@@ -34,6 +34,7 @@ from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (successful resolutions only).
 _git_executable: str | None = None
+_gh_executable: str | None = None
 _git_init_run = subprocess.run
 
 # Variables that represent ambient git state -- strip these to avoid
@@ -131,12 +132,12 @@ _SENSITIVE_HTTP_HEADER_PARTS = frozenset(
 _REMOTE_HELPER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*::")
 _SCP_HOST_RE = re.compile(r"^(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:@\s]+):")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_GIT_CONFIG_PROBE_TIMEOUTS = (10, 30)
 
-_URL_REWRITE_RECOVERY = (
-    "inspect matching rules with "
-    "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$' "
-    "and remove the unsafe rule"
+_URL_REWRITE_INSPECTION = (
+    "inspect matching rules with 'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'"
 )
+_URL_REWRITE_RECOVERY = f"{_URL_REWRITE_INSPECTION} and remove the unsafe rule"
 
 
 class GitUrlRewriteError(ValueError):
@@ -157,7 +158,7 @@ class GitUrlRewriteProbeError(ValueError):
         self.category = category
         super().__init__(
             f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_RECOVERY}"
+            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
         )
 
 
@@ -191,10 +192,74 @@ def _run_git_config(
 _git_config_run = _run_git_config
 
 
+def _run_git_config_probe(
+    command: Sequence[str],
+    *,
+    capture_output: bool,
+    check: bool,
+    cwd: str | None,
+    env: dict[str, str],
+    timeout_category: str,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run a bounded Git config probe with one retry for slow CI runners."""
+    for index, timeout in enumerate(_GIT_CONFIG_PROBE_TIMEOUTS):
+        try:
+            return _git_config_run(
+                command,
+                capture_output=capture_output,
+                check=check,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            if index == len(_GIT_CONFIG_PROBE_TIMEOUTS) - 1:
+                raise GitUrlRewriteProbeError(timeout_category) from exc
+    raise GitUrlRewriteProbeError(timeout_category)
+
+
+def _executable_exclusion_root() -> Path:
+    """Return the nearest repository or APM project root containing the cwd."""
+    cwd = Path.cwd().resolve()
+    ancestors = (cwd, *cwd.parents)
+    for directory in ancestors:
+        if (directory / ".git").exists():
+            return directory
+    for directory in ancestors:
+        if (directory / "apm.yml").is_file():
+            return directory
+    return cwd
+
+
+def _resolve_trusted_executable(name: str) -> str:
+    """Resolve an executable from PATH directories outside the project."""
+    exclusion_root = _executable_exclusion_root()
+    for entry in os.get_exec_path():
+        if not entry:
+            continue
+        directory = Path(entry).expanduser().resolve()
+        try:
+            if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+                continue
+        except (OSError, ValueError):
+            continue
+        candidate = shutil.which(str(directory / name))
+        if candidate is None:
+            continue
+        resolved = Path(candidate).resolve()
+        try:
+            if resolved == exclusion_root or resolved.is_relative_to(exclusion_root):
+                continue
+        except (OSError, ValueError):
+            continue
+        return str(resolved)
+    raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
+
+
 def get_git_executable() -> str:
     """Return the path to the git executable (cached after a successful lookup).
 
-    Uses ``shutil.which("git")`` to locate git on PATH.
+    Resolves explicit PATH entries and excludes the current working tree.
     Failed lookups are not cached because PATH can change within a
     long-lived process.
 
@@ -208,13 +273,27 @@ def get_git_executable() -> str:
     if _git_executable is not None:
         return _git_executable
 
-    resolved = shutil.which("git")
-    if resolved is None:
-        raise FileNotFoundError(
+    try:
+        _git_executable = _resolve_trusted_executable("git")
+    except FileNotFoundError:
+        raise FileNotFoundError(  # noqa: B904
             "git executable not found on PATH. Please install git: https://git-scm.com/downloads"
         )
-    _git_executable = resolved
     return _git_executable
+
+
+def get_gh_executable() -> str:
+    """Return a trusted absolute path to the GitHub CLI executable."""
+    global _gh_executable
+    if _gh_executable is None:
+        try:
+            _gh_executable = _resolve_trusted_executable("gh")
+        except FileNotFoundError:
+            raise FileNotFoundError(  # noqa: B904
+                "GitHub CLI executable not found on PATH. "
+                "Please install it: https://cli.github.com/"
+            )
+    return _gh_executable
 
 
 def git_subprocess_env(overrides: dict[str, object] | None = None) -> dict[str, str]:
@@ -247,8 +326,8 @@ def redact_git_diagnostic(text: str) -> str:
     """Redact credentials and private key paths from Git diagnostics."""
     without_url_secrets = _DIAGNOSTIC_GIT_URL_RE.sub(_redact_git_diagnostic_url, text)
     without_userinfo = _URL_USERINFO_RE.sub(r"\1***@", without_url_secrets)
-    without_query_secrets = _URL_SECRET_QUERY_RE.sub(r"\1***", without_userinfo)
-    without_headers = _AUTH_HEADER_RE.sub(r"\1******", without_query_secrets)
+    query_redacted = _URL_SECRET_QUERY_RE.sub(r"\1***", without_userinfo)
+    without_headers = _AUTH_HEADER_RE.sub(r"\1******", query_redacted)
     without_env = _SECRET_ENV_ASSIGNMENT_RE.sub(r"\1=***", without_headers)
     without_tokens = _BARE_PLATFORM_TOKEN_RE.sub("***", without_env)
     without_labelled = _LABELLED_SECRET_RE.sub(r"\1\2***", without_tokens)
@@ -465,16 +544,14 @@ def _read_effective_git_config(
         )
     )
     try:
-        result = _git_config_run(
+        result = _run_git_config_probe(
             command,
             capture_output=True,
             check=False,
             cwd=probe_cwd,
             env=probe_env,
-            timeout=10,
+            timeout_category="Git config probe timed out",
         )
-    except subprocess.TimeoutExpired as exc:
-        raise GitUrlRewriteProbeError("Git config probe timed out") from exc
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git config probe could not start") from exc
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
@@ -519,7 +596,13 @@ def _has_applicable_http_authorization(
     headers: Sequence[GitConfigEntry],
     env: dict[str, str],
 ) -> bool:
-    """Ask Git which URL-scoped extra headers apply to one remote."""
+    """Ask Git which URL-scoped extra headers apply to one HTTP(S) remote."""
+    try:
+        scheme = urlsplit(remote_url).scheme.lower()
+    except ValueError:
+        return False
+    if scheme not in {"http", "https"}:
+        return False
     direct_header = env.get("GIT_HTTP_EXTRAHEADER", "")
     if _is_valid_http_extraheader_value(direct_header) and _is_credential_bearing_http_header(
         direct_header
@@ -559,7 +642,7 @@ def _urlmatched_header_group(
 
     git_executable = get_git_executable()
     try:
-        result = _git_config_run(
+        result = _run_git_config_probe(
             [
                 git_executable,
                 "config",
@@ -572,16 +655,14 @@ def _urlmatched_header_group(
             check=False,
             cwd=str(Path(git_executable).resolve().parent),
             env=probe_env,
-            timeout=10,
+            timeout_category="Git URL-match probe timed out",
         )
-    except subprocess.TimeoutExpired as exc:
-        raise GitUrlRewriteProbeError("Git URL-match probe timed out") from exc
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git URL-match probe could not start") from exc
     if result.returncode == 1:
         return ()
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git URL-match probe failed")
+        raise GitUrlRewriteProbeError(f"Git URL-match probe exited with status {result.returncode}")
     selected = result.stdout.rstrip(b"\0\n")
     prefix = b"X-Apm-Config-Probe: "
     if not selected.startswith(prefix):
@@ -1426,8 +1507,9 @@ def git_current_branch(
 
 def reset_git_cache() -> None:
     """Reset the cached git executable (for testing purposes only)."""
-    global _git_executable
+    global _gh_executable, _git_executable
     _git_executable = None
+    _gh_executable = None
 
 
 def git_long_paths_args() -> list[str]:

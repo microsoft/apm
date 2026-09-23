@@ -4,10 +4,14 @@ from scripts.architecture_linter.checks.transport_auth_platform import (
     COLLECTORS as _AUTH_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_auth_platform import RULES as _AUTH_RULES
+from scripts.architecture_linter.checks.transport_cache_cleanup import RULES as _CLEANUP_RULES
 from scripts.architecture_linter.checks.transport_cache_identity import (
     COLLECTORS as _CACHE_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_cache_identity import RULES as _CACHE_RULES
+from scripts.architecture_linter.checks.transport_gitlab_sparse import (
+    RULES as _GITLAB_SPARSE_RULES,
+)
 from scripts.architecture_linter.checks.transport_network_and_runtime import (
     COLLECTORS as _NETWORK_COLLECTORS,
 )
@@ -27,7 +31,15 @@ from scripts.architecture_linter.checks.transport_sparse_and_updates import (
     RULES as _SPARSE_RULES,
 )
 
-RULES = _AUTH_RULES + _CACHE_RULES + _SPARSE_RULES + _REVISION_PIN_RULES + _NETWORK_RULES
+RULES = (
+    _AUTH_RULES
+    + _CACHE_RULES
+    + _CLEANUP_RULES
+    + _SPARSE_RULES
+    + _GITLAB_SPARSE_RULES
+    + _REVISION_PIN_RULES
+    + _NETWORK_RULES
+)
 COLLECTORS = (
     _AUTH_COLLECTORS
     + _CACHE_COLLECTORS

@@ -142,7 +142,7 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
     else:
         body = _def_body_text(validation_facts, "_validate_agent_plugin")
         for needle in (
-            "package = project_agent_plugin_package(plugin)",
+            "package = project_agent_plugin_package(plugin, create_config=create_config)",
             "result.package = package",
         ):
             if needle not in body:

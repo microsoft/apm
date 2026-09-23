@@ -32,7 +32,6 @@
 # Recovery if a webhook is dropped:
 #   pull_request context:
 #     - Push an empty commit:  git commit --allow-empty -m 'retrigger' && git push
-#     - Or trigger manually:   gh workflow run merge-gate.yml -f pr_number=NNN
 #     - Or close + reopen the PR.
 #   merge_group context (NB: pushing a commit will not retrigger the
 #   merge_group event, only pull_request):
@@ -46,12 +45,6 @@ on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: 'PR number to re-run the gate against'
-        required: true
-        type: string
 
 # Dedup pushes to the same PR / merge-queue entry: cancel any older
 # in-flight gate run on the same head. In merge_group context, github.ref
@@ -59,7 +52,7 @@ on:
 # queue entry -- so cancel-in-progress only cancels rapid push-after-push
 # on the same temp branch, never across PR <-> merge_group channels.
 concurrency:
-  group: merge-gate-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  group: merge-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -75,36 +68,35 @@ jobs:
     # headroom for setup/teardown without false-failing the gate.
     timeout-minutes: 60
     steps:
-      - name: Resolve head SHA
+      - name: Resolve target and trusted SHAs
         id: sha
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           case "${{ github.event_name }}" in
-            workflow_dispatch)
-              sha=$(gh api "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}" --jq '.head.sha')
-              ;;
             merge_group)
               # Temp merge commit on the merge-queue temp branch; check
               # runs from ci.yml/ci-integration.yml are reported here, NOT
               # against the PR head SHA.
-              sha="${{ github.event.merge_group.head_sha }}"
+              target_sha="${{ github.event.merge_group.head_sha }}"
+              trusted_sha="${{ github.event.merge_group.base_sha }}"
               ;;
             *)
-              sha="${{ github.event.pull_request.head.sha }}"
+              target_sha="${{ github.event.pull_request.head.sha }}"
+              trusted_sha="${{ github.event.pull_request.base.sha }}"
               ;;
           esac
-          if [ -z "$sha" ]; then
-            echo "::error::Could not resolve head SHA for event ${{ github.event_name }}"
+          if [ -z "$target_sha" ] || [ -z "$trusted_sha" ]; then
+            echo "::error::Could not resolve target/trusted SHAs for event ${{ github.event_name }}"
             exit 1
           fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "[merge-gate] event=${{ github.event_name }} resolved head SHA: $sha"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "trusted_sha=$trusted_sha" >> "$GITHUB_OUTPUT"
+          echo "[merge-gate] event=${{ github.event_name }} target=$target_sha trusted=$trusted_sha"
 
-      - name: Checkout head
+      - name: Checkout trusted gate implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.sha.outputs.sha }}
+          ref: ${{ steps.sha.outputs.trusted_sha }}
+          persist-credentials: false
           sparse-checkout: |
             .github/scripts/ci
 
@@ -112,10 +104,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ steps.sha.outputs.sha }}
+          SHA: ${{ steps.sha.outputs.target_sha }}
           EVENT_NAME: ${{ github.event_name }}
           # All required checks the gate aggregates, branched by event:
-          #   pull_request / workflow_dispatch -> only ci.yml runs at PR time
+          #   pull_request -> only ci.yml runs at PR time
           #   merge_group                      -> ci.yml AND ci-integration.yml run
           # Keep this in sync with the underlying workflows.
           # NOTE: 'gate' (this job) MUST NOT appear here -- it would
@@ -154,6 +146,5 @@ jobs:
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh
-
 
 

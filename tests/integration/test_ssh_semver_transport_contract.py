@@ -44,6 +44,7 @@ pytestmark = [
 _HOST = "github.com"
 _OWNER_REPO = "acme/ssh-semver-contract"
 _SSH_REMOTE = f"git@{_HOST}:{_OWNER_REPO}.git"
+_SSH_CUSTOM_REMOTE = f"ssh://deploy@{_HOST}:2222/{_OWNER_REPO}.git"
 _HTTPS_REMOTE = f"https://{_HOST}/{_OWNER_REPO}.git"
 _SHORTHAND_SOURCE = _OWNER_REPO
 _SKILL_NAME = "ssh-semver-contract"
@@ -99,6 +100,7 @@ class _TransportCase:
     install_args: tuple[str, ...]
     expect_success: bool
     expected_transport: str
+    expected_requested_remote: str | None = None
 
 
 _CASES = (
@@ -110,6 +112,16 @@ _CASES = (
         install_args=_INSTALL_ARGS,
         expect_success=True,
         expected_transport="ssh",
+    ),
+    _TransportCase(
+        id="explicit-ssh-custom-port",
+        manifest_source=_SSH_CUSTOM_REMOTE,
+        rewritten_remote=_SSH_CUSTOM_REMOTE,
+        prefer_ssh=False,
+        install_args=_INSTALL_ARGS,
+        expect_success=True,
+        expected_transport="ssh",
+        expected_requested_remote=_SSH_CUSTOM_REMOTE,
     ),
     _TransportCase(
         id="prefer-ssh",
@@ -400,6 +412,8 @@ def _transport_for_argument(argument: str) -> str | None:
     if argument == _SSH_REMOTE:
         return "ssh"
     parsed = urlparse(argument)
+    if parsed.scheme == "ssh" and parsed.hostname == _HOST:
+        return "ssh"
     expected = urlparse(_HTTPS_REMOTE)
     if (
         parsed.scheme,
@@ -442,6 +456,20 @@ def _invoked_transports(trace_root: Path) -> tuple[str, ...]:
             if transport is not None:
                 transports.append(transport)
     return tuple(transports)
+
+
+def _semver_remote_arguments(trace_root: Path) -> tuple[str, ...]:
+    remotes = []
+    for event in _trace_events(trace_root):
+        if event.get("event") != "start":
+            continue
+        arguments = tuple(str(argument) for argument in event.get("argv", ()))
+        if "ls-remote" not in arguments or "--tags" not in arguments:
+            continue
+        remotes.extend(
+            argument for argument in arguments if _transport_for_argument(argument) is not None
+        )
+    return tuple(remotes)
 
 
 def _git_transport_children(scenario: _Scenario) -> tuple[tuple[str, Path], ...]:
@@ -547,6 +575,15 @@ def test_git_semver_resolution_honors_consume_transport_contract(
     transports = _invoked_transports(scenario.trace_root)
     assert transports
     assert set(transports) == {case.expected_transport}
+    if case.expected_requested_remote is not None:
+        observed_remotes = _semver_remote_arguments(scenario.trace_root)
+        observed_remote = next(
+            remote for remote in observed_remotes if remote == case.expected_requested_remote
+        )
+        parsed = urlparse(observed_remote)
+        assert parsed.username == "deploy"
+        assert parsed.hostname == _HOST
+        assert parsed.port == 2222
     if case.expect_success:
         _assert_file_transport_children(scenario)
     else:

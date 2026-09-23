@@ -18,6 +18,7 @@ from ..core.deployment_state import DeploymentLedger
 from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
 from ..models.dependency.identity import normalize_package_repo_url
+from ..models.dependency.object_fields import parse_alias_override
 from ..models.dependency.reference import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
@@ -275,6 +276,7 @@ class LockedDependency:
     # See to_dict/from_dict and the supply-chain boundary note in the lockfile
     # spec. Omitted from the serialized entry when absent.
     name: str | None = None
+    alias: str | None = None
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -283,6 +285,15 @@ class LockedDependency:
 
     def __post_init__(self) -> None:
         """Separate canonical lock identity from materialization spelling."""
+        try:
+            self.alias = parse_alias_override(self.alias)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid lockfile dependency alias {self.alias!r}. Restore a known-good "
+                "apm.lock.yaml from version control or correct this entry's alias "
+                "to its intended placement. "
+                "Do not delete content at a rejected alias destination."
+            ) from exc
         original_repo_url = self.repo_url
         canonical_repo_url = normalize_package_repo_url(
             self.repo_url,
@@ -342,6 +353,8 @@ class LockedDependency:
         result: dict[str, Any] = {"repo_url": self.repo_url}
         if self.materialization_repo_url:
             result["materialization_repo_url"] = self.materialization_repo_url
+        if self.alias is not None:
+            result["alias"] = self.alias
         if self.name is not None:
             result["name"] = self.name
         if self.host:
@@ -458,6 +471,7 @@ class LockedDependency:
         _known_keys = {
             "repo_url",
             "materialization_repo_url",
+            "alias",
             "host",
             "host_type",
             "port",
@@ -506,6 +520,7 @@ class LockedDependency:
         return cls(
             repo_url=data["repo_url"],
             materialization_repo_url=data.get("materialization_repo_url"),
+            alias=data.get("alias"),
             host=data.get("host"),
             host_type=host_type,
             port=port,
@@ -651,6 +666,7 @@ class LockedDependency:
         )
         return cls(
             repo_url=canonical_repo_url,
+            alias=dep_ref.alias,
             materialization_repo_url=(
                 dep_ref.repo_url if dep_ref.repo_url != canonical_repo_url else None
             ),
@@ -712,6 +728,7 @@ class LockedDependency:
         ref = self.version if (is_registry and self.version) else self.resolved_ref
         return DependencyReference(
             repo_url=self.materialization_repo_url or self.repo_url,
+            alias=self.alias,
             host=self.host,
             host_type=self.host_type,
             port=self.port,
@@ -976,6 +993,7 @@ class LockFile:
         to avoid parsing the same bytes again.
         """
         from ..utils.atomic_io import atomic_write_text
+        from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
 
         existing: LockFile | None
@@ -1010,7 +1028,9 @@ class LockFile:
             self.generated_at = datetime.now(timezone.utc).isoformat()
         else:
             self.generated_at = None
-        atomic_write_text(path, self.to_yaml())
+        serialized = self.to_yaml()
+        assert_no_staging_paths(serialized, path.name)
+        atomic_write_text(path, serialized)
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:

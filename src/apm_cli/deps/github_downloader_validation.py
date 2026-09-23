@@ -44,7 +44,11 @@ import requests
 from git.exc import GitCommandError
 
 from ..config import get_apm_temp_dir
-from ..utils.git_env import git_subprocess_error_text
+from ..models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_owner_and_repo,
+)
+from ..utils.git_env import get_git_executable, git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
@@ -84,10 +88,7 @@ def _split_owner_repo(repo_url: str) -> tuple[str, str] | None:
     Guards against ``ValueError`` on tuple-unpacking when ``repo_url``
     has no ``/`` (panel round-2 finding 2).
     """
-    parts = repo_url.split("/", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        return None
-    return parts[0], parts[1]
+    return repository_owner_and_repo(repo_url)
 
 
 def validate_virtual_package_exists(
@@ -533,7 +534,7 @@ def _ref_exists_via_ls_remote(
         if result.returncode != 0:
             # auth-delegated: the validated AttemptSpec owns this credential choice.
             raise GitCommandError(
-                ["git", "ls-remote", *options, url, *patterns],
+                [get_git_executable(), "ls-remote", *options, url, *patterns],
                 result.returncode,
                 stderr=result.stderr,
             )
@@ -576,7 +577,7 @@ def _ref_exists_via_ls_remote(
             )
             return output, AttemptSpec(label, url, probe_env)
 
-        org = dep_ref.repo_url.split("/", 1)[0]
+        org = dependency_repository_owner(dep_ref)
         try:
             output, attempt = downloader.auth_resolver.try_with_fallback(
                 host,

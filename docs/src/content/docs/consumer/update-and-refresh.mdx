@@ -7,8 +7,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="tip" title="Coming from npm? You already know this.">
 `apm update` refreshes your project's package dependencies, just like
-`npm update`. To update the `apm` CLI binary itself, use
-`apm self-update` (think `npm install -g npm`).
+`npm update`. CLI upgrades depend on how you installed APM:
+[use your package manager or the standalone updater](#update-the-apm-cli-binary).
 </Aside>
 
 Two things drift out of date in an APM project:
@@ -124,25 +124,30 @@ still runs. If you want new commit SHAs, run `apm update`.
 
 ## Update the apm CLI binary
 
+Use the tool that installed APM. For **Homebrew**:
+
 ```bash
-apm self-update
+brew upgrade apm
 ```
 
-Downloads the latest release of the `apm` CLI from the official
-installer URL and replaces the binary in place. Use `--check` to see
-whether an update exists without installing it:
+Homebrew core disables `apm self-update` and startup update notices; see the
+[self-update reference](../../reference/cli/self-update/#description).
+For **pip**, run `pip install --upgrade apm-cli`; for **Scoop**, run `scoop update apm`.
+
+For **standalone installs only**, check for a release, then update through the
+official installer:
 
 ```bash
 apm self-update --check
+apm self-update
 ```
 
-That is the entire surface. It does not read `apm.yml`. It does not
-touch `apm_modules/`. It does not modify the lockfile.
+CLI upgrades do not refresh project dependencies or change the lockfile.
 
 <Aside type="note" title="Back-compat shim">
 If you run the legacy `apm update --check`, the CLI prints a
-deprecation notice and forwards to `apm self-update --check`. Update
-your scripts to call `apm self-update --check` directly.
+deprecation notice and forwards to `apm self-update --check`. Use that command
+directly only for standalone installs.
 </Aside>
 
 ## When to use which
@@ -155,8 +160,9 @@ your scripts to call `apm self-update --check` directly.
 | Refresh only the lockfile from upstream refs | `apm lock --update` |
 | Reproduce the locked versions exactly | `apm install` |
 | Fail CI on lockfile drift | `apm install --frozen` |
-| Update the `apm` CLI itself | `apm self-update` |
-| See if a CLI update exists | `apm self-update --check` |
+| Update a Homebrew-installed CLI | `brew upgrade apm` |
+| Update a standalone CLI | `apm self-update` |
+| Check for a standalone CLI update | `apm self-update --check` |
 
 ## Next steps
 

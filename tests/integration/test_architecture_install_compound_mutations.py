@@ -477,9 +477,9 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
         _replace(
-            "                prepared_replay = prepare_ci_audit_replay(",
-            "                run_replay(None, None)\n"
-            "                prepared_replay = prepare_ci_audit_replay(",
+            "                    prepared_replay = prepare_ci_audit_replay(",
+            "                    run_replay(None, None)\n"
+            "                    prepared_replay = prepare_ci_audit_replay(",
         ),
     ),
     CompoundMutation(

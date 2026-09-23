@@ -11,6 +11,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry.client import RegistryError, VersionEntry
 from apm_cli.deps.registry.outdated import (
     RegistryOutdatedContext,
+    _highest_semver,
     check_registry_locked_dep,
     load_registry_outdated_context,
 )
@@ -58,6 +59,23 @@ def _fake_client(versions: list[str]):
     return fake
 
 
+@pytest.mark.parametrize(
+    ("versions", "expected"),
+    [
+        ([], None),
+        (["stable", "invalid"], None),
+        (["2.0.0-rc.1", "invalid", "1.9.0", "2.0.0"], "2.0.0"),
+        (["1.7.0+build.2", "1.7.0+build.1", "1.6.0"], "1.7.0+build.1"),
+        (["1.7.0+build.1", "1.6.0", "1.7.0+build.2"], "1.7.0+build.2"),
+    ],
+)
+def test_highest_semver_preserves_last_equal_precedence(
+    versions: list[str], expected: str | None
+) -> None:
+    """Selecting the maximum preserves the prior stable-sort tie behavior."""
+    assert _highest_semver(versions) == expected
+
+
 @pytest.fixture(autouse=True)
 def _enable_package_registry(monkeypatch):
     import apm_cli.config as _conf
@@ -70,6 +88,63 @@ def _enable_package_registry(monkeypatch):
 
 
 class TestCheckRegistryLockedDep:
+    @pytest.mark.parametrize(
+        ("selector", "wanted", "outside"),
+        [
+            ("1.7.0", "1.7.0", True),
+            ("=1.7.0", "1.7.0", True),
+            ("^1.7.0", "1.8.0", True),
+            (">=1.7.0 <1.8.0", "1.7.0", True),
+            (">=1.7.0", "2.0.0", False),
+        ],
+    )
+    def test_published_latest_is_independent_of_wanted(
+        self, selector: str, wanted: str, outside: bool
+    ) -> None:
+        result = check_registry_locked_dep(
+            _locked(version="1.7.0"),
+            _ctx(manifest_range=selector),
+            client_factory=lambda url, auth: _fake_client(["1.7.0", "1.8.0", "2.0.0"]),
+        )
+
+        assert result.latest == "2.0.0"
+        assert result.wanted == wanted
+        assert result.outside_constraint is outside
+        assert result.status == "outdated"
+
+    @pytest.mark.parametrize(
+        ("current", "versions", "latest", "status"),
+        [
+            ("1.7.0", ["1.6.0", "1.7.0"], "1.7.0", "up-to-date"),
+            ("1.7.0", ["1.7.0", "1.8.0-rc.1"], "1.8.0-rc.1", "outdated"),
+            ("1.7.0-rc.1", ["1.7.0-rc.1", "1.7.0"], "1.7.0", "outdated"),
+            ("1.7.0+build.1", ["1.7.0+build.1", "1.7.0+build.2"], "1.7.0+build.2", "up-to-date"),
+        ],
+    )
+    def test_latest_preserves_semver_precedence(
+        self, current: str, versions: list[str], latest: str, status: str
+    ) -> None:
+        result = check_registry_locked_dep(
+            _locked(version=current),
+            _ctx(manifest_range=current),
+            client_factory=lambda url, auth: _fake_client(versions),
+        )
+
+        assert result.latest == latest
+        assert result.status == status
+
+    @pytest.mark.parametrize("versions", [[], ["stable"], ["2.0.0"]])
+    def test_no_matching_wanted_remains_unknown(self, versions: list[str]) -> None:
+        result = check_registry_locked_dep(
+            _locked(version="1.7.0"),
+            _ctx(manifest_range="1.7.0"),
+            client_factory=lambda url, auth: _fake_client(versions),
+        )
+
+        assert result.status == "unknown"
+        assert result.wanted == "-"
+        assert result.latest == ("2.0.0" if versions == ["2.0.0"] else "-")
+
     def test_outdated_when_newer_version_in_range(self):
         ctx = _ctx(manifest_range="^1.0.0")
         locked = _locked(version="1.0.1")

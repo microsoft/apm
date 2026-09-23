@@ -2,9 +2,13 @@
 
 ## 5-step workflow
 
+Install APM once: on macOS with Homebrew, use `brew install apm` (no tap).
+For Linux/macOS without Homebrew or Windows, choose an option in
+[Installation](./installation.md). Homebrew users update with `brew upgrade apm`.
+
 ```bash
-# 1. Install APM (one-time)
-curl -sSL https://aka.ms/apm-unix | sh        # or irm on Windows
+# 1. Verify installation
+apm --version
 
 # 2. Initialize project
 apm init my-project && cd my-project           # new project

@@ -59,8 +59,8 @@ class TestCacheClean:
             patch("apm_cli.cache.git_cache.GitCache") as MockGit,
             patch("apm_cli.cache.http_cache.HttpCache") as MockHttp,
         ):
-            MockGit.return_value.clean_all.return_value = None
-            MockHttp.return_value.clean_all.return_value = None
+            MockGit.return_value.clean_all.return_value = []
+            MockHttp.return_value.clean_all.return_value = []
             result = runner.invoke(cli, ["cache", "clean", "--force"])
 
         assert result.exit_code == 0, result.output
@@ -92,8 +92,8 @@ class TestCacheClean:
             patch("apm_cli.cache.git_cache.GitCache") as MockGit,
             patch("apm_cli.cache.http_cache.HttpCache") as MockHttp,
         ):
-            MockGit.return_value.clean_all.return_value = None
-            MockHttp.return_value.clean_all.return_value = None
+            MockGit.return_value.clean_all.return_value = []
+            MockHttp.return_value.clean_all.return_value = []
             result = runner.invoke(cli, ["cache", "clean", "--yes"])
 
         assert result.exit_code == 0, result.output

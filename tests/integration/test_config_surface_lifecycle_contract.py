@@ -1657,7 +1657,6 @@ def test_configured_mcp_registry_drives_global_direct_install(
         assert parsed_registry.port is not None
         environment = isolated.subprocess_env()
         environment["APM_TEST_LOOPBACK_PORTS"] = str(parsed_registry.port)
-        environment["MCP_REGISTRY_ALLOW_HTTP"] = "0"
         runner = _runner(apm_binary_path)
         config_result = runner.run(
             ("config", "set", "mcp-registry-url", registry.url),
@@ -1665,29 +1664,7 @@ def test_configured_mcp_registry_drives_global_direct_install(
             cwd=project,
             env=environment,
         )
-        denied = runner.run(
-            (
-                "install",
-                "-g",
-                "--mcp",
-                server_name,
-                "--target",
-                "claude",
-                "--no-policy",
-                "--verbose",
-            ),
-            scenario_id="configured-global-direct-registry-denied",
-            cwd=project,
-            env=environment,
-        )
         assert config_result.returncode == 0
-        assert denied.returncode == 2
-        assert "MCP_REGISTRY_ALLOW_HTTP=1" in denied.stdout + denied.stderr
-        assert list(registry.request_paths) == []
-
-        (isolated.home / ".apm" / "apm.yml").unlink(missing_ok=True)
-        (isolated.home / ".apm" / "apm.lock.yaml").unlink(missing_ok=True)
-        environment["MCP_REGISTRY_ALLOW_HTTP"] = "1"
         runner.run_sequence(
             (
                 (
@@ -1723,6 +1700,73 @@ def test_configured_mcp_registry_drives_global_direct_install(
     )
     claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
     assert "configured-registry" in claude_config["mcpServers"]
+
+
+def test_ambient_http_mcp_registry_requires_opt_in_before_project_writes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """An ambient plaintext registry fails closed until explicitly allowed."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "ambient-http-registry",
+        base_env=dict(os.environ),
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        'name: ambient-http-consumer\nversion: "1.0.0"\ntargets:\n  - copilot\n',
+        encoding="utf-8",
+    )
+    manifest_before = manifest.read_bytes()
+    server_name = "io.github.apm/ambient-http"
+    document = {
+        "name": server_name,
+        "description": "Ambient plaintext registry fixture",
+        "version": "1.0.0",
+        "packages": [
+            {
+                "registryType": "npm",
+                "identifier": "@apm/ambient-http",
+                "runtimeHint": "npx",
+                "transport": {"type": "stdio"},
+                "runtimeArguments": [],
+            }
+        ],
+    }
+    registry_factory = LocalMcpRegistryFactory(isolated.root / "registries")
+
+    with registry_factory.start(document) as registry:
+        parsed_registry = urlparse(registry.url)
+        assert parsed_registry.port is not None
+        environment = isolated.subprocess_env()
+        environment["APM_TEST_LOOPBACK_PORTS"] = str(parsed_registry.port)
+        environment["MCP_REGISTRY_URL"] = registry.url
+        # Internal provenance hints are not user-authoritative: an ambient
+        # registry cannot forge persisted-config intent.
+        environment["APM_MCP_REGISTRY_SOURCE"] = "config"
+        result = _runner(apm_binary_path).run(
+            (
+                "install",
+                "--mcp",
+                server_name,
+                "--target",
+                "copilot",
+                "--no-policy",
+                "--verbose",
+            ),
+            scenario_id="ambient-http-registry-denied",
+            cwd=project,
+            env=environment,
+        )
+
+        assert result.returncode == 1
+        assert "MCP_REGISTRY_ALLOW_HTTP=1" in result.stdout + result.stderr
+        assert list(registry.request_paths) == []
+
+    assert manifest.read_bytes() == manifest_before
+    assert not (project / "apm.lock.yaml").exists()
+    assert not (project / ".github" / "mcp.json").exists()
 
 
 def test_unknown_global_registry_server_changes_no_user_state(
@@ -1820,11 +1864,11 @@ def test_unreachable_global_registry_changes_no_user_state(
     )
 
     assert result.returncode == 1, (result.stdout, result.stderr)
-    output = result.stdout + result.stderr
-    assert "Could not reach MCP registry" in output
-    assert "verify the --registry URL" in output
-    assert "reachability" in output
-    assert "No state was changed." in output
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "MCP registry validation failed" in output
+    assert "Check the server name and registry reachability/configuration" in output
+    assert "then retry" in output
+    assert "no state was changed" in output
     assert not (isolated.home / ".apm" / "apm.yml").exists()
     assert not (isolated.home / ".apm" / "apm.lock.yaml").exists()
     assert not (isolated.home / ".claude.json").exists()
@@ -1968,26 +2012,6 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
     assert "remove the exclusion" in excluded_output
     assert not user_manifest.exists()
 
-    hermes = runner.run(
-        (
-            "install",
-            "-g",
-            "--target",
-            "hermes",
-            "--mcp",
-            "disabled-hermes-server",
-            "--no-policy",
-            "--",
-            "echo",
-            "disabled",
-        ),
-        scenario_id="global-disabled-hermes",
-        cwd=project,
-        env=environment,
-    )
-    assert hermes.returncode == 2
-    assert not user_manifest.exists()
-
     mixed, replay = runner.run_sequence(
         (
             (
@@ -2025,6 +2049,40 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
     assert user_config["targets"] == ["claude"]
     claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
     assert set(claude_config["mcpServers"]) == {"mixed-server", "replay-server"}
+
+    hermes_isolated = IsolatedApmEnvironment.create(
+        tmp_path / "global-hermes",
+        base_env=dict(os.environ),
+    )
+    hermes_project = hermes_isolated.work_root / "consumer"
+    hermes_project.mkdir()
+    hermes = _runner(apm_binary_path).run(
+        (
+            "install",
+            "-g",
+            "--target",
+            "hermes",
+            "--mcp",
+            "hermes-server",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ),
+        scenario_id="global-hermes",
+        cwd=hermes_project,
+        env=hermes_isolated.subprocess_env(),
+    )
+    assert hermes.returncode == 0, (hermes.stdout, hermes.stderr)
+    hermes_manifest = load_yaml(hermes_isolated.home / ".apm" / "apm.yml")
+    assert hermes_manifest["targets"] == ["hermes"]
+    assert hermes_manifest["dependencies"]["mcp"][0]["name"] == "hermes-server"
+    hermes_config = load_yaml(hermes_isolated.home / ".hermes" / "config.yaml")
+    assert hermes_config["mcp_servers"]["hermes-server"] == {
+        "args": ["ready"],
+        "command": "echo",
+        "enabled": True,
+    }
 
     explicitly_excluded = runner.run(
         (

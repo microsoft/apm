@@ -528,8 +528,10 @@ class TestPolicyCaching:
     """Tests for policy caching logic."""
 
     def test_cache_directory_creation(self, tmp_path: Path) -> None:
-        """Cache directory is created in apm_modules."""
-        cache_dir = tmp_path / "apm_modules" / ".policy-cache"
+        """Cache directory is created in the user cache root."""
+        from apm_cli.policy.discovery import _get_cache_dir
+
+        cache_dir = _get_cache_dir(tmp_path)
         cache_dir.mkdir(parents=True, exist_ok=True)
         assert cache_dir.exists()
 

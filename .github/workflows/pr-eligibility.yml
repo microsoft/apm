@@ -1,0 +1,72 @@
+# Activated only after this workflow and its trusted implementation reach main.
+# Deliberately absent from merge-gate.yml EXPECTED_CHECKS and branch protection.
+name: PR eligibility evidence
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+  issue_comment:
+    types: [created, edited, deleted]
+  issues:
+    types: [edited, reopened, closed]
+  workflow_run:
+    workflows: [PR eligibility queue signal]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - GOVERNANCE.md
+      - scripts/governance/**
+      - .github/workflows/pr-eligibility.yml
+  # Unlike workflow_dispatch, this loads the workflow definition from the default branch.
+  repository_dispatch:
+    types: [pr-eligibility-recheck]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+  checks: write
+
+# One writer also serializes issue decisions with PR-reference refreshes.
+concurrency:
+  group: pr-eligibility-evidence
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  report:
+    name: Publish neutral eligibility evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify trusted default branch
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data: repo } = await github.rest.repos.get(context.repo);
+            if (repo.default_branch !== 'main') {
+              throw new Error('Trusted default branch must be main; review workflow before resuming');
+            }
+
+      - name: Checkout trusted implementation only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/governance
+            GOVERNANCE.md
+
+      - name: Read metadata and publish neutral reports
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const trustedSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+            if (!/^[a-f0-9]{40}$/.test(trustedSha)) throw new Error('Trusted base unavailable');
+            const { run } = require('./scripts/governance/run.cjs');
+            await run({ github, context, core, trustedSha });

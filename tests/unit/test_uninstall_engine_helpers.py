@@ -9,6 +9,8 @@ in existing integration-style uninstall tests:
 - _cleanup_stale_mcp
 """
 
+import errno
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,6 +19,7 @@ from apm_cli.commands.uninstall.engine import (
     MCPUninstallCleanupError,
     _build_children_index,
     _cleanup_stale_mcp,
+    _cleanup_transitive_orphans,
     _dry_run_uninstall,
     _parse_dependency_entry,
     _remove_packages_from_disk,
@@ -24,6 +27,8 @@ from apm_cli.commands.uninstall.engine import (
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.path_security import safe_rmtree as real_safe_rmtree
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -223,7 +228,7 @@ class TestRemovePackagesFromDisk:
         assert removed == 2
 
     def test_path_traversal_is_rejected(self, tmp_path):
-        """PathTraversalError during dep resolution is caught and logged."""
+        """Path traversal stops removal before the caller can release ownership."""
         from apm_cli.utils.path_security import PathTraversalError
 
         modules = tmp_path / "apm_modules"
@@ -234,30 +239,141 @@ class TestRemovePackagesFromDisk:
         bad_ref = MagicMock()
         bad_ref.get_install_path.side_effect = PathTraversalError("traversal")
 
-        with patch(
-            "apm_cli.commands.uninstall.engine._parse_dependency_entry",
-            return_value=bad_ref,
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine._parse_dependency_entry",
+                return_value=bad_ref,
+            ),
+            pytest.raises(PathTraversalError, match="traversal"),
         ):
-            removed = _remove_packages_from_disk(["../evil"], modules, logger)
+            _remove_packages_from_disk(["../evil"], modules, logger)
 
-        assert removed == 0
         logger.error.assert_called_once()
 
-    def test_rmtree_exception_is_caught(self, tmp_path):
-        """Exception during safe_rmtree is logged without crashing."""
+    def test_deletion_containment_refusal_names_package(self, tmp_path: Path) -> None:
+        """The deletion boundary must retain the operand in its diagnostic."""
+        modules = tmp_path / "apm_modules"
+        (modules / "org" / "repo").mkdir(parents=True)
+        logger = _make_logger()
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine.safe_rmtree",
+                side_effect=PathTraversalError("containment refused"),
+            ),
+            pytest.raises(PathTraversalError, match="containment refused"),
+        ):
+            _remove_packages_from_disk(["org/repo"], modules, logger)
+        logger.error.assert_called_once_with(
+            "Refusing to remove org/repo from apm_modules/: containment refused"
+        )
+
+    def test_rmtree_exception_is_propagated(self, tmp_path):
+        """A deletion error is logged and stops the caller's ownership release."""
         modules = tmp_path / "apm_modules"
         pkg_dir = modules / "org" / "repo"
         pkg_dir.mkdir(parents=True)
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.safe_rmtree",
-            side_effect=OSError("permission denied"),
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine.safe_rmtree",
+                side_effect=OSError("permission denied"),
+            ),
+            pytest.raises(OSError, match="permission denied"),
         ):
-            removed = _remove_packages_from_disk(["org/repo"], modules, logger)
+            _remove_packages_from_disk(["org/repo"], modules, logger)
 
-        assert removed == 0
+        assert pkg_dir.exists()
         logger.error.assert_called_once()
+
+
+@pytest.mark.parametrize("at_resolution", [True, False], ids=["resolve", "delete"])
+def test_orphan_containment_refusal_has_no_fallback(tmp_path: Path, at_resolution: bool) -> None:
+    """Containment refusals are not parse errors eligible for key-derived deletion."""
+    modules = tmp_path / "apm_modules"
+    orphan_path = modules / "org" / "orphan"
+    orphan_path.mkdir(parents=True)
+    payload = orphan_path / "payload"
+    payload.write_bytes(b"retain ownership")
+    logger = _make_logger()
+    lockfile = MagicMock()
+    reference = lockfile.get_dependency.return_value.to_dependency_ref.return_value
+    reference.get_install_path.return_value = orphan_path
+    if at_resolution:
+        reference.get_install_path.side_effect = PathTraversalError("containment refused")
+    with (
+        patch(
+            "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+            return_value=({"org/orphan"}, {}),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.engine.safe_rmtree",
+            side_effect=PathTraversalError("containment refused"),
+        ) as remove,
+        pytest.raises(PathTraversalError, match="containment refused"),
+    ):
+        _cleanup_transitive_orphans(lockfile, ["org/parent"], modules, None, logger)
+    assert payload.read_bytes() == b"retain ownership"
+    assert remove.call_count == (0 if at_resolution else 1)
+    logger.error.assert_called_once_with(
+        "Refusing to remove transitive dep org/orphan: containment refused"
+    )
+
+
+@pytest.mark.parametrize("removal_kind", ["direct", "orphan"])
+def test_partial_failure_cleans_deleted_package_parents_for_retry(
+    tmp_path: Path, removal_kind: str
+) -> None:
+    """A later deletion failure must not strand an earlier package's owner directory."""
+    modules = tmp_path / "apm_modules"
+    first = modules / "org1" / "a"
+    second = modules / "org2" / "b"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    logger = _make_logger()
+    packages = ["org1/a", "org2/b"]
+    lockfile = LockFile()
+    for package in packages:
+        lockfile.add_dependency(
+            LockedDependency(repo_url=package, resolved_commit=f"{package}-commit")
+        )
+
+    def remove_with_second_failure(path: Path, root: Path) -> None:
+        if path == second:
+            raise PermissionError(errno.EACCES, "permission denied", path)
+        real_safe_rmtree(path, root)
+
+    def remove() -> None:
+        if removal_kind == "direct":
+            _remove_packages_from_disk(packages, modules, logger)
+        else:
+            _cleanup_transitive_orphans(lockfile, ["org/parent"], modules, None, logger)
+
+    with (
+        patch(
+            "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+            return_value=(packages, {}),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.engine.safe_rmtree",
+            side_effect=remove_with_second_failure,
+        ),
+        pytest.raises(PermissionError, match="permission denied"),
+    ):
+        remove()
+
+    assert not (modules / "org1").exists()
+    assert second.exists()
+
+    with patch(
+        "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+        return_value=(packages, {}),
+    ):
+        remove()
+
+    assert modules.exists()
+    assert not (modules / "org1").exists()
+    assert not (modules / "org2").exists()
 
 
 # ===========================================================================

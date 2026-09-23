@@ -26,6 +26,7 @@ import io
 import json
 import threading
 import zipfile
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,12 @@ import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate, _debug
+from apm_cli.deps.git_file_transport import GitFileTransportError
+from apm_cli.deps.transport_selection import (
+    NoOpInsteadOfResolver,
+    ProtocolPreference,
+    TransportSelector,
+)
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
@@ -174,12 +181,12 @@ class TestDebugHelper:
         assert "[DEBUG]" in captured.err
 
     def test_debug_redacts_git_credentials(self, capsys: pytest.CaptureFixture[str]) -> None:
-        secret = "glrt-" + "R" * 24
+        sentinel = "glrt-" + "R" * 24
         with patch.dict("os.environ", {"APM_DEBUG": "1"}):
-            _debug(f"git cleanup failed with {secret}")
+            _debug(f"git cleanup failed with {sentinel}")
 
         captured = capsys.readouterr()
-        assert secret not in captured.err
+        assert sentinel not in captured.err
         assert "[DEBUG] git cleanup failed with ***" in captured.err
 
 
@@ -1013,6 +1020,21 @@ class TestDownloadAdoFile:
 
 
 class TestDownloadGitlabFile:
+    @pytest.fixture(autouse=True)
+    def _isolate_sparse_git(self) -> Iterator[None]:
+        """Drive REST-only cases with a typed Git failure, never external Git."""
+        with (
+            patch(
+                "apm_cli.deps.git_file_transport.GitSparseFileTransport._run",
+                side_effect=GitFileTransportError("Git fetch failed"),
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.validate_git_url_rewrite_safety",
+                return_value=None,
+            ),
+        ):
+            yield
+
     def _dep(self) -> DependencyReference:
         return DependencyReference(
             repo_url="mygroup/myproject",
@@ -1021,11 +1043,19 @@ class TestDownloadGitlabFile:
 
     def _setup_host_info(self, host_mock: MagicMock) -> None:
         info = MagicMock()
+        info.kind = "gitlab"
         info.api_base = "https://gitlab.example.com/api/v4"
         host_mock.auth_resolver.classify_host.return_value = info
         ctx = MagicMock()
         ctx.token = "gl-tok"
+        ctx.auth_scheme = "basic"
         host_mock.auth_resolver.resolve.return_value = ctx
+        host_mock.auth_resolver.resolve_for_remote.return_value = ctx
+        host_mock.auth_resolver.git_env_for_remote.return_value = {}
+        host_mock.auth_resolver.build_native_git_credential_env.return_value = {}
+        host_mock._protocol_pref = ProtocolPreference.NONE
+        host_mock._allow_fallback = False
+        host_mock._transport_selector = TransportSelector(NoOpInsteadOfResolver())
 
     def test_success_returns_content(self) -> None:
         host = _make_host()
@@ -1099,7 +1129,9 @@ class TestDownloadGitlabFile:
 
     def test_401_without_token_includes_context(self) -> None:
         host = _make_host()
+        self._setup_host_info(host)
         info = MagicMock()
+        info.kind = "gitlab"
         info.api_base = "https://gitlab.example.com/api/v4"
         host.auth_resolver.classify_host.return_value = info
         ctx = MagicMock()
@@ -1167,7 +1199,7 @@ class TestDownloadGitlabFile:
         resp = _fake_response(200, b"data")
         host._resilient_get.return_value = resp
         callback = MagicMock()
-        git_error = RuntimeError(
+        git_error = GitFileTransportError(
             "fatal: could not read from https://oauth2:secret@gitlab.example.com/group/repo.git"
         )
         monkeypatch.setenv("APM_DEBUG", "1")

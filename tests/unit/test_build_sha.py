@@ -2,6 +2,7 @@
 
 import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.version import get_build_sha
@@ -31,7 +32,8 @@ class TestGetBuildSha(unittest.TestCase):
         assert result == "d1630d1"
         mock_run.assert_called_once()
         args = mock_run.call_args
-        assert args[0][0] == ["git", "rev-parse", "--short", "HEAD"]
+        assert Path(args[0][0][0]).stem == "git"
+        assert args[0][0][1:] == ["rev-parse", "--short", "HEAD"]
 
     @patch("apm_cli.version.__BUILD_SHA__", None)
     @patch("subprocess.run", side_effect=FileNotFoundError("git not found"))

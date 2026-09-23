@@ -3,6 +3,7 @@
 import subprocess
 import threading  # noqa: F401
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,10 +23,26 @@ FAKE_JWT = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9." + "a" * 200
 
 
 class TestIsAvailable:
-    def test_is_available_when_az_on_path(self):
-        with patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"):
+    @pytest.mark.windows_compat
+    def test_is_available_when_az_on_path(self) -> None:
+        """Availability must not launch az, even when it resolves to az.cmd.
+
+        A final xdist PASSED line can remain unterminated until another worker
+        finishes. Its CI log timestamp is not evidence that this probe ran a
+        slow subprocess; pin the no-subprocess contract directly.
+        """
+        with (
+            patch(
+                "apm_cli.core.azure_cli.shutil.which",
+                return_value=r"C:\Program Files\Azure CLI\az.cmd",
+            ),
+            patch("apm_cli.core.azure_cli.subprocess.run") as mock_run,
+            patch("apm_cli.core.azure_cli.subprocess.Popen") as mock_popen,
+        ):
             provider = AzureCliBearerProvider()
             assert provider.is_available() is True
+            mock_run.assert_not_called()
+            mock_popen.assert_not_called()
 
     def test_is_available_when_az_missing(self):
         with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
@@ -53,6 +70,7 @@ class TestIsAvailable:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.windows_compat
 class TestWindowsAzCmdResolution:
     """Regression: subprocess.run must receive the shutil.which-resolved
     path, not the bare "az" token. On Windows the resolver returns
@@ -73,12 +91,17 @@ class TestWindowsAzCmdResolution:
             provider = AzureCliBearerProvider()
             assert provider._az_command is None
 
-    def test_init_absolute_path_skips_resolution(self):
-        """Caller passed an explicit absolute path -- trust verbatim."""
+    def test_init_absolute_path_skips_resolution(self, tmp_path: Path) -> None:
+        """Trust a native absolute path, not a POSIX-only rooted spelling.
+
+        On Python 3.13+ Windows, /opt/custom/az is rooted but not absolute:
+        it has no drive. Use a real platform-native absolute path here.
+        """
+        az_command = str(tmp_path / "custom" / "az")
         with patch("apm_cli.core.azure_cli.shutil.which") as mock_which:
-            provider = AzureCliBearerProvider(az_command="/opt/custom/az")
+            provider = AzureCliBearerProvider(az_command=az_command)
             mock_which.assert_not_called()
-            assert provider._az_command == "/opt/custom/az"
+            assert provider._az_command == az_command
 
     def test_init_relative_with_separator_still_resolves(self):
         """A relative-with-separator token like 'subdir/az' must NOT bypass

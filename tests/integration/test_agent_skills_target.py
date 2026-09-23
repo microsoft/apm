@@ -66,7 +66,7 @@ def _make_plugin_bundle(
     rel = f"skills/{skill_name}/SKILL.md"
     skill_path = bundle / rel
     skill_path.parent.mkdir(parents=True, exist_ok=True)
-    skill_path.write_text(skill_body, encoding="utf-8")
+    skill_path.write_bytes(skill_body.encode("utf-8"))
 
     bundle_files = {rel: _sha256(skill_body)}
 
@@ -320,7 +320,7 @@ def test_uninstall_agent_skills_cleans_dir(tmp_path: Path, monkeypatch: pytest.M
     skill_rel = f".agents/skills/{SKILL_NAME}/SKILL.md"
     deployed = project / skill_rel
     deployed.parent.mkdir(parents=True, exist_ok=True)
-    deployed.write_text(SKILL_BODY, encoding="utf-8")
+    deployed.write_bytes(SKILL_BODY.encode("utf-8"))
 
     lock = {
         "dependencies": [
@@ -530,7 +530,7 @@ def _make_multi_target_bundle(
     rel = f"skills/{skill_name}/SKILL.md"
     skill_path = bundle / rel
     skill_path.parent.mkdir(parents=True, exist_ok=True)
-    skill_path.write_text(skill_body, encoding="utf-8")
+    skill_path.write_bytes(skill_body.encode("utf-8"))
 
     bundle_files = {rel: _sha256(skill_body)}
     lock_data = {

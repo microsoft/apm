@@ -350,23 +350,15 @@ def build_download_ref(
         if locked_dep:
             overrides: dict[str, Any] = {}
 
-            # Prefer the lockfile host so re-installs fetch from the exact same
-            # source (proxy host preserved) — fixes air-gapped reproducibility.
+            # Registry-proxy rows preserve their configured proxy host for
+            # reproducibility. Ordinary dependency hosts and insecure transport
+            # are always taken from the current manifest, never from lock state.
             # When registry_prefix is set, also restore the artifactory_prefix
             # field on dep_ref so the downloader takes the proxy code-path and
             # uses PROXY_REGISTRY_TOKEN for auth instead of the GitHub PAT.
             if locked_dep.registry_prefix and locked_dep.host:
                 overrides["host"] = locked_dep.host
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
-            elif (
-                isinstance(getattr(locked_dep, "host", None), str)
-                and locked_dep.host != dep_ref.host
-            ):
-                overrides["host"] = locked_dep.host
-
-            if getattr(locked_dep, "is_insecure", False) is True:
-                overrides["is_insecure"] = True
-                overrides["allow_insecure"] = getattr(locked_dep, "allow_insecure", False)
 
             reg_replay = _registry_replay_overrides_from_lock(locked_dep)
             if reg_replay is not None:

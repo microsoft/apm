@@ -92,8 +92,10 @@ For the deeper view of how compile fits in, see
 `apm install` mirrors `npm install` deliberately. The big difference:
 APM also runs a security scan and, if present, an org policy gate
 before writing anything to disk. To refresh dependencies to their
-latest matching versions or refs, use `apm update` (mirrors `npm update`). To
-upgrade the `apm` CLI binary itself, use `apm self-update`.
+latest matching versions or refs, use `apm update` (mirrors `npm update`).
+CLI upgrades use your package manager (`brew upgrade apm` for Homebrew), or
+`apm self-update` for standalone installs. See
+[Update and refresh](../update-and-refresh/#update-the-apm-cli-binary).
 :::
 
 ## Where files land

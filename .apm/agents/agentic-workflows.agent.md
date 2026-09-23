@@ -141,11 +141,17 @@ When a user interacts with you:
 ## Quick Reference
 
 ```bash
+# Install the repository's exact compiler version
+gh extension install github/gh-aw --pin v0.87.8 --force
+
 # Initialize repository for agentic workflows
 gh aw init
 
 # Generate the lock file for a workflow
 gh aw compile [workflow-name]
+
+# Approve reviewed action or secret changes during a version upgrade
+gh aw compile [workflow-name] --approve
 
 # Debug workflow runs
 gh aw logs [workflow-name]
@@ -155,6 +161,16 @@ gh aw audit <run-id>
 gh aw fix --write
 gh aw compile --validate
 ```
+
+The repository compiler pin is gh-aw `v0.87.8` at tag commit
+`e973b8cc974ce0b3628a8f9759b40733b4bf146b`. Regenerate committed
+`.lock.yml` files with that exact version. Use `--approve` only after
+reviewing action, container, permission, and secret changes.
+
+`.github/workflows/agentics-maintenance.yml` is compiler-generated but
+committed with its `github/gh-aw-actions/setup-cli` tag refs rewritten to SHA
+`1aa033c7bf25ac9428fe521065b90c30a7070c4e`. Re-apply that rewrite after
+regeneration; `tests/unit/test_shared_apm_workflow_contract.py` fails otherwise.
 
 ## Key Features of gh-aw
 
@@ -174,4 +190,5 @@ gh aw compile --validate
 - Workflows must be compiled to `.lock.yml` files before running in GitHub Actions
 - **Bash tools are enabled by default** - Don't restrict bash commands unnecessarily since workflows are sandboxed by the AWF
 - Follow security best practices: minimal permissions, explicit network access, no template injection
+- gh-aw v0.87.8 exposes `GH_AW_DEFAULT_OTLP_HEADERS` to the agent and MCP telemetry runtime when that enterprise secret is configured. Leave it unset unless agent-visible telemetry credentials are an accepted boundary.
 - **Single-file output**: When creating a workflow, produce exactly **one** workflow `.md` file. Do not create separate documentation files (architecture docs, runbooks, usage guides, etc.). If documentation is needed, add a brief `## Usage` section inside the workflow file itself.

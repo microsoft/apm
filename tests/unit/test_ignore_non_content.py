@@ -88,6 +88,24 @@ class TestIgnoreNonContent:
         nested_names = sorted(p.name for p in (dest / "nested").iterdir())
         assert nested_names == ["data.md"]
 
+    def test_filters_generated_python_bytecode(self, tmp_path: Path):
+        src = tmp_path / "src"
+        cache = src / "scripts" / "__pycache__"
+        cache.mkdir(parents=True)
+        (src / "SKILL.md").write_text("# My Skill", encoding="utf-8")
+        (src / "scripts" / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+        (src / "scripts" / "legacy.pyc").write_bytes(b"legacy")
+        (src / "scripts" / "legacy.pyo").write_bytes(b"legacy-optimized")
+        (cache / "helper.cpython-312.pyc").write_bytes(b"cached")
+
+        dest = tmp_path / "dest"
+        shutil.copytree(src, dest, ignore=ignore_non_content)
+
+        assert (dest / "scripts" / "helper.py").exists()
+        assert not (dest / "scripts" / "legacy.pyc").exists()
+        assert not (dest / "scripts" / "legacy.pyo").exists()
+        assert not (dest / "scripts" / "__pycache__").exists()
+
     def test_simulates_skill_deploy_from_apm_modules(self, tmp_path: Path):
         """End-to-end: cache dir with .apm-pin copies cleanly to deploy target.
 

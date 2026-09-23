@@ -125,6 +125,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     """
     import subprocess as _sp
 
+    from ..models.dependency.host_virtual import dependency_repository_owner
     from ..utils.git_env import redact_git_diagnostic
     from ..utils.github_host import (
         is_ado_auth_failure_signal,
@@ -147,7 +148,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         host = dep.host
         if not host or is_github_hostname(host):
             continue  # github.com uses API probe with unauth fallback
-        org = dep.repo_url.split("/")[0] if dep.repo_url and "/" in dep.repo_url else None
+        org = dependency_repository_owner(dep)
         key = (host, dep.port, org)
         if key in seen:
             continue

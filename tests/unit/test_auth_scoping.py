@@ -19,6 +19,7 @@ from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
+from apm_cli.utils.git_env import get_git_executable
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1090,6 +1091,7 @@ class TestValidatePackageExistsEnv:
     )
     @patch("subprocess.run")
     @patch.dict(os.environ, {}, clear=True)
+    @pytest.mark.windows_compat
     def test_gitlab_virtual_subdirectory_uses_git_ls_remote(self, mock_run, _mock_cred):
         """Dict git+path subdirectory on GitLab validates the repo root via git ls-remote."""
         from apm_cli.commands.install import _validate_package_exists
@@ -1109,7 +1111,7 @@ class TestValidatePackageExistsEnv:
         assert ok is True
         assert mock_run.called
         cmd = mock_run.call_args[0][0]
-        assert Path(cmd[0]).name == "git"
+        assert cmd[0] == get_git_executable()
         assert cmd[1:3] == ["ls-remote", "--heads"]
 
     @patch(
@@ -1282,6 +1284,7 @@ class TestIsGitHubClassification:
 class TestSparseCheckoutTokenResolution:
     """Verify sparse checkout follows public GitHub anonymous-first auth."""
 
+    @pytest.mark.windows_compat
     def test_sparse_checkout_starts_anonymous_before_per_org_token(self, tmp_path):
         """Sparse checkout does not present either configured token initially."""
         org_token = "ghp_ORG_SPECIFIC"
@@ -1310,7 +1313,7 @@ class TestSparseCheckoutTokenResolution:
             def capture_run(cmd, **kwargs):
                 if (
                     len(cmd) >= 5
-                    and Path(cmd[0]).name == "git"
+                    and cmd[0] == get_git_executable()
                     and cmd[1:4] == ["remote", "add", "origin"]
                 ):
                     captured_urls.append(cmd[4])  # The URL argument (after 'origin')

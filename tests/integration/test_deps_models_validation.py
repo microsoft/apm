@@ -892,6 +892,49 @@ class TestTrySparseCheckout:
             ok = dl._try_sparse_checkout(dep, tmp_path / "clone", "skills/brand", "main")
         assert ok is False
 
+    def test_failure_debug_omits_git_executable_path(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        dl = _make_downloader()
+        dep = _make_dep_ref(
+            repo_url="https://git.example.com/owner/repo",
+            host="git.example.com",
+            reference="main",
+        )
+        dl.auth_resolver.uses_public_github_anonymous_first.return_value = False
+        dl.auth_resolver.resolve_for_remote.return_value = MagicMock()
+        dl.auth_resolver.git_env_for_remote.return_value = {}
+        failed = MagicMock(returncode=1, stderr="fatal: not found")
+        sensitive_path = "/credentials/secret/git"
+
+        with (
+            patch.dict(os.environ, {"APM_DEBUG": "1"}),
+            patch.object(dl, "_resolve_dep_auth_ctx", return_value=None),
+            patch.object(
+                dl,
+                "_build_repo_url",
+                return_value="https://git.example.com/owner/repo",
+            ),
+            patch(
+                "apm_cli.utils.git_env.init_git_remote_worktree",
+                return_value={},
+            ),
+            patch("apm_cli.deps.github_downloader.apply_sparse_cone"),
+            patch(
+                "apm_cli.deps.github_downloader.get_git_executable",
+                return_value=sensitive_path,
+            ),
+            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=failed),
+        ):
+            ok = dl._try_sparse_checkout(dep, tmp_path / "clone", "skills/brand", "main")
+
+        assert ok is False
+        stderr = capsys.readouterr().err
+        assert sensitive_path not in stderr
+        assert "Sparse-checkout fetch failed: fatal: not found" in stderr
+
     def test_exception_returns_false(self, tmp_path: Path) -> None:
         dl = _make_downloader()
         dep = _make_dep_ref(repo_url="owner/repo")

@@ -141,8 +141,9 @@ enforcement: invalid-value
         policy_file = tmp_path / "apm-policy.yml"
         policy_file.write_text('name: cached-test\nversion: "1.0.0"\n', encoding="utf-8")
 
-        # Create apm_modules/.policy-cache directory
-        cache_dir = tmp_path / "apm_modules" / ".policy-cache"
+        from apm_cli.policy.discovery import _get_cache_dir
+
+        cache_dir = _get_cache_dir(tmp_path)
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         result = discover_policy(tmp_path, policy_override=str(policy_file))

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import base64
@@ -22,6 +23,16 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 _LOCALIZED_AUTH_FAILURE = "fatal: Autentikasi gagal untuk 'https://github.com/fixture/private.git/'\n"
+_BARE_PLATFORM_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"github_pat_[A-Za-z0-9_]{20,}|"
+    r"gh[oprsu]_[A-Za-z0-9_]{6,}|"
+    r"gl(?:agent|cbt|ft|pat|ptt|rt|soat)[-_][A-Za-z0-9_-]{6,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}|"
+    r"[A-Za-z0-9]{75}AZDO[A-Za-z0-9]{5}|"
+    r"[A-Za-z0-9]{52}"
+    r")(?![A-Za-z0-9_])"
+)
 
 
 def _config_entries():
@@ -109,9 +120,37 @@ def _authorization_for_url(value):
         (
             header
             for header in reversed(active)
-            if header.lower().startswith("authorization:")
+            if _is_active_credential_header(header)
         ),
         None,
+    )
+
+
+def _is_active_credential_header(value):
+    name, separator, credential = value.partition(":")
+    if not separator or not credential.strip():
+        return False
+    if _BARE_PLATFORM_TOKEN_RE.search(credential):
+        return True
+    if re.match(r"(?i)^\s*(?:basic|bearer|token)\s+\S+", credential):
+        return True
+    parts = {
+        part
+        for part in re.split(r"[^a-z0-9]+", name.strip().lower())
+        if part
+    }
+    return bool(
+        parts
+        & {
+            "auth",
+            "authorization",
+            "cookie",
+            "credential",
+            "key",
+            "password",
+            "secret",
+            "token",
+        }
     )
 
 
@@ -204,8 +243,8 @@ def main():
             ),
             "git_token_present": "GIT_TOKEN" in os.environ,
             "auth_config_present": any(
-                (value and "extraheader" in key.lower())
-                or value.strip().lower().startswith("authorization:")
+                "extraheader" in key.lower()
+                and _is_active_credential_header(value)
                 for key, value in entries
             ),
             "credential_helpers": [

@@ -210,22 +210,22 @@ def test_neutral_hook_walker_preserves_tolerant_integrator_inspection() -> None:
     )
 
 
+@pytest.mark.parametrize("schema_revision", ["0.1", "0.1.41"])
 def test_manifest_schema_negotiates_normative_v01_registry_shape(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema_revision: str
 ) -> None:
     """Explicit v0.1 identity must select its normative registry parser."""
     from apm_cli.models.apm_package import APMPackage
-    from apm_cli.models.manifest_contract import OPENAPM_V01_SCHEMA_URI
 
     monkeypatch.setattr(
         "apm_cli.deps.registry.feature_gate.require_package_registry_enabled",
-        lambda _feature: None,
+        lambda _feature, *, create_config=True: None,
     )
     manifest = tmp_path / "apm.yml"
     manifest.write_text(
         "\n".join(
             (
-                f"$schema: {OPENAPM_V01_SCHEMA_URI}",
+                f"$schema: https://microsoft.github.io/apm/specs/schemas/manifest-v{schema_revision}.schema.json",
                 "name: demo",
                 "version: 1.0.0",
                 "registries:",
@@ -246,6 +246,8 @@ def test_manifest_schema_negotiates_normative_v01_registry_shape(
 
 def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:
     """A future schema cannot be silently interpreted as the working draft."""
+    from urllib.parse import urlparse
+
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.manifest_contract import UnsupportedManifestContractError
 
@@ -255,8 +257,13 @@ def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(UnsupportedManifestContractError):
+    with pytest.raises(UnsupportedManifestContractError) as caught:
         APMPackage.from_apm_yml(manifest)
+    urls = [urlparse(line.strip()) for line in str(caught.value).splitlines()[2:]]
+    assert [(url.scheme, url.hostname, url.path) for url in urls] == [
+        ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.schema.json"),
+        ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.41.schema.json"),
+    ]
 
 
 def test_lifecycle_docs_match_explicit_compilation_contract() -> None:

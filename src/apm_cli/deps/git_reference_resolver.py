@@ -38,7 +38,12 @@ from ..models.apm_package import (
     RemoteRef,
     ResolvedReference,
 )
-from ..utils.git_env import git_subprocess_error_text
+from ..models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_owner,
+    repository_path_segments,
+)
+from ..utils.git_env import get_git_executable, git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
@@ -46,7 +51,7 @@ from ..utils.github_host import (
 )
 from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
-from .transport_selection import ProtocolPreference
+from .transport_selection import ProtocolPreference, initial_transport_scheme
 
 if TYPE_CHECKING:
     import requests
@@ -145,10 +150,7 @@ class GitReferenceResolver:
 
         is_ado = dep_ref.is_azure_devops()
         repo_url_base = dep_ref.repo_url
-        explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower()
-        candidate_uses_ssh = explicit_scheme == "ssh" or (
-            not explicit_scheme and host._protocol_pref == ProtocolPreference.SSH
-        )
+        candidate_uses_ssh = initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh"
         rewrite_candidate = host._build_repo_url(
             repo_url_base,
             use_ssh=candidate_uses_ssh,
@@ -261,7 +263,7 @@ class GitReferenceResolver:
             if result.returncode != 0:
                 # auth-delegated: _primary_op and _bearer_op select this environment.
                 raise GitCommandError(
-                    ["git", "ls-remote", *ls_args, url],
+                    [get_git_executable(), "ls-remote", *ls_args, url],
                     result.returncode,
                     stderr=result.stderr,
                 )
@@ -324,7 +326,7 @@ class GitReferenceResolver:
                 )
                 return ("ok", _run_remote(public_url, git_env))
 
-            org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
+            org = repository_owner(repo_url_base)
             try:
                 outcome = host.auth_resolver.try_with_fallback(
                     dep_host,
@@ -382,7 +384,9 @@ class GitReferenceResolver:
             )
         else:
             target_host = dep_host or default_host()
-            org = repo_url_base.split("/")[0] if repo_url_base else None
+            org = (
+                dependency_repository_owner(dep_ref) if dep_ref else repository_owner(repo_url_base)
+            )
             error_msg += host.auth_resolver.build_error_context(
                 target_host,
                 "list refs",
@@ -419,8 +423,9 @@ class GitReferenceResolver:
             return ref.lower()
 
         try:
-            dep_ref.repo_url.split("/", 1)
-        except (AttributeError, ValueError):
+            if len(repository_path_segments(dep_ref.repo_url)) < 2:
+                return None
+        except AttributeError:
             return None
 
         from .host_backends import backend_for
@@ -430,10 +435,7 @@ class GitReferenceResolver:
         if api_url is None:
             return None
 
-        org = None
-        parts = dep_ref.repo_url.split("/")
-        if parts:
-            org = parts[0]
+        org = dependency_repository_owner(dep_ref)
 
         def _request(token: str | None, _git_env: dict[str, str]) -> str | None:
             headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
@@ -521,8 +523,8 @@ class GitReferenceResolver:
 
             if is_semver_range(ref):
                 remote_refs = self.list_remote_refs(dep_ref)
-                # Build version-string → (tag_name, sha) map.
-                # Strip the common 'v' prefix (e.g. 'v1.2.3' → '1.2.3').
+                # Build version-string -> (tag_name, sha) map.
+                # Strip the common 'v' prefix (e.g. 'v1.2.3' -> '1.2.3').
                 candidates: dict[str, tuple[str, str]] = {}
                 for rr in remote_refs:
                     if rr.ref_type != GitReferenceType.TAG:
@@ -633,7 +635,7 @@ class GitReferenceResolver:
                         ) or "remote: Repository not found" in str(e):
                             error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
                             target_host = dep_ref.host or default_host()
-                            org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url else None
+                            org = dependency_repository_owner(dep_ref)
                             error_msg += host.auth_resolver.build_error_context(
                                 target_host,
                                 "resolve reference",

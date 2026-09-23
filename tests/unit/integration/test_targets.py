@@ -11,7 +11,9 @@ from apm_cli.integration.targets import (
     RULE_FORMATS,
     PrimitiveMapping,
     active_targets,
+    resolve_targets,
 )
+from apm_cli.utils.path_security import PathTraversalError
 
 
 class TestPrimitiveMappingValidation:
@@ -73,6 +75,17 @@ class TestActiveTargets:
         (self.root / ".cursor").mkdir()
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["cursor"]
+
+    def test_symlinked_project_target_root_is_rejected(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        try:
+            (self.root / ".claude").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+
+        with pytest.raises(PathTraversalError, match="symlinked target root"):
+            resolve_targets(self.root, explicit_target="claude")
 
     def test_only_opencode_returns_opencode(self):
         (self.root / ".opencode").mkdir()

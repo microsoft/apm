@@ -1,9 +1,13 @@
 """Tests for HTTP response cache."""
 
 import json
+import logging
+import os
 import time
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from apm_cli.cache.http_cache import (
     MAX_HTTP_CACHE_TTL_SECONDS,
@@ -50,6 +54,61 @@ class TestHttpCacheHitMiss:
 
         result = cache.get(url)
         assert result is None
+
+    def test_hit_updates_recency_without_rewriting_response(self, tmp_path: Path) -> None:
+        cache = HttpCache(tmp_path)
+        url = "https://registry.example.com/api/recent"
+        cache.store(url, b"body", headers={"Cache-Control": "max-age=3600"})
+        path = cache._entry_path(url)
+        metadata = (path / "meta.json").read_bytes()
+        os.utime(path, (1_000_000_000, 1_000_000_000))
+
+        entry = cache.get(url)
+
+        assert entry is not None
+        assert entry.body == b"body"
+        assert path.stat().st_mtime > 1_000_000_000
+        assert (path / "meta.json").read_bytes() == metadata
+
+    @pytest.mark.parametrize("failure", [FileNotFoundError, PermissionError])
+    def test_recency_failure_preserves_verified_hit(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, failure: type[OSError]
+    ) -> None:
+        cache = HttpCache(tmp_path)
+        url = "https://registry.example.com/api/recent"
+        cache.store(url, b"body", headers={"Cache-Control": "max-age=3600"})
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="apm_cli.cache.http_cache"),
+            patch("apm_cli.cache.http_cache.os.utime", side_effect=failure("touch failed")),
+        ):
+            entry = cache.get(url)
+
+        assert entry is not None
+        assert entry.body == b"body"
+        assert "Failed to update HTTP cache recency" in caplog.text
+
+    @pytest.mark.parametrize("invalid", ["expired", "corrupt", "malformed", "missing-body"])
+    def test_invalid_read_does_not_update_recency(self, tmp_path: Path, invalid: str) -> None:
+        cache = HttpCache(tmp_path)
+        url = "https://registry.example.com/api/invalid"
+        cache.store(url, b"body", headers={"Cache-Control": "max-age=3600"})
+        path = cache._entry_path(url)
+        if invalid == "expired":
+            meta = json.loads((path / "meta.json").read_text())
+            meta["expires_at"] = 0
+            (path / "meta.json").write_text(json.dumps(meta))
+        elif invalid == "corrupt":
+            (path / "body").write_bytes(b"tampered")
+        elif invalid == "malformed":
+            (path / "meta.json").write_text("{")
+        else:
+            (path / "body").unlink()
+
+        with patch("apm_cli.cache.http_cache.os.utime") as touch:
+            assert cache.get(url) is None
+
+        touch.assert_not_called()
 
 
 class TestHttpCacheConditionalRevalidation:
@@ -114,6 +173,23 @@ class TestHttpCacheTTLCap:
 
 class TestHttpCacheSizeCap:
     """Test LRU eviction when size cap is exceeded."""
+
+    def test_successful_hit_protects_entry_from_eviction(self, tmp_path: Path) -> None:
+        cache = HttpCache(tmp_path)
+        urls = [f"https://registry.example.com/api/{name}" for name in ("a", "b", "c")]
+        with patch("apm_cli.cache.http_cache.MAX_HTTP_CACHE_BYTES", 10_000):
+            for index, url in enumerate(urls[:2]):
+                cache.store(url, b"x" * 4096, headers={"Cache-Control": "max-age=3600"})
+                aged = 1_000_000_000 + index * 100
+                os.utime(cache._entry_path(url), (aged, aged))
+
+            assert cache.get(urls[0]) is not None
+            cache.store(urls[2], b"x" * 4096, headers={"Cache-Control": "max-age=3600"})
+
+        assert cache.get(urls[0]) is not None
+        assert cache.get(urls[1]) is None
+        assert cache.get(urls[2]) is not None
+        assert cache.get_stats()["total_size_bytes"] <= 10_000
 
     def test_eviction_on_size_cap(self, tmp_path: Path) -> None:
         # Use a very small cap for testing

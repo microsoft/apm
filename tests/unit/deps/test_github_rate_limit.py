@@ -68,3 +68,20 @@ def test_typed_error_contains_no_response_header_or_credential_value() -> None:
 
     assert isinstance(error, GitHubThrottleError)
     assert str(error) == "GitHub API throttle for github.com (HTTP 403)"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "API rate limit exceeded for this address.",
+        "You have exceeded a secondary rate limit.",
+        "You have triggered an abuse detection mechanism.",
+    ],
+)
+def test_bootstrap_can_opt_into_body_throttle_signals(message: str) -> None:
+    """Body evidence is classified here, without changing header-only callers."""
+    throttle = classify_github_throttle(403, {}, message=message)
+    assert throttle is not None
+    assert throttle.signal == "message"
+    assert classify_github_throttle(403, {}) is None
+    assert classify_github_throttle(401, {}, message=message) is None

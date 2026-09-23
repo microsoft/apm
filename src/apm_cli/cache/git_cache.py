@@ -16,6 +16,7 @@ Resolution flow:
 On every cache HIT:
 - Run integrity check (verify HEAD == expected SHA)
 - Mismatch -> evict shard, fall through to fresh fetch, log warning
+- Refresh the SHA directory's access timestamp after successful validation
 
 Concurrency:
 - Per-shard file locks (via filelock) for atomic operations
@@ -24,7 +25,6 @@ Concurrency:
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import logging
@@ -33,6 +33,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..utils.atomic_io import atomic_write_text
 from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
@@ -50,6 +51,15 @@ _FALLBACK_REFSPECS = (
 )
 
 
+class CachePruneError(OSError):
+    """Incomplete prune with completed-removal count and per-entry failures."""
+
+    def __init__(self, pruned: int, failures: list[tuple[Path, OSError]]) -> None:
+        self.pruned = pruned
+        self.failures = tuple(failures)
+        super().__init__(f"Pruned {pruned} SHA group(s); {len(failures)} failed.")
+
+
 def _safe_git_args() -> list[str]:
     """Return hardening ``-c`` args prepended to every git subprocess.
 
@@ -57,6 +67,13 @@ def _safe_git_args() -> list[str]:
       malicious upstream might ship, so clone and checkout stay inert.
     - ``submodule.recurse=false`` prevents any subcommand from
       recursing into attacker-controlled submodule URLs.
+    - ``core.autocrlf=false`` disables host autocrlf conversion so
+      LF-committed blobs are not rewritten as CRLF on checkout.
+      ``-c`` outranks host system / global config and
+      ``GIT_CONFIG_KEY_n`` snapshots from ``git_network_env``, which
+      otherwise win over a repo-local pin (apm#2971). This pin does
+      not override ``core.eol`` or ``.gitattributes`` ``eol=crlf`` /
+      ``text=auto`` requests.
 
     These flags are scoped per-invocation via ``-c`` and never mutate
     the user's gitconfig. The cache layer is the single source of
@@ -70,7 +87,42 @@ def _safe_git_args() -> list[str]:
         *git_no_hooks_args(),
         "-c",
         "submodule.recurse=false",
+        "-c",
+        "core.autocrlf=false",
     ]
+
+
+def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
+    """Return whether the checkout's local gitconfig pins ``core.autocrlf=false``.
+
+    Pre-fix shards materialized under host ``core.autocrlf=true`` omit this
+    pin and may contain CRLF working-tree bytes. Cache hits rematerialize
+    those shards so existing Windows caches heal without ``apm cache clean``.
+    """
+    config = checkout_dir / ".git" / "config"
+    if not config.is_file():
+        return False
+    try:
+        text = config.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    section = None
+    for raw in text.splitlines():
+        line = raw.split(";", 1)[0].split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            inner = line[1:-1].strip()
+            section = inner.split(" ", 1)[0].strip().lower()
+            continue
+        if section != "core" or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip().lower() != "autocrlf":
+            continue
+        normalized = value.strip().strip("\"'").lower()
+        return normalized in {"false", "0", "no", "off"}
+    return False
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -192,16 +244,14 @@ class GitCache:
 
         # Cache hit path (skip if refresh requested)
         if not self._refresh and checkout_dir.is_dir():
-            if verify_checkout_sha(checkout_dir, sha):
+            sha_ok = verify_checkout_sha(checkout_dir, sha)
+            if sha_ok and _checkout_pins_autocrlf_false(checkout_dir):
                 _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
-                    return self._finalize_sparse_checkout(
-                        url,
-                        checkout_dir,
-                        sparse_paths,
-                        env=env,
+                    return self._record_checkout_access(
+                        self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
                     )
-            else:
+            elif not sha_ok:
                 # Integrity failure -- evict
                 _log.warning(
                     "[!] Evicting corrupt cache entry: %s @ %s [%s]",
@@ -210,6 +260,9 @@ class GitCache:
                     variant,
                 )
                 self._evict_checkout(checkout_dir)
+            # SHA-valid unpinned trees stay until ``_create_checkout`` holds
+            # ``shard_lock`` and emits the rematerialize log. A concurrent
+            # consumer may still be reading the old checkout.
 
         # Cache miss: ensure we have the bare repo, then create checkout.
         # Sparse callers use a partial bare (blob:none) + promisor consumer
@@ -225,6 +278,46 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _resolved_ref_path(self, url: str, ref: str) -> Path:
+        digest = hashlib.sha256(ref.encode("utf-8")).hexdigest()
+        path = self._db_root / f"{cache_shard_key(url)}-{digest}.ref"
+        ensure_path_within(path, self._db_root)
+        return path
+
+    def remember_resolved_ref(self, url: str, ref: str, sha: str) -> None:
+        """Persist an authorized remote observation independently of bare flavor."""
+        if not ref or not _SHA_RE.fullmatch(sha):
+            raise ValueError("A remote ref observation requires a ref and full SHA")
+        path = self._resolved_ref_path(url, ref)
+        with shard_lock(path):
+            atomic_write_text(path, sha.lower(), new_file_mode=0o600)
+
+    def read_resolved_ref(self, url: str, ref: str) -> tuple[bool, str | None]:
+        """Return receipt presence and SHA; corrupt receipts must not revive old refs."""
+        path = self._resolved_ref_path(url, ref)
+        try:
+            sha = path.read_text(encoding="ascii")
+        except FileNotFoundError:
+            return False, None
+        except (OSError, UnicodeError):
+            return True, None
+        return True, sha if _SHA_RE.fullmatch(sha) else None
+
+    def _record_checkout_access(self, checkout_dir: Path) -> Path:
+        """Record successful reuse of a finalized checkout under its shard lock."""
+        # Pruning ages the shared SHA root, not individual checkout variants.
+        try:
+            os.utime(checkout_dir.parent, None)
+        except PermissionError as exc:
+            _log.warning(
+                "[!] Cannot update Git cache recency for %s: %s. "
+                "Continuing with validated checkout; cache prune may evict it. "
+                "Check cache permissions or set APM_CACHE_DIR to a writable directory.",
+                checkout_dir.parent,
+                exc,
+            )
+        return checkout_dir
 
     def _finalize_sparse_checkout(
         self,
@@ -593,19 +686,31 @@ class GitCache:
             # this shard while we were waiting. Verify integrity to
             # rule out a poisoned half-write (atomic_land guards
             # against that, but we re-check defensively).
-            if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
+            existing_ok = final_dir.is_dir() and verify_checkout_sha(final_dir, sha)
+            if existing_ok and _checkout_pins_autocrlf_false(final_dir):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
                     variant,
                 )
-                return self._finalize_sparse_checkout(
-                    url,
-                    final_dir,
-                    sparse_paths,
-                    env=env,
+                return self._record_checkout_access(
+                    self._finalize_sparse_checkout(url, final_dir, sparse_paths, env=env)
                 )
+            if existing_ok:
+                _log.info(
+                    "[*] Rematerializing git checkout missing core.autocrlf=false pin: "
+                    "%s @ %s [%s]",
+                    _sanitize_url(url),
+                    sha[:12],
+                    variant,
+                )
+                self._evict_checkout(final_dir)
+                if final_dir.exists():
+                    raise RuntimeError(
+                        "Failed to rematerialize unpinned git checkout "
+                        f"for {_sanitize_url(url)} @ {sha[:12]}"
+                    )
 
             staged = stage_path(final_dir)
             ensure_path_within(staged, self._checkouts_root)
@@ -648,6 +753,27 @@ class GitCache:
                     capture_output=True,
                     text=True,
                     timeout=60,
+                    env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
+                    check=True,
+                )
+                # Persist the pin so cache hits can recognize post-fix shards.
+                # Checkout itself still needs ``-c core.autocrlf=false`` from
+                # ``_safe_git_args`` because env-frozen host config outranks
+                # this local value.
+                subprocess.run(
+                    [
+                        git_exe,
+                        *_safe_git_args(),
+                        "-C",
+                        str(staged),
+                        "config",
+                        "core.autocrlf",
+                        "false",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
@@ -737,8 +863,10 @@ class GitCache:
             if not atomic_land(staged, final_dir, lock):
                 # Another process landed first between our re-probe and
                 # the rename (only possible if our lock dropped, which
-                # it didn't); verify integrity defensively.
-                if not verify_checkout_sha(final_dir, sha):
+                # it didn't); verify integrity and the autocrlf pin.
+                if not (
+                    verify_checkout_sha(final_dir, sha) and _checkout_pins_autocrlf_false(final_dir)
+                ):
                     self._evict_checkout(final_dir)
                     raise RuntimeError(
                         f"Race condition: concurrent checkout failed integrity "
@@ -858,6 +986,8 @@ class GitCache:
                 if entry.is_dir(follow_symlinks=False) and not entry.name.endswith(".lock"):
                     db_count += 1
                     total_size += _dir_size(Path(entry.path))
+                elif entry.name.endswith(".ref") and entry.is_file(follow_symlinks=False):
+                    total_size += entry.stat(follow_symlinks=False).st_size
 
         if self._checkouts_root.is_dir():
             for shard_entry in os.scandir(str(self._checkouts_root)):
@@ -873,33 +1003,37 @@ class GitCache:
             "total_size_bytes": total_size,
         }
 
-    def clean_all(self) -> None:
-        """Remove ALL cache content (db + checkouts). Used by ``apm cache clean``."""
-        from ..utils.file_ops import robust_rmtree
+    def clean_all(self) -> list[str]:
+        """Remove db and checkouts, returning details of every incomplete removal."""
+        from .cleanup import clean_cache_buckets
 
-        for bucket in (self._db_root, self._checkouts_root):
-            if bucket.is_dir():
-                for entry in os.scandir(str(bucket)):
-                    if entry.is_dir(follow_symlinks=False):
-                        robust_rmtree(Path(entry.path), ignore_errors=True)
-                    elif entry.is_file(follow_symlinks=False):
-                        with contextlib.suppress(OSError):
-                            os.unlink(entry.path)
+        return clean_cache_buckets((self._db_root, self._checkouts_root))
 
     def prune(self, *, max_age_days: int = 30) -> int:
         """Remove checkout entries older than *max_age_days*.
 
-        Uses mtime of the checkout directory as the access indicator.
+        Uses mtime of the shared SHA directory as the access indicator.
+        Successfully reusing any checkout variant refreshes that timestamp.
 
         Returns:
-            Number of entries pruned.
+            Number of SHA groups successfully removed.
+
+        Raises:
+            ValueError: If max_age_days is negative.
+            CachePruneError: Some entries could not be inspected or removed.
+                Other stale entries are still attempted. Completed removals
+                and partially deleted entries are not rolled back.
         """
         import time
 
         from ..utils.file_ops import robust_rmtree
 
+        if max_age_days < 0:
+            raise ValueError("max_age_days must be nonnegative; use 0 or a positive number of days")
+
         cutoff = time.time() - (max_age_days * 86400)
         pruned = 0
+        failures: list[tuple[Path, OSError]] = []
 
         if not self._checkouts_root.is_dir():
             return 0
@@ -913,11 +1047,13 @@ class GitCache:
                 try:
                     stat = sha_entry.stat(follow_symlinks=False)
                     if stat.st_mtime < cutoff:
-                        robust_rmtree(Path(sha_entry.path), ignore_errors=True)
+                        robust_rmtree(Path(sha_entry.path))
                         pruned += 1
-                except OSError:
-                    continue
+                except OSError as exc:
+                    failures.append((Path(sha_entry.path), exc))
 
+        if failures:
+            raise CachePruneError(pruned, failures)
         return pruned
 
 

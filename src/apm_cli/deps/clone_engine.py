@@ -21,28 +21,61 @@ unit-testable in isolation and mirrors the existing
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import urlsplit
 
 from git.exc import GitCommandError
 
 from ..models.apm_package import DependencyReference
+from ..models.dependency.host_virtual import repository_owner
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
     is_github_hostname,
 )
 from .bare_cache import build_clone_failure_message
-from .transport_selection import ProtocolPreference, TransportAttempt, TransportPlan
+from .transport_selection import (
+    TransportAttempt,
+    TransportPlan,
+    fallback_port_warning,
+    initial_transport_scheme,
+)
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
 
-_PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
-)
+
+def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, url: str) -> bool:
+    """Recognize only Git's pre-connection HTTPS failure for this exact remote."""
+    remote = urlsplit(url)
+    if remote.scheme != "https" or not remote.hostname:
+        return False
+    stderr = error.stderr
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not isinstance(stderr, str):
+        return False
+    if isinstance(error, GitCommandError):
+        if error.status != 128:
+            return False
+        stderr = stderr.removeprefix("\n  stderr: '").removesuffix("'")
+    elif error.returncode != 128:
+        return False
+    return (
+        re.fullmatch(
+            r"(?:Cloning into [^\r\n]+\r?\n)?"
+            rf"fatal: unable to access '{re.escape(url.rstrip('/'))}/?': "
+            rf"Failed to connect to {re.escape(remote.hostname)} port {remote.port or 443}"
+            r" after [0-9]+ ms: Couldn't connect to server",
+            stderr.strip(),
+        )
+        is not None
+    )
 
 
 def _debug(msg: str) -> None:
@@ -149,15 +182,23 @@ class CloneEngine:
         last_error: Exception | None = None
         is_ado = bool(dep_ref and dep_ref.is_azure_devops())
 
+        def _clone(url: str, env: dict[str, str], target: Path) -> None:
+            """Retry one failed connection without changing transport or credentials."""
+            try:
+                clone_action(url, env, target)
+            except (GitCommandError, subprocess.CalledProcessError) as exc:
+                if not _is_connect_failure(exc, url):
+                    raise
+                _debug("HTTPS connection failed; retrying the same Git action once in 1s")
+                # Clone callbacks own partial-target cleanup; fetch callbacks
+                # retain the existing bare repository. Never delete here.
+                time.sleep(1)
+                clone_action(url, env, target)
+
         dep_host = dep_ref.host if dep_ref else None
         is_github = is_github_hostname(dep_host) if dep_host else True
         is_generic = not is_ado and not is_github
-        explicit_scheme = (
-            (getattr(dep_ref, "explicit_scheme", None) or "").lower() if dep_ref else ""
-        )
-        candidate_uses_ssh = explicit_scheme == "ssh" or (
-            not explicit_scheme and self._protocol_pref == ProtocolPreference.SSH
-        )
+        candidate_uses_ssh = initial_transport_scheme(dep_ref, self._protocol_pref) == "ssh"
         rewrite_candidate = (
             host._build_repo_url(
                 repo_url_base,
@@ -246,7 +287,7 @@ class CloneEngine:
                     base_env=host.git_env,
                 )
             if is_generic and dep_ref is not None:
-                org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
+                org = repository_owner(repo_url_base)
                 policy_url = attempt.effective_url or attempt_url
                 context = host.auth_resolver.resolve_for_remote(
                     dep_host or default_host(),
@@ -276,17 +317,12 @@ class CloneEngine:
         )
 
         # Cross-protocol fallback custom-port warning (#786).
-        dep_port = getattr(dep_ref, "port", None) if dep_ref else None
-        if (
-            not plan.strict
-            and dep_port is not None
-            and any(a.scheme == "ssh" for a in plan.attempts)
-            and any(a.scheme == "https" for a in plan.attempts)
-        ):
+        port_warning = fallback_port_warning(dep_ref, plan)
+        if port_warning is not None:
             warn_key = (
                 dep_host.lower() if dep_host else dep_host,
                 repo_url_base,
-                dep_port,
+                dep_ref.port,
             )
             # Guard the check-then-add under the lock so two threads
             # racing on the same warn_key cannot both pass the
@@ -297,20 +333,7 @@ class CloneEngine:
                     self._fallback_port_warned.add(warn_key)
                     _should_warn = True
             if _should_warn:
-                initial_scheme = plan.attempts[0].scheme.upper()
-                fallback_scheme = next(
-                    a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme
-                )
-                host_display = dep_host or "host"
-                _rich_warning(
-                    f"Custom port {dep_port} on {host_display}/{repo_url_base}: "
-                    f"if {initial_scheme} fails, APM will retry over "
-                    f"{fallback_scheme} on the same port.\n"
-                    f"    Pin the URL scheme, or drop "
-                    f"--allow-protocol-fallback to fail fast.\n"
-                    f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}",
-                    symbol="warning",
-                )
+                _rich_warning(port_warning, symbol="warning")
 
         def _run_public_github_attempt() -> tuple[str, bool]:
             if dep_ref is None:
@@ -331,9 +354,9 @@ class CloneEngine:
                     token="",
                     auth_scheme="basic",
                 )
-                clone_action(winning_url, git_env, target_path)
+                _clone(winning_url, git_env, target_path)
 
-            org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
+            org = repository_owner(repo_url_base)
             host.auth_resolver.try_with_fallback(
                 dep_host or default_host(),
                 _clone_public_github,
@@ -402,7 +425,7 @@ class CloneEngine:
                         attempt_env: dict[str, str],
                     ) -> tuple[str, str | Exception]:
                         try:
-                            clone_action(attempt_url, attempt_env, target_path)
+                            _clone(attempt_url, attempt_env, target_path)
                             return "ok", attempt_url
                         except (
                             GitCommandError,
@@ -452,7 +475,7 @@ class CloneEngine:
                     url = str(outcome[1])
                     authenticated_fallback_used = fallback.bearer_attempted
                 else:
-                    clone_action(url, _env_for(attempt, url), target_path)
+                    _clone(url, _env_for(attempt, url), target_path)
                 if verbose_callback:
                     display = (
                         host._sanitize_git_error(url)

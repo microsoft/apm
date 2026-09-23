@@ -858,6 +858,7 @@ class TestAPMFileHandlerDebounce:
     def test_recompile_dry_run_success_message(self) -> None:
         """_recompile() with dry_run=True emits a dry run success message."""
         from apm_cli.commands.compile.watcher import APMFileHandler
+        from apm_cli.compilation.agents_compiler import CompilationResult
         from apm_cli.core.command_logger import CommandLogger
 
         logger = MagicMock(spec=CommandLogger)
@@ -868,9 +869,14 @@ class TestAPMFileHandlerDebounce:
             dry_run=True,
             logger=logger,
         )
-        mock_result = MagicMock()
-        mock_result.success = True
-        mock_result.output_path = "AGENTS.md"
+        mock_result = CompilationResult(
+            success=True,
+            output_path="AGENTS.md",
+            content="",
+            warnings=[],
+            errors=[],
+            stats={},
+        )
         with (
             patch(
                 "apm_cli.commands.compile.watcher.AgentsCompiler.compile",
@@ -882,9 +888,11 @@ class TestAPMFileHandlerDebounce:
             patch("apm_cli.commands.compile.watcher.clear_discovery_cache"),
         ):
             handler._recompile("/fake/some.prompt.md")
-        logger.success.assert_called()
-        call_args = str(logger.success.call_args_list)
-        assert "dry run" in call_args.lower()
+        logger.success.assert_called_once_with(
+            "Recompilation successful (dry run)", symbol="sparkles"
+        )
+        logger.warning.assert_not_called()
+        logger.error.assert_not_called()
 
     def test_recompile_failure_logs_errors(self) -> None:
         """_recompile() on compilation failure logs each error."""
@@ -1546,10 +1554,17 @@ class TestBareCacheHelpers:
             default_host_fn=lambda: "github.com",
             last_error=None,
             last_attempt_scheme=None,
-            sanitize_git_error=lambda s: s,
         )
         assert isinstance(msg, str)
-        assert "owner/repo" in msg
+        urls = [token for token in msg.split() if "://" in token]
+        assert len(urls) == 1
+        parsed = urllib.parse.urlparse(urls[0])
+        assert (parsed.scheme, parsed.hostname, parsed.path) == (
+            "https",
+            "github.com",
+            "/owner/repo",
+        )
+        assert "Please check repository access permissions and authentication setup." in msg
 
 
 # ===========================================================================

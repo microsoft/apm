@@ -170,7 +170,9 @@ def get_latest_version_for_self_update(channel: str) -> str | None:
     """Return the latest version for a supported self-update channel."""
     from ..utils.version_checker import get_latest_version_from_github
 
-    return get_latest_version_from_github(include_prerelease=(channel == "prerelease"))
+    return get_latest_version_from_github(
+        include_prerelease=(channel == "prerelease"), raise_errors=True
+    )
 
 
 def _build_self_update_installer_env(
@@ -194,6 +196,11 @@ def _build_self_update_installer_env(
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
     env[_ENV_VERSION] = release.tag
+    if not _is_windows_platform():
+        # Pass identity, not a second destination policy: install.sh owns routing.
+        env["APM_SELF_UPDATE_SOURCE"] = os.path.abspath(
+            sys.executable if getattr(sys, "frozen", False) else sys.argv[0]
+        )
     return env
 
 
@@ -266,7 +273,13 @@ def self_update(check: bool) -> None:
             sys.exit(1)
 
         # Check for latest version
-        latest_version = get_latest_version_for_self_update(_channel)
+        from ..utils.version_checker import ReleaseMetadataError
+
+        try:
+            latest_version = get_latest_version_for_self_update(_channel)
+        except ReleaseMetadataError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
 
         if not latest_version:
             if _pinned:
@@ -352,7 +365,7 @@ def self_update(check: bool) -> None:
 
             # Note: We don't capture output so the installer can prompt when needed.
             # Sanitise the environment so the installer (and the system binaries
-            # it spawns -- curl, tar, sudo) do not inherit the PyInstaller
+            # it spawns -- curl and tar) do not inherit the PyInstaller
             # bootloader's LD_LIBRARY_PATH / DYLD_* overrides, which would
             # otherwise redirect system linkers at this binary's bundled
             # _internal directory.  See issue #894.
@@ -373,7 +386,8 @@ def self_update(check: bool) -> None:
                 logger.success(
                     f"Successfully updated to version {release.version}!",
                 )
-                logger.progress("Please restart your terminal or run 'apm --version' to verify")
+                if _is_windows_platform():
+                    logger.progress("Please restart your terminal or run 'apm --version' to verify")
             else:
                 logger.error("Installation failed - see output above for details")
                 sys.exit(1)

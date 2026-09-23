@@ -60,6 +60,9 @@ _GUARD_DEPENDENCY_IDENTITY = "contracts-tooling-dependency-identity"
 _GUARD_CACHED_POLICY = "contracts-tooling-cached-policy-shape"
 
 
+_GUARD_POLICY_HASH = "contracts-tooling-policy-content-hash"
+
+
 _GUARD_APPLY_TO = "contracts-tooling-apply-to-placement"
 
 
@@ -92,6 +95,7 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/packer.py",
     "src/apm_cli/bundle/plugin_exporter.py",
     "src/apm_cli/bundle/agent_plugin_exporter.py",
+    "src/apm_cli/commands/outdated.py",
 )
 
 
@@ -244,10 +248,15 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
             consumer.tree_index.nodes,
             "resolve_lockfile_path_for_read",
         )
-        routes_read_only = len(calls) == 1 and _keyword_is_name(
-            calls[0],
-            "read_only",
-            "dry_run",
+        routes_read_only = len(calls) == 1 and (
+            any(
+                keyword.arg == "read_only"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in calls[0].keywords
+            )
+            if consumer_path == "src/apm_cli/commands/outdated.py"
+            else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
             "resolve_lockfile_path_for_read" not in imported
@@ -258,7 +267,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 _summary(
                     rule_id,
                     consumer_path,
-                    "Bundle lockfile reads must route through the read-only owner",
+                    "Lockfile reads must route through the read-only owner",
                 )
             )
     return tuple(findings)
@@ -460,6 +469,74 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         return tuple(failures)
 
     findings: list[Violation] = []
+    alias_consumers = {
+        "src/apm_cli/deps/lockfile.py": (
+            "self.alias = parse_alias_override(self.alias)",
+            'result["alias"] = self.alias',
+            'alias=data.get("alias")',
+            "alias=dep_ref.alias",
+            "alias=self.alias",
+        ),
+        _REFERENCE_OWNER: ("alias = parse_alias_override(alias)",),
+        "src/apm_cli/models/dependency/registry_entry.py": (
+            'alias = parse_alias_override(entry.get("alias"))',
+        ),
+        "src/apm_cli/models/dependency/object_fields.py": (
+            'validate_path_segments(alias, context="dependency alias")',
+        ),
+        _MATERIALIZATION_OWNER: (
+            "alias = parse_alias_override(dependency.alias)",
+            "if alias is not None:",
+            "resolved = ensure_path_within(result, apm_modules_dir)",
+            "if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):",
+            "if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:",
+        ),
+        "src/apm_cli/install/phases/download.py": (
+            "_pd_path = _pd_ref.get_install_path(apm_modules_dir)",
+        ),
+        "src/apm_cli/install/phases/integrate.py": (
+            "install_path = dep_ref.get_install_path(apm_modules_dir)",
+        ),
+        _RESOLVE_PHASE: (
+            "        cache_validation_callback=partial(",
+            "validate_cached_legacy_plugin,",
+        ),
+        "src/apm_cli/deps/apm_resolver.py": (
+            "if parent_dep.alias:",
+            "replace(parent_dep, alias=None).get_install_path(self._apm_modules_dir)",
+            "repo_root, parent_source = self._remote_source_paths_for_parent(",
+            "self._cache_validation_callback(install_path, dep_ref.get_unique_key())",
+            "and self._download_dedup_key(dep_ref, parent_pkg) not in self._downloaded_packages",
+        ),
+        "src/apm_cli/install/legacy_plugin_compat.py": (
+            "plugin_json_path = validate_cached_legacy_plugin(",
+        ),
+    }
+    for path, required in alias_consumers.items():
+        facts, errors = _facts_for(provider, path, rule_id)
+        findings.extend(errors)
+        source = "\n".join(_lines(facts))
+        reuse_order = (
+            source.find("if dep_ref.is_local or not install_path.exists()"),
+            source.find("self._cache_validation_callback(install_path,"),
+            source.find("materialize_marketplace_manifest(dep_ref, install_path)"),
+        )
+        misplaced_cache_validation = (
+            path == "src/apm_cli/deps/apm_resolver.py"
+            and not (0 <= reuse_order[0] < reuse_order[1] < reuse_order[2])
+        ) or (path == _RESOLVE_PHASE and "validate_cached_legacy_plugin(" in source)
+        if not errors and (
+            any(not _present(facts, needle) for needle in required)
+            or _present_re(facts, re.compile(r"/\s*\w+\.alias\b"))
+            or misplaced_cache_validation
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    "Dependency aliases must use shared validation and strict materialization ownership",
+                )
+            )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )
@@ -701,6 +778,35 @@ def check_cached_policy_shape(provider: FactsProvider) -> tuple[Violation, ...]:
         _ado_coordinate_findings(provider, policy, rule_id)
         + _cached_policy_shape_findings(provider, policy, rule_id)
     )
+
+
+def check_policy_content_hash(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Policy verification and cache digests must use the same SHA-2 owner."""
+    rule_id = _GUARD_POLICY_HASH
+    policy, failures = _facts_for(provider, _POLICY_OWNER, rule_id)
+    if failures:
+        return tuple(failures)
+    findings: list[Violation] = []
+    for name in ("_verify_hash_pin", "_compute_hash_normalized"):
+        function = policy.tree_index.function(name)
+        nodes = policy.tree_index.own_scope(function) if function is not None else ()
+        calls = _named_calls(nodes, "compute_policy_hash")
+        direct_hashes = [
+            node
+            for node in nodes
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "hashlib"
+        ]
+        if len(calls) != 1 or direct_hashes:
+            findings.append(
+                _summary(
+                    rule_id,
+                    _POLICY_OWNER,
+                    f"{name} must delegate digest computation to compute_policy_hash",
+                )
+            )
+    return tuple(findings)
 
 
 _APPLY_TO_OWNER = "src/apm_cli/utils/patterns.py"
@@ -1306,6 +1412,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_CACHED_POLICY,
         "Cached policy shape and ADO coordinate stay owned by policy/discovery.py.",
         check_cached_policy_shape,
+    ),
+    _owner_rule(
+        _GUARD_POLICY_HASH,
+        "Policy pin verification and cache digests use project_config.compute_policy_hash.",
+        check_policy_content_hash,
     ),
     _owner_rule(
         _GUARD_APPLY_TO,

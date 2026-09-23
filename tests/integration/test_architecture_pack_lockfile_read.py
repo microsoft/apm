@@ -93,3 +93,25 @@ def test_lockfile_read_rule_accepts_reformatted_consumer_call() -> None:
 
     assert report.failures == ()
     assert report.violations == ()
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "get_lockfile_path(project_root)",
+        "resolve_lockfile_path_for_read(project_root, read_only=False)",
+    ],
+)
+def test_outdated_cannot_bypass_read_only_lockfile_owner(replacement: str) -> None:
+    """Reject a parallel fallback or migration restored in the reporting command."""
+    consumer = "src/apm_cli/commands/outdated.py"
+    source = (ROOT / consumer).read_text(encoding="utf-8")
+    mutated = source.replace(
+        "resolve_lockfile_path_for_read(project_root, read_only=True)", replacement, 1
+    )
+    assert mutated != source
+
+    report = run_selected_rules(ROOT, (RULE_ID,), source_overrides={consumer: mutated})
+
+    assert report.failures == ()
+    assert any(v.rule_id == RULE_ID and v.path == consumer for v in report.violations)

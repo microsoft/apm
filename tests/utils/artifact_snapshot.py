@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Literal, TypeAlias
@@ -94,6 +94,46 @@ class ArtifactSnapshot:
         )
 
 
+@dataclass(frozen=True)
+class ArtifactSnapshotSet:
+    """Open-world filesystem captures for explicitly named, non-overlapping roots."""
+
+    snapshots: tuple[tuple[str, ArtifactSnapshot], ...]
+
+    @classmethod
+    def capture(cls, roots: Mapping[str, Path]) -> ArtifactSnapshotSet:
+        """Capture every entry below each named root without consulting product state."""
+        if not roots:
+            raise ValueError("artifact snapshot roots must not be empty")
+        normalized: list[tuple[str, Path]] = []
+        resolved_paths: list[tuple[str, Path]] = []
+        for root_id, root in sorted(roots.items()):
+            if not root_id:
+                raise ValueError("artifact snapshot root IDs must not be empty")
+            absolute = root.absolute()
+            resolved = absolute.resolve()
+            for existing_id, existing in resolved_paths:
+                if _paths_overlap(resolved, existing):
+                    raise ValueError(
+                        f"artifact snapshot roots must not overlap: {root_id!r} and {existing_id!r}"
+                    )
+            normalized.append((root_id, absolute))
+            resolved_paths.append((root_id, resolved))
+        return cls(
+            snapshots=tuple(
+                (root_id, ArtifactSnapshot.capture(root)) for root_id, root in normalized
+            )
+        )
+
+    def snapshot(self, root_id: str) -> ArtifactSnapshot:
+        """Return one named capture, failing clearly for unknown roots."""
+        for candidate, snapshot in self.snapshots:
+            if candidate == root_id:
+                return snapshot
+        known = ", ".join(candidate for candidate, _snapshot in self.snapshots)
+        raise KeyError(f"Unknown artifact snapshot root {root_id!r}; known roots: {known}")
+
+
 def assert_paths_present(
     snapshot: ArtifactSnapshot,
     expected_paths: Collection[str],
@@ -160,10 +200,87 @@ def assert_only_paths_changed(
     assert not unexpected, f"Unexpected changed paths: {sorted(unexpected)}"
 
 
+def assert_snapshot_set_unchanged(
+    before: ArtifactSnapshotSet,
+    after: ArtifactSnapshotSet,
+) -> None:
+    """Assert every named open-world filesystem root is byte-identical."""
+    _require_snapshot_set_pair(before, after)
+    for root_id, snapshot in before.snapshots:
+        assert_unchanged(snapshot, after.snapshot(root_id))
+
+
+def assert_only_snapshot_paths_changed(
+    before: ArtifactSnapshotSet,
+    after: ArtifactSnapshotSet,
+    allowed_paths: Mapping[str, Collection[str]],
+) -> None:
+    """Assert all changes across named roots are confined to explicit paths."""
+    _require_snapshot_set_pair(before, after)
+    unknown = set(allowed_paths) - {root_id for root_id, _snapshot in before.snapshots}
+    if unknown:
+        raise KeyError(f"Unknown artifact snapshot roots in allowlist: {sorted(unknown)}")
+    for root_id, snapshot in before.snapshots:
+        assert_only_paths_changed(
+            snapshot,
+            after.snapshot(root_id),
+            allowed_paths.get(root_id, ()),
+        )
+
+
+def assert_snapshot_changes_within(
+    before: ArtifactSnapshotSet,
+    after: ArtifactSnapshotSet,
+    *,
+    exact_paths: Mapping[str, Collection[str]],
+    tree_prefixes: Mapping[str, Collection[str]],
+) -> None:
+    """Assert changes stay within exact paths or explicitly allowed subtrees."""
+    _require_snapshot_set_pair(before, after)
+    known_roots = {root_id for root_id, _snapshot in before.snapshots}
+    unknown = (set(exact_paths) | set(tree_prefixes)) - known_roots
+    if unknown:
+        raise KeyError(f"Unknown artifact snapshot roots in write set: {sorted(unknown)}")
+    for root_id, snapshot in before.snapshots:
+        difference = snapshot.diff(after.snapshot(root_id))
+        observed = difference.added | difference.removed | difference.changed
+        allowed_exact = set(exact_paths.get(root_id, ()))
+        allowed_trees = set(tree_prefixes.get(root_id, ()))
+        unexpected = {
+            path
+            for path in observed
+            if path not in allowed_exact
+            and not any(_is_path_in_tree(path, prefix) for prefix in allowed_trees)
+        }
+        assert not unexpected, (
+            f"Artifact root {root_id!r} wrote outside its declared write set: {sorted(unexpected)}"
+        )
+
+
 def _require_snapshot(value: object) -> None:
     """Reject authored mappings in place of real filesystem captures."""
     if not isinstance(value, ArtifactSnapshot):
         raise TypeError("artifact assertions require ArtifactSnapshot instances")
+
+
+def _require_snapshot_set_pair(
+    before: object,
+    after: object,
+) -> None:
+    if not isinstance(before, ArtifactSnapshotSet) or not isinstance(after, ArtifactSnapshotSet):
+        raise TypeError("artifact snapshot set assertions require ArtifactSnapshotSet instances")
+    before_ids = tuple(root_id for root_id, _snapshot in before.snapshots)
+    after_ids = tuple(root_id for root_id, _snapshot in after.snapshots)
+    if before_ids != after_ids:
+        raise ValueError(f"artifact snapshot root IDs differ: {before_ids!r} != {after_ids!r}")
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first in second.parents or second in first.parents
+
+
+def _is_path_in_tree(path: str, prefix: str) -> bool:
+    return bool(prefix) and (path == prefix or path.startswith(f"{prefix}/"))
 
 
 def _portable_path(path: PurePath) -> str:

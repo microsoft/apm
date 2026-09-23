@@ -9,7 +9,6 @@ Covers three CPU-bound code-paths:
 Run with: uv run pytest tests/benchmarks/test_git_and_compiler_benchmarks.py -v -m benchmark
 """
 
-import hashlib
 import time
 from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
@@ -33,8 +32,17 @@ from apm_cli.primitives.models import Instruction
 
 
 def _make_sha(index: int) -> str:
-    """Generate a deterministic 40-hex-char SHA for a given index."""
-    return hashlib.sha1(f"ref-{index}".encode()).hexdigest()  # noqa: S324
+    """Generate a synthetic 40-hex-character object ID, not a Git object hash."""
+    return f"{index + 1:040x}"
+
+
+def test_synthetic_object_ids_preserve_format_and_uniqueness() -> None:
+    """Fixture IDs stay deterministic and distinct across all benchmark ranges."""
+    ids = [_make_sha(index) for index in range(10500)]
+    assert len(set(ids)) == len(ids)
+    assert all(len(value) == 40 and set(value) <= set("0123456789abcdef") for value in ids)
+    assert "0" * 40 not in ids
+    assert ids == [_make_sha(index) for index in range(10500)]
 
 
 def _generate_ls_remote_output(ref_count: int) -> str:
@@ -188,6 +196,13 @@ class TestParseLsRemoteThroughput:
         tag_refs = [r for r in refs if r.ref_type == GitReferenceType.TAG]
         branch_refs = [r for r in refs if r.ref_type == GitReferenceType.BRANCH]
         assert len(tag_refs) + len(branch_refs) == len(refs)
+        assert len(refs) == ref_count
+        assert {ref.commit_sha for ref in tag_refs} == {
+            _make_sha(index) for index in range(int(ref_count * 0.6))
+        }
+        assert {ref.commit_sha for ref in branch_refs} == {
+            _make_sha(index + 5000) for index in range(ref_count - int(ref_count * 0.6))
+        }
         # Generous ceiling (5x expected) -- catches catastrophic regressions only.
         # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (

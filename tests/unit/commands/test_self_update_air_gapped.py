@@ -665,9 +665,7 @@ class TestEnterpriseBootstrapSelfUpdate:
             result = self.runner.invoke(cli, ["self-update"])
 
         assert result.exit_code == 1
-        assert (
-            "Unable to fetch latest version from APM_RELEASE_METADATA_URL mirror" in result.output
-        )
+        assert "Invalid release metadata; expected a valid tag_name." in result.output
         assert mock_get.call_count == 1
         parsed = urlparse(mock_get.call_args.args[0])
         assert parsed.hostname == "mirror.corp.example"

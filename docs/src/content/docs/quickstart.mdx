@@ -18,11 +18,23 @@ rolling APM out across an org, start with the
 
 ## 1. Install APM
 
-**macOS / Linux:**
+**macOS (already using Homebrew):**
+
+```bash
+brew install apm
+```
+
+No custom tap needed. Update with `brew upgrade apm`.
+
+**Linux / macOS without Homebrew:**
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
 ```
+
+Open a new shell after a native desktop install. If the current terminal cannot
+find `apm`, run the exact shell-specific `PATH` command printed by the installer
+for that shell.
 
 **Windows (PowerShell):**
 
@@ -36,7 +48,7 @@ Verify:
 apm --version
 ```
 
-For Homebrew, Scoop, pip, air-gapped mirrors, or signed-archive install,
+For Scoop, pip, manual checksum-verified archive installs, or air-gapped mirrors,
 see [Installation](../getting-started/installation/).
 
 ## 2. Initialize a project
@@ -143,8 +155,10 @@ APM's verbs match npm's semantics:
   drift, like `npm ci`.
 - `apm prune` -- remove packages from `apm_modules/` that are no
   longer in `apm.yml`, like `npm prune`.
-- `apm self-update` -- upgrade the `apm` CLI binary itself
-  (think `npm install -g npm`).
+
+For CLI upgrades, use your package manager (`brew upgrade apm` for Homebrew)
+or `apm self-update` for standalone installs. See
+[Update and refresh](../consumer/update-and-refresh/#update-the-apm-cli-binary).
 
 For private packages, set `GITHUB_APM_PAT` -- see
 [private packages](/apm/consumer/private-and-org-packages/).

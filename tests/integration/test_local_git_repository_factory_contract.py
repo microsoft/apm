@@ -65,6 +65,48 @@ def test_git_credential_shim_streams_persistent_cat_file_output(tmp_path: Path) 
         process.wait(timeout=_GIT_TIMEOUT_SECONDS)
 
 
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("X-Trace: Bearer fixture-token", True),
+        ("X-Trace-Id: safe-value", False),
+    ],
+)
+def test_git_credential_shim_detects_credential_shaped_header_values(
+    tmp_path: Path,
+    header: str,
+    expected: bool,
+) -> None:
+    """The generated shim mirrors production credential-value detection."""
+    environment = _git_environment(tmp_path)
+    environment.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": header,
+        }
+    )
+    real_git = Path(shutil.which("git") or "git").resolve()
+    shim = GitCredentialShimFactory(tmp_path / "shim").create(
+        base_env=environment,
+        real_git=real_git,
+        remote_map={},
+    )
+
+    subprocess.run(
+        ("git", "--version"),
+        env=shim.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=_GIT_TIMEOUT_SECONDS,
+    )
+
+    events = [event for event in shim.events() if event["event"] == "git"]
+    assert len(events) == 1
+    assert events[0]["auth_config_present"] is expected
+
+
 def _git_environment(tmp_path: Path) -> dict[str, str]:
     git_config = tmp_path / "gitconfig"
     git_config.write_text("", encoding="utf-8")

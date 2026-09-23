@@ -38,6 +38,7 @@ class TestBuildRegistryWithDiag:
             with patch("apm_cli.registry.integration.RegistryIntegration") as mock_reg:
                 mock_instance = MagicMock()
                 mock_instance.client.registry_url = "https://custom.registry.com"
+                mock_instance.client.registry_url_source = "env"
                 mock_reg.return_value = mock_instance
 
                 with patch.object(logger, "progress") as mock_progress:
@@ -54,6 +55,7 @@ class TestBuildRegistryWithDiag:
             with patch("apm_cli.registry.integration.RegistryIntegration") as mock_reg:
                 mock_instance = MagicMock()
                 mock_instance.client.registry_url = "https://custom.registry.com"
+                mock_instance.client.registry_url_source = "env"
                 mock_reg.return_value = mock_instance
 
                 _build_registry_with_diag(mock_console, None)
@@ -82,6 +84,7 @@ class TestHandleRegistryNetworkError:
         mock_exception = Exception("Connection timeout")
         mock_registry = MagicMock()
         mock_registry.client.registry_url = "https://custom.registry.com"
+        mock_registry.client.registry_url_source = "env"
         logger = CommandLogger("test")
 
         with patch.dict(os.environ, {MCP_REGISTRY_ENV: "https://custom.registry.com"}):

@@ -26,6 +26,7 @@ from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
 )
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
+from ..utils.git_env import get_git_executable
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
 from ..version import get_build_sha, get_version
@@ -568,7 +569,7 @@ def _auto_detect_author():
 
     try:
         result = subprocess.run(
-            ["git", "config", "user.name"],
+            [get_git_executable(), "config", "user.name"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -588,7 +589,7 @@ def _auto_detect_description(project_name):
     try:
         # Try to get git repository description
         result = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
+            [get_git_executable(), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
             encoding="utf-8",

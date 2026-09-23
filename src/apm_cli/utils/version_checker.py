@@ -4,14 +4,21 @@ import os
 import re
 import sys
 import threading
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from ..bootstrap_mirror import (
     get_release_metadata_url,
+    no_direct_fallback_enabled,
     release_metadata_public_lookup_blocked,
 )
 from ..core.auth import AuthResolver
+from ..deps.github_rate_limit import classify_github_throttle
+
+if TYPE_CHECKING:
+    import requests
 
 _DEFAULT_REPO = "microsoft/apm"
 _PUBLIC_GITHUB_URL = "https://github.com"
@@ -83,8 +90,14 @@ def _get_github_token(github_url: str | None = None, repo: str | None = None) ->
     fallback avoids invoking gh or git credential helpers from the non-blocking
     startup update check while keeping the token precedence centralized.
     """
-    parsed = urlparse(github_url or _get_air_gap_github_url())
-    host = parsed.hostname or "github.com"
+    try:
+        parsed = urlparse(github_url or _get_air_gap_github_url())
+        host = parsed.hostname or "github.com"
+    except ValueError:
+        raise ReleaseMetadataError(
+            "configuration",
+            "Invalid release metadata host configuration. Check GITHUB_URL for a valid HTTPS URL.",
+        ) from None
     effective_repo = repo or _get_air_gap_repo()
     org = effective_repo.split("/", 1)[0] if "/" in effective_repo else None
     with _VERSION_CHECK_AUTH_RESOLVER_LOCK:
@@ -105,11 +118,61 @@ def _normalize_release_tag(tag_name: str) -> str | None:
     return None
 
 
+class ReleaseMetadataError(RuntimeError):
+    """A token-free, actionable release-discovery failure."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        self.reason = reason
+        super().__init__(message)
+
+
+def _release_http_error(response: "requests.Response") -> ReleaseMetadataError | None:
+    """Classify HTTP failures without exposing server bodies or credentials."""
+    status = response.status_code
+    if status == 200:
+        return None
+    headers = response.headers
+    message = None
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            message = body.get("message")
+    except ValueError:
+        pass
+    throttle = classify_github_throttle(
+        status, headers if isinstance(headers, Mapping) else None, message=message
+    )
+    if throttle is not None:
+        return ReleaseMetadataError(
+            "rate-limit",
+            f"Release metadata rate limit (HTTP {status}). Wait for the limit to reset; "
+            "for anonymous shared-IP limits, configure an accepted GitHub token.",
+        )
+    if status in (401, 403):
+        return ReleaseMetadataError(
+            "auth",
+            f"Release metadata authentication/authorization failed (HTTP {status}). "
+            "Check the credential's validity and repository access, or pin VERSION.",
+        )
+    if 300 <= status < 400:
+        return ReleaseMetadataError(
+            "redirect",
+            f"Release metadata redirects are not followed (HTTP {status}). "
+            "Set APM_RELEASE_METADATA_URL to the final JSON endpoint, or pin VERSION.",
+        )
+    return ReleaseMetadataError(
+        "http",
+        f"Release metadata request failed (HTTP {status}). "
+        "Check the configured host/repository or metadata mirror, or pin VERSION.",
+    )
+
+
 def get_latest_version_from_github(
     repo: str | None = None,
     timeout: int = 2,
     *,
     include_prerelease: bool = False,
+    raise_errors: bool = False,
 ) -> str | None:
     """Fetch the latest release version from GitHub or a configured mirror.
 
@@ -129,14 +192,17 @@ def get_latest_version_from_github(
 
     Also sends an Authorization header when a GitHub token is present in the
     environment (GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN) and no metadata
-    mirror is configured, falling back to anonymous when none is set.  The token
-    value is never logged or echoed.
+    mirror is configured. Rejected credentials get one anonymous retry only for
+    canonical public microsoft/apm metadata, never for a throttle or an operator
+    host/repository/mirror override. The token value is never logged or echoed.
 
     Args:
         repo: Repository override in ``owner/repo`` form.  When *None* (the
             default), the value of ``APM_REPO`` env var is used, falling back
             to ``microsoft/apm``.
         timeout: Request timeout in seconds (default: 2 for non-blocking).
+        raise_errors: Raise actionable errors for explicit self-update; background
+            checks retain their quiet ``None`` result on lookup failures.
 
     Returns:
         Version string (e.g., ``"0.6.3"``) or ``None`` if unable to fetch.
@@ -161,19 +227,51 @@ def get_latest_version_from_github(
             url = _build_releases_list_api_url(github_url, effective_repo)
         else:
             url = _build_releases_api_url(github_url, effective_repo, release_metadata_url)
-        token = _get_github_token(github_url, effective_repo)
-        headers = (
-            {"Authorization": f"token {token}"} if token and release_metadata_url is None else {}
+        token = (
+            _get_github_token(github_url, effective_repo) if release_metadata_url is None else None
         )
-        response = requests.get(url, headers=headers, timeout=timeout)
+        headers = {"Authorization": f"token {token}"} if token else {}
 
-        if response.status_code != 200:
-            return None
+        def fetch(request_headers: dict[str, str]) -> requests.Response:
+            # Explicit auth suppresses requests' ambient .netrc lookup, including
+            # on the anonymous retry and mirrors. Do not follow metadata redirects.
+            return requests.get(
+                url,
+                headers=request_headers,
+                timeout=timeout,
+                auth=lambda request: request,
+                allow_redirects=False,
+            )
 
-        data = response.json()
+        response = fetch(headers)
+        error = _release_http_error(response)
+        if (
+            error is not None
+            and error.reason == "auth"
+            and headers
+            and github_url == _PUBLIC_GITHUB_URL
+            and effective_repo == _DEFAULT_REPO
+            and release_metadata_url is None
+            and not no_direct_fallback_enabled()
+        ):
+            response = fetch({})
+            error = _release_http_error(response)
+        if error is not None:
+            raise error
+
+        try:
+            data = response.json()
+        except ValueError:
+            raise ReleaseMetadataError(
+                "malformed",
+                "Invalid release metadata JSON. Check the source or publish a valid latest.json mirror.",
+            ) from None
         if include_prerelease and release_metadata_url is None:
             if not isinstance(data, list):
-                return None
+                raise ReleaseMetadataError(
+                    "malformed",
+                    "Invalid release metadata; expected a release list. Check the source or pin VERSION.",
+                )
             for release in data:
                 if not isinstance(release, dict):
                     continue
@@ -186,10 +284,25 @@ def get_latest_version_from_github(
                     return normalized
             return None
 
-        tag_name = data.get("tag_name", "")
-        return _normalize_release_tag(tag_name)
-    except Exception:
-        # Silently fail for any network/parsing errors
+        tag_name = data.get("tag_name") if isinstance(data, dict) else None
+        normalized = _normalize_release_tag(tag_name) if isinstance(tag_name, str) else None
+        if normalized is None:
+            raise ReleaseMetadataError(
+                "malformed",
+                "Invalid release metadata; expected a valid tag_name. "
+                "Check the source or publish a valid latest.json mirror, or pin VERSION.",
+            )
+        return normalized
+    except (requests.RequestException, OSError):
+        if raise_errors:
+            raise ReleaseMetadataError(
+                "network",
+                "Release metadata network request failed. Check connectivity, proxy and TLS settings, then retry.",
+            ) from None
+        return None
+    except ReleaseMetadataError:
+        if raise_errors:
+            raise
         return None
 
 

@@ -8,14 +8,15 @@ same port is reused across schemes, which is incorrect for servers that
 serve SSH and HTTPS on different ports (e.g. Bitbucket Datacenter: SSH
 7999, HTTPS 7990). The warning names the offending dependency
 (``{host}/{repo}``), names the planned initial + fallback schemes,
-lists two remediations (pin the URL scheme, or drop
-``--allow-protocol-fallback`` to fail fast), and links to the docs.
+explains how to disable fallback across CLI flags, environment, and saved
+config to fail fast, and links to the docs.
 """
 
 import os
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
+from urllib.parse import urlsplit
 
 import pytest  # noqa: F401
 from git.exc import GitCommandError
@@ -84,8 +85,8 @@ class TestProtocolFallbackPortWarning:
 
     def test_warning_fires_on_ssh_url_with_port_when_fallback_allowed(self):
         """ssh:// URL with port + allow_fallback => plan has SSH and HTTPS =>
-        exactly one warning naming the offender, both schemes, both
-        remediations, and the docs URL."""
+        exactly one warning naming the offender, both schemes, the
+        fallback-disable remediation, and the docs URL."""
         dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
         assert dep.port == 7999
 
@@ -104,15 +105,18 @@ class TestProtocolFallbackPortWarning:
             f"{{host}}/{{repo}}:' form: {msg!r}"
         )
         assert "SSH" in msg and "HTTPS" in msg, f"warning must name both planned schemes: {msg!r}"
-        assert "Pin the URL scheme" in msg, (
-            f"warning must offer the 'pin the URL scheme' remediation: {msg!r}"
+        assert "Disable protocol fallback" in msg, (
+            f"warning must offer the fallback-disable remediation: {msg!r}"
         )
-        assert "--allow-protocol-fallback" in msg, (
-            f"warning must offer the 'drop --allow-protocol-fallback' escape "
-            f"hatch as an alternative: {msg!r}"
+        assert "CLI flags, environment, and saved config" in msg, (
+            f"warning must cover every fallback configuration source: {msg!r}"
         )
-        assert "See: https://microsoft.github.io/apm/" in msg, (
-            f"warning must link to the public docs via the 'See: ' prefix: {msg!r}"
+        docs = urlsplit(msg.rsplit("See: ", 1)[1])
+        assert (docs.scheme, docs.hostname, docs.path, docs.fragment) == (
+            "https",
+            "microsoft.github.io",
+            "/apm/consumer/manage-dependencies/",
+            "transport-selection",
         )
 
     def test_warning_fires_on_https_url_with_port_when_fallback_allowed(self):

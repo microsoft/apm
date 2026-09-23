@@ -18,6 +18,12 @@ import pytest
 
 from apm_cli.deps.git_semver_resolver import GitSemverResolution
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.transport_selection import (
+    ProtocolPreference,
+    TransportAttempt,
+    TransportPlan,
+    TransportSelector,
+)
 from apm_cli.drift import detect_ref_change
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
@@ -191,6 +197,145 @@ class TestMaybeResolveGitSemver:
             package_name="widget",
             constraint="^1.2.0",
             remote_url="https://dev.azure.com/apm-org/apm-project/_git/widget",
+        )
+
+    def test_prefer_ssh_selects_rewrite_candidate_for_ssh_transport(self):
+        """Semver ref discovery must use the same SSH candidate as clone."""
+        dep = _make_dep_ref(reference="^1.2.0")
+        dep.ssh_user = "deploy"
+        dep.port = 2222
+        selector = MagicMock()
+        selector.select.return_value = TransportPlan(
+            attempts=[
+                TransportAttempt(
+                    scheme="ssh",
+                    use_token=False,
+                    label="SSH",
+                )
+            ],
+            strict=True,
+        )
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+                protocol_pref=ProtocolPreference.SSH,
+            )
+
+        assert selector.select.call_args.kwargs["candidate_url"] == (
+            "ssh://deploy@github.com:2222/acme/widget.git"
+        )
+        assert ref_resolver_cls.call_args.kwargs["transport_scheme"] == "ssh"
+
+    def test_explicit_ssh_preserves_custom_user_and_port(self):
+        """An explicit SSH dependency keeps its original SSH connection details."""
+        dep = DependencyReference.parse("ssh://deploy@github.com:2222/acme/widget#^1.2.0")
+        selector = MagicMock()
+        selector.select.return_value = TransportPlan(
+            attempts=[
+                TransportAttempt(
+                    scheme="ssh",
+                    use_token=False,
+                    label="SSH",
+                )
+            ],
+            strict=True,
+        )
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+            )
+
+        assert selector.select.call_args.kwargs["candidate_url"] == (
+            "ssh://deploy@github.com:2222/acme/widget.git"
+        )
+        assert ref_resolver_cls.call_args.kwargs["transport_scheme"] == "ssh"
+        assert ref_resolver_cls.call_args.kwargs["ssh_user"] == "deploy"
+        assert ref_resolver_cls.call_args.kwargs["port"] == 2222
+
+    def test_ado_prefer_ssh_uses_ado_candidate_and_selected_transport(self):
+        """ADO shorthand honors SSH preference without routing through HTTPS."""
+        dep = DependencyReference.parse(
+            "https://dev.azure.com/apm-org/apm-project/_git/widget#^1.2.0"
+        )
+        dep.explicit_scheme = None
+        selector = MagicMock()
+        selector.select.return_value = TransportPlan(
+            attempts=[
+                TransportAttempt(
+                    scheme="ssh",
+                    use_token=False,
+                    label="SSH",
+                )
+            ],
+            strict=True,
+        )
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+                protocol_pref=ProtocolPreference.SSH,
+            )
+
+        assert selector.select.call_args.kwargs["candidate_url"] == (
+            "git@ssh.dev.azure.com:v3/apm-org/apm-project/widget"
+        )
+        assert ref_resolver_cls.call_args.kwargs["transport_scheme"] == "ssh"
+
+    def test_https_to_ssh_rewrite_preserves_requested_url_for_git(self):
+        """Git must apply an HTTPS-to-SSH rewrite, including custom SSH details."""
+        dep = _make_dep_ref(reference="^1.2.0")
+        requested_url = "https://github.com/acme/widget.git"
+        effective_url = "ssh://git@github.com:443/acme/widget.git"
+        rewrite_resolver = MagicMock()
+        rewrite_resolver.resolve.side_effect = lambda candidate: (
+            effective_url if candidate == requested_url else None
+        )
+        rewrite_resolver.has_exact_rule.return_value = True
+        selector = TransportSelector(rewrite_resolver)
+        semver_resolver = MagicMock()
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch(
+                "apm_cli.deps.git_semver_resolver.GitSemverResolver",
+                return_value=semver_resolver,
+            ),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+                protocol_pref=ProtocolPreference.HTTPS,
+            )
+
+        assert ref_resolver_cls.call_args.kwargs.get("transport_scheme", "https") == "https"
+        rewrite_resolver.resolve.assert_called_once_with(requested_url)
+        semver_resolver.resolve.assert_called_once_with(
+            owner_repo="acme/widget",
+            package_name="widget",
+            constraint="^1.2.0",
+            remote_url=requested_url,
         )
 
     def test_lockfile_replay_skipped_when_constraint_changed(self):

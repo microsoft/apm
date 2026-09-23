@@ -24,14 +24,19 @@ import pytest
 from apm_cli.install.phases.policy_gate import PolicyViolationError, run
 from apm_cli.policy.discovery import (
     PolicyFetchResult,
+    _compute_hash_normalized,
+    _fetch_from_repo,
     _verify_hash_pin,
+    _write_cache,
     discover_policy_with_chain,
 )
 from apm_cli.policy.project_config import (
     ProjectPolicyConfigError,
+    compute_policy_hash,
     parse_project_policy_hash_pin,
     read_project_policy_hash_pin,
 )
+from apm_cli.policy.schema import ApmPolicy
 
 _VALID_POLICY_YAML = "name: org-policy\nversion: '1.0'\nenforcement: warn\n"
 
@@ -50,6 +55,43 @@ def _sha384(content: str) -> str:
 
 
 class TestVerifyHashPin:
+    def test_default_and_bare_pin_remain_sha256(self) -> None:
+        """Default hashing and case-insensitive bare pins retain SHA-256 semantics."""
+        digest = _sha256(_VALID_POLICY_YAML)
+        assert compute_policy_hash(_VALID_POLICY_YAML) == digest
+        assert _compute_hash_normalized(_VALID_POLICY_YAML, None) == f"sha256:{digest}"
+        assert _verify_hash_pin(_VALID_POLICY_YAML, digest.upper(), "file:x") is None
+
+    @pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512"])
+    @pytest.mark.parametrize("content", ["name: caf\u00e9\r\n", b"\xffraw\r\nbytes"])
+    def test_explicit_sha2_preserves_raw_bytes(self, algorithm: str, content: str | bytes) -> None:
+        """All approved algorithms retain their exact byte-level digest."""
+        raw_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        constructors = {
+            "sha256": hashlib.sha256,
+            "sha384": hashlib.sha384,
+            "sha512": hashlib.sha512,
+        }
+        expected = constructors[algorithm](raw_bytes).hexdigest()
+        with patch("hashlib.new", side_effect=AssertionError("dynamic digest selection")):
+            assert compute_policy_hash(content, algorithm) == expected
+            assert _verify_hash_pin(content, f"{algorithm}:{expected}", "file:x") is None
+            mismatch = _verify_hash_pin(content, f"{algorithm}:{'0' * len(expected)}", "file:x")
+        assert mismatch is not None
+        assert mismatch.outcome == "hash_mismatch"
+        assert mismatch.policy is None
+        assert mismatch.raw_bytes_hash == f"{algorithm}:{expected}"
+
+    @pytest.mark.parametrize("algorithm", ["md5", "sha1", "blake2b", "unknown"])
+    def test_unsupported_algorithms_still_fail_closed(self, algorithm: str) -> None:
+        """Neither direct hashing nor discovery accepts an unapproved digest."""
+        with pytest.raises(ProjectPolicyConfigError, match="unsupported algorithm"):
+            compute_policy_hash("payload", algorithm)
+        result = _verify_hash_pin("payload", f"{algorithm}:{'0' * 64}", "file:x")
+        assert result is not None
+        assert result.outcome == "hash_mismatch"
+        assert result.policy is None
+
     def test_no_pin_returns_none(self):
         assert _verify_hash_pin("anything", None, "file:x") is None
 
@@ -92,6 +134,36 @@ class TestVerifyHashPin:
         mismatch = _verify_hash_pin(b, f"sha256:{digest_a}", "x")
         assert mismatch is not None
         assert mismatch.outcome == "hash_mismatch"
+
+
+@pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512"])
+def test_existing_sha2_cache_digest_remains_compatible(tmp_path: Path, algorithm: str) -> None:
+    """Existing digest sidecars remain usable; changed pins still fail closed."""
+    constructors = {
+        "sha256": hashlib.sha256,
+        "sha384": hashlib.sha384,
+        "sha512": hashlib.sha512,
+    }
+    digest = constructors[algorithm](_VALID_POLICY_YAML.encode("utf-8")).hexdigest()
+    pin = f"{algorithm}:{digest}"
+    policy = ApmPolicy(name="cached-policy", enforcement="block")
+    _write_cache("org/.github", policy, tmp_path, raw_bytes_hash=pin)
+    with patch("hashlib.new", side_effect=AssertionError("dynamic digest selection")):
+        assert _compute_hash_normalized(_VALID_POLICY_YAML, pin.upper()) == pin
+        cached = _fetch_from_repo(
+            "org/.github", tmp_path, expected_hash=pin.upper(), cache_only=True
+        )
+        mismatch = _fetch_from_repo(
+            "org/.github",
+            tmp_path,
+            expected_hash=f"{algorithm}:{'0' * len(digest)}",
+            cache_only=True,
+        )
+    assert cached.cached is True
+    assert cached.policy == policy
+    assert cached.raw_bytes_hash == pin
+    assert mismatch.outcome == "hash_mismatch"
+    assert mismatch.policy is None
 
 
 # =====================================================================

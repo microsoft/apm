@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import multiprocessing
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -184,6 +185,35 @@ def test_success_commit_removes_abandoned_resolution_staging_only(tmp_path: Path
     assert not abandoned.exists()
     assert not abandoned.with_suffix(".lock").exists()
     assert (unrelated / "marker").read_text(encoding="ascii") == "keep"
+
+
+@pytest.mark.parametrize(
+    "orphan_name_length",
+    [32, 12],
+    ids=["legacy-32-char-uuid4-hex", "current-12-char-staging-root"],
+)
+def test_success_commit_removes_abandoned_staging_of_either_name_length(
+    tmp_path: Path,
+    orphan_name_length: int,
+) -> None:
+    """Orphan cleanup recognises both the pre- and post-#2896 staging-root names.
+
+    Shortening the staging root from a full ``uuid4().hex`` (32 hex chars)
+    to ``uuid4().hex[:12]`` means ``_STAGING_NAME`` must keep matching BOTH
+    lengths, or an APM upgrade would strand every orphaned staging root left
+    behind by an older, pre-fix version.
+    """
+    transaction = _transaction(tmp_path)
+    staging_parent = transaction.apm_modules_dir / ".apm-resolution-staging"
+    abandoned = staging_parent / ("d" * orphan_name_length)
+    (abandoned / "package").mkdir(parents=True)
+    abandoned.with_suffix(".lock").write_text("", encoding="ascii")
+    (abandoned / "package" / "marker").write_text("stale", encoding="ascii")
+
+    transaction.commit(InstallResult())
+
+    assert not abandoned.exists()
+    assert not abandoned.with_suffix(".lock").exists()
 
 
 def test_success_commit_preserves_lockless_legacy_staging(tmp_path: Path) -> None:
@@ -483,6 +513,7 @@ def test_workspace_lock_releases_after_interruption(tmp_path: Path) -> None:
 
 def test_workspace_lock_releases_when_initialization_fails(tmp_path: Path) -> None:
     """A constructor failure cannot strand the cross-process lock."""
+    lock = lifecycle_lock()
     manifest = tmp_path / "apm.yml"
     manifest.write_text("name: fixture\nversion: 1.0.0\n", encoding="ascii")
     modules = tmp_path / "apm_modules"
@@ -493,7 +524,7 @@ def test_workspace_lock_releases_when_initialization_fails(tmp_path: Path) -> No
             "apm_cli.install.transaction.ResolutionStagingSession",
             side_effect=RuntimeError("boom"),
         ),
-        pytest.raises(RuntimeError, match="boom"),
+        pytest.raises(RuntimeError, match="boom") as caught,
     ):
         InstallTransaction(
             manifest_path=manifest,
@@ -502,6 +533,9 @@ def test_workspace_lock_releases_when_initialization_fails(tmp_path: Path) -> No
             logger=MagicMock(),
         )
 
+    assert caught.value.__traceback__ is not None
+    assert lock.lock_counter == 0
+    assert not lock.is_locked
     replacement = InstallTransaction(
         manifest_path=manifest,
         apm_modules_dir=modules,
@@ -558,13 +592,22 @@ def test_repeated_dry_run_releases_only_transaction_acquisition(tmp_path: Path) 
         outer_lock.release()
 
 
-def test_abandoned_transaction_does_not_strand_lifecycle_lock(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cyclic", [False, True])
+def test_abandoned_transaction_does_not_strand_lifecycle_lock(tmp_path: Path, cyclic: bool) -> None:
     """Dropping the last transaction owner releases its FileLock acquisition."""
+    lock = lifecycle_lock()
     transaction = _transaction(tmp_path)
+    if cyclic:
+        transaction._logger.transaction = transaction
+    owner = weakref.ref(transaction)
+    assert lock.is_locked
     del transaction
     gc.collect()
 
-    assert not lifecycle_lock().is_locked
+    assert owner() is None
+    assert not lock.is_locked
+    with FileLock(lock.lock_file).acquire(timeout=0) as probe:
+        assert probe.is_locked
     replacement = InstallTransaction(
         manifest_path=tmp_path / "apm.yml",
         apm_modules_dir=tmp_path / "apm_modules",
@@ -572,6 +615,31 @@ def test_abandoned_transaction_does_not_strand_lifecycle_lock(tmp_path: Path) ->
         logger=MagicMock(),
     )
     replacement.commit(InstallResult())
+
+
+@pytest.mark.parametrize("completion", ["abandon", "commit", "rollback", "dry-run"])
+def test_transaction_finalization_preserves_outer_lock(tmp_path: Path, completion: str) -> None:
+    """Collection releases only an outstanding acquisition, never an outer owner."""
+    outer_lock = acquire_lifecycle_lock()
+    try:
+        transaction = _transaction(tmp_path)
+        assert outer_lock.lock_counter == 2
+        if completion == "commit":
+            transaction.commit(InstallResult())
+        elif completion == "rollback":
+            transaction.rollback()
+        elif completion == "dry-run":
+            transaction.complete(InstallResult(disposition=InstallDisposition.DRY_RUN))
+        if completion != "abandon":
+            assert outer_lock.lock_counter == 1
+        del transaction
+        gc.collect()
+
+        assert outer_lock.lock_counter == 1
+        assert outer_lock.is_locked
+    finally:
+        outer_lock.release()
+    assert not outer_lock.is_locked
 
 
 def test_phase_compatibility_journal_does_not_own_lifecycle_lock(tmp_path: Path) -> None:

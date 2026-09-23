@@ -279,9 +279,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
       ]
     },
@@ -291,8 +292,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_target_merge_hook_state_reconciled_fail_safe"
       ]
     },
@@ -579,6 +581,61 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-025",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 45,
+      "tests": [
+        "tests/spec_conformance/test_alias_reqs.py::test_absent_alias_is_not_inferred_from_inventory_name",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_rejects_symlink_destination[outside]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_rejects_symlink_destination[root]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[ \\r..\\t-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[ \\tMy.Safe\\n-True-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[ \\t\\n-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[.-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[..-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[../escape-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[..\\n-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[.safe-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[1-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[foo..bar-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[my-skill.v2-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe.-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe/name-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe\\n-True-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe\\ninside-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git- \\tMy.Safe\\n]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-.safe]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-None]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-foo..bar]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-my-skill.v2]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-safe.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local- \\tMy.Safe\\n]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-.safe]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-None]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-foo..bar]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-my-skill.v2]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-safe.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry- \\tMy.Safe\\n]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-.safe]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-None]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-foo..bar]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-my-skill.v2]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-safe.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_invalid_lock_alias_guidance_repairs_the_lock_not_the_manifest",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[%2e%2e]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[../escape]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[..]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[1]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[foo/../bar]"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -767,6 +824,17 @@
       ]
     },
     {
+      "conformance_class": "governance",
+      "id": "req-pl-018",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics"
+      ]
+    },
+    {
       "conformance_class": "consumer",
       "id": "req-pr-001",
       "keyword": "MUST",
@@ -783,9 +851,10 @@
       "keyword": "MUST",
       "section": "8.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source"
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source",
+        "tests/spec_conformance/test_resolution_reqs.py::test_local_native_skill_overrides_dependency_and_reports_conflict"
       ]
     },
     {
@@ -985,8 +1054,11 @@
       "keyword": "MUST",
       "section": "7.7",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[=1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[^1.7.0-1.8.0]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_source_url_in_lockfile"
       ]
     },
@@ -1040,8 +1112,11 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 7,
+      "test_count": 10,
       "tests": [
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[main]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[sha]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[v1]",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_l0_cache_across_hosts",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_same_host_nested_repositories_through_resolver",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_normalizes_safe_syntax_dimensions",
@@ -1215,8 +1290,11 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[main]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[sha]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[v1]",
         "tests/spec_conformance/test_manifest_reqs.py::test_configured_host_class_precedence_is_credential_isolated"
       ]
     },
@@ -1410,13 +1488,13 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 90,
+      "active": 91,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
     },
     "governance": {
-      "active": 17,
+      "active": 18,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1434,5 +1512,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 121
+  "total_requirements": 123
 }

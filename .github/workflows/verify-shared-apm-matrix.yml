@@ -19,21 +19,21 @@ name: Verify shared/apm.md matrix secret-stripping fix
 #      round-trips intact (SHA-256 comparison; the SHA is not a substring
 #      of the PEM and is therefore not masked).
 #
-#   C. apm-version-pinning (positive proof of the import-default fix)
-#      Proves the apm-version import-schema default in shared/apm.md pins
-#      every non-opting consumer to a bare-semver CLI release instead of
-#      floating to 'latest'. Two independent checks:
-#        (1) Artifact assertion (no deps): every compiled *.lock.yml that
+#   C. import-contract-pinning (positive proof of import boundary defaults)
+#      Proves target is required and forwarded without an invalid default,
+#      and the apm-version import-schema default pins every non-opting consumer
+#      to a bare-semver CLI release instead of floating to 'latest'. Three
+#      independent checks:
+#        (1) Target assertion: target is required, has no default, and is
+#            forwarded exactly once to the isolated apm-action pack step.
+#        (2) Artifact assertion (no deps): every compiled *.lock.yml that
 #            calls microsoft/apm-action renders a pinned `apm-version:
 #            <semver>` literal and carries NO raw
 #            `apm-version: ${{ github.aw.import-inputs.apm-version }}`
 #            token. The raw token (the bug shape from PR #1842) is empty
 #            at runtime, so apm-action resolves '' || 'latest' and floats.
-#        (2) Drift guard (source of truth): the schema default in
-#            shared/apm.md MUST equal the apm-version input default
-#            declared by the pinned microsoft/apm-action ref. Fetches the
-#            action's action.yml at that exact ref and compares. Fails if
-#            the mirror drifts (see the MAINTENANCE note in shared/apm.md).
+#        (3) Drift guard (source of truth): the schema default's pack format
+#            must be detected by the pinned microsoft/apm-action ref.
 #
 #   D. pack-format-consumer-compat (cross-repo drift guard)
 #      Proves the `apm pack --archive` default archive format (.zip) stays
@@ -58,6 +58,7 @@ on:
     paths:
       - .github/workflows/shared/apm.md
       - .github/workflows/verify-shared-apm-matrix.yml
+      - .github/workflows/*.md
       - .github/workflows/*.lock.yml
       - src/apm_cli/bundle/packer.py
   push:
@@ -66,6 +67,7 @@ on:
     paths:
       - .github/workflows/shared/apm.md
       - .github/workflows/verify-shared-apm-matrix.yml
+      - .github/workflows/*.md
       - .github/workflows/*.lock.yml
       - src/apm_cli/bundle/packer.py
   workflow_dispatch:
@@ -317,21 +319,51 @@ jobs:
           echo "[OK] row kind=$ROW_KIND app_id=$ROW_APP_ID pk_sha=$got_sha matches expected."
 
   # =====================================================================
-  # Job set C: apm-version default correctness.
-  #   1. non-opting consumer locks pin a bare-semver apm-version (no
+  # Job set C: shared import target and version correctness.
+  #   1. target is explicit, has no default, and is forwarded once.
+  #   2. non-opting consumer locks pin a bare-semver apm-version (no
   #      float-to-latest) -- import-default fix, PR #1842.
-  #   2. the format that default version produces is detected by the
+  #   3. the format that default version produces is detected by the
   #      pinned apm-action (format-compat). This supersedes the old
   #      version-equality guard: equality (schema default == apm-action's
   #      own default) never caught the pack-format outage and could both
   #      false-pass and false-fail (see step comment).
   # =====================================================================
   c-apm-version-pinning:
-    name: C. apm-version default pins non-opting consumers
+    name: C. shared import target and version contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Target is explicit and forwarded to isolated pack
+        run: |
+          set -euo pipefail
+          src=.github/workflows/shared/apm.md
+          target_block=$(awk '
+            /^  target:$/ { found=1 }
+            found && /^  [a-zA-Z0-9-]+:$/ && !/^  target:$/ { exit }
+            found { print }
+          ' "$src")
+          if ! printf '%s\n' "$target_block" | grep -q '^    required: true$'; then
+            echo "::error file=$src::target import input must be required"
+            exit 1
+          fi
+          if printf '%s\n' "$target_block" | grep -q '^    default:'; then
+            echo "::error file=$src::target import input must not default to a manifest-invalid fallback"
+            exit 1
+          fi
+          target_expr='target: $''{{ github.aw.import-inputs.target }}'
+          forwarded=$(grep -Fc "$target_expr" "$src" || true)
+          if [ "$forwarded" -ne 1 ]; then
+            echo "::error file=$src::expected one explicit target handoff to apm-action, found $forwarded"
+            exit 1
+          fi
+          if grep -rEiq '^[[:space:]]*target:[[:space:]]*all[[:space:]]*$' .github/workflows/*.md; then
+            echo "::error::.github/workflows contains target: all, which is not a valid apm.yml target"
+            exit 1
+          fi
+          echo "[+] shared/apm.md requires and forwards one explicit target."
 
       - name: Compiled consumer locks pin apm-version (no float-to-latest)
         run: |
@@ -444,6 +476,68 @@ jobs:
             echo "::error::This is the 'apm pack produced no bundle' outage shape. Bump the pinned apm-action ref to a release that detects '$default_ext', or set apm-version to a release whose pack format apm-action detects."
             exit 1
           fi
+
+  c-apm-028-action-compat:
+    name: C. APM 0.28 pack and multi-bundle restore
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pack Copilot bundle with APM 0.28
+        id: pack-copilot
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        with:
+          dependencies: |
+            - microsoft/apm-sample-package
+          isolated: 'true'
+          pack: 'true'
+          archive: 'true'
+          target: copilot
+          apm-version: '0.28.0'
+          working-directory: ${{ runner.temp }}/apm-028-pack-copilot
+
+      - name: Pack Claude bundle with APM 0.28
+        id: pack-claude
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        with:
+          dependencies: |
+            - microsoft/apm-sample-package
+          isolated: 'true'
+          pack: 'true'
+          archive: 'true'
+          target: claude
+          apm-version: '0.28.0'
+          working-directory: ${{ runner.temp }}/apm-028-pack-claude
+
+      - name: Build two-bundle restore list
+        id: bundle-list
+        env:
+          COPILOT_BUNDLE: ${{ steps.pack-copilot.outputs.bundle-path }}
+          CLAUDE_BUNDLE: ${{ steps.pack-claude.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -f "$COPILOT_BUNDLE"
+          test -f "$CLAUDE_BUNDLE"
+          list="${RUNNER_TEMP}/apm-028-bundles.txt"
+          printf '%s\n' "$COPILOT_BUNDLE" "$CLAUDE_BUNDLE" > "$list"
+          test "$(wc -l < "$list" | tr -d ' ')" = "2"
+          echo "path=$list" >> "$GITHUB_OUTPUT"
+
+      - name: Restore both APM 0.28 bundles
+        id: restore
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        with:
+          apm-version: '0.28.0'
+          bundles-file: ${{ steps.bundle-list.outputs.path }}
+          working-directory: ${{ runner.temp }}/apm-028-restore
+
+      - name: Assert two bundles restored
+        env:
+          BUNDLES_RESTORED: ${{ steps.restore.outputs.bundles-restored }}
+          RESTORE_ROOT: ${{ runner.temp }}/apm-028-restore
+        run: |
+          set -euo pipefail
+          test "$BUNDLES_RESTORED" = "2"
+          test -n "$(find "$RESTORE_ROOT" -type f -print -quit)"
+          echo "[+] APM 0.28 packed two explicit targets and restored both bundles."
 
   # =====================================================================
   # Job set D: apm pack archive-format <-> apm-action consumer detection.

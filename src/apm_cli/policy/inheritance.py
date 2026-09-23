@@ -393,9 +393,7 @@ def _merge_list_field(
     """Merge a deny/require list field with None-transparency and union.
 
     * ``child is None``  -- no opinion; parent flows through (transparent).
-    * ``child`` is empty -- explicit empty override; clears parent entries,
-      returning ``()``.  Child can use ``[]`` in YAML to clear an inherited
-      deny/require list.
+    * ``child`` is empty -- adds no entries; parent restrictions remain.
     * both truthy        -- union; child entries are added to parent entries
       (deduped, parent order preserved).
 
@@ -407,7 +405,7 @@ def _merge_list_field(
         # was constructed in tests (list vs tuple).
         return _union((), parent) if parent is not None else None
     if not child:
-        return ()  # explicit empty: override parent
+        return _union((), parent) if parent is not None else ()
     if parent is None or not parent:
         return _union((), child)  # parent has nothing; child wins
     return _union(parent, child)  # both have values: union

@@ -1,5 +1,9 @@
 # Authentication
 
+## CLI bootstrap and release lookup
+
+CLI bootstrap/update metadata recovery is separate from package authentication. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and bounded anonymous retry, and [mirror migration](https://microsoft.github.io/apm/getting-started/installation/#enterprise-bootstrap-mirror-mode) for final-endpoint configuration.
+
 ## Token precedence chain
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
@@ -9,26 +13,32 @@ Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the
 Managed GitHub, GitLab, and Azure DevOps credentials use process-scoped
 Authorization headers. They are never embedded in Git URL userinfo.
 
-Before each dependency Git operation that consumes a remote URL, APM rejects a
-matching rewrite that embeds credentials, downgrades to insecure transports such
-as `http://` or `git://`, selects remote-helper syntax such as `ext::` or
-`https::`, or redirects any network remote to another host, regardless of host
-class. A managed HTTPS credential cannot cross a scheme, host, or port boundary.
-Same-host SSH and local-mirror selections remain credential-free. Inspect
-rejected rules with:
+Before each dependency Git operation that uses a remote URL, APM checks the
+longest matching rewrite. It rejects rewrites that embed credentials, switch to
+insecure transports such as `http://` or `git://`, use remote-helper syntax
+such as `ext::` or `https::`, or send a network remote to a different host. A
+managed HTTPS credential cannot cross a scheme, host, or port boundary.
+Same-host SSH rewrites and local mirrors remain credential-free.
+
+If a rewrite is rejected and it should be safe, inspect the effective Git
+config and matching `insteadOf` rules, then retry:
 
 ```bash
 git config --show-origin --get-regexp '^url\..*\.insteadOf$'
 ```
 
+Remove or replace the rule only if it is unsafe or misconfigured.
+
 If the selected rewrite is a `file://` mirror and the clone fails, verify that
 the local path exists and is readable. Fix or remove that rewrite; host
 credentials cannot repair a missing local mirror.
 
-APM snapshots effective Git config, validates the longest matching rewrite, and
-freezes the result for the child. It drops malformed ambient HTTP headers before
-applying an anonymous empty-header fence or one path-scoped AuthResolver header.
-Dependency clones ignore Git templates and checkout hooks.
+APM snapshots the effective Git config, validates the longest matching rewrite,
+and passes that fixed result to the child Git process. It drops malformed
+ambient HTTP headers before it applies either an anonymous empty-header fence or
+one path-scoped AuthResolver header. For effective URLs outside HTTP(S), APM
+skips the `http.extraHeader` URL-match probe. Dependency clones ignore Git
+templates and checkout hooks.
 
 When fallback is required, APM checks these sources in order:
 
@@ -56,6 +66,9 @@ APM runs git clones non-interactively. Before using an SSH dependency, make
 sure its key is already available to SSH. Unlock a passphrase-protected key
 first (for example, with `ssh-add <key-file>`). In CI, load a dedicated deploy
 key non-interactively or use token-backed HTTPS.
+
+APM uses the selected transport for clone/fetch and semver tag discovery. When
+`prefer-ssh` selects SSH, strict mode does not silently probe HTTPS.
 
 ## Marketplace transport
 
@@ -207,23 +220,21 @@ apm pack                                 # marketplace.json also resolves agains
 
 ## GitLab (SaaS or self-managed)
 
-APM fetches `path:`-specified files from GitLab dependencies via git sparse/partial
-checkout (the same transport as the clone). Git transport is tried first, so SSH
-keys and git credential helpers work without any extra token, and self-hosted
-GitLab instances where the API returns 410 (disabled) no longer fail. Explicit
-`git:` / SSH URLs carry the host in the dependency; set `GITLAB_HOST` (or
-`APM_GITLAB_HOSTS`) only when bare-host or shorthand forms should classify as
-GitLab.
+GitLab `path:` single-file sparse fetches follow the clone transport policy:
+`--ssh`, `APM_GIT_PROTOCOL`, saved `prefer-ssh`, and opt-in
+`--allow-protocol-fallback` / `APM_ALLOW_PROTOCOL_FALLBACK`. In strict mode,
+APM passes the selected SSH/SCP URL to Git with its user, host, port, and
+requested ref intact; safe Git `insteadOf` rewrites still apply. If the
+effective transport remains SSH, failure never unlocks REST, even with a
+PAT available. Fix SSH or declare the HTTPS web endpoint.
 
-If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
-
-```bash
-export GITLAB_APM_PAT=glpat_your_token
-apm install
-```
-
-`GITLAB_TOKEN` is accepted as a lower-precedence fallback. `git credential fill` is
-also tried (same as for GitHub) so credential-manager users need no env var at all.
+Default HTTPS compatibility remains. REST requires an exhausted Git plan
+and an executed effective HTTPS attempt matching the API's normalized
+scheme/host/port. HTTP is not upgraded; HTTPS rewritten to SSH/local does
+not qualify. Opt-in alternate protocol reuses the declared custom port and
+warns, without mapping SSH aliases to web hostnames. See the
+[GitLab fetch policy](https://microsoft.github.io/apm/consumer/authentication/#gitlab-saas-or-self-managed)
+and [GitLab hosts](#gitlab-hosts) for token trust.
 
 ## GHE Cloud data residency (*.ghe.com)
 
@@ -260,6 +271,12 @@ a **separate** credential chain from the GitHub / ADO token chains above.
 Tokens are scoped per registry name as declared in `apm.yml`'s `registries:`
 block (or in `~/.apm/config.json`).
 
+Credentials are released only when `registry.<name>.url` in
+`~/.apm/config.json` matches the request destination. Configure this
+user-owned URL even when a project declares the same registry. Project-only
+registry declarations are anonymous, and credentials are never sent over
+HTTP.
+
 **Env-var naming:** `APM_REGISTRY_TOKEN_{NAME}` where `{NAME}` is the
 registry name uppercased, with `-` and `.` mapped to `_`.
 
@@ -287,6 +304,7 @@ Bearer wins when both forms are set.
 
 ```bash
 # Bearer token for registry "jf-skills"
+apm config set registry.jf-skills.url https://registry.example.com
 export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
 
 # Or HTTP Basic
@@ -392,7 +410,7 @@ credential under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 
-APM tries SSH as a fallback when HTTPS auth is not available. It forces
+APM tries SSH when selected or cross-protocol fallback is enabled. It forces
 `BatchMode=yes`, disables askpass and HTTP credential channels, and uses a
 30-second connection timeout so SSH attempts fail without prompting.
 

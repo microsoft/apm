@@ -19,6 +19,7 @@ import os
 import platform as _platform
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
@@ -291,6 +292,17 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for marker_name, (check_fn, reason) in _MARKER_CHECKS.items():
             if item.get_closest_marker(marker_name) and not check_fn():
                 item.add_marker(pytest.mark.skip(reason=reason))
+
+
+@pytest.fixture(scope="session")
+def apm_engine_command() -> tuple[str, ...]:
+    """Select the installed Python CLI for engine contracts with boundary faults.
+
+    This is explicitly not a packaged-binary test. Unlike apm_binary_path,
+    engine contracts must retain Python startup instrumentation even when CI
+    also provides a frozen artifact through APM_BINARY_PATH.
+    """
+    return (sys.executable, "-m", "apm_cli.cli")
 
 
 @pytest.fixture(scope="session")

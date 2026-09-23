@@ -65,10 +65,11 @@ parent's remote host/repo/ref and fetches the sibling from the same origin.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
 
-**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
-transport, not the REST API, so self-hosted instances with the API disabled
-still install. Path containment is enforced on the materialized file to reject
-symlink or traversal escapes. For fallback token setup, see `authentication.md`.
+**GitLab `path:` fetch transport:** GitLab `path:` files use Git first, so
+self-hosted instances with the API disabled still install. Restricted REST
+fallback requires an exhausted plan with an executed same-origin effective
+HTTPS attempt. Path containment rejects symlink or traversal escapes.
+See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-self-managed).
 
 ### Custom git ports
 
@@ -173,11 +174,19 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `git` | REQUIRED | Clone URL (HTTPS, SSH, or FQDN shorthand). The literal `parent` inherits the consuming package's repo. |
 | `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
-| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `alias` | OPTIONAL | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 | `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
-| `skills` | OPTIONAL | Install only named skills from a skill bundle. |
+| `skills` | OPTIONAL | Select deployed skills, not a repo slice; use `path` for a subdirectory. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
+
+Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
+source identity or local `../sibling` source anchors. After upgrading an older
+aliased install, run `apm install` and review the updated lockfile; use the
+updated CLI for subsequent replay and cleanup.
+
+Git [skill collections](../../../../../docs/src/content/docs/reference/package-types.md)
+with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or `SKILL.md`.
 
 Unknown fields are rejected. A Git `version` field reports an actionable error
 to use `ref` for a branch, tag, or commit; `version` belongs to registry and
@@ -205,7 +214,7 @@ and `alias`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
-| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `alias` | OPTIONAL | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. Local `../` sources remain supported. |
 | `skills` | OPTIONAL | Consumer-side skill subset for that dependency. Non-empty list of skill names. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
@@ -293,7 +302,8 @@ Behind `apm experimental enable registries`. Registry deps resolve over the
 REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
 alongside the Git resolver -- declare registries in `apm.yml` (or in
 `~/.apm/config.json`) and reference them from `dependencies.apm`. See
-`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+`authentication.md` (Registry tokens) for the required user-owned URL
+binding and `APM_REGISTRY_TOKEN_{NAME}`.
 
 ```yaml
 registries:
@@ -332,7 +342,7 @@ Object-form fields:
 | `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
 | `registry` | no | Name from the merged registry map; defaults to the effective default |
 | `path` | no | Sub-path to a file or directory within the published package |
-| `alias` | no | Local alias controlling the install directory name |
+| `alias` | no | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |
 
 Routing rules when a default registry is active:
 
