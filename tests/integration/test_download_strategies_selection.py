@@ -13,7 +13,13 @@ import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.git_file_transport import GitFileTransportError
 from apm_cli.deps.github_rate_limit import GitHubThrottleError
+from apm_cli.deps.transport_selection import (
+    NoOpInsteadOfResolver,
+    ProtocolPreference,
+    TransportSelector,
+)
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -41,12 +47,18 @@ def make_host(
     ctx = SimpleNamespace(token=effective_token, source=source, auth_scheme="basic")
     auth_resolver.resolve.return_value = ctx
     auth_resolver.resolve_for_dep.return_value = ctx
+    auth_resolver.resolve_for_remote.return_value = ctx
+    auth_resolver.git_env_for_remote.return_value = {}
+    auth_resolver.build_native_git_credential_env.return_value = {}
     auth_resolver.classify_host.return_value = SimpleNamespace(kind="generic", api_base=api_base)
     auth_resolver.build_error_context.return_value = (
         "Check PAT permissions." if effective_token else "Set a token."
     )
     host.auth_resolver = auth_resolver
     host._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
+    host._protocol_pref = ProtocolPreference.NONE
+    host._allow_fallback = False
+    host._transport_selector = TransportSelector(NoOpInsteadOfResolver())
     return host
 
 
@@ -544,7 +556,7 @@ class TestDownloadGitlabFile:
         with patch(
             "apm_cli.deps.download_strategies.GitSparseFileTransport",
             return_value=MagicMock(
-                fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+                fetch_file=MagicMock(side_effect=GitFileTransportError("git transport unavailable"))
             ),
         ):
             result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)

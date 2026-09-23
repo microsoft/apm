@@ -5,6 +5,7 @@
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm init [NAME]` | Initialize a new APM project; names must be non-empty and must not contain path separators or equal `..`. A derived filesystem-root name falls back to `my-project`. | `-y` skip prompts, `--target` comma-separated targets (CLI aliases such as `agents` and `vscode` are persisted as canonical `copilot`, so the generated manifest is immediately installable), `--plugin` (deprecated, use `apm plugin init` instead) scaffolds `plugin.json` + `apm.yml` using the same no-flag Claude-compatible default as `apm plugin init`, `--marketplace` (deprecated, use `apm marketplace init` instead) seed apm.yml with a `marketplace:` block. After init, Next Steps contextually suggests `agentrc init` (if agentrc is in PATH) or prints a tip link when no agent instruction files exist. |
+| `apm init --discover` | Preview existing agent content without writing or executing it. Apply adds missing local package references to `apm.yml`, leaving source files unchanged; reruns do not duplicate declarations. Unsupported content is reported, not converted. Run `apm install` separately. | `--apply`/`--write` request a manifest merge; `--yes` supplies noninteractive consent (unlike plain `init --yes`, this never overwrites the manifest). `--format text\|json\|yaml`; `-g`/`--global` for user scope with absolute/home-directory references. Select `--target` on install, not discovery. |
 | `apm plugin init [NAME]` | Scaffold a plugin project (`plugin.json` + `apm.yml`). No-flag default scaffolds the legacy Claude-compatible layout (same as `apm init --plugin`). Pass `--format agent-plugin` to explicitly scaffold a portable Agent Plugins v1 project instead; `--claude-plugin` (or `--format plugin\|claude\|claude-plugin`) is the explicit form of the default. `--format` and `--claude-plugin` are mutually exclusive. | `-y` skip prompts, `--target` comma-separated targets, `--format [agent-plugin\|plugin\|claude\|claude-plugin]`, `--claude-plugin`, `-v`/`--verbose` |
 
 ## Dependency management
@@ -416,6 +417,10 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 
 ## Configuration and updates
 
+Updating selected packages preserves deployment targets in `apm.lock.yaml` for
+refreshed and untouched dependencies, including shared `.agents/skills/` paths.
+No follow-up install is needed to restore those target records.
+
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |
@@ -435,6 +440,8 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 `apm config set target <value>` persists a default install target (single token or comma-separated list) for `apm install` when both `--target` and `apm.yml target(s)` are absent. `apm config unset target` removes this fallback.
 
 Self-update preferences: `self-update.channel` accepts `stable` or `prerelease`; `self-update.install-dir` is optional. On Unix, a set directory must match the existing installation, while leaving it unset preserves the detected installation. Windows keeps its installer destination/default behavior. `VERSION` pins a release; `APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. Both channels pass a normalized `v<version>` to the installer and GitHub/GHES script URL. `APM_INSTALLER_BASE_URL` stays authoritative, receiving only the script name. Config excludes credentials, mirror URLs, commands, and installer arguments.
+
+Linux bootstrap/self-update: prebuilt binaries (x86_64 and ARM64) require glibc 2.38+. On older systems, use pip with a working Python 3.10+; the floor applies only to prebuilt binaries, not to a system Python running pip.
 
 Unix self-update passes the running binary's identity to preserve its launcher/bundle destinations, never invokes `sudo`, and rejects conflicting overrides or switching an existing install to pip. Set or unset install-directory preferences do not migrate it. Follow [Unix ownership and migration](./installation.md#unix-ownership-and-migration) for administrator/package-manager installs.
 

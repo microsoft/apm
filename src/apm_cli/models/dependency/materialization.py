@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
-from ...utils.path_security import ensure_path_within, validate_path_segments
+from ...utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+from .object_fields import parse_alias_override
 
 if TYPE_CHECKING:
     from ...install.resolution_staging import ResolutionStagingSession
@@ -112,6 +113,24 @@ def build_materialization_path(
             "Cannot compute install path for unresolved marketplace dependency "
             f"'{dependency.marketplace_plugin_name}@{dependency.marketplace_name}'"
         )
+
+    alias = parse_alias_override(dependency.alias)
+    if alias is not None:
+        result = apm_modules_dir / alias
+        try:
+            resolved = ensure_path_within(result, apm_modules_dir)
+        except PathTraversalError as exc:
+            raise PathTraversalError(
+                f"Invalid dependency alias {alias!r}: unsafe destination {result}. "
+                "Inspect the alias path without removing its target, choose a separate "
+                "package directory, and rerun apm install."
+            ) from exc
+        if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):
+            raise PathTraversalError(
+                f"Invalid dependency alias {alias!r}: destination resolves to apm_modules itself. "
+                "Choose a separate package directory and rerun apm install."
+            )
+        return result
 
     if dependency.is_local and dependency.local_path:
         pkg_dir_name = Path(dependency.local_path).name
@@ -328,7 +347,7 @@ def prepare_materialization_path(
 ) -> Path:
     """Return the display-cased path, transactionally migrating stale casing."""
     desired = dependency.get_install_path(apm_modules_dir)
-    if not dependency.has_case_insensitive_repo_identity:
+    if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:
         return desired
 
     existing = find_case_equivalent_materialization_path(

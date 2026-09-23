@@ -1,0 +1,12 @@
+name: autopilot-issue-triage-scheduler
+version: 0.1.0
+description: Queue open issues and fan out isolated issue-triage-worker slots (default 2). Advisory only. Never implements and never assigns.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm:
+    - ../autopilot-issue-triage-worker
+  mcp: []
+
+scripts: {}

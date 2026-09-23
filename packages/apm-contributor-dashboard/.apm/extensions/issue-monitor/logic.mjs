@@ -95,10 +95,57 @@ export function classifyPanel(labels) {
     if (!labels || labels.length === 0) return { status: "none", label: "Not requested" };
     const names = labels.map(l => typeof l === "string" ? l : l.name || "");
     const hasPanel = names.some(n => n === "panel-review");
-    const hasAccepted = names.some(n => n === "status/accepted");
-    if (hasPanel && hasAccepted) return { status: "green", label: "Accepted" };
     if (hasPanel) return { status: "yellow", label: "Requested" };
     return { status: "none", label: "Not requested" };
+}
+
+export function parseTriageAdvice(body) {
+    const match = (body || "").match(/```json\s+(triage-recommendation|triage-decision)\s*\n([\s\S]*?)\n```/);
+    if (!match) return null;
+    let data;
+    try {
+        data = JSON.parse(match[2]);
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        return { error: "Malformed triage JSON" };
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+        return { error: "Invalid triage payload" };
+    }
+    const legacy = match[1] === "triage-decision";
+    if (!legacy && (data.schema_version !== 2 || data.advisory_only !== true)) {
+        return { error: "Unsupported triage recommendation contract" };
+    }
+    const classification = legacy ? data : (data.classification || {});
+    const brief = legacy ? null : data.proposed_brief;
+    const decision = legacy ? data.decision : data.recommendation;
+    if (typeof decision !== "string" ||
+        !["accept", "needs-design", "decline-with-reason", "duplicate-of", "defer-later", "auto-handle"]
+            .some(value => decision === value || (legacy && decision.startsWith(`${value}:`)))) {
+        return { error: "Invalid triage recommendation" };
+    }
+    if (!legacy && (!brief || ["scope", "done_when", "exclusions", "review_needs"]
+        .some(key => typeof brief[key] !== "string"))) {
+        return { error: "Incomplete proposed triage brief" };
+    }
+    if ((classification.theme != null && typeof classification.theme !== "string") ||
+        (classification.type != null && typeof classification.type !== "string") ||
+        (classification.areas != null && (!Array.isArray(classification.areas) ||
+            classification.areas.some(area => typeof area !== "string")))) {
+        return { error: "Invalid triage classification" };
+    }
+    return {
+        advisoryOnly: true,
+        legacy,
+        decision,
+        decisionDetail: (legacy ? data.decision_detail : data.recommendation_detail) || "",
+        theme: classification.theme || "",
+        areas: Array.isArray(classification.areas) ? classification.areas : [],
+        type: classification.type || "",
+        proposedBrief: brief,
+        nextAction: data.next_action || "",
+        commentMarkdown: data.comment_markdown || "",
+    };
 }
 
 export function parsePanelCounts(comments) {

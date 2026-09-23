@@ -585,6 +585,8 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     deps_to_install = ctx.deps_to_install
     apm_modules_dir = ctx.apm_modules_dir
+    if apm_modules_dir is None:
+        raise RuntimeError("Resolution must set apm_modules_dir before integration")
 
     # Direct dep keys: used to distinguish direct vs transitive failures
     # so direct failures can be surfaced immediately.
@@ -614,12 +616,7 @@ def run(ctx: InstallContext) -> None:
         # e.g., microsoft/apm-sample-package -> apm_modules/microsoft/apm-sample-package/
         # For virtual packages: owner/repo/prompts/file.prompt.md -> apm_modules/owner/repo-file/
         # For subdirectory packages: owner/repo/subdir -> apm_modules/owner/repo/subdir/
-        if dep_ref.alias:
-            # If alias is provided, use it directly (assume user handles namespacing)
-            install_path = apm_modules_dir / dep_ref.alias
-        else:
-            # Use the canonical install path from DependencyReference
-            install_path = dep_ref.get_install_path(apm_modules_dir)
+        install_path = dep_ref.get_install_path(apm_modules_dir)
 
         # Skip deps that already failed during BFS resolution callback
         # to avoid a duplicate error entry in diagnostics.

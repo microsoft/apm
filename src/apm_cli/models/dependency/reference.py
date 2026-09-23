@@ -1881,10 +1881,7 @@ class DependencyReference(ProviderCoordinateMixin):
             .startswith(("https://", "http://")),
         )
 
-        if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
-            raise ValueError(
-                f"Invalid alias: {alias}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
-            )
+        alias = parse_alias_override(alias)
 
         # Extract Artifactory prefix from the original path if applicable
         is_ado_final = host and is_azure_devops_hostname(host)

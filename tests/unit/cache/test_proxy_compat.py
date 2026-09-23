@@ -79,6 +79,7 @@ class TestInsteadOfRewrite:
         git_dir = checkout_dir / ".git"
         git_dir.mkdir()
         (git_dir / "HEAD").write_text(f"{sha}\n", encoding="utf-8")
+        (git_dir / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
 
         # Second install -- should hit cache with ZERO subprocess calls
         result = cache.get_checkout(url, "main", locked_sha=sha)
