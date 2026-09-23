@@ -15,7 +15,10 @@ from filelock import FileLock, Timeout
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 
-_STAGING_NAME = re.compile(r"[0-9a-f]{32}")
+# Matches both the current 12-hex-char staging root name and the 32-hex-char
+# (full uuid4().hex) name used before the MAX_PATH fix, so upgrading APM does
+# not strand orphaned staging roots created by an older version (issue #2896).
+_STAGING_NAME = re.compile(r"[0-9a-f]{12}|[0-9a-f]{32}")
 
 
 class ResolutionStagingSession:
@@ -25,7 +28,9 @@ class ResolutionStagingSession:
         """Create an empty staging session rooted below ``apm_modules``."""
         self._modules_dir = apm_modules_dir
         self._modules_existed = apm_modules_dir.exists()
-        self._staging_root = apm_modules_dir / STAGING_DIR_NAME / uuid.uuid4().hex
+        # 12 hex chars (48 bits) is ample entropy for one install session and
+        # keeps staged paths well clear of Windows MAX_PATH (issue #2896).
+        self._staging_root = apm_modules_dir / STAGING_DIR_NAME / uuid.uuid4().hex[:12]
         self._staging_lock_path = self._staging_root.with_suffix(".lock")
         self._staging_lock: FileLock | None = None
         self._backups: dict[Path, Path | None] = {}
@@ -210,7 +215,10 @@ class ResolutionStagingSession:
         """Return an opaque slot so nested destinations never overlap."""
         modules = ensure_path_within(self._modules_dir, self._modules_dir)
         relative = destination.relative_to(modules).as_posix().encode("utf-8")
-        slot = sha256(relative).hexdigest()
+        # 16 hex chars (64 bits) of the digest is enough to make collisions
+        # between the destinations staged in one session negligible, while
+        # keeping staged paths well clear of Windows MAX_PATH (issue #2896).
+        slot = sha256(relative).hexdigest()[:16]
         return self._staging_root / bucket / slot
 
     @staticmethod
