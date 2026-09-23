@@ -25,6 +25,9 @@ from apm_cli.install.helpers.ref_reuse import (
 from apm_cli.install.helpers.ref_reuse import (
     maybe_resolve_git_semver as _maybe_resolve_git_semver,
 )
+from apm_cli.install.helpers.ref_reuse import (
+    requires_remote_ref_resolution as _requires_remote_ref_resolution,
+)
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
@@ -321,14 +324,6 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
             ctx.logger.error(error)
     joined_errors = "; ".join(dependency_graph.resolution_errors)
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
-
-
-def _requires_remote_ref_resolution(ctx: InstallContext) -> bool:
-    """Return the configured policy decision or fail before resolution."""
-    policy = ctx.ref_freshness_policy
-    if policy is None:
-        raise RuntimeError("Ref freshness policy was not configured")
-    return policy.requires_remote
 
 
 def _attach_resolver_marketplace_provenance(
@@ -738,6 +733,8 @@ def _resolve_dependencies(
     # ------------------------------------------------------------------
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
+    from apm_cli.install.legacy_plugin_compat import validate_cached_legacy_plugin
+
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
@@ -752,6 +749,11 @@ def _resolve_dependencies(
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
         existing_lockfile=existing_lockfile,
+        cache_validation_callback=partial(
+            validate_cached_legacy_plugin,
+            lockfile=existing_lockfile,
+            fetched_this_run=False,
+        ),
     )
 
     # Resolver reads ``<anchor>/apm.yml``. Preserve the original

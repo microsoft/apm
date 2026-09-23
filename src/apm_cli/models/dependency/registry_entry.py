@@ -13,9 +13,9 @@ from typing import Any
 
 from ...utils.github_host import default_host
 from ...utils.path_security import validate_path_segments
+from .object_fields import parse_alias_override
 from .subsets import parse_skill_subset, parse_target_subset
 
-_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 _ID_SEGMENT_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
@@ -73,16 +73,7 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
         raise ValueError("Object-form registry entry: 'version' is required")
     version = version.strip()
 
-    alias = entry.get("alias")
-    if alias is not None:
-        if not isinstance(alias, str) or not alias.strip():
-            raise ValueError("'alias' field must be a non-empty string")
-        alias = alias.strip()
-        if not _ALIAS_PATTERN.match(alias):
-            raise ValueError(
-                f"Invalid alias: {alias}. Aliases can only contain "
-                f"letters, numbers, dots, underscores, and hyphens"
-            )
+    alias = parse_alias_override(entry.get("alias"))
 
     skills_raw = entry.get("skills")
     skill_subset = parse_skill_subset(skills_raw) if skills_raw is not None else None

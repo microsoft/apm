@@ -14,9 +14,9 @@ This module collapses that work via a four-tier waterfall executed by
 * **L1 CommitsAPI** -- cheap ``GET /repos/.../commits/{ref}`` against the
   GitHub-family host_backend, with ``Accept: application/vnd.github.sha``
   + optional ``HttpCache`` ETag. ~1 RTT.
-* **L2 BareRevParse** -- if the cross-run :class:`GitCache` already has a
-  bare clone of the URL, ``git rev-parse refs/heads/REF`` against it.
-  Zero network. Catches the second-run case.
+* **L2 BareRevParse** -- read a recorded current-remote observation first;
+  if absent, use ``git rev-parse`` against an existing cached bare clone.
+  Zero network. Catches the second-run case without reviving superseded refs.
 * **L3 LegacyClone** -- delegates to the legacy
   :meth:`GitReferenceResolver.resolve` (shallow clone + introspect).
   Behaviourally identical to the pre-#1369 path; always succeeds or
@@ -266,10 +266,11 @@ class L1CommitsAPI:
 
 
 class L2BareRevParse:
-    """Resolve by ``git rev-parse`` against an already-cached bare clone.
+    """Resolve from a remote-observation receipt, then a cached bare clone.
 
-    No network. Hits only when :class:`GitCache` has a bare clone of the
-    URL from a previous run. Cheap follow-up tier after L0/L1 miss --
+    No network. A corrupt receipt misses rather than reviving an older bare
+    ref. Without a receipt, a cached bare clone supplies the legacy fallback.
+    Cheap follow-up tier after L0/L1 miss --
     catches repeat reproducible installs where the bare exists but the cheap
     API is unavailable (e.g. ADO). Current-state commands exclude this tier.
     """
@@ -284,6 +285,10 @@ class L2BareRevParse:
             return None
         if _SHA_RE.match(ref):
             return ref.lower()
+
+        recorded, sha = self._git_cache.read_resolved_ref(dep_ref.to_github_url(), ref)
+        if recorded:
+            return sha
 
         try:
             from ..cache.url_normalize import cache_shard_key
@@ -412,12 +417,19 @@ class TieredRefResolver:
         self.freshness_policy = freshness_policy
         self._coalesce: dict[tuple[str, str], threading.Event] = {}
         self._coalesce_lock = threading.Lock()
+        self._remote_resolutions: dict[tuple[str, str], str] = {}
         # Diagnostics: counts per tier across the run. Read by tests.
         self.stats: dict[str, int] = {tier.name: 0 for tier in tiers}
         self.stats["coalesced"] = 0
         # Zero-I/O resolves of an already-concrete SHA. Tracked separately
         # so verbose tier stats do not inflate the commits-API count.
         self.stats["sha_passthrough"] = 0
+
+    def remotely_resolved(self, dep_ref: DependencyReference, sha: str) -> bool:
+        """Authorize persistence only for a current-remote tier's exact observation."""
+        key = (_repository_cache_identity(dep_ref), dep_ref.reference or "")
+        with self._coalesce_lock:
+            return self._remote_resolutions.get(key) == sha
 
     def seed(self, repo_ref: str | DependencyReference, ref: str, sha: str) -> bool:
         """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
@@ -518,6 +530,13 @@ class TieredRefResolver:
             if sha and _SHA_RE.match(sha):
                 self.stats[tier.name] = self.stats.get(tier.name, 0) + 1
                 self._last_tier = tier.name
+                if self.freshness_policy.requires_remote and tier.name in (
+                    "commits_api",
+                    "legacy_clone",
+                ):
+                    key = (_repository_cache_identity(dep_ref), ref)
+                    with self._coalesce_lock:
+                        self._remote_resolutions[key] = sha.lower()
                 return sha.lower()
         return None
 

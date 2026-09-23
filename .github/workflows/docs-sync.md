@@ -27,9 +27,9 @@ description: Per-PR documentation impact panel; posts a single advisory recommen
 #          remove-labels allowed [docs-sync] max 1
 #            (clear the trigger label so re-applying it re-runs the
 #             skill idempotently)
-#      - companion-PR creation (Step 7 of the skill) requires a
-#        SECOND label `docs-sync-confirm` -- A9 SUPERVISED EXECUTION
-#        boundary. The agent suggests; the maintainer ratifies.
+#      - this workflow never creates companion PRs. Step 7 belongs
+#        to a separate human-supervised issue-scope checkpoint;
+#        `docs-sync-confirm` is not permission.
 #      - `roles: [admin, maintainer, write]` ensures only repo
 #        maintainers can trigger -- matches the trust model that
 #        applying the `docs-sync` label requires write access.
@@ -105,8 +105,8 @@ safe-outputs:
     max: 2
   # Label cleanup. The orchestrator removes `docs-sync` so re-applying
   # the label re-runs the skill idempotently. `docs-sync-confirm` is
-  # NOT swept -- it is the maintainer's ratification signal for the
-  # optional companion PR (see Step 7 of the skill).
+  # NOT swept -- it is only a discussion request, not permission
+  # for a companion PR (see Step 7 of the skill).
   remove-labels:
     allowed: [docs-sync]
     max: 1
@@ -138,17 +138,16 @@ gh pr diff "$PR"
 gh pr diff "$PR" --name-only
 ```
 
-Also check for the `docs-sync-confirm` label on this PR -- it gates
-the optional companion-PR step (Step 7 of the skill).
-
-```bash
-gh pr view "$PR" --json labels --jq '.labels[].name' | grep -q docs-sync-confirm && echo "CONFIRM_PRESENT=true" || echo "CONFIRM_PRESENT=false"
-```
+Both label and manual dispatch are advisory-only. Do not create a companion
+branch, commit, or PR here. `docs-sync-confirm` can request discussion but
+cannot ratify implementation. A separate human-supervised follow-up must
+complete the skill's fresh responsible-human issue-scope checkpoint, using
+the shared trusted governance tool; do not infer permission from any label.
 
 ## Step 2: Run the docs-sync skill
 
 Load the **docs-sync** skill and follow its execution checklist
-(Steps 1-7) and output contract exactly. The skill owns:
+(Steps 1-6) and output contract exactly. The skill owns:
 
 - Classifier dispatch (the cost gate)
 - Localizer or architect dispatch on in_place / structural verdicts
@@ -160,8 +159,8 @@ Load the **docs-sync** skill and follow its execution checklist
   GitHub API directly)
 - Label sweep via `safe-outputs.remove-labels` (drops `docs-sync` so
   re-applying it re-runs the skill)
-- Companion-PR creation IF AND ONLY IF the `docs-sync-confirm`
-  label is present (the A9 SUPERVISED EXECUTION boundary)
+- A human handoff for any proposed companion work; Step 7 implementation
+  never runs in this unattended workflow
 
 The skill body is at `.apm/skills/docs-sync/SKILL.md` (resolved
 from the import above).

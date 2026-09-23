@@ -140,6 +140,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Generated footer owner loses the one canonical builder definition.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-governance-evidence",
+        rule_id="contracts-tooling-governance-evidence",
+        path="scripts/governance/authority.cjs",
+        old="authorizes_implementation: false",
+        new="authorizes_implementation: true",
+        intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-read",
         rule_id="contracts-tooling-lockfile-read",
         path="src/apm_cli/deps/lockfile.py",
@@ -591,6 +599,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="return _read_plugin_json_version(package_root)",
         new="return (None, 'disabled')",
         intent="Local marketplace version precedence skips the plugin.json fallback read.",
+    ),
+    MutationCase(
+        guard_id="onboarding-metadata-only",
+        rule_id="onboarding-metadata-only",
+        path="src/apm_cli/adopt/discovery.py",
+        old="validate_apm_package(path, read_only=True)",
+        new="validate_apm_package(path, read_only=False)",
+        intent="Discovery allows package admission to mutate the source it is inventorying.",
     ),
     MutationCase(
         guard_id="registry-delegation-bootstrap-project-name",
@@ -1159,6 +1175,25 @@ def test_owner_rules_report_nothing_before_mutation(
 ) -> None:
     """Every owner rule is clean at HEAD, so any violation below is the mutation."""
     assert baseline_violated_rule_ids == frozenset()
+
+
+def test_ref_freshness_guard_rejects_unconditional_cache_publication() -> None:
+    """A checkout must not promote a lock pin into a fresh named observation."""
+    path = "src/apm_cli/deps/github_downloader.py"
+    source = _source(path)
+    old = "resolver.remotely_resolved(dep_ref, locked_sha) is True"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "True", 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(
+        ROOT,
+        ("transport-platform-ref-freshness",),
+        source_overrides={path: mutated},
+    )
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "transport-platform-ref-freshness" for violation in report.violations
+    )
 
 
 def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> None:

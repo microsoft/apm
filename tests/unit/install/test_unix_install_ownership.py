@@ -98,10 +98,11 @@ def _run(
     bootstrap: bool = False,
     pip_fallback: bool = False,
     failure_stage: Literal["binary", "glibc"] | None = None,
+    binary_glibc_failure: bool = False,
     script_args: tuple[str, ...] = (),
     **overrides: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run unchanged configuration and installation code from this checkout."""
+    """Run production installer code; binary_glibc_failure injects a later loader failure."""
     root, env = installation
     source = INSTALLER.read_text(encoding="ascii")
     config = source.split("# Banner\n", 1)[0]
@@ -135,6 +136,14 @@ def _run(
             body += source.split("# Early glibc compatibility check for Linux\n", 1)[1].split(
                 "# Detect if running in a container", 1
             )[0]
+            if binary_glibc_failure:
+                body += "\nBINARY_TEST_EXIT_CODE=255\nBINARY_TEST_OUTPUT='GLIBC fixture failure'\n"
+                failure_branch = source.index("if [ $BINARY_TEST_EXIT_CODE -eq 0 ]; then")
+                body += source[failure_branch:].split(
+                    "# Resolve before either installation path", 1
+                )[0]
+            else:
+                body += "\nprintf 'Reached binary download phase\\n'\n"
         else:
             body += "\ntry_pip_installation\n"
         # Exercise the same fallback consumer, with its historical path arguments
@@ -2137,6 +2146,58 @@ def test_existing_install_cannot_fall_back_to_pip(
     assert result.returncode == 1
     assert "Pip fallback cannot preserve" in result.stderr
     assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
+
+
+@pytest.mark.parametrize("glibc_version", ["2.31", "2.35", "2.36", "2.37", "2.38", "2.39", "2.41"])
+def test_glibc_floor_routes_to_pip_before_binary_download(
+    installation: tuple[Path, dict[str, str]], glibc_version: str
+) -> None:
+    """Run the production gate and pip consumer, not a Python copy of the comparison."""
+    root, _ = installation
+    ldd = root / "tools/ldd"
+    ldd.write_text(f"#!/bin/sh\nprintf 'ldd fixture {glibc_version}\\n'\n", encoding="ascii")
+    ldd.chmod(0o755)
+    fake_modules, _ = _stage_fake_python_pip(root)
+    log = root / "pip.log"
+    result = _run(
+        installation,
+        failure_stage="glibc",
+        PYTHONPATH=str(fake_modules),
+        PYTHONUSERBASE=str(root / "python-user-base"),
+        PIP_LOG=str(log),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if glibc_version in {"2.31", "2.35", "2.36", "2.37"}:
+        assert log.read_text(encoding="ascii").splitlines() == ["install", "--user", "apm-cli"]
+        assert f"Your glibc version: {glibc_version}" in result.stdout
+        assert "Required version: glibc 2.38+" in result.stdout
+        assert "Reached binary download phase" not in result.stdout
+    else:
+        assert not log.exists()
+        assert "Reached binary download phase" in result.stdout
+        assert "Compatibility Issue Detected" not in result.stdout
+
+
+@pytest.mark.parametrize("binary_glibc_failure", [False, True])
+def test_glibc_recovery_guidance_reports_prebuilt_floor(
+    installation: tuple[Path, dict[str, str]], binary_glibc_failure: bool
+) -> None:
+    """Both the early rejection and later loader diagnostic must report the same floor."""
+    root, _ = installation
+    version = "2.38" if binary_glibc_failure else "2.37"
+    ldd = root / "tools/ldd"
+    ldd.write_text(f"#!/bin/sh\nprintf 'ldd fixture {version}\\n'\n", encoding="ascii")
+    ldd.chmod(0o755)
+    result = _run(installation, failure_stage="glibc", binary_glibc_failure=binary_glibc_failure)
+    assert result.returncode == 1, result.stdout + result.stderr
+    if binary_glibc_failure:
+        assert (
+            f"Your system has glibc {version} but the binary requires glibc 2.38+" in result.stdout
+        )
+    else:
+        assert "Use a system with glibc 2.38+ for the prebuilt binary" in result.stdout
+    assert "Install Python 3.10+ first" in result.stdout
+    assert "glibc 2.35+" not in result.stdout
 
 
 @pytest.mark.parametrize("python_name", ["python3", "python"])

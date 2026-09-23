@@ -1,0 +1,12 @@
+name: autopilot-issue-delivery-scheduler
+version: 0.1.0
+description: Queue maintainer-accepted issues and fan out isolated autopilot-issue-delivery-worker slots (default 2) until each selected issue is implemented. Does not triage. Does not review PRs.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm:
+    - ../autopilot-issue-delivery-worker
+  mcp: []
+
+scripts: {}
