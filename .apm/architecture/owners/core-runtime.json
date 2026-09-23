@@ -50,6 +50,16 @@
       "guards": ["registry-delegation-compiled-output-writes"]
     },
     {
+      "id": "native-instruction-deduplication",
+      "decision": "Native instruction coverage and deployed rule filenames",
+      "owner": "compilation/instruction_dedup.py with integration/instruction_integrator.py",
+      "selectors": [
+        "src/apm_cli/compilation/instruction_dedup.py",
+        "src/apm_cli/integration/instruction_integrator.py"
+      ],
+      "guards": ["registry-delegation-instruction-deduplication"]
+    },
+    {
       "id": "distributed-agents-output-preparation",
       "decision": "Agent root-context output eligibility and content preparation",
       "owner": "compilation/agents_compiler.py with compilation/root_context_protection.py",
