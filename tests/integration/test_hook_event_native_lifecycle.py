@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -335,6 +337,96 @@ def test_project_hook_events_converge_update_and_contract(
     assert _commands(_read_hooks(consumer.root / _CLAUDE_SETTINGS)["stop"]) == ["echo user-stop"]
     final = _project_snapshot(consumer.root)
     assert not final.deployment_records
+
+
+def test_project_hook_manifest_survives_source_removal_and_uninstall(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A deployed hook reads its manifest without retaining the package source."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "project-hook-manifest",
+        base_env=dict(os.environ),
+    )
+    environment = isolated.subprocess_env()
+    sources = LocalPackageFactory(isolated.package_root)
+    consumers = LocalPackageFactory(isolated.work_root)
+    source = sources.create("manifest-hook-kit", targets=("claude",))
+    manifest = source.root / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir()
+    manifest.write_text('{"name":"manifest-hook-kit"}\n', encoding="utf-8")
+    sources.add_hook(
+        source,
+        "manifest",
+        {
+            "hooks": {
+                "SessionStart": [
+                    _entry(
+                        f'"{sys.executable}" '
+                        '"${CLAUDE_PLUGIN_ROOT}/.apm/hooks/manifest/read_manifest.py"'
+                    )
+                ]
+            }
+        },
+    )
+    sources.add_hook_asset(
+        source,
+        "manifest",
+        PurePosixPath("read_manifest.py"),
+        "from pathlib import Path\n"
+        'print((Path(__file__).parents[3] / ".claude-plugin/plugin.json").read_text())\n',
+    )
+    consumer = consumers.create(
+        "manifest-hook-consumer",
+        dependencies=({"path": str(source.root)},),
+        targets=("claude",),
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    _run_success(
+        runner,
+        _INSTALL_ARGS,
+        scenario_id="hook-manifest-project-install",
+        cwd=consumer.root,
+        environment=environment,
+    )
+
+    plugin_root = consumer.root / ".claude" / "hooks" / source.name
+    deployed_manifest = plugin_root / ".claude-plugin" / "plugin.json"
+    assert deployed_manifest.read_bytes() == manifest.read_bytes()
+    user_file = plugin_root / ".claude-plugin" / "user.txt"
+    user_bytes = b"user-owned\n"
+    user_file.write_bytes(user_bytes)
+    command = _commands(_read_hooks(consumer.root / _CLAUDE_SETTINGS)["SessionStart"])[0]
+    command = command.replace("${CLAUDE_PROJECT_DIR}", str(consumer.root))
+    outside = isolated.work_root / "outside-manifest-hook"
+    outside.mkdir()
+    hidden_source = source.root.with_name(f"{source.name}-hidden")
+    source.root.rename(hidden_source)
+    try:
+        executed = subprocess.run(
+            shlex.split(command),
+            cwd=outside,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        hidden_source.rename(source.root)
+    assert executed.returncode == 0, executed.stdout + executed.stderr
+    assert json.loads(executed.stdout)["name"] == source.name
+
+    _run_success(
+        runner,
+        ("uninstall", str(source.root)),
+        scenario_id="hook-manifest-project-uninstall",
+        cwd=consumer.root,
+        environment=environment,
+    )
+
+    assert not deployed_manifest.exists()
+    assert user_file.read_bytes() == user_bytes
 
 
 def test_global_hook_events_preserve_user_state(
