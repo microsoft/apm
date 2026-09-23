@@ -1190,7 +1190,9 @@ def _sync_integrations_after_uninstall(
             authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
-    sync_managed = all_deployed_files if all_deployed_files else None
+    # An empty lockfile inventory still authorizes no file removal. Only
+    # installations without a lockfile may need legacy orphan detection.
+    sync_managed = all_deployed_files if lockfile is not None or all_deployed_files else None
     if sync_managed is not None:
         # Partition against default KNOWN_TARGETS for legacy/project-scope
         # paths, then merge with resolved targets for user-scope paths.

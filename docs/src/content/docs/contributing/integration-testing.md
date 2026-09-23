@@ -162,6 +162,23 @@ Contributor commands, ready pull requests, merge queue runs, and final
 validation are strict. Do not pass the internal provisional flag manually;
 remove `provisional` metadata after remeasurement and review.
 
+### Keeping fixtures portable
+
+Keep transport selection and authentication owners real in download tests;
+mock the Git/HTTP I/O instead. To exercise GitLab REST fallback, first simulate
+a typed Git transport failure on the same-origin HTTPS route. An empty mock
+transport plan does not authorize REST.
+
+Home-directory fixtures must align `HOME` and `USERPROFILE` so `Path.home()`
+and `Path("~").expanduser()` refer to the same directory on Windows. Assert
+serialized dependency paths with `Path.as_posix()`. For `deployed_file_hashes`,
+use `compute_file_hash`, which canonicalizes text CRLF; package-tree integrity
+continues to hash raw bytes.
+
+When adding a registered architecture-owner guard, add its surgical mutation
+to `test_architecture_owner_rule_mutations.py` in the same change. The matrix
+requires exactly one mutation for every registered guard.
+
 ### Common invocations
 
 ```bash

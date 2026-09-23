@@ -30,6 +30,6 @@ The skill is ready to graduate from rung 1 (label-gated) to rung 2
 ## Notes
 
 - Eval execution is currently manual. Future: tie into a CI job
-  similar to `apm-review-panel/evals/render_eval.py`.
+  similar to `autopilot-pr-review-worker/evals/render_eval.py`.
 - The shadow-run phase is the most important. Synthetic evals
   cannot fully predict classifier accuracy on real PR diffs.

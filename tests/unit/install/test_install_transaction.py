@@ -187,6 +187,35 @@ def test_success_commit_removes_abandoned_resolution_staging_only(tmp_path: Path
     assert (unrelated / "marker").read_text(encoding="ascii") == "keep"
 
 
+@pytest.mark.parametrize(
+    "orphan_name_length",
+    [32, 12],
+    ids=["legacy-32-char-uuid4-hex", "current-12-char-staging-root"],
+)
+def test_success_commit_removes_abandoned_staging_of_either_name_length(
+    tmp_path: Path,
+    orphan_name_length: int,
+) -> None:
+    """Orphan cleanup recognises both the pre- and post-#2896 staging-root names.
+
+    Shortening the staging root from a full ``uuid4().hex`` (32 hex chars)
+    to ``uuid4().hex[:12]`` means ``_STAGING_NAME`` must keep matching BOTH
+    lengths, or an APM upgrade would strand every orphaned staging root left
+    behind by an older, pre-fix version.
+    """
+    transaction = _transaction(tmp_path)
+    staging_parent = transaction.apm_modules_dir / ".apm-resolution-staging"
+    abandoned = staging_parent / ("d" * orphan_name_length)
+    (abandoned / "package").mkdir(parents=True)
+    abandoned.with_suffix(".lock").write_text("", encoding="ascii")
+    (abandoned / "package" / "marker").write_text("stale", encoding="ascii")
+
+    transaction.commit(InstallResult())
+
+    assert not abandoned.exists()
+    assert not abandoned.with_suffix(".lock").exists()
+
+
 def test_success_commit_preserves_lockless_legacy_staging(tmp_path: Path) -> None:
     """Lockless backups remain until the user confirms no legacy install is active."""
     transaction = _transaction(tmp_path)

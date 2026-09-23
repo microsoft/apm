@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Normative reference:** this page documents the v0.2 working-draft lockfile format as emitted by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 5 (Lockfile)](/apm/specs/openapm-v01/) and published as JSON Schema at [`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json).
+> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.41 amendment selects [`lockfile-v0.1.41.schema.json`](/apm/specs/schemas/lockfile-v0.1.41.schema.json). See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 `apm.lock.yaml` is the pinned record of every resolved dependency and every
 file APM deployed into the workspace. It is the source of truth for
@@ -195,6 +195,7 @@ Each item in `dependencies` describes one resolved package.
 |---|---|---|---|
 | `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
 | `materialization_repo_url` | string | no | Source-cased path that preserves repository display spelling when APM reconstructs the dependency, including for `apm_modules/` materialization and generated links. Omitted when it equals `repo_url`; it must normalize to the same identity and cannot redirect a lock entry. |
+| `alias` | string | no | Validated directory name directly below `apm_modules/`, preserved for replay, audit, and removal. Placement metadata only; it does not change repository identity, source coordinates, or the resolved revision. Missing means no alias override, never an alias inferred from `name`. |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
 | `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
@@ -217,7 +218,7 @@ Each item in `dependencies` describes one resolved package.
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
 | `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
-| `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
+| `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. GitCache-backed git-subpath checkouts pin `core.autocrlf=false` so LF-committed content is not rewritten as CRLF on checkout; this pin does not override `.gitattributes` or `core.eol`. Bytes that are committed as CRLF stay CRLF. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |

@@ -1,0 +1,39 @@
+{
+  "pr": 2610,
+  "head_sha": "8accfa46a0000000000000000000000000000000",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "panel_mode": "delta",
+  "title": "Fold Copilot leftovers on an auth-sized PR",
+  "labels": ["status/accepted", "panel-review"],
+  "review_requests": ["@codeowner"],
+  "changed_files": [
+    "src/apm_cli/core/auth.py",
+    "src/apm_cli/core/token_manager.py",
+    "tests/unit/test_auth.py"
+  ],
+  "owned_hunks": [
+    {
+      "path": "src/apm_cli/core/auth.py",
+      "hunk": "@@ -40,6 +40,8 @@\n     token = resolver.resolve(host)\n+    if not token:\n+        raise AuthError(\"missing token\")\n     return token"
+    }
+  ],
+  "last_advisory": {
+    "comment_id": "123456789",
+    "stance": "ship_with_followups",
+    "open_followups": [
+      "auth-expert: fail closed when resolver returns empty"
+    ]
+  },
+  "copilot_leftovers": [
+    {
+      "id": "PRRT_example",
+      "path": "src/apm_cli/core/auth.py",
+      "body": "Prefer raising over returning None."
+    }
+  ],
+  "ci": {
+    "state": "green",
+    "failing_jobs": []
+  },
+  "contract": "JSON only. Do not run gh. Do not read files outside this packet unless a path is listed as owned by you."
+}

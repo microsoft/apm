@@ -34,6 +34,37 @@ from apm_cli.models.apm_package import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("remote_observation", [True, False])
+@pytest.mark.parametrize("anonymous_first", [True, False])
+def test_persistent_cache_only_records_authoritative_named_ref(
+    tmp_path: Path, remote_observation: bool, anonymous_first: bool
+) -> None:
+    """Both auth paths record successful fresh observations, never old lock pins."""
+    downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+    downloader.auth_resolver = MagicMock()
+    downloader.auth_resolver.uses_public_github_anonymous_first.return_value = anonymous_first
+    downloader.auth_resolver.try_with_fallback.side_effect = lambda host, operation, **kwargs: (
+        operation(None, {})
+    )
+    downloader.git_env = {}
+    downloader._cache_git_env = MagicMock(return_value={})
+    downloader._tiered_resolver = MagicMock()
+    downloader._tiered_resolver.remotely_resolved.return_value = remote_observation
+    dependency = DependencyReference.parse("owner/repo#main")
+    cache = MagicMock()
+    cache.get_checkout.return_value = tmp_path
+    url = dependency.to_github_url()
+    assert (
+        downloader._persistent_cache_checkout(cache, dependency, url, "b" * 40, locked_sha="b" * 40)
+        == tmp_path
+    )
+    cache.get_checkout.assert_called_once()
+    if remote_observation:
+        cache.remember_resolved_ref.assert_called_once_with(url, "main", "b" * 40)
+    else:
+        cache.remember_resolved_ref.assert_not_called()
+
+
 def _make_dep(
     repo_url: str = "owner/repo",
     *,

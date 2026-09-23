@@ -1,0 +1,15 @@
+name: autopilot-issue-triage-worker
+version: 0.1.0
+description: Advise on ONE microsoft/apm issue already selected by autopilot-issue-triage-scheduler. Advisory only. Never implements, never assigns, never lists the queue.
+author: Microsoft
+license: MIT
+type: skill
+
+# Stand-alone primitive: no transitive APM deps. Persona lenses are
+# referenced by relative path (../../agents/*.agent.md) and resolved
+# against the consumer repo's installed .apm/agents/** or
+# .github/agents/** -- identical to the autopilot-pr-review-worker precedent.
+dependencies:
+  apm:
+    - ../autopilot-comment
+  mcp: []

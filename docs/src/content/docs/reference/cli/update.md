@@ -21,6 +21,11 @@ When every ref is already current but the locked `apm_modules/` cache is empty, 
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
+Partial updates retain deployment targets in `apm.lock.yaml` for both refreshed
+and untouched packages, including skills deployed under the shared
+`.agents/skills/` directory. A follow-up `apm install` is not needed to restore
+target records.
+
 This command refreshes dependencies, not the CLI. For CLI upgrades, use your
 package manager (`brew upgrade apm` for Homebrew), or
 [`apm self-update`](../self-update/) for standalone installs.

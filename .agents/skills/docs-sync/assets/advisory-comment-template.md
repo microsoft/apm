@@ -67,13 +67,17 @@ Verified by: {{ this.verifications }}
 - `{{ this.from }}` -> `{{ this.to }}` ({{ this.redirect_rationale }})
 {{ /each }}
 
-{{ #if structural_proposal.confirm_label_present }}
+{{ #if companion_pr_link }}
 
 A companion docs PR has been opened: {{ companion_pr_link }}.
 
 {{ else }}
 
-To open a companion docs PR with these changes, apply the `docs-sync-confirm` label to this PR.
+A companion docs PR requires a responsible human's bounded issue scope,
+done-when criteria, exclusions, review contact, and fresh manual confirmation.
+The trusted repository governance tool reports evidence only. Applying
+`docs-sync-confirm` may request discussion; it is not ratification or
+permission to implement. Without that checkpoint, this remains advice.
 
 {{ /if }}
 

@@ -47,16 +47,16 @@ from tests.spec_conformance._helpers import (
 
 @pytest.mark.req("req-mf-001")
 def test_manifest_required_keys_enforced_by_schema():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     assert set(schema["required"]) == {"name", "version"}
     validate_against(
-        "manifest-v0.1.schema.json", load_yaml_fixture("manifest", "valid-minimal.yml")
+        "manifest-v0.1.41.schema.json", load_yaml_fixture("manifest", "valid-minimal.yml")
     )
 
 
 @pytest.mark.req("req-mf-002")
 def test_manifest_name_is_non_empty_string():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     assert schema["properties"]["name"]["type"] == "string"
     assert schema["properties"]["name"]["minLength"] == 1
     doc = load_yaml_fixture("manifest", "valid-minimal.yml")
@@ -67,12 +67,12 @@ def test_manifest_name_is_non_empty_string():
 def test_manifest_missing_name_rejected_by_schema():
     doc = load_yaml_fixture("manifest", "invalid-missing-name.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-004")
 def test_manifest_version_is_semver_2_0_0():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     pattern = schema["properties"]["version"]["pattern"]
     assert "0|[1-9]" in pattern, "version pattern must be semver 2.0.0 grammar"
     assert_spec_contains("semver 2.0.0", "version`")
@@ -94,12 +94,12 @@ def test_manifest_target_enum_is_pinned():
 def test_consumer_rejects_missing_source_key():
     doc = load_yaml_fixture("manifest", "invalid-no-source-key.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-007")
 def test_consumer_apm_source_field_has_supported_shapes():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry = schema["$defs"]["depEntry"]
     one_of = entry["oneOf"]
     has_string = any(s.get("type") == "string" for s in one_of)
@@ -111,14 +111,14 @@ def test_consumer_apm_source_field_has_supported_shapes():
 
 @pytest.mark.req("req-mf-008")
 def test_consumer_supports_pinned_version():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "version" in entry_obj["properties"]
 
 
 @pytest.mark.req("req-mf-009")
 def test_consumer_supports_pinned_commit():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "ref" in entry_obj["properties"], (
         "depEntry MUST permit a `ref` field for commit / branch / tag pins"
@@ -127,7 +127,7 @@ def test_consumer_supports_pinned_commit():
 
 @pytest.mark.req("req-mf-010")
 def test_consumer_supports_apm_source_short_form_string():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     one_of = schema["$defs"]["depEntry"]["oneOf"]
     string_form = next(s for s in one_of if s.get("type") == "string")
     assert string_form.get("minLength", 0) >= 1
@@ -135,7 +135,7 @@ def test_consumer_supports_apm_source_short_form_string():
 
 @pytest.mark.req("req-mf-011")
 def test_consumer_supports_apm_source_table_form():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     options = entry_obj["oneOf"]
     required_sets = sorted(tuple(sorted(o["required"])) for o in options)
@@ -148,12 +148,12 @@ def test_consumer_supports_apm_source_table_form():
 def test_consumer_rejects_unknown_source_kind():
     doc = load_yaml_fixture("manifest", "invalid-source-kind.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-013")
 def test_consumer_supports_local_path_source():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "path" in entry_obj["properties"]
 
@@ -161,22 +161,22 @@ def test_consumer_supports_local_path_source():
 @pytest.mark.req("req-mf-014")
 def test_producer_rejects_non_http_registry_scheme():
     """Schema pattern `^https?://` is the regression handle."""
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     reg = schema["properties"]["registries"]["additionalProperties"]["oneOf"][1]
     assert reg["properties"]["url"]["pattern"] == "^https?://"
     doc = load_yaml_fixture("manifest", "invalid-registry-scheme.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-015")
 def test_producer_rejects_unknown_registries_keys():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     reg = schema["properties"]["registries"]["additionalProperties"]["oneOf"][1]
     assert reg["additionalProperties"] is False
     doc = load_yaml_fixture("manifest", "invalid-registries-typo.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-016")
@@ -199,14 +199,14 @@ def test_producer_publishes_apm_yml_at_repo_root():
 
 @pytest.mark.req("req-mf-018")
 def test_consumer_restricts_policy_hash_algorithm_to_strong_set():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     enum = schema["properties"]["policy"]["properties"]["hash_algorithm"]["enum"]
     assert set(enum) == {"sha256", "sha384", "sha512"}
 
 
 @pytest.mark.req("req-mf-019")
 def test_consumer_supports_default_host_field():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     assert "default_host" in schema["properties"]
     doc = load_yaml_fixture("manifest", "x-extension-roundtrip.yml")
     assert doc.get("default_host"), "fixture must exercise default_host"
@@ -456,7 +456,7 @@ def test_consumer_preserves_x_extension_keys_on_round_trip():
     doc = load_yaml_fixture("manifest", "x-extension-roundtrip.yml")
     x_keys = [k for k in doc if k.startswith("x-")]
     assert x_keys, "fixture must contain at least one x-* key"
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     pp = schema.get("patternProperties", {})
     assert any(k.startswith("^x-") for k in pp), (
         "manifest schema MUST declare patternProperties for x-* keys"
@@ -844,19 +844,19 @@ def test_dependency_package_targets_are_restriction_only() -> None:
 
     assert disjoint.targets == ()
     assert tuple(target.name for target in universal.targets) == ("cursor",)
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     jsonschema.Draft202012Validator.check_schema(schema)
     validate_against(
-        "manifest-v0.1.schema.json",
+        "manifest-v0.1.41.schema.json",
         {"name": "claude-hooks", "version": "1.0.0", "targets": ["claude"]},
     )
     validate_against(
-        "manifest-v0.1.schema.json",
+        "manifest-v0.1.41.schema.json",
         {"name": "legacy-null", "version": "1.0.0", "target": None},
     )
     with pytest.raises(jsonschema.ValidationError):
         validate_against(
-            "manifest-v0.1.schema.json",
+            "manifest-v0.1.41.schema.json",
             {
                 "name": "conflicting-hooks",
                 "version": "1.0.0",
@@ -866,13 +866,13 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         )
     with pytest.raises(jsonschema.ValidationError):
         validate_against(
-            "manifest-v0.1.schema.json",
+            "manifest-v0.1.41.schema.json",
             {"name": "blank-target", "version": "1.0.0", "targets": [""]},
         )
     for malformed_token in ("Cursor", "../cursor"):
         with pytest.raises(jsonschema.ValidationError):
             validate_against(
-                "manifest-v0.1.schema.json",
+                "manifest-v0.1.41.schema.json",
                 {
                     "name": "malformed-target",
                     "version": "1.0.0",
@@ -887,7 +887,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
     ):
         with pytest.raises(jsonschema.ValidationError):
             validate_against(
-                "manifest-v0.1.schema.json",
+                "manifest-v0.1.41.schema.json",
                 {"name": "invalid-target", "version": "1.0.0", **invalid_fields},
             )
     assert_spec_contains(
