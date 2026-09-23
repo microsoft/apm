@@ -30,6 +30,11 @@ cd apm
 uv sync --extra dev
 ```
 
+For binary builds, install the locked build tools with
+`uv sync --frozen --extra dev --extra build`. PyInstaller 6.17 or newer is
+required for compatibility with setuptools 83, which no longer provides
+`pkg_resources`.
+
 ## Optional agent tools
 
 No AI tool, harness, or repository skill is required to contribute. APM
@@ -364,15 +369,16 @@ WIP push.
 ### Workflow dependency updates
 
 When updating actions in generated `.github/workflows/*.lock.yml` files,
-keep their `gh-aw-manifest` headers, human-readable action lists, and
-`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
-Dependabot does not update those metadata records. Preserve the compiler
-version and source hashes for dependency-only edits; recompile with
-`gh aw compile` when changing workflow source.
+align `gh-aw-manifest` headers, action lists, and `.github/aw/actions-lock.json`
+entries with runtime `uses:` pins. Dependabot does not update this metadata.
+Preserve compiler versions and source hashes for dependency-only edits.
+For source changes, including comments, run `gh aw compile` with the repository's
+pinned compiler version from `.github/workflows/copilot-setup-steps.yml`.
+Commit source and regenerated lock together; do not edit compiler metadata by hand.
 
-Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
-to check setup and app-token action pin consistency across the manifest-bearing
-workflows.
+Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py tests/unit/test_shared_apm_workflow_contract.py`
+to check triage/review source freshness across line endings, compiler-header
+consistency with the repository pin, and action-pin consistency.
 
 ### Code scanning on pull requests and merge queues
 

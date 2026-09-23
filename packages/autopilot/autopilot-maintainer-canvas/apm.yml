@@ -1,0 +1,15 @@
+name: autopilot-maintainer-canvas
+version: 0.1.0
+description: >
+  Copilot App canvas for microsoft/apm CODEOWNERS. Live GitHub is the
+  only queue. Apply accept/defer/panel-review, then spawn isolated
+  canonical autopilot scheduler and worker sessions. Never assigns,
+  never requests reviewers, never merges, never runs skill logic in
+  the canvas session. Agentic Workflows must not open this canvas.
+author: Microsoft
+license: MIT
+targets:
+  - copilot
+dependencies:
+  apm: []
+  mcp: []

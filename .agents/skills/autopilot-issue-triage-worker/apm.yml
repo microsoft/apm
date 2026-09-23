@@ -10,5 +10,6 @@ type: skill
 # against the consumer repo's installed .apm/agents/** or
 # .github/agents/** -- identical to the autopilot-pr-review-worker precedent.
 dependencies:
-  apm: []
+  apm:
+    - ../autopilot-comment
   mcp: []

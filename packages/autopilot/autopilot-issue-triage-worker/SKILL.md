@@ -48,6 +48,7 @@ intent: advise one already-selected issue
 origin: unattended | actor-session
 write: on | off
 json: off | on
+debug: off | on
 repo: microsoft/apm
 issue: <positive integer>
 invocation: agentic-workflow | actor-session
@@ -58,13 +59,24 @@ Rules:
 - `write` defaults to `on` when the caller omitted it.
 - `write: off` returns the filled template only. Do not comment,
   add labels, or remove labels.
-- `write: on` posts the one advisory comment and processing /
-  classification labels. Never human decision labels. Never assign.
+- `write: on` posts one GitHub comment via
+  `autopilot-comment` and processing / classification labels.
+  Never human decision labels. Never assign. Do not call
+  `gh issue comment` yourself.
 - `json` defaults to `off` when omitted or unknown. Omitted `json`
   is not a missing-field stop.
 - `json: off` -> no `triage-recommendation` JSON receipt.
 - `json: on` -> fill that JSON only as an internal payload
   (session file or parent Exit). Never post it on GitHub.
+- `debug` defaults to `off` when omitted or unknown. Omitted `debug`
+  is not a missing-field stop.
+- `debug: off` -> pass `public_body` as the Suggested issue
+  comment (unwrap the markdown fence) to `autopilot-comment`.
+  Do not pass recommendation, classification, brief, next
+  action, or persona details as `public_body`.
+- `debug: on` -> pass `debug_body` as the filled template
+  without the JSON fence. `autopilot-comment` prefixes
+  `[i] Skill debug is on.`
 - `origin` fail-closed unknown -> `unattended`.
 - One issue. Do not nest a scheduler path.
 
@@ -76,6 +88,7 @@ subject: microsoft/apm#<issue-number>
 path: triage
 write: on | off
 json: off | on
+debug: off | on
 posted: yes | no
 labels_applied: <comma list or none>
 approved: n/a
@@ -83,10 +96,11 @@ approved: n/a
 
 The panel is fixed at **2 mandatory specialist lenses + up to 3
 conditional lenses + 1 always-active arbiter = 6 persona sections in
-one triage comment**. You play each
+the filled template**. You play each
 lens in turn from inside a single agent loop (progressive-disclosure
 skill model -- no sub-agent dispatch). Routing chooses *which* lenses
-execute; it never changes which headings appear in the final comment.
+execute; it never changes which headings appear in the filled
+template. The public GitHub body still follows `debug`.
 
 This skill mirrors the `autopilot-pr-review-worker` orchestration shape on
 purpose. Same single-comment discipline, same completeness gate, same
@@ -374,26 +388,36 @@ write/receipt step.
 7. Now (and only now) load `assets/triage-template.md` and fill it
    in with the collected findings, recommendation, classification,
    proposed brief, and suggested comment body.
-8. Verify the rendered comment contains every top-level heading from
-   the template, all six persona `<details>` sections, and the closing
-   `triage-recommendation` JSON block. If any element is missing, re-render
-   from the template instead of posting a hand-composed substitute.
+8. Verify the INTERNAL fill contains every top-level heading from
+   the template, all six persona `<details>` sections, and (only
+   when `json: on`) the closing `triage-recommendation` JSON.
+   If any required element is missing, re-render from the
+   template. That filled template is not the GitHub body when
+   `debug: off`.
 9. If `write: on`, apply the advisory writes yourself. The scheduler
    never comments or labels. A worker summoned without a scheduler
    still writes when `write` is on. No-op when target plus
-   conversation watermark already match. Post exactly one template
-   comment (`gh issue comment` in actor-session / Copilot App /
-   Cloud / Remote; Agentic Workflow `safe-outputs.add-comment`).
-   Add `triage/recommended` plus useful classification from the
-   contract allowlist (`gh issue edit --add-label` or
-   `safe-outputs.add-labels`). Never write human decision labels.
-   Remove only `triage/requested` after successful advice. If
-   `write: off`, return the filled template only. Also return the
-   `triage-recommendation` JSON to the caller. Emit the Exit
-   receipt (`posted: yes` only when a comment was written). Never
-   authorize implementation. This is the ONLY triage-comment
-   emission for the entire panel run -- no per-persona comments,
-   no progress comments.
+   conversation watermark already match. Probe
+   `$REPO_ROOT/.agents/skills/autopilot-comment/SKILL.md` (or the
+   sibling package). Missing -> stop. Do not post. Post exactly
+   one comment by activating `autopilot-comment` (`source_skill:
+   autopilot-issue-triage-worker`). Do not call `gh issue comment`
+   or `safe-outputs.add-comment` yourself. Missing footer after
+   that write is a failed post -- patch via `autopilot-comment`
+   (`intent: patch`) rather than leaving the comment bare.
+   `debug: off`: Suggested issue comment body only as
+   `public_body`. `debug: on`: filled template as `debug_body`.
+   Add `triage/recommended` plus useful
+   classification from the contract allowlist
+   (`gh issue edit --add-label` or `safe-outputs.add-labels`).
+   Never write human decision labels. Remove only
+   `triage/requested` after successful advice. If `write: off`,
+   return the filled template only. Also return the
+   `triage-recommendation` JSON to the caller when `json: on`.
+   Emit the Exit receipt (`posted: yes` only when a comment was
+   written). Never authorize implementation. This is the ONLY
+   triage-comment emission for the entire panel run -- no
+   per-persona comments, no progress comments.
 
 ### Persona pass procedure
 
@@ -419,15 +443,21 @@ This contract is non-negotiable -- it is the difference between a
 triage that lands as one cohesive comment and one that fragments into
 per-persona noise.
 
-- Produce **exactly one** comment per triage run.
-- Use `assets/triage-template.md` as the comment body. Keep its
+- Produce **exactly one** GitHub comment per triage run.
+- Always fill `assets/triage-template.md` internally. Keep its
   section headings exactly as written. Adapt the body of each
   section to the issue. Do not invent new top-level sections or drop
   existing ones.
-- The GitHub issue comment is human prose only: HTML receipt,
-  headings, classification, brief, next action, suggested reply,
-  and persona details. Do not post JSON, machine fences, or
-  `comment_markdown` dumps on the issue.
+- Load `autopilot-comment` before any GitHub comment write.
+  Fill its card (`source_skill: autopilot-issue-triage-worker`,
+  `debug` copied from this card, `receipt` = the HTML watermark
+  line). Missing skill or missing card -> stop. Never post
+  with `gh issue comment`.
+- `debug: off` `public_body`: Suggested issue comment prose
+  (no wrapping fence, no other headings).
+- `debug: on` `debug_body`: the filled template without JSON.
+- Do not post JSON, machine fences, or `comment_markdown` dumps
+  on the issue. `autopilot-comment` appends the AI disclaimer.
 - Emit the template's `triage-recommendation` JSON only when
   `json: on`. Keep `schema_version: 2` and `advisory_only: true`.
   Never attach that JSON to the GitHub comment. Consumers must

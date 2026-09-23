@@ -39,19 +39,19 @@ BARE_HEX_LOCKFILE = ("integrity", "bare-hex-reader.frozen.yaml")
 
 @pytest.mark.req("req-lk-001")
 def test_lockfile_valid_v2_passes_schema():
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V2))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*V2))
 
 
 @pytest.mark.req("req-lk-002")
 def test_lockfile_declares_apiversion():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert "lockfile_version" in schema["required"]
     assert set(schema["properties"]["lockfile_version"]["enum"]) == {"1", "2"}
 
 
 @pytest.mark.req("req-lk-003")
 def test_lockfile_carries_dependencies_block():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert "dependencies" in schema["required"]
 
 
@@ -84,12 +84,12 @@ def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
 
 @pytest.mark.req("req-lk-004")
 def test_lockfile_v1_remains_parseable_under_v2_reader():
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*V1))
 
 
 @pytest.mark.req("req-lk-005")
 def test_lockfile_dependency_carries_resolved_field():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry_props = schema["$defs"]["entry"]["properties"]
     for key in ("resolved_ref", "resolved_commit", "version"):
         assert key in entry_props, f"entry MUST permit `{key}`"
@@ -176,7 +176,7 @@ def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
 
 @pytest.mark.req("req-lk-007")
 def test_lockfile_should_record_resolution_metadata():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     props = schema["properties"]
     for key in ("generated_at", "apm_version"):
         assert key in props
@@ -185,7 +185,7 @@ def test_lockfile_should_record_resolution_metadata():
 
 @pytest.mark.req("req-lk-008")
 def test_lockfile_supports_registry_source():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry = schema["$defs"]["entry"]["properties"]
     assert "registry_prefix" in entry and "host" in entry
 
@@ -209,7 +209,7 @@ def test_lockfile_records_registry_digest():
 def test_lockfile_round_trips_unknown_fields():
     doc = load_yaml_fixture(*RT)
     assert doc is not None
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert schema["additionalProperties"] is True
     assert "^x-[a-z][a-z0-9-]*$" in schema["patternProperties"]
 
@@ -220,7 +220,7 @@ def test_lockfile_round_trips_unknown_fields():
 @pytest.mark.req("req-lk-012")
 def test_lockfile_canonical_tree_sha256_field_present():
     """Canonical-tree hash MUST be `tree_sha256` (sec.5.6.4)."""
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry = schema["$defs"]["entry"]["properties"]
     assert "tree_sha256" in entry
     assert entry["tree_sha256"]["$ref"] == "#/$defs/hashEnvelope"
@@ -256,7 +256,7 @@ def test_lockfile_unknown_hash_algorithm_rejected():
         "local_deployed_file_hashes": {"a.md": "md5:c62747a2802841aa"},
     }
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("lockfile-v0.1.schema.json", bad)
+        validate_against("lockfile-v0.1.41.schema.json", bad)
 
 
 @pytest.mark.req("req-lk-015")
@@ -270,10 +270,10 @@ def test_lockfile_tree_sha256_canonicalisation_invariant():
 @pytest.mark.req("req-lk-016")
 def test_lockfile_reader_tolerates_bare_hex_hash():
     """v0.1 schema tolerates bare-hex; v0.2 will require envelope."""
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     pattern = schema["properties"]["local_deployed_file_hashes"]["additionalProperties"]["pattern"]
     assert "[0-9a-f]{64}" in pattern
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*BARE_HEX_LOCKFILE))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*BARE_HEX_LOCKFILE))
 
 
 @pytest.mark.req("req-lk-017")
@@ -307,7 +307,7 @@ def test_lockfile_deployed_file_hash_mismatch_fails_closed():
 
 @pytest.mark.req("req-lk-018")
 def test_lockfile_should_record_publish_timestamp():
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     assert "generated_at" in schema["properties"]
     waive(
         "Publish-timestamp recording is a publisher-side SHOULD that "
@@ -323,7 +323,7 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
     # The optional `name`/`version` inventory fields MUST be permitted
     # on an entry and MUST validate when carried alongside the trust
     # anchors -- they are additive metadata, not identity.
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry_props = schema["$defs"]["entry"]["properties"]
     for key in ("name", "version"):
         assert key in entry_props, f"entry MUST permit `{key}`"
@@ -341,7 +341,7 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
             }
         ],
     }
-    validate_against("lockfile-v0.1.schema.json", doc)
+    validate_against("lockfile-v0.1.41.schema.json", doc)
 
     # The normative boundary: package-declared fields are self-asserted,
     # never trust anchors, and never identity/dedup keys. Registry version
@@ -359,10 +359,10 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
 def test_lockfile_materialization_spelling_is_non_identity_metadata():
     from apm_cli.deps.lockfile import LockedDependency
 
-    schema = load_schema("lockfile-v0.1.schema.json")
+    schema = load_schema("lockfile-v0.1.41.schema.json")
     entry_props = schema["$defs"]["entry"]["properties"]
     assert entry_props["materialization_repo_url"]["type"] == "string"
-    validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
+    validate_against("lockfile-v0.1.41.schema.json", load_yaml_fixture(*V1))
 
     dependency = LockedDependency(
         repo_url="contoso/example",

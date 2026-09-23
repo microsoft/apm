@@ -24,7 +24,7 @@
     },
     "active": {
       "type": "boolean",
-      "description": "Set to false ONLY for conditional personas (auth-expert, doc-writer, test-coverage-expert, performance-expert) when their fast-path file triggers and fallback self-check both miss. All mandatory personas MUST set active=true. When false, findings MUST be empty and inactive_reason MUST be a one-sentence explanation citing the touched files."
+      "description": "true for every spawned persona that ran. false ONLY when the orchestrator stubs a spawned persona because the pinned model was unavailable. Omitted persona = inactive; do not spawn active=false stubs for a surface miss. When false, findings MUST be empty and inactive_reason MUST explain."
     },
     "inactive_reason": {
       "type": "string",

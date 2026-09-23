@@ -7,11 +7,14 @@ description: >-
   inline review, runs autopilot-pr-review-worker, folds (by default)
   every recommendation inside the PR's stated scope, pushes to the
   head branch or a superseding PR that preserves authorship via
-  commit trailers, watches CI to green, and iterates under fixed
-  caps until ready-to-merge, advisory-with-deferred, superseded, or
-  blocked. Never spawned by autopilot-pr-review-scheduler. That
-  scheduler is advisory only. Invoke this skill by name when the
-  caller asked to drive a PR to merge.
+  commit trailers,   watches CI to green (`agent-merge` when that skill or
+  `<agent_merge_state>` is present; otherwise `gh pr checks --watch`),
+  and iterates under fixed caps until ready-to-merge,
+  advisory-with-deferred, superseded, or blocked. Plan before any
+  fold, push, or reviewer request. Never spawned by
+  autopilot-pr-review-scheduler. That scheduler is advisory only.
+  Invoke this skill by name when the caller asked to drive a PR
+  to merge.
 ---
 
 # autopilot-pr-merge-worker - per-PR drive-to-merge convergence loop
@@ -52,12 +55,19 @@ Rules:
 - `write` defaults to `on` when the caller omitted it.
 - `write: off` returns the filled template only. Do not comment,
   add labels, remove labels, push, or request reviewers.
-- If `write: on`, apply the advisory writes yourself (one
-  comment) and fold/push inside the PR's stated scope. Never
-  assign. Never request the implementer as a reviewer.
+- If `write: on`, post the one advisory comment via
+  `autopilot-comment` (`source_skill:
+  autopilot-pr-merge-worker`) and fold/push inside the PR's
+  stated scope. Never assign. Never request the implementer as
+  a reviewer. Do not call `gh pr comment` yourself.
 - `origin` fail-closed unknown -> `unattended`.
 - Unattended never assigns and never requests reviewers.
 - One PR. Do not nest a scheduler path.
+- `plan_first` defaults to `yes`. Do not fold, push, or request
+  reviewers until Step 0.P exists. Copilot App spawn uses
+  `kickoff_mode: plan`. If the session started interactive, still
+  write that plan in-session and do not skip it. Wait for operator
+  approval when a plan-mode gate is present.
 
 After the loop, emit this Exit receipt:
 
@@ -149,6 +159,12 @@ first-class path, not a fallback.
 The autopilot-pr-merge-worker subagent runs this loop (full detail in the spawn
 body):
 
+0. Phase 0.P -- plan before implement (hard gate). Compare work to
+   date with the original task/scope (PR body + linked issue). Then
+   plan: fresh panel, fold in-scope findings and requirement gaps,
+   CI green via `agent-merge` when available else
+   `assets/ci-recovery-checklist.md`. Do not checkout, fold, or
+   push until that plan exists (and is approved when plan-mode).
 1. Phase X.0 -- fetch + classify `copilot-pull-request-reviewer[bot]`
    inline review per
    [assets/copilot-classification-prompt.md](assets/copilot-classification-prompt.md).
@@ -175,7 +191,10 @@ body):
 6. Phase X.4 -- run the lint contract until silent.
 7. Phase X.5 -- push (head branch; fall back to a superseding PR that
    preserves authorship via commit trailers).
-8. Phase X.6 -- CI watch + recovery per
+8. Phase X.6 -- CI to green. Prefer the `agent-merge` skill when it
+   is loaded or the prompt contains `<agent_merge_state>` (do not
+   sleep/watch inside that tick; never merge). Otherwise watch +
+   recover per
    [assets/ci-recovery-checklist.md](assets/ci-recovery-checklist.md).
 9. Phase X.7 -- decide terminal vs next iteration.
 10. Phase X.8 -- at terminal, capture `head_sha`, `mergeable`,
@@ -236,7 +255,8 @@ ONCE; on a second malformed return, mark the row blocked and continue.
 - CI-observed-green: terminal `ready-to-merge` requires real CI
   evidence, not an assumption.
 - One advisory comment per PR per terminal pass, rendered from
-  [assets/pr-comment-templates.md](assets/pr-comment-templates.md).
+  [assets/pr-comment-templates.md](assets/pr-comment-templates.md)
+  and posted by `autopilot-comment`.
 - Authorship preservation: superseding PRs credit the original author
   via commit trailers and link back.
 

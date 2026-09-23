@@ -12,7 +12,8 @@ fold-vs-defer rubric.
 This subagent REPLACES the previous worker / completion split. The
 old two-phase flow hard-coded a "post advisory, address it later"
 seam that left foldable items as unbounded backlog. You own the
-whole convergence.
+whole convergence. Plan first (Step 0.P). Do not fold or push
+until that plan exists.
 
 ## Inputs
 
@@ -65,6 +66,7 @@ are part of your contract:
 Up to FOUR outer iterations. Each iteration:
 
 ```
+0.P  plan before implement (once, hard gate)
 X.0 fetch + classify Copilot
 X.1 invoke autopilot-pr-review-worker skill
 X.2 merge follow-ups, apply fold-vs-defer rubric
@@ -72,7 +74,7 @@ X.2.5 canonical-owner gate (classify + evidence, FAIL CLOSED)
 X.3 edit code, fold foldable items
 X.4 lint contract (silent)
 X.5 push (author fork or superseding PR)
-X.6 CI watch + recovery loop (cap 3)
+X.6 CI green (agent-merge when available; else watch + recovery, cap 3)
 X.7 decide: terminal or next iteration
 X.8 (terminal only) capture mergeability snapshot
 ```
@@ -153,6 +155,33 @@ threads, linked issue comments) before any later fold work.
 Paginate every list to exhaustion. Fail closed if a page cannot
 be read.
 
+### Step 0.P -- plan before implement (hard gate)
+
+Do not checkout, fold, push, or request reviewers until this
+plan exists. If Copilot App started this session with
+`kickoff_mode: plan`, this plan IS the plan-mode artifact;
+wait for operator approval before Step 0. If the session is
+already interactive, still write the plan in-session and do
+not skip it.
+
+The plan MUST cover all four, in order:
+
+1. Work-to-date versus original task/scope. Use the PR body,
+   linked issue(s), labels, and current diff/commits. Name
+   gaps (missing requirement, extra scope, stale approach).
+2. Fresh panel. Iteration 1 is `panel-mode=full` (or `lean`
+   if the diff is tiny). Later iterations and terminal are
+   `delta`. One `full` per run unless `panel_escalation`.
+3. Fold every in-scope finding and requirement gap from (1)
+   and (2). Defer only scope-crossing items with a one-line
+   boundary note.
+4. CI green. Prefer the `agent-merge` skill when it is
+   loaded or the prompt contains `<agent_merge_state>`:
+   honor that tick's authorized actions, do not sleep or
+   `--watch` inside the turn, never merge, never auto-merge.
+   If `agent-merge` is not available, use
+   `ci-recovery-checklist.md` (`gh pr checks --watch`).
+
 ### Step 0 -- check out the PR
 
 ```
@@ -198,10 +227,18 @@ this run, mark `copilot_drained: true` and skip future fetches.
    what the harness actually offers, and treat the inline path as
    FIRST-CLASS, not an emergency fallback:
 
+   Set `panel-mode` before fan-out:
+      iteration 1 -> `full` (or `lean` if the diff is tiny:
+      under 3 production files, no new module / owner split)
+      iteration 2+ and terminal -> `delta`
+      Hard cap: one `full` per merge-worker run. A second `full`
+      needs `panel_escalation` on the completion_return.
+
    a. FAST-PATH (if the `skill` tool is present in YOUR context):
       invoke the `autopilot-pr-review-worker` skill by name, passing
-      `INVOCATION_MODE=composed-implementation-review` and the
-      complete PR conversation snapshot, and let it run.
+      `INVOCATION_MODE=composed-implementation-review`,
+      `panel-mode` as resolved above, and the complete PR
+      conversation snapshot, and let it run.
 
    b. INLINE EXECUTION (the NORMAL path for a shepherd subagent):
       you are usually spawned two levels deep, and the runtime
@@ -211,10 +248,11 @@ this run, mark `copilot_drained: true` and skip future fetches.
       reason to block. In that case YOU act as the panel orchestrator:
       load `$REPO_ROOT/.agents/skills/autopilot-pr-review-worker/SKILL.md` as the
       authoritative contract and EXECUTE its published fan-out yourself
-      via `task` in mode `composed-implementation-review` -- gather the
-      complete PR conversation first, spawn each mandatory persona,
-      every conditional persona (active or stubbed per the panel's own
-      activation rubric, so the schema stays uniform), and the
+      via `task` in mode `composed-implementation-review` with the
+      resolved `panel-mode` -- gather the complete PR conversation
+      first, pack the shared brief, spawn ONLY the active roster
+      from `assets/panel-mode.md` (fast-path plus orchestrator
+      judgment with `adhoc_reason`; never inactive stubs), and the
       `apm-ceo` synthesizer; never request a reviewer and never assign;
       schema-validate each panelist return against
       `assets/panelist-return-schema.json` and the CEO return against
@@ -253,7 +291,12 @@ this run, mark `copilot_drained: true` and skip future fetches.
      `from_persona`, `summary`, `why`, and optional `blocking`).
    - `panel_execution` = `skill-tool` or `inline` (which path ran).
    - `panel_personas` = the list of persona names you fanned out
-     (for the routing receipt / parent audit).
+     (for the routing receipt / parent audit). Active only; no
+     inactive stubs.
+   - `panel_mode` = `full` | `lean` | `delta`.
+   - `panel_noop` = true when delta elected unchanged-receipt noop.
+   - `panel_escalation` = one-line reason if this run used a
+     second `full`.
 
 ### Step X.2 -- merge follow-ups + apply fold-vs-defer rubric
 
@@ -483,9 +526,15 @@ Then close the original with the courteous handoff comment from
 `pr-comment-templates.md`. Record `status: superseded` and
 `superseded_by: <new pr>` in your return shape.
 
-### Step X.6 -- CI watch + recovery
+### Step X.6 -- CI green (`agent-merge` when available)
 
-Per `ci-recovery-checklist.md`:
+If the `agent-merge` skill is loaded or this prompt contains
+`<agent_merge_state>`, use that path for CI, review-thread, and
+conflict work. Follow its authorized-actions line. End the turn
+instead of sleeping or running `gh pr checks --watch`. Never
+merge, enable auto-merge, enqueue, or run `gh pr merge`.
+
+Otherwise follow `ci-recovery-checklist.md`:
 
 ```
 gh pr checks $PR_NUMBER --repo microsoft/apm --watch
@@ -515,24 +564,27 @@ On cap hit: `status: blocked` with failing job + log excerpt in
   remaining followups are tagged DEFER with valid scope-boundary
   notes.
 
-In this case: re-run the autopilot-pr-review-worker ONE LAST TIME so the
-visible comment reflects the converged state. That final run posts its
-own recommendation comment to the PR (per the Step X.1 WRITE BOUNDARY:
-the panel always posts its result via `gh`). Move to "Finalize" below.
+In this case: re-run the autopilot-pr-review-worker ONE LAST TIME with
+`panel-mode=delta` so the visible comment reflects the converged
+state. If head SHA and conversation watermark are unchanged since
+the last advisory receipt, that run is a noop (do not post).
+Otherwise it posts its own recommendation comment to the PR (per
+the Step X.1 WRITE BOUNDARY). Move to "Finalize" below.
 
 **Terminal `status: advisory-with-deferred`** when:
 
 - Iteration cap (4) is hit, AND
 - Foldable items remain unresolved.
 
-In this case: re-run the autopilot-pr-review-worker one last time so its final
-recommendation comment reflects the converged (capped) state, carrying
-the unfolded items and their deferral rationale in that comment's
-"Deferred" list (see "Finalize" below). The panel posts this final
-comment per the Step X.1 WRITE BOUNDARY. As within any run, the
-panelist/CEO subagents never post -- only the single per-run panel
-comment lands, so the iteration adds exactly one comment, not a reply
-chain.
+In this case: re-run the autopilot-pr-review-worker one last time with
+`panel-mode=delta` so its final recommendation comment reflects the
+converged (capped) state, carrying the unfolded items and their
+deferral rationale in that comment's "Deferred" list (see
+"Finalize" below). Unchanged head+watermark -> noop. Otherwise the
+panel posts this final comment per the Step X.1 WRITE BOUNDARY.
+As within any run, the panelist/CEO subagents never post -- only
+the single per-run panel comment lands, so the iteration adds
+exactly one comment, not a reply chain.
 
 **Next iteration** otherwise: go back to Step X.0.
 
@@ -680,6 +732,9 @@ most one short clause (e.g. `pending required review`,
   "ci_status": "green|yellow|red|blocked",
   "panel_execution": "skill-tool|inline",
   "panel_personas": ["python-architect", "..."],
+  "panel_mode": "full|lean|delta",
+  "panel_noop": false,
+  "panel_escalation": "string (required when a second full ran)",
   "routing_receipt": {
     "spawn": "shepherd-<pr>",
     "requested_model": "claude-sonnet-4.6",
@@ -697,7 +752,8 @@ two observed drift aliases are wrong:
 - INVALID: `{ "terminal_state": "ready-to-merge", "pr_number": 1584 }`
 
 Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
-`panel_execution`, `panel_personas`, and `routing_receipt` are optional
+`panel_execution`, `panel_personas`, `panel_mode`, `panel_noop`,
+`panel_escalation`, and `routing_receipt` are optional
 (parent-audit observability) but, when present, must match the schema.
 `architecture_evidence` version 2 is REQUIRED for `ready-to-merge` and
 `advisory-with-deferred`. This is an intentional terminal-contract

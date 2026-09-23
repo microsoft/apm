@@ -25,5 +25,6 @@ type: skill
 dependencies:
   apm:
     - ../autopilot-pr-review-worker
+    - ../autopilot-comment
     - ../../pr-description-skill
   mcp: []

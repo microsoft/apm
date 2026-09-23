@@ -179,6 +179,9 @@ def test_template_has_proposed_brief_not_an_operative_decision() -> None:
     assert "json: off | on" in skill
     assert "`json` defaults to `off`" in skill
     assert "Omitted `json`" in skill
+    assert "debug: off | on" in skill
+    assert "`debug` defaults to `off`" in skill
+    assert "Omitted `debug`" in skill
     assert "Do not post JSON" in skill
     assert "Never attach that JSON" in skill
     assert "The trailing fenced" not in skill

@@ -308,6 +308,60 @@ def test_codec_reconciles_owners_through_canonical_reconciler(tmp_path: Path) ->
     assert lockfile.deployment_ledger.records[shared.key].active_owner == "beta"
 
 
+def test_dependency_merge_retains_canonical_locators_and_surviving_owners(tmp_path: Path) -> None:
+    """Partial replacement keeps opaque locators and removes only replaced ownership."""
+    prior = LockFile(
+        dependencies={
+            "alpha": LockedDependency(repo_url="alpha", resolved_commit="old-alpha"),
+            "beta": LockedDependency(repo_url="beta", resolved_commit="old-beta"),
+        }
+    )
+    shared = _locator(".agents/skills/shared/SKILL.md")
+    stale = _locator(".agents/skills/removed/SKILL.md")
+    copilot = _locator(".agents/skills/untouched/SKILL.md")
+    cursor = replace(copilot, target="cursor")
+    external = replace(copilot, kind=LocatorKind.TARGET_RELATIVE, value="skills/untouched")
+    service = replace(copilot, kind=LocatorKind.URI, target="mcp", value="server", runtime="vscode")
+    untouched = {
+        locator.key: _record(locator, owners=("beta",), active="beta")
+        for locator in (copilot, cursor, external)
+    }
+    untouched[service.key] = _record(service, owners=(".",), active=".")
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(
+            records={
+                **untouched,
+                shared.key: _record(shared, owners=("beta", "alpha"), active="alpha"),
+                stale.key: _record(stale, owners=("alpha",), active="alpha"),
+            }
+        ),
+        prior,
+    )
+    updated = LockFile(
+        dependencies={"alpha": LockedDependency(repo_url="alpha", resolved_commit="new-alpha")}
+    )
+    added = _locator(".agents/skills/new/reference.md")
+    current_record = _record(added, owners=("alpha",), active="alpha")
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records={added.key: current_record}), updated
+    )
+
+    DeploymentLedgerCodec.merge_dependencies(
+        prior, updated, project_root=tmp_path, diagnostics=DiagnosticCollector()
+    )
+
+    assert prior.deployment_ledger.records == {
+        **untouched,
+        shared.key: _record(shared, owners=("beta",), active="beta"),
+        added.key: current_record,
+    }
+    assert prior.dependencies["alpha"].resolved_commit == "new-alpha"
+    assert prior.dependencies["beta"].resolved_commit == "old-beta"
+    assert prior.dependencies["alpha"].deployed_files == [".agents/skills/new/reference.md"]
+    assert prior.mcp_target_servers == {"vscode": ["server"]}
+    assert LockFile.from_yaml(prior.to_yaml()).deployment_ledger == prior.deployment_ledger
+
+
 def test_deployment_record_rejects_active_owner_outside_owners() -> None:
     with pytest.raises(ValueError, match="active_owner must be present in owners"):
         _record(_locator(), owners=("survivor",), active="removed")

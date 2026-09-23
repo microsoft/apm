@@ -19,6 +19,9 @@ is empty.
 1. Prefer a new session (Copilot App / Cloud / Remote) named
    `Issue triage #<issue-number>` whose kickoff runs
    `autopilot-issue-triage-worker` on exactly one issue.
+   Kickoff must also load `autopilot-comment` (`comment_via:
+   autopilot-comment`, `debug: off` unless the caller set on).
+   The worker must not call `gh issue comment`.
 2. Else spawn a sub-agent (`task`) with the worker skill.
 3. Else run the worker sequentially in this session.
 

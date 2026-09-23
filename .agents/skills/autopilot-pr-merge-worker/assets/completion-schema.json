@@ -318,7 +318,20 @@
         "panel_personas": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Persona names fanned out for the panel run (e.g. python-architect, apm-ceo). Optional parent-audit field; lets the orchestrator confirm the inline panel ran the full persona set without reading the child transcript."
+          "description": "Active persona slugs fanned out for the panel run. Optional parent-audit field. Do not include inactive stubs."
+        },
+        "panel_mode": {
+          "type": "string",
+          "enum": ["full", "lean", "delta"],
+          "description": "panel-mode used for the last panel run in this merge-worker loop. Optional parent-audit field."
+        },
+        "panel_noop": {
+          "type": "boolean",
+          "description": "true when the last panel run elected unchanged-receipt noop (typical terminal delta)."
+        },
+        "panel_escalation": {
+          "type": "string",
+          "description": "Required when this merge-worker run used a second full panel. One-line reason."
         },
         "routing_receipt": {
           "type": "object",
