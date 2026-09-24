@@ -204,6 +204,53 @@ class TestAttachDeployedFilesUnion:
         assert ".github/kept.md" in dep.deployed_files
         assert ".github/removed.md" not in dep.deployed_files
 
+    def test_missing_stale_file_is_removed_from_the_receipt(self, tmp_path):
+        """A prior path already absent from disk is still retired from the lock.
+
+        Package updates often remove a skill before a later consumer refresh.
+        The cleanup helper correctly treats the absent path as a no-op success;
+        reconciliation must not keep that stale receipt merely because there
+        was nothing left to unlink.
+        """
+        key = "owner/pkg"
+        current = ".agents/skills/current/SKILL.md"
+        stale = ".agents/skills/retired/SKILL.md"
+        (tmp_path / "apm.yml").write_text("target: agent-skills\n", encoding="utf-8")
+        current_path = tmp_path / current
+        current_path.parent.mkdir(parents=True)
+        current_path.write_text("current", encoding="utf-8")
+        prior = LockFile()
+        prior.add_dependency(
+            LockedDependency(
+                repo_url=key,
+                deployed_files=[current, stale],
+                deployed_file_hashes={
+                    current: compute_file_hash(current_path),
+                    stale: "sha256:" + "0" * 64,
+                },
+            )
+        )
+        new = LockFile()
+        new.add_dependency(LockedDependency(repo_url=key))
+
+        ctx = _ctx(
+            package_deployed_files={key: [current]},
+            existing_lockfile=prior,
+            targets=[_known("agent-skills")],
+            project_root=tmp_path,
+        )
+        LockfileBuilder(ctx)._attach_deployed_files(new)
+
+        dep = new.get_dependency(key)
+        assert current in dep.deployed_files
+        assert stale not in dep.deployed_files
+        assert stale not in dep.deployed_file_hashes
+        records = tuple(new.deployment_ledger.records.values())
+        assert len(records) == 1
+        assert records[0].locator.value == current
+        assert records[0].locator.target == "agent-skills"
+        assert records[0].owners == (key,)
+
 
 class TestCurrentInstallGovernance:
     def test_file_target_includes_root_and_primitive_deploy_roots(self, tmp_path):

@@ -331,11 +331,27 @@ def union_preserving(
         )
 
     prior_values = set(prior_files or ())
+    # Pre-ledger lockfiles did not record a target for deployed paths, so their
+    # synthesized records use the ``legacy`` target.  Once a declared active
+    # target governs such a path, retain its owner and content hash but migrate
+    # the locator before reconciliation.  Otherwise the legacy target is
+    # preserved as an unrelated target forever, including after the package
+    # retired the path.
     prior_records = {}
-    for key, record in prior_ledger.records.items() if prior_ledger is not None else ():
+    for _key, record in prior_ledger.records.items() if prior_ledger is not None else ():
         if record.locator.value not in prior_values:
             continue
-        prior_records[key] = record
+        if record.locator.target == "legacy" and is_governed_by_install(
+            record.locator.value, active_prefixes, active_schemes
+        ):
+            locator = _locator(record.locator.value)
+            record = DeploymentRecord(
+                locator=locator,
+                owners=record.owners,
+                active_owner=record.active_owner,
+                content_hash=record.content_hash,
+            )
+        prior_records[record.locator.key] = record
     prior_record_values = {record.locator.value for record in prior_records.values()}
     for path in prior_files or ():
         if path in prior_record_values:
@@ -640,12 +656,15 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     if on_cleanup is not None:
         on_cleanup(cleanup)
     # Orphan candidates (unlike the classic dropped set) can still be present in
-    # `files`; a proven deletion must therefore also retract the value from the
+    # `files`; every cleanup success must therefore retract the value from the
     # returned manifest and hashes so the lockfile row and disk state agree.
-    if cleanup.deleted:
-        deleted = set(cleanup.deleted)
-        files = [path for path in files if path not in deleted]
-        for path in deleted:
+    # A missing stale file is also a successful cleanup: the helper deliberately
+    # reports it as a no-op instead of an unlink, so only its explicit retained
+    # set distinguishes it from a proven deletion here.
+    cleaned = dropped - set(cleanup.retained)
+    if cleaned:
+        files = [path for path in files if path not in cleaned]
+        for path in cleaned:
             hashes.pop(path, None)
     for path in cleanup.retained:
         if path not in files:
