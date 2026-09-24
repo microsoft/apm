@@ -37,6 +37,7 @@ def _write_package(path: Path, name: str, deps: list[str]) -> None:
 
 
 @pytest.mark.parametrize("frozen", [False, True], ids=["normal", "frozen"])
+@pytest.mark.parametrize("offline", [False, True], ids=["named-ref", "locked-replay"])
 @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
 @pytest.mark.parametrize("compatible", [False, True], ids=["conflict", "equivalent"])
 @pytest.mark.parametrize(
@@ -49,10 +50,13 @@ def test_install_checks_every_immutable_requirement(
     warm: bool,
     compatible: bool,
     direct_shared: bool,
+    offline: bool,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APM_NO_CACHE", "1")
     deps = ["org/shared#release"] if direct_shared else []
+    alternate = (OLD if compatible else NEW) if offline else "alternate"
+    parent_deps = [f"org/shared#{alternate}"]
     _write_package(tmp_path, "consumer", [*deps, f"org/parent#{PARENT}"])
     lock = LockFile()
     for name, ref, commit in (("shared", "release", OLD), ("parent", PARENT, PARENT)):
@@ -69,7 +73,7 @@ def test_install_checks_every_immutable_requirement(
             _write_package(
                 tmp_path / "apm_modules" / "org" / name,
                 name,
-                ["org/shared#alternate"] if name == "parent" else [],
+                parent_deps if name == "parent" else [],
             )
     lock.write(tmp_path / "apm.lock.yaml")
     original_lock = (tmp_path / "apm.lock.yaml").read_bytes()
@@ -77,7 +81,7 @@ def test_install_checks_every_immutable_requirement(
     def commit_for(dep: DependencyReference) -> str:
         if dep.repo_url == "org/parent":
             return PARENT
-        return NEW if dep.reference == "alternate" and not compatible else OLD
+        return NEW if dep.reference in {"alternate", NEW} and not compatible else OLD
 
     def download(
         _self: GitHubPackageDownloader,
@@ -87,7 +91,7 @@ def test_install_checks_every_immutable_requirement(
         **kwargs: object,
     ) -> PackageInfo:
         name = dep.repo_url.rsplit("/", 1)[-1]
-        _write_package(path, name, ["org/shared#alternate"] if name == "parent" else [])
+        _write_package(path, name, parent_deps if name == "parent" else [])
         sha = commit_for(dep)
         return PackageInfo(
             package=APMPackage.from_apm_yml(path / "apm.yml"),
@@ -107,11 +111,12 @@ def test_install_checks_every_immutable_requirement(
         patch.object(
             GitHubPackageDownloader,
             "list_remote_refs",
+            side_effect=AssertionError("Locked replay must not discover refs") if offline else None,
             return_value=[
                 RemoteRef("release", GitReferenceType.TAG, OLD),
                 RemoteRef("alternate", GitReferenceType.TAG, OLD if compatible else NEW),
             ],
-        ),
+        ) as refs,
         patch.object(
             GitHubPackageDownloader,
             "resolve_git_reference",
@@ -128,12 +133,14 @@ def test_install_checks_every_immutable_requirement(
             ["install", "--no-policy", "--target", "copilot", *(["--frozen"] if frozen else [])],
         )
 
+    if offline:
+        refs.assert_not_called()
     if compatible or (not frozen and not direct_shared):
         assert result.exit_code == 0, result.output
     else:
         assert result.exit_code == 1, result.output
         assert "incompatible immutable requirements" in result.output
-        assert "org/shared@alternate" in result.output
+        assert f"org/shared@{alternate}" in result.output
         assert "org/shared@release" in result.output
         assert (tmp_path / "apm.lock.yaml").read_bytes() == original_lock
         assert not (tmp_path / ".github" / "skills").exists()

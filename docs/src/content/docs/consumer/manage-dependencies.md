@@ -190,10 +190,9 @@ New named refs may need a lookup; a failed lookup is not proof of compatibility.
 Align the refs in your `apm.yml`, or select a parent package release that requires
 the same commit. Then run `apm install` to regenerate the lockfile. Do not edit
 `apm.lock.yaml` to hide a conflict. `--frozen` also rejects a locked commit that
-drops an immutable requirement discovered in a dependency manifest. Short SHA
-pins must match the prefix of the recorded full commit. This check also runs
-on a cold cache after the parent package is fetched. Side-by-side versions are
-not supported.
+drops an immutable requirement discovered in a dependency manifest, including
+on a cold cache after the parent package is fetched. Short SHA pins must match
+the prefix of the recorded full commit. Side-by-side versions are not supported.
 
 ## Add a dependency
 

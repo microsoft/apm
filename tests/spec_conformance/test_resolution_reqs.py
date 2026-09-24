@@ -60,9 +60,6 @@ from tests.unit.adopt.test_native_skill_collision import (
 from tests.unit.deps.test_immutable_requirement_conflicts import (
     test_conflicting_commit_requirements_fail_with_both_chains as _run_immutable_chain_contract,
 )
-from tests.unit.deps.test_immutable_requirement_conflicts import (
-    test_unchanged_locked_literal_replays_offline_with_equivalent_sha as _run_locked_equivalence_contract,
-)
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
 
 # --- req-rs-001..014 ---------------------------------------------------
@@ -84,7 +81,7 @@ def test_immutable_diamond_constraints_reach_install_consumer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool, frozen: bool
 ) -> None:
     """Fail empty immutable intersections and accept proven equivalent refs."""
-    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, True, compatible, True)
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, True, compatible, True, False)
 
 
 @pytest.mark.req("req-rs-010")
@@ -109,10 +106,10 @@ def test_frozen_short_pin_checks_recorded_commit_without_discovery(
 @pytest.mark.req("req-rs-015")
 @pytest.mark.parametrize("frozen", [False, True])
 def test_locked_literal_equivalence_requires_no_remote_discovery(
-    tmp_path: Path, frozen: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frozen: bool
 ) -> None:
     """Unchanged lock evidence survives a deleted remote tag."""
-    _run_locked_equivalence_contract(tmp_path, frozen, "release")
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, False, True, True, True)
 
 
 @pytest.mark.req("req-rs-002")

@@ -262,4 +262,5 @@ def test_verification_failure_names_both_chains_without_transport_secrets(tmp_pa
     assert "consumer -> org/shared@release-one" in diagnostic
     assert "consumer -> org/parent@HEAD -> org/shared@release-two" in diagnostic
     assert "Cannot verify immutable requirements" in diagnostic
+    assert "Authorization" not in diagnostic
     assert "secret-value" not in diagnostic
