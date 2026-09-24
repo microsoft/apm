@@ -614,7 +614,9 @@ fail with both dependency paths and requested refs; unequal ref strings alone
 are not a conflict when they resolve to the same commit. Align the root or
 parent manifest refs, then run `apm install` to regenerate the lockfile.
 `--frozen` rejects locked commits that drop an immutable transitive requirement.
-Distinct named refs may need a Git lookup to establish equivalence.
+Short pins must match the locked full commit's prefix. Unchanged locked refs
+use recorded commits without ref discovery, including moved or deleted tags.
+New named refs may need a Git lookup to establish equivalence.
 
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|

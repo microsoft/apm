@@ -14,6 +14,8 @@
 identity and reports both dependency paths and refs. Equivalent tag/SHA
 spellings are accepted. `--frozen` verifies transitive immutable requirements
 as parent manifests become available, including after cold-cache downloads.
+Short pins must match the locked full commit's prefix. Unchanged locked refs
+replay without ref discovery; new names may require a lookup.
 Align manifest refs and regenerate the lockfile with a normal install to repair
 a collapsed graph; `--force` does not bypass this check.
 

@@ -182,13 +182,16 @@ For registry-sourced dependencies (internal packages on Artifactory or a custom 
 APM installs one version per package identity. If two dependency paths require
 tags or commit SHAs that resolve to different commits, install fails with both
 root-to-package paths and requested refs. Different tag names, or a tag and its
-commit SHA, are compatible when they identify the same commit. APM may query
-Git refs to verify this; a failed lookup is not treated as proof of compatibility.
+commit SHA, are compatible when they identify the same commit. Errors show
+ordered `owner/repo@ref -> owner/repo@ref` chains; manifests still use `#ref`.
+Unchanged locked refs use their recorded commits without Git ref discovery.
+New named refs may need a lookup; a failed lookup is not proof of compatibility.
 
 Align the refs in your `apm.yml`, or select a parent package release that requires
 the same commit. Then run `apm install` to regenerate the lockfile. Do not edit
 `apm.lock.yaml` to hide a conflict. `--frozen` also rejects a locked commit that
-drops an immutable requirement discovered in a dependency manifest, including
+drops an immutable requirement discovered in a dependency manifest. Short SHA
+pins must match the prefix of the recorded full commit. This check also runs
 on a cold cache after the parent package is fetched. Side-by-side versions are
 not supported.
 

@@ -118,10 +118,13 @@ in `apm.yml`, then run `apm install` again.
 
 - **Immutable dependency conflicts.** Install fails when two paths require
   different immutable commits for one package identity, showing both paths and
-  requested refs. Equivalent tag/SHA spellings remain valid. `--frozen` also
+  requested refs as ordered `owner/repo@ref -> owner/repo@ref` chains.
+  Equivalent tag/SHA spellings remain valid. Unchanged locked refs reuse their
+  recorded commits without ref discovery. `--frozen` also
   checks transitive immutable requirements against locked commits as package
   manifests become available; a cold cache may need parent-package downloads
-  before a conflict is discoverable. Align the root/parent refs and run a normal
+  before a conflict is discoverable. Short SHA pins must match the recorded
+  full commit's prefix. Align the root/parent refs and run a normal
   install to regenerate the lockfile. See
   [Manage dependencies](../../../consumer/manage-dependencies/#incompatible-immutable-requirements).
 

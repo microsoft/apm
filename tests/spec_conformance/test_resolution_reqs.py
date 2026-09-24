@@ -40,6 +40,12 @@ from apm_cli.deps.tiered_ref_resolver import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.utils.yaml_io import load_yaml
+from tests.integration.test_immutable_requirements_install import (
+    test_frozen_install_checks_short_pin_without_ref_discovery as _run_frozen_short_pin_contract,
+)
+from tests.integration.test_immutable_requirements_install import (
+    test_install_checks_every_immutable_requirement as _run_immutable_install_contract,
+)
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -50,6 +56,12 @@ from tests.spec_conformance._helpers import (
 )
 from tests.unit.adopt.test_native_skill_collision import (
     test_native_skill_preserves_unowned_directory as _native_skill_collision_contract,
+)
+from tests.unit.deps.test_immutable_requirement_conflicts import (
+    test_conflicting_commit_requirements_fail_with_both_chains as _run_immutable_chain_contract,
+)
+from tests.unit.deps.test_immutable_requirement_conflicts import (
+    test_unchanged_locked_literal_replays_offline_with_equivalent_sha as _run_locked_equivalence_contract,
 )
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
 
@@ -63,6 +75,44 @@ def test_resolver_walks_dependency_graph_deterministically():
         "declaration order",
         "Intersection-pick",
     )
+
+
+@pytest.mark.req("req-rs-001")
+@pytest.mark.parametrize("compatible", [False, True])
+@pytest.mark.parametrize("frozen", [False, True])
+def test_immutable_diamond_constraints_reach_install_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool, frozen: bool
+) -> None:
+    """Fail empty immutable intersections and accept proven equivalent refs."""
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, True, compatible, True)
+
+
+@pytest.mark.req("req-rs-010")
+@pytest.mark.parametrize("transitive", [False, True])
+def test_immutable_conflicts_name_ordered_constraint_chains(
+    tmp_path: Path, transitive: bool
+) -> None:
+    """Bind immutable conflict diagnostics to both complete ordered paths."""
+    _run_immutable_chain_contract(tmp_path, transitive, 4)
+
+
+@pytest.mark.req("req-lk-003")
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("compatible", [False, True])
+def test_frozen_short_pin_checks_recorded_commit_without_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool
+) -> None:
+    """Replay only a recorded commit that actually matches its short pin."""
+    _run_frozen_short_pin_contract(tmp_path, monkeypatch, compatible)
+
+
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("frozen", [False, True])
+def test_locked_literal_equivalence_requires_no_remote_discovery(
+    tmp_path: Path, frozen: bool
+) -> None:
+    """Unchanged lock evidence survives a deleted remote tag."""
+    _run_locked_equivalence_contract(tmp_path, frozen, "release")
 
 
 @pytest.mark.req("req-rs-002")

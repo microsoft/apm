@@ -344,8 +344,11 @@ only on a substantive write. To migrate a legacy lockfile manually, delete the
 
 Frozen replay checks immutable requirements from dependency manifests as they
 are loaded. A lock entry cannot silently replace a required tag or SHA with a
-different commit. Equivalent tag/SHA spellings are accepted after verification;
-checking distinct tag names may require a remote ref lookup. On a cold cache,
+different commit. Equivalent tag/SHA spellings are accepted after verification.
+Unchanged locked literal refs reuse the recorded commit without ref discovery,
+even if the upstream tag moved or disappeared. Short SHA pins are checked
+against the full recorded commit's prefix; matching ref text alone is not enough.
+New tag names may require a lookup. On a cold cache,
 APM may fetch a locked parent before discovering its conflicting requirement.
 Fix the manifest refs and regenerate the lockfile with a normal install.
 

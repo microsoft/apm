@@ -86,10 +86,12 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 4,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::test_full_sha_pin_audit_rejects_resolved_commit_mismatch",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_carries_dependencies_block"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_carries_dependencies_block",
+        "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]"
       ]
     },
     {
@@ -938,8 +940,12 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_immutable_diamond_constraints_reach_install_consumer[False-False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_immutable_diamond_constraints_reach_install_consumer[False-True]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_immutable_diamond_constraints_reach_install_consumer[True-False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_immutable_diamond_constraints_reach_install_consumer[True-True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_walks_dependency_graph_deterministically"
       ]
     },
@@ -1043,8 +1049,10 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_immutable_conflicts_name_ordered_constraint_chains[False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_immutable_conflicts_name_ordered_constraint_chains[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_exact_pin"
       ]
     },
@@ -1101,8 +1109,12 @@
       "keyword": "MUST",
       "section": "7.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_literal_equivalence_requires_no_remote_discovery[False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_literal_equivalence_requires_no_remote_discovery[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_replays_locked_commit_without_network"
       ]
     },

@@ -648,6 +648,7 @@ install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
+install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement

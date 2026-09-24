@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now fails on incompatible immutable dependency requirements instead of silently keeping one version, including inconsistent frozen replay and short SHA pins; equivalent tag/SHA pins remain valid. Align root/parent refs, then run `apm install` without `--frozen` to regenerate the lockfile. (#3061)
 - Partial dependency updates preserve concrete deployment targets for refreshed and untouched packages, including skills under `.agents/skills/`, instead of demoting them to `legacy`. (#2924)
 - Transient resolution-staging paths are shorter, so `apm install` no longer fails with `[WinError 206] The filename or extension is too long.` from a deep Windows checkout. The staging root drops from a full `uuid4().hex` to 12 hex characters and each per-destination slot from a full SHA-256 digest to 16, freeing 68 characters on every staged path. This is not a guarantee of arbitrary long-path support. Orphaned staging roots left by earlier versions are still cleaned up. (#2896)
 
