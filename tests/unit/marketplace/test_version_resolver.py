@@ -215,3 +215,33 @@ class TestResolveVersionConstraint(unittest.TestCase):
 
         tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "^1.0.0")
         assert tag == "secrets-vault--v1.2.3"
+
+    def test_passes_remote_url_to_list_remote_refs(self, MockResolver):
+        """Package remotes are queried when remote_url is provided (#2928)."""
+        refs = _make_refs("1.0.0", plugin_name="my-plugin")
+        MockResolver.return_value.list_remote_refs.return_value = refs
+        package_url = "https://git.example.invalid/owner/repo"
+
+        resolve_version_constraint(
+            "my-plugin",
+            "owner/repo",
+            "^1.0.0",
+            remote_url=package_url,
+        )
+        MockResolver.return_value.list_remote_refs.assert_called_once_with(
+            "owner/repo",
+            remote_url=package_url,
+        )
+
+    def test_error_includes_remote_url_when_set(self, MockResolver):
+        MockResolver.return_value.list_remote_refs.return_value = []
+        package_url = "https://git.example.invalid/owner/repo"
+
+        with self.assertRaises(NoMatchingVersionError) as ctx:
+            resolve_version_constraint(
+                "my-plugin",
+                "owner/repo",
+                "^1.0.0",
+                remote_url=package_url,
+            )
+        assert package_url in str(ctx.exception)

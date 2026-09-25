@@ -102,7 +102,9 @@ class _MockRefResolver:
     def __init__(self, refs_by_remote: dict[str, list[RemoteRef]] | None = None):
         self._refs = refs_by_remote or {}
 
-    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
+    def list_remote_refs(
+        self, owner_repo: str, *, remote_url: str | None = None
+    ) -> list[RemoteRef]:
         if owner_repo not in self._refs:
             from apm_cli.marketplace.errors import GitLsRemoteError
 

@@ -12,6 +12,7 @@ from apm_cli.marketplace.models import (
     MarketplacePlugin,
     MarketplaceSource,
 )
+from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.resolver import (
     _resolve_git_subdir_source,
     _resolve_github_source,
@@ -910,15 +911,17 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         assert dep is not None
         assert dep.reference == "pkg--v1.0.0"
         assert result.canonical.endswith("#pkg--v1.0.0")
+        expected_repo = urlparse(source["url"]).path.strip("/")
         mock_resolve_version.assert_called_once_with(
             "pkg",
-            "catalog/remote-mkt",
+            expected_repo,
             "1.0.0",
             tag_pattern="{name}--v{version}",
             host="git.example.invalid",
             token=None,
             auth_scheme="basic",
             auth_resolver=None,
+            remote_url=source["url"],
         )
 
     @pytest.mark.parametrize(
@@ -972,6 +975,54 @@ class TestResolveMarketplacePluginGitLabMonorepo:
                 "remote-mkt",
                 version_spec=version_spec,
             )
+
+    @patch("apm_cli.marketplace.version_resolver.RefResolver")
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_url_version_spec_queries_package_remote(
+        self, mock_get, mock_fetch, mock_ref_resolver
+    ):
+        """Version tags are listed on the package remote, not the catalog (#2928)."""
+        package_url = "https://git.example.invalid/team/repo"
+        marketplace_source = MarketplaceSource(
+            name="remote-mkt",
+            owner="catalog",
+            repo="remote-mkt",
+            host="git.example.invalid",
+        )
+        mock_get.return_value = marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(
+                name="pkg",
+                source={"source": "url", "url": package_url},
+            )
+        )
+
+        package_tag = RemoteRef(name="refs/tags/pkg--v1.0.0", sha="c" * 40)
+
+        def list_refs(owner_repo, *, remote_url=None):
+            if owner_repo == "catalog/remote-mkt" and remote_url is None:
+                return []
+            if owner_repo == "team/repo" and remote_url == package_url:
+                return [package_tag]
+            return []
+
+        mock_ref_resolver.return_value.list_remote_refs.side_effect = list_refs
+
+        result = resolve_marketplace_plugin(
+            "pkg",
+            "remote-mkt",
+            version_spec="1.0.0",
+        )
+
+        assert result.canonical.endswith("#pkg--v1.0.0")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == "pkg--v1.0.0"
+        mock_ref_resolver.return_value.list_remote_refs.assert_called_once_with(
+            "team/repo",
+            remote_url=package_url,
+        )
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -1094,6 +1145,86 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         dep = result.dependency_reference
         assert dep.virtual_path == "registry/pkg"
         assert dep.repo_url == "epm-ease/ai-apm-registry"
+
+
+class TestGithubPackageTagHostOnForeignMarketplace:
+    """Version-tag lookup must honor the package host, not the catalog host (#2928).
+
+    A GitLab (or other non-GitHub) marketplace can list ``type: github`` plugins.
+    Tags for those packages live on github.com. Host-qualified ``repo`` fields
+    must also be parsed so ``github.com`` is the host, not a path prefix.
+    """
+
+    @staticmethod
+    def _manifest_with_plugin(plugin: MarketplacePlugin) -> MarketplaceManifest:
+        return MarketplaceManifest(
+            name="gl-mkt",
+            plugins=(plugin,),
+            plugin_root="",
+        )
+
+    @staticmethod
+    def _gitlab_marketplace() -> MarketplaceSource:
+        return MarketplaceSource(
+            name="gl-mkt",
+            owner="catalog",
+            repo="gl-mkt",
+            host="gitlab.example.invalid",
+        )
+
+    def _assert_github_tag_lookup(self, mock_resolve_version) -> None:
+        mock_resolve_version.assert_called_once()
+        args, kwargs = mock_resolve_version.call_args
+        assert args[1] == "acme/tool"
+        assert kwargs["host"] == "github.com"
+        assert kwargs["host"] != "gitlab.example.invalid"
+        assert not args[1].startswith("github.com/")
+
+    @patch(
+        "apm_cli.marketplace.version_resolver.resolve_version_constraint",
+        return_value=("tool--v1.0.0", "c" * 40),
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_bare_github_type_on_gitlab_marketplace_uses_github_com_host(
+        self, mock_get, mock_fetch, mock_resolve_version
+    ):
+        """``type: github`` + bare ``acme/tool`` must query github.com, not GitLab."""
+        mock_get.return_value = self._gitlab_marketplace()
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(
+                name="tool",
+                source={"type": "github", "repo": "acme/tool"},
+            )
+        )
+
+        resolve_marketplace_plugin("tool", "gl-mkt", version_spec="1.0.0")
+
+        self._assert_github_tag_lookup(mock_resolve_version)
+
+    @patch(
+        "apm_cli.marketplace.version_resolver.resolve_version_constraint",
+        return_value=("tool--v1.0.0", "c" * 40),
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_host_qualified_github_repo_strips_host_from_owner_repo(
+        self, mock_get, mock_fetch, mock_resolve_version
+    ):
+        """``repo: github.com/acme/tool`` must parse to owner_repo ``acme/tool``."""
+        mock_get.return_value = self._gitlab_marketplace()
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(
+                name="tool",
+                source={"type": "github", "repo": "github.com/acme/tool"},
+            )
+        )
+
+        resolve_marketplace_plugin("tool", "gl-mkt", version_spec="1.0.0")
+
+        self._assert_github_tag_lookup(mock_resolve_version)
+        args, _kwargs = mock_resolve_version.call_args
+        assert not args[1].startswith("github.com/")
 
 
 class TestResolveMarketplacePluginGHECloud:
