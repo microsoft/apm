@@ -9,8 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Transient resolution-staging paths are shorter, so `apm install` no longer fails with `[WinError 206] The filename or extension is too long.` from a deep Windows checkout. The staging root drops from a full `uuid4().hex` to 12 hex characters and each per-destination slot from a full SHA-256 digest to 16, freeing 68 characters on every staged path. This is not a guarantee of arbitrary long-path support. Orphaned staging roots left by earlier versions are still cleaned up. (#2896)
-
 ### Added
 
 - Global OpenCode MCP support now writes `opencode.json` to the resolved user configuration root, configurable with `OPENCODE_CONFIG_DIR` and falling back through `$XDG_CONFIG_HOME/opencode` to `~/.config/opencode`. (#3075)

@@ -63,27 +63,32 @@ def _reject_symlink_config(
     fail_on_write_error: bool,
 ) -> bool:
     """Reject MCP cleanup through a symlink without reading its target."""
-    boundary = (config_root or config_path.parent).resolve(strict=False)
     symlink_candidates = {config_path}
-    current = config_path.parent
-    while current != current.parent:
-        symlink_candidates.add(current)
-        resolved_current = current.resolve(strict=False)
-        if resolved_current == boundary:
-            symlink_candidates.add(current)
-            break
-        # A path routed through an ancestor symlink can resolve directly to
-        # the configured root. That ancestor is outside the deployment root
-        # and must not be treated as a symlinked config directory.
-        if boundary not in resolved_current.parents:
-            current = current.parent
-            continue
-        symlink_candidates.add(current)
-        current = current.parent
+    has_symlink = False
     try:
-        has_symlink = any(path.is_symlink() for path in symlink_candidates)
-    except OSError:
+        boundary = (config_root or config_path.parent).resolve(strict=False)
+        current = config_path.parent
+        while current != current.parent:
+            symlink_candidates.add(current)
+            resolved_current = current.resolve(strict=False)
+            if resolved_current == boundary:
+                symlink_candidates.add(current)
+                break
+            # A path routed through an ancestor symlink can resolve directly to
+            # the configured root. That ancestor is outside the deployment root
+            # and must not be treated as a symlinked config directory.
+            if boundary not in resolved_current.parents:
+                current = current.parent
+                continue
+            symlink_candidates.add(current)
+            current = current.parent
+    except (OSError, RuntimeError):
         has_symlink = True
+    else:
+        try:
+            has_symlink = any(path.is_symlink() for path in symlink_candidates)
+        except OSError:
+            has_symlink = True
     if not has_symlink:
         return False
     message = (

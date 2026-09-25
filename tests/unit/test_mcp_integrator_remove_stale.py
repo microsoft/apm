@@ -522,6 +522,31 @@ def test_symlink_ancestor_above_configured_root_is_ignored(tmp_path):
     )
 
 
+@pytest.mark.parametrize("fail_on_write_error", [True, False])
+def test_symlink_config_resolution_failure_fails_closed(tmp_path, fail_on_write_error):
+    from apm_cli.install.errors import RequiredIntegrationError
+    from apm_cli.integration.mcp_integrator import _reject_symlink_config
+
+    logger = MagicMock()
+    with patch.object(Path, "resolve", side_effect=RuntimeError("resolution failed")):
+        if fail_on_write_error:
+            with pytest.raises(RequiredIntegrationError, match="symlinked MCP config"):
+                _reject_symlink_config(
+                    tmp_path / "config.json",
+                    "test config",
+                    logger,
+                    fail_on_write_error=True,
+                )
+        else:
+            assert _reject_symlink_config(
+                tmp_path / "config.json",
+                "test config",
+                logger,
+                fail_on_write_error=False,
+            )
+            logger.warning.assert_called_once()
+
+
 class TestCleanCodexToml:
     def test_preserves_windows_literal_keys_while_removing_stale_server(self, tmp_path):
         import tomlkit
