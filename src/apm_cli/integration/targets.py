@@ -456,7 +456,7 @@ class TargetProfile:
                 try:
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    new_root = str(abs_path)
+                    new_root = abs_path.as_posix()
         elif self.name in ("claude", "hermes"):
             import os
 

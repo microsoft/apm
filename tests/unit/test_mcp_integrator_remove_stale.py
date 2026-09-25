@@ -407,7 +407,10 @@ def test_remove_stale_rejects_symlinked_hermes_config(tmp_path, monkeypatch):
     original = b"mcp_servers:\n  stale:\n    command: keep\n"
     target.write_bytes(original)
     config_path = hermes_home / "config.yaml"
-    config_path.symlink_to(target)
+    try:
+        config_path.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("file symlinks are unavailable")
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
 
     with pytest.raises(RequiredIntegrationError, match="symlinked MCP config"):
@@ -434,7 +437,10 @@ def test_remove_stale_rejects_symlinked_hermes_ancestor(tmp_path, monkeypatch):
     original = b"mcp_servers:\n  stale:\n    command: keep\n"
     config_path.write_bytes(original)
     hermes_home = tmp_path / ".hermes"
-    hermes_home.symlink_to(target_home, target_is_directory=True)
+    try:
+        hermes_home.symlink_to(target_home, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
 
     with pytest.raises(RequiredIntegrationError, match="symlinked MCP config"):
@@ -458,7 +464,10 @@ def test_symlink_ancestor_above_configured_root_is_ignored(tmp_path):
     deployment_root = target / "deployment"
     deployment_root.mkdir(parents=True)
     link = tmp_path / "system-link"
-    link.symlink_to(target, target_is_directory=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
     config_path = link / "deployment" / "config.yaml"
 
     assert (

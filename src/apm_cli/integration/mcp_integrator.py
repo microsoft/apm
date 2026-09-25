@@ -69,6 +69,7 @@ def _reject_symlink_config(
     while current != current.parent:
         resolved_current = current.resolve(strict=False)
         if resolved_current == boundary:
+            symlink_candidates.add(current)
             break
         # A path routed through an ancestor symlink can resolve directly to
         # the configured root. That ancestor is outside the deployment root
