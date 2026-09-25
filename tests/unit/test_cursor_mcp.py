@@ -343,15 +343,13 @@ class TestCursorTokenInjection(unittest.TestCase):
 
 
 class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
-    """Regression coverage for a latent partner-bug of issue #1266.
+    """Regression coverage for Cursor-native runtime env references.
 
     Before #1266 the Cursor adapter routed `raw["env"]` (a dict) through
-    `_resolve_environment_variables`, but the legacy-mode branch of that
-    method only handled the registry list-of-dict shape -- the dict shape
-    was silently iterated as KEYS, every key failed the `isinstance(..., dict)`
-    check, and the env block came out empty. The fix adds a dedicated
-    dict-shape legacy branch to the resolver so the same call site now
-    correctly resolves all three placeholder syntaxes.
+    `_resolve_environment_variables`, but the resolver only handled the
+    registry list-of-dict shape, silently dropping every entry. The dict-shape
+    branch now preserves Cursor's native runtime references and authored
+    literal values instead of resolving references during installation.
     """
 
     def setUp(self):
@@ -391,11 +389,11 @@ class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
         env_block = json.loads(self.mcp_json.read_text(encoding="utf-8"))["mcpServers"][
             "bitbucket"
         ]["env"]
-        # The pre-fix latent bug returned {}; the fix returns the resolved
-        # literal values for every placeholder syntax.
-        self.assertEqual(env_block["TOKEN_DOLLAR"], "real-secret-xyz123")
-        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "real-secret-xyz123")
-        self.assertEqual(env_block["TOKEN_ANGLE"], "real-secret-xyz123")
+        # Cursor resolves these references at runtime; installation must not
+        # write the supplied secret value into project-local config.
+        self.assertEqual(env_block["TOKEN_DOLLAR"], "${env:ATLASSIAN_API_TOKEN}")
+        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "${env:ATLASSIAN_API_TOKEN}")
+        self.assertEqual(env_block["TOKEN_ANGLE"], "${env:ATLASSIAN_API_TOKEN}")
         self.assertEqual(env_block["LITERAL_EMAIL"], "user@example.com")
 
 

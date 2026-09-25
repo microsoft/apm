@@ -566,7 +566,7 @@ For an org standardizing on APM:
 - Require signed commits on the source repos APM pulls from -- this is where the trust chain bottoms out.
 - Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
 - Forbid `allow_insecure: true` via the policy allow list, except where an air-gapped mirror demands it.
-- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- APM assumes env-var indirection (`GITHUB_TOKEN: ${GITHUB_TOKEN}`) but does not enforce it. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
+- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor preserves explicitly authored static values, while env-var references use Cursor's native runtime interpolation. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
 
 ## Frequently asked questions
 

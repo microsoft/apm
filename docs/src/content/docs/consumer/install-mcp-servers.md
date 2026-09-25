@@ -276,9 +276,14 @@ etc.) are rejected with exit code 2.
 
 ## Token injection: GitHub MCP server
 
-APM does not template arbitrary environment variables into MCP config
-files (your harness does that at runtime). It does inject one
-specific credential automatically:
+For Cursor, env-var references are written using Cursor's native
+`${env:NAME}` syntax, so referenced secret values are resolved by Cursor
+when it starts the MCP server and are not written into the project-local
+`.cursor/mcp.json`. Explicit static values in `mcp.env` remain static and
+are written as authored; keep secrets out of those values.
+
+Separately, APM injects one specific credential automatically for the
+Copilot CLI adapter:
 
 When the Copilot CLI adapter writes a remote MCP config and the
 server is identified as the GitHub MCP server, APM resolves a token
@@ -312,6 +317,11 @@ For other authenticated remote servers, set headers explicitly with
 `--header Authorization="Bearer ${MY_TOKEN}"`.
 
 ## Updating and replacing a server
+
+If an older install already wrote a resolved secret into `.cursor/mcp.json`,
+reinstalling does not rewrite that existing server entry. Remove the affected
+entry (or file) and install it again to replace it with runtime references.
+Rotate any credential that was exposed in a committed or shared config.
 
 Re-run `apm install --mcp NAME ...` against an existing entry:
 

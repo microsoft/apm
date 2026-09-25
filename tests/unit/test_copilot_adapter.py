@@ -463,8 +463,8 @@ class TestCopilotEnvTranslationStdioArgs(unittest.TestCase):
 class TestSiblingAdaptersUnchanged(unittest.TestCase):
     """Regression trap: sibling adapters that inherit from
     ``CopilotClientAdapter`` MUST keep the legacy install-time resolution
-    behaviour. Their ``_supports_runtime_env_substitution`` is pinned to
-    ``False`` until each is individually audited (#1152 follow-ups)."""
+    behaviour. Runtime-capable targets are tested separately after an
+    individual audit."""
 
     def _adapter(self, cls):
         with (
@@ -472,17 +472,6 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
             return cls()
-
-    def test_cursor_still_resolves_to_literal(self):
-        from apm_cli.adapters.client.cursor import CursorClientAdapter
-
-        adapter = self._adapter(CursorClientAdapter)
-        self.assertFalse(adapter._supports_runtime_env_substitution)
-        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
-            result = adapter._resolve_env_variable(
-                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
-            )
-        self.assertEqual(result, "Bearer literal-value")
 
     def test_claude_still_resolves_to_literal(self):
         """Claude Desktop config does NOT support runtime substitution --
@@ -529,6 +518,51 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
                 "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
             )
         self.assertEqual(result, "Bearer literal-value")
+
+
+class TestCursorRuntimeEnvSubstitution(unittest.TestCase):
+    """Cursor uses native runtime references and preserves explicit literals."""
+
+    def _adapter(self):
+        from apm_cli.adapters.client.cursor import CursorClientAdapter
+
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CursorClientAdapter()
+
+    def test_header_reference_uses_cursor_native_syntax_without_reading_secret(self):
+        adapter = self._adapter()
+        self.assertTrue(adapter._supports_runtime_env_substitution)
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer ${env:MY_TOKEN}")
+        self.assertNotIn("literal-value", result)
+
+    def test_explicit_env_literals_stay_static_while_references_are_translated(self):
+        from apm_cli.models.dependency.mcp import TrustedEnvLiteral
+
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "secret-value"}, clear=False):
+            result = adapter._resolve_environment_variables(
+                {
+                    "STATIC": "authored-value",
+                    "TRUSTED": TrustedEnvLiteral("${MY_TOKEN}"),
+                    "REFERENCE": "${MY_TOKEN}",
+                    "ENVPREFIX": "${env:MY_TOKEN}",
+                    "ANGLE": "<MY_TOKEN>",
+                },
+                env_overrides={"MY_TOKEN": "secret-value"},
+            )
+        self.assertEqual(result["STATIC"], "authored-value")
+        self.assertEqual(result["TRUSTED"], "${MY_TOKEN}")
+        self.assertEqual(result["REFERENCE"], "${env:MY_TOKEN}")
+        self.assertEqual(result["ENVPREFIX"], "${env:MY_TOKEN}")
+        self.assertEqual(result["ANGLE"], "${env:MY_TOKEN}")
+        self.assertNotIn("secret-value", str(result))
 
 
 class TestCopilotEnvVarTranslationInStdioEnvBlock(unittest.TestCase):
@@ -603,19 +637,19 @@ class TestLegacyModeStdioEnvBlock(unittest.TestCase):
     pre-fix latent bug returns ``{}`` and every self-defined stdio MCP
     server silently loses its env block.
 
-    Cursor is exercised as the representative legacy-mode subclass; the
+    Claude is exercised as the representative legacy-mode subclass; the
     method now lives on ``MCPClientAdapter`` so the contract is shared
     with every adapter that inherits the base.
     """
 
     def _adapter(self):
-        from apm_cli.adapters.client.cursor import CursorClientAdapter
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
 
         with (
             patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
-            return CursorClientAdapter()
+            return ClaudeClientAdapter()
 
     def test_dict_shape_resolves_all_three_placeholder_syntaxes(self):
         adapter = self._adapter()

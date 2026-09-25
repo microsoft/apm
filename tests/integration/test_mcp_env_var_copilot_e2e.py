@@ -9,11 +9,8 @@ The unit tests in tests/unit/test_copilot_adapter.py cover translation in
 isolation; this test pins the integration boundary so plaintext secrets
 cannot regress back onto disk.
 
-Also includes a Cursor regression trap: Cursor's adapter is pinned to
-the legacy install-time resolution behaviour (per the design contract
-in copilot.py) until its config format is individually audited. That
-adapter MUST keep producing literal values; this test fails loudly if
-the Copilot translation accidentally bleeds into Cursor.
+Also covers Cursor's native ``${env:NAME}`` syntax and guards against
+writing resolved secret values to its project-local configuration.
 """
 
 import json
@@ -25,7 +22,6 @@ import yaml
 
 pytestmark = [
     pytest.mark.requires_apm_binary,
-    pytest.mark.requires_runtime_copilot,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
     # Requires --dist loadgroup in the xdist invocation (the only
     # scheduler that honors xdist_group); without it the marker is
@@ -50,6 +46,8 @@ class TestMcpEnvVarHeadersCopilot:
     runtime placeholders for env-var references in apm.yml. The literal
     values from the installer's environment must NEVER appear on disk.
     """
+
+    pytestmark = pytest.mark.requires_runtime_copilot
 
     def test_self_defined_http_server_translates_env_vars_not_resolves(
         self, tmp_path, apm_binary_path
@@ -240,18 +238,11 @@ class TestMcpEnvVarHeadersCopilot:
 
 
 class TestMcpEnvVarHeadersCursor:
-    """Sibling-adapter regression trap for #1152.
+    """Cursor's native runtime references keep secrets out of project config."""
 
-    Cursor's mcp.json runtime-substitution support has not yet been
-    individually audited, so its adapter is pinned to the legacy
-    install-time resolution behaviour. This test fails if that pin
-    accidentally lifts -- either by removing the
-    ``_supports_runtime_env_substitution = False`` override on
-    ``CursorClientAdapter`` or by changing the base class default in
-    a way that breaks Cursor.
-    """
-
-    def test_cursor_still_resolves_env_vars_to_literal(self, tmp_path, apm_binary_path):
+    def test_cursor_preserves_runtime_references_without_writing_secret(
+        self, tmp_path, apm_binary_path
+    ):
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         # Cursor target signal.
@@ -305,12 +296,8 @@ class TestMcpEnvVarHeadersCursor:
         server = next(iter(servers.values()))
         headers = server.get("headers") or {}
 
-        # Cursor MUST keep the legacy resolve-to-literal behaviour
-        # until a per-adapter audit lifts the pin. This guard fires
-        # if the Copilot fix accidentally bleeds into Cursor.
-        assert headers.get("Authorization") == "Bearer literal-cursor-value", (
-            f"Cursor adapter unexpectedly stopped resolving env vars at "
-            f"install time. If this is intentional, update the design "
-            f"contract in copilot.py and remove this regression trap.\n"
-            f"Got: {headers!r}"
+        assert headers.get("Authorization") == "Bearer ${env:MY_BEARER_TOKEN}", (
+            f"Cursor did not preserve its native runtime reference.\nGot: {headers!r}"
         )
+        full_text = cursor_config.read_text(encoding="utf-8")
+        assert "literal-cursor-value" not in full_text

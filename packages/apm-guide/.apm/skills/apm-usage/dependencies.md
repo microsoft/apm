@@ -468,7 +468,8 @@ dependencies:
         #                            VS Code and JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
-        #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
+        #                            Cursor: translated to ${env:VAR} and resolved at runtime.
+        #                            Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: resolved at install time.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
