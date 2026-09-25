@@ -391,8 +391,18 @@ Every module under those roots must import on Windows before marker deselection.
 Import Unix-only modules such as `pwd` or `fcntl` inside the helpers that need
 them, not at module scope. The collection guard checks this with Unix-only
 standard modules unavailable, even on Linux and macOS.
+The nested collection subprocess has a 300-second hard timeout: pytest must
+import and collect both roots before applying the marker, including on release
+runners sharing CPU with other test workers. Plugin autoload remains disabled,
+and a collection timeout fails the check rather than skipping it.
 Collection proves a test is selected; a successful Windows job provides
 Windows execution evidence. The existing job timeout bounds runtime.
+
+Plugin sequential-install coverage checks deployed-file removal and lockfile
+ownership after uninstall, plus unchanged files and ownership for the retained
+skill. The local fixture covers both an independent skill and a separately
+installed skill from the plugin; the network-backed case uses the same assertions.
+Cleanup wording is not the lifecycle contract.
 
 Linux Lifecycle Smoke runs the required marker subset with `-n 2 --dist loadgroup`. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
 Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all

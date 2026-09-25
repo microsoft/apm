@@ -136,7 +136,9 @@ def _collect_gate_family(args: list[str]) -> subprocess.CompletedProcess[str]:
         env=collection_env,
         capture_output=True,
         text=True,
-        timeout=120,
+        # Marker deselection follows full-root collection; allow for slow,
+        # contended release runners, as the repository taxonomy guard does.
+        timeout=300,
         check=False,
     )
 
@@ -281,10 +283,10 @@ def test_gate_collection_rejects_invalid_selections(
         _assert_gate_family_collection(subprocess.CompletedProcess([], returncode, summary, ""))
 
 
-def test_nested_collection_disables_plugin_autoload(
+def test_nested_collection_preserves_environment_and_bounded_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Nested collection must not import unrelated third-party plugins."""
+    """Keep baseline environment isolation and a finite full-root collection budget."""
     expected_path = os.environ.get("PATH")
     captured_env: dict[str, str] | None = None
 
@@ -295,6 +297,12 @@ def test_nested_collection_disables_plugin_autoload(
         nonlocal captured_env
         env = kwargs.get("env")
         captured_env = env if isinstance(env, dict) else None
+        assert kwargs["timeout"] == 300
+        assert kwargs["cwd"] == ROOT
+        assert kwargs["capture_output"] is True
+        assert kwargs["check"] is False
+        assert command[0] == sys.executable
+        assert command[-3:] == ["-m", GATE_MARKER, "tests/unit"]
         return subprocess.CompletedProcess(
             command,
             returncode=0,
@@ -304,12 +312,26 @@ def test_nested_collection_disables_plugin_autoload(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.delenv("PATH", raising=False)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "0")
 
     _collect_gate_family(["-m", GATE_MARKER, "tests/unit"])
 
     assert captured_env is not None
     assert captured_env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") == "1"
     assert captured_env.get("PATH") == expected_path
+
+
+def test_nested_collection_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung collector must still fail rather than skip or synthesize a passing result."""
+    failure = subprocess.TimeoutExpired("pytest", 300, output="partial collection")
+
+    def timed_out(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", timed_out)
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        _collect_gate_family(["-m", GATE_MARKER, "tests/unit", "tests/integration"])
+    assert exc.value is failure
 
 
 @pytest.mark.parametrize(
