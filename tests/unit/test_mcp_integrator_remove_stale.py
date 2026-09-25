@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.scope import InstallScope
+
 
 @pytest.fixture(autouse=True)
 def _suppress_console(monkeypatch):
@@ -58,6 +60,45 @@ class TestRemoveStaleCharacterisation:
             project_root=Path.cwd(),
             user_scope=True,
         )
+
+    @pytest.mark.parametrize("runtime", ["codex", "kiro", "antigravity", "hermes"])
+    def test_explicit_project_scope_overrides_legacy_user_scope(self, runtime):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        client = MagicMock()
+        client.get_config_path.return_value = "/tmp/project-config"
+        with (
+            patch(
+                "apm_cli.factory.ClientFactory.create_client", return_value=client
+            ) as create_client,
+            patch("apm_cli.integration.mcp_integrator._clean_toml_mcp_config"),
+            patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config"),
+            patch("apm_cli.integration.mcp_integrator._clean_hermes_mcp_config"),
+        ):
+            MCPIntegrator.remove_stale(
+                {"stale"}, runtime=runtime, user_scope=True, scope=InstallScope.PROJECT
+            )
+
+        kwargs = create_client.call_args.kwargs
+        assert kwargs["user_scope"] is False
+
+    @pytest.mark.parametrize("runtime", ["codex", "kiro", "antigravity", "hermes"])
+    def test_legacy_user_scope_selects_preferred_user_config(self, runtime):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        client = MagicMock()
+        client.get_config_path.return_value = "/tmp/user-config"
+        with (
+            patch(
+                "apm_cli.factory.ClientFactory.create_client", return_value=client
+            ) as create_client,
+            patch("apm_cli.integration.mcp_integrator._clean_toml_mcp_config"),
+            patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config"),
+            patch("apm_cli.integration.mcp_integrator._clean_hermes_mcp_config"),
+        ):
+            MCPIntegrator.remove_stale({"stale"}, runtime=runtime, user_scope=True)
+
+        assert create_client.call_args.kwargs["user_scope"] is True
 
     def test_remove_stale_with_runtime(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -147,6 +188,61 @@ class TestRemoveStaleCharacterisation:
         servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
         assert "stale-server" not in servers
         assert servers["keep-server"]["command"] == "keep"
+
+    def test_claude_user_cleanup_uses_custom_config_dir(self, tmp_path, monkeypatch):
+        import json
+
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        config_dir = tmp_path / "claude-config"
+        config_dir.mkdir()
+        config_path = config_dir / ".claude.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "stale-server": {"command": "old"},
+                        "keep-server": {"command": "keep"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        MCPIntegrator.remove_stale(
+            {"stale-server"},
+            runtime="claude",
+            project_root=tmp_path / "project",
+            scope=InstallScope.USER,
+            logger=MagicMock(),
+        )
+
+        servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+        assert "stale-server" not in servers
+        assert servers["keep-server"]["command"] == "keep"
+
+    def test_claude_project_cleanup_does_not_touch_user_config(self, tmp_path, monkeypatch):
+        import json
+
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        config_dir = tmp_path / "claude-config"
+        config_dir.mkdir()
+        config_path = config_dir / ".claude.json"
+        original = json.dumps({"mcpServers": {"stale-server": {"command": "old"}}})
+        config_path.write_text(original, encoding="utf-8")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        MCPIntegrator.remove_stale(
+            {"stale-server"},
+            runtime="claude",
+            project_root=tmp_path / "project",
+            scope=InstallScope.PROJECT,
+            logger=MagicMock(),
+        )
+
+        assert config_path.read_text(encoding="utf-8") == original
 
 
 @pytest.mark.windows_compat

@@ -6,6 +6,7 @@ instead of blanket-skipping all MCP installation at user scope.
 """
 
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.base import MCPClientAdapter
@@ -72,9 +73,8 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
 
     def test_factory_created_adapters_scope(self):
         """ClientFactory-created adapters report the correct scope support."""
-        global_runtimes = {"copilot", "codex", "intellij"}
+        global_runtimes = {"copilot", "codex", "intellij", "opencode"}
         workspace_runtimes = {"vscode", "cursor"}
-        global_runtimes.add("opencode")
 
         for rt in global_runtimes:
             adapter = ClientFactory.create_client(rt)
@@ -133,9 +133,9 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
             )
 
         # Only copilot/codex should have been called (global-capable),
-        # not vscode/cursor/opencode
+        # not vscode/cursor
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        workspace_only = {"vscode", "cursor", "opencode"}
+        workspace_only = {"vscode", "cursor"}
         self.assertFalse(
             called_runtimes & workspace_only,
             f"Workspace-only runtimes should not be called at USER scope, "
@@ -284,14 +284,27 @@ class TestRemoveStaleScopeFiltering(unittest.TestCase):
             scope=InstallScope.USER,
         )
 
-        # Path.cwd() is used for workspace configs (.vscode, .cursor, opencode)
+        # Path.cwd() is used for workspace configs (.vscode, .cursor)
         # Path.home() is used for global configs (~/.copilot, ~/.codex)
         # At USER scope, we should only try to access home-dir configs
         all_calls_str = str(mock_path_cls.mock_calls)
         # Workspace paths should NOT appear
         self.assertNotIn(".vscode", all_calls_str)
         self.assertNotIn(".cursor", all_calls_str)
-        self.assertIn("opencode.json", all_calls_str)
+
+    @patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config")
+    @patch("apm_cli.factory.ClientFactory.create_client")
+    def test_user_scope_cleans_opencode_user_config(self, create_client, clean_config):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        adapter = MagicMock()
+        adapter.get_config_path.return_value = "/tmp/opencode/opencode.json"
+        create_client.return_value = adapter
+
+        MCPIntegrator.remove_stale({"server"}, runtime="opencode", scope=InstallScope.USER)
+
+        create_client.assert_called_once_with("opencode", project_root=Path.cwd(), user_scope=True)
+        clean_config.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

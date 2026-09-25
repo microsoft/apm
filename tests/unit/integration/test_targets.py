@@ -13,6 +13,7 @@ from apm_cli.integration.targets import (
     PrimitiveMapping,
     active_targets,
     active_targets_user_scope,
+    get_integration_prefixes,
     resolve_targets,
 )
 from apm_cli.utils.path_security import PathTraversalError
@@ -122,6 +123,24 @@ class TestActiveTargets:
         targets = active_targets_user_scope()
 
         assert [target.name for target in targets] == ["opencode"]
+
+    @pytest.mark.parametrize("config_dir_kind", ["default", "inside-home", "outside-home"])
+    def test_user_scope_prefixes_include_resolved_opencode_root(self, monkeypatch, config_dir_kind):
+        monkeypatch.setattr(Path, "home", lambda: self.root)
+        monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        expected = self.root / ".config" / "opencode"
+        if config_dir_kind == "inside-home":
+            expected = self.root / "custom-opencode"
+            monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(expected))
+        elif config_dir_kind == "outside-home":
+            expected = self.root.parent / "outside-opencode"
+            monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(expected))
+
+        prefixes = get_integration_prefixes(user_scope=True)
+
+        assert f"{expected.resolve(strict=False)}/" in prefixes
+        assert KNOWN_TARGETS["opencode"].prefix in prefixes
 
     def test_github_and_claude_returns_both(self):
         (self.root / ".github").mkdir()

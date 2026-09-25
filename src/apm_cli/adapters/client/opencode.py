@@ -1,8 +1,8 @@
 """OpenCode implementation of MCP client adapter.
 
 At project scope, OpenCode uses ``opencode.json`` at the project root with an
-``mcp`` key when the project-root ``.opencode/`` directory exists. Project
-writes require ``.opencode/``; user writes create the resolved user
+``mcp`` key when the project-root ``.opencode/`` directory exists. Project-scope
+writes require ``.opencode/``; user scope creates the resolved user
 configuration root as needed.
 The schema differs from VSCode/Cursor:
 
@@ -57,13 +57,19 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     # revisit in a follow-up.
     _supports_runtime_env_substitution: bool = False
 
-    def _get_config_dir(self) -> Path:
-        """Return the project or resolved user OpenCode configuration root."""
-        if not self.user_scope:
-            return self.project_root / ".opencode"
+    def _project_guard_dir(self) -> Path:
+        """Return the project opt-in directory."""
+        return self.project_root / ".opencode"
+
+    def _user_config_root(self) -> Path:
+        """Return the native OpenCode user configuration root."""
         from ...integration.opencode_paths import opencode_user_config_dir
 
         return opencode_user_config_dir()
+
+    def _get_config_dir(self) -> Path:
+        """Return the scope-appropriate OpenCode directory."""
+        return self._user_config_root() if self.user_scope else self._project_guard_dir()
 
     def get_config_path(self):
         """Return ``opencode.json`` in the scope-appropriate OpenCode root."""
@@ -95,8 +101,19 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         for name, copilot_entry in config_updates.items():
             current_config["mcp"][name] = self._to_opencode_format(copilot_entry, enabled=enabled)
 
-        atomic_write_text(config_path, json.dumps(current_config, indent=2), new_file_mode=0o600)
-        os.chmod(config_path, 0o600)
+        atomic_write_text(
+            config_path,
+            json.dumps(current_config, indent=2),
+            new_file_mode=0o600 if self.user_scope else None,
+        )
+        if self.user_scope and os.name != "nt":
+            os.chmod(config_path, 0o600)
+
+    def render_server_config(self, server_info: dict) -> dict:
+        """Render the exact OpenCode-native stored server shape."""
+        return self._to_opencode_format(
+            self._format_server_config(server_info, {}, {}),
+        )
 
     def get_current_config(self):
         """Read the scope-appropriate ``opencode.json`` contents."""

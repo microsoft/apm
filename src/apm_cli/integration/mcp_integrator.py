@@ -15,7 +15,6 @@ import builtins
 import copy
 import json
 import logging
-import os
 import re
 import shutil
 import warnings
@@ -781,6 +780,8 @@ class MCPIntegrator:
             copilot_client = ClientFactory.create_client(
                 "copilot",
                 project_root=project_root_path,
+                # Preserve the historical unspecified-scope global cleanup
+                # behavior for Copilot; Claude is handled explicitly below.
                 user_scope=True if scope is None else effective_user_scope,
             )
             _clean_json_mcp_config(
@@ -917,10 +918,12 @@ class MCPIntegrator:
         if "hermes" in target_runtimes:
             from apm_cli.factory import ClientFactory
 
-            hermes_home = os.environ.get("HERMES_HOME", "").strip()
-            unresolved_cfg = (
-                Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
-            ) / "config.yaml"
+            hermes_client = ClientFactory.create_client(
+                "hermes",
+                project_root=project_root_path,
+                user_scope=effective_user_scope,
+            )
+            unresolved_cfg = Path(hermes_client.get_config_path())
             if _reject_symlink_config(
                 unresolved_cfg,
                 "Hermes config.yaml",
@@ -928,15 +931,8 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             ):
                 return
-            hermes_cfg = Path(
-                ClientFactory.create_client(
-                    "hermes",
-                    project_root=project_root_path,
-                    user_scope=effective_user_scope,
-                ).get_config_path()
-            )
             _clean_hermes_mcp_config(
-                hermes_cfg,
+                unresolved_cfg,
                 expanded_stale,
                 logger,
                 fail_on_write_error=fail_on_write_error,
@@ -954,8 +950,15 @@ class MCPIntegrator:
 
         # Clean Claude Code user ~/.claude.json (USER scope only)
         if clean_claude_user:
+            from apm_cli.factory import ClientFactory
+
+            claude_client = ClientFactory.create_client(
+                "claude",
+                project_root=project_root_path,
+                user_scope=True,
+            )
             _clean_claude_config(
-                Path.home() / ".claude.json",
+                Path(claude_client.get_config_path()),
                 expanded_stale,
                 logger,
                 is_user_scope=True,

@@ -46,16 +46,18 @@ def fake_home(tmp_path):
     return home_dir
 
 
-def _env_with_home(fake_home):
+def _env_with_home(fake_home, extra=None):
     """Return an env dict with HOME/USERPROFILE pointing to *fake_home*."""
     env = os.environ.copy()
     env["HOME"] = str(fake_home)
     if sys.platform == "win32":
         env["USERPROFILE"] = str(fake_home)
+    if extra:
+        env.update(extra)
     return env
 
 
-def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60):
+def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60, extra_env=None):
     """Run an apm CLI command with an overridden home directory."""
     return subprocess.run(
         [apm_binary_path] + args,  # noqa: RUF005
@@ -63,7 +65,7 @@ def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60):
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=_env_with_home(fake_home),
+        env=_env_with_home(fake_home, extra_env),
     )
 
 
@@ -641,6 +643,51 @@ class TestGlobalOpenCodeScope:
         assert project_skill.is_file()
         assert (project_root / "AGENTS.md").read_text(encoding="utf-8") == project_agents
         assert not (claude_root / "CLAUDE.md").exists()
+
+    @pytest.mark.lifecycle_smoke
+    def test_opencode_global_mcp_lifecycle_uses_custom_config_dir(self, apm_binary_path, fake_home):
+        """Global MCP install/uninstall follows OPENCODE_CONFIG_DIR exactly."""
+        custom_root = fake_home / "custom-opencode"
+        env = {"OPENCODE_CONFIG_DIR": str(custom_root)}
+
+        install = _run_apm(
+            apm_binary_path,
+            [
+                "install",
+                "--global",
+                "--target",
+                "opencode",
+                "--mcp",
+                "custom-server",
+                "--",
+                "npx",
+                "-y",
+                "custom-server",
+            ],
+            fake_home,
+            fake_home,
+            extra_env=env,
+        )
+        assert install.returncode == 0, install.stdout + install.stderr
+
+        config_path = custom_root / "opencode.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        assert config["mcp"]["custom-server"] == {
+            "type": "local",
+            "command": ["npx", "-y", "custom-server"],
+            "enabled": True,
+        }
+
+        uninstall = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", "custom-server"],
+            fake_home,
+            fake_home,
+            extra_env=env,
+        )
+        assert uninstall.returncode == 0, uninstall.stdout + uninstall.stderr
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        assert "custom-server" not in config.get("mcp", {})
 
 
 class TestGlobalUninstallLifecycle:

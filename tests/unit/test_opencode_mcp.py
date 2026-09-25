@@ -172,6 +172,16 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         path = self.adapter.get_config_path()
         self.assertEqual(path, str(self.opencode_json))
 
+    def test_project_update_preserves_non_windows_file_mode(self):
+        if os.name == "nt":
+            self.skipTest("POSIX file modes are not portable to Windows")
+        self.opencode_json.write_text("{}", encoding="utf-8")
+        self.opencode_json.chmod(0o644)
+
+        self.adapter.update_config({"server": {"command": "npx", "args": []}})
+
+        self.assertEqual(self.opencode_json.stat().st_mode & 0o777, 0o644)
+
     def test_user_scope_uses_resolved_user_directory_and_secure_write(self):
         user_dir = Path(self.tmp.name) / "user-opencode"
         with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
@@ -262,6 +272,53 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         server = data["mcp"]["my-server"]
         self.assertEqual(server["type"], "local")
         self.assertEqual(server["environment"], {"KEY": "val"})
+
+    def test_render_server_config_matches_stored_local_shape(self):
+        server_info = {
+            "name": "test",
+            "packages": [
+                {
+                    "name": "pkg",
+                    "registry_name": "npm",
+                    "runtime_hint": "npx",
+                    "runtime_arguments": [],
+                    "package_arguments": [],
+                    "environment_variables": [],
+                }
+            ],
+        }
+        rendered = self.adapter.render_server_config(server_info)
+
+        self.adapter.update_config({"test": rendered})
+        stored = json.loads(self.opencode_json.read_text(encoding="utf-8"))["mcp"]["test"]
+        self.assertEqual(
+            stored, {"type": "local", "command": ["npx", "-y", "pkg"], "enabled": True}
+        )
+
+    def test_render_server_config_matches_stored_remote_shape_and_env(self):
+        server_info = {
+            "name": "remote",
+            "remotes": [{"url": "https://example.test/mcp", "headers": {"X-Key": "v"}}],
+        }
+        rendered = self.adapter.render_server_config(server_info)
+        self.adapter.update_config({"remote": rendered})
+        stored = json.loads(self.opencode_json.read_text(encoding="utf-8"))["mcp"]["remote"]
+        self.assertEqual(
+            stored,
+            {
+                "type": "remote",
+                "url": "https://example.test/mcp",
+                "headers": {"X-Key": "v"},
+                "enabled": True,
+            },
+        )
+
+    def test_relative_opencode_config_dir_falls_through(self):
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": "relative", "XDG_CONFIG_HOME": ""}):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / ".config" / "opencode").resolve(strict=False),
+            )
 
     def test_update_config_enabled_false(self):
         copilot_entry = {"command": "npx", "args": []}

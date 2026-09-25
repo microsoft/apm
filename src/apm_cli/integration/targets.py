@@ -165,6 +165,14 @@ class TargetProfile:
     ``~/.github/``).
     """
 
+    user_scope_root_resolver: Callable[[], Path | None] | None = None
+    """Resolve a native user root without using the dynamic-root mechanism.
+
+    This resolver is for ordinary user-scope configuration roots whose path
+    can be overridden by environment variables. Unlike ``user_root_resolver``,
+    it does not populate ``resolved_deploy_root``.
+    """
+
     unsupported_user_primitives: tuple[str, ...] = ()
     """Primitives that are **not** available at user scope even when the
     target itself is partially supported."""
@@ -440,17 +448,16 @@ class TargetProfile:
             "claude": "CLAUDE_CONFIG_DIR",
             "hermes": "HERMES_HOME",
         }
-        if self.name in ("claude", "hermes", "opencode"):
+        if self.user_scope_root_resolver is not None:
+            abs_path = self.user_scope_root_resolver()
+            if abs_path is not None:
+                new_root = str(abs_path)
+        elif self.name in ("claude", "hermes"):
             import os
             from pathlib import Path
 
-            if self.name == "opencode":
-                from apm_cli.integration.opencode_paths import opencode_user_config_dir
-
-                abs_path = opencode_user_config_dir()
-            else:
-                env = os.environ.get(env_vars[self.name], "").strip()
-                abs_path = Path(env).expanduser().resolve(strict=False) if env else None
+            env = os.environ.get(env_vars[self.name], "").strip()
+            abs_path = Path(env).expanduser().resolve(strict=False) if env else None
 
             if abs_path is not None:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
@@ -588,6 +595,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
+        user_scope_root_resolver=lambda: _resolve_env_user_root("CLAUDE_CONFIG_DIR", ".claude"),
         hooks_config_display=".claude/settings.json",
     ),
     # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
@@ -681,6 +689,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".config/opencode",
+        user_scope_root_resolver=lambda: _resolve_opencode_user_root(),
         unsupported_user_primitives=("hooks",),
         user_primitive_overrides={
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
@@ -925,6 +934,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_dir=".hermes",
+        user_scope_root_resolver=lambda: _resolve_env_user_root("HERMES_HOME", ".hermes"),
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
@@ -1081,6 +1091,24 @@ def should_use_legacy_skill_paths() -> bool:
     return val in ("1", "true", "yes")
 
 
+def _resolve_env_user_root(env_name: str, default_dir: str) -> Path:
+    """Resolve a user target root from an absolute environment override."""
+    import os
+
+    configured = os.environ.get(env_name, "").strip()
+    configured_path = Path(configured).expanduser() if configured else None
+    if configured_path is not None and configured_path.is_absolute():
+        return configured_path.resolve(strict=False)
+    return (Path.home() / default_dir).resolve(strict=False)
+
+
+def _resolve_opencode_user_root() -> Path:
+    """Resolve OpenCode's native user configuration directory."""
+    from apm_cli.integration.opencode_paths import opencode_user_config_dir
+
+    return opencode_user_config_dir()
+
+
 def _resolve_copilot_cowork_root() -> Path | None:
     """Thin wrapper around ``copilot_cowork_paths.resolve_copilot_cowork_skills_dir()``.
 
@@ -1130,8 +1158,9 @@ def resolve_hermes_root() -> Path:
     from pathlib import Path
 
     env = os.environ.get("HERMES_HOME", "").strip()
-    if env:
-        return Path(env).expanduser().resolve(strict=False)
+    env_path = Path(env).expanduser() if env else None
+    if env_path is not None and env_path.is_absolute():
+        return env_path.resolve(strict=False)
     return (Path.home() / ".hermes").resolve(strict=False)
 
 
@@ -1178,8 +1207,11 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
         if t.prefix not in seen:
             seen.add(t.prefix)
             prefixes.append(t.prefix)
-        if targets is None and user_scope and t.user_root_dir is not None:
-            user_prefix = f"{t.user_root_dir}/"
+        if targets is None and user_scope:
+            user_profile = t.for_scope(user_scope=True)
+            user_prefix = f"{user_profile.root_dir}/" if user_profile is not None else None
+            if user_prefix is None:
+                continue
             if user_prefix not in seen:
                 seen.add(user_prefix)
                 prefixes.append(user_prefix)
@@ -1264,12 +1296,8 @@ def active_targets_user_scope(
             or not _flag_gated(p, create_config=create_config)
         ):
             continue
-        if p.name == "opencode":
-            from apm_cli.integration.opencode_paths import opencode_user_config_dir
-
-            is_present = opencode_user_config_dir().is_dir()
-        else:
-            is_present = (home / p.effective_root(user_scope=True)).is_dir()
+        scoped = p.for_scope(user_scope=True)
+        is_present = scoped is not None and scoped.deploy_path(home).is_dir()
         if is_present:
             detected.append(p)
     if detected:
