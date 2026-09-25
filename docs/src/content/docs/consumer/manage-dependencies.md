@@ -177,6 +177,23 @@ For reserved aliases `.` and `..`, see [Rejected dependency aliases](../../troub
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).
 
+## Incompatible immutable requirements
+
+APM installs one version per package identity. If two dependency paths require
+tags or commit SHAs that resolve to different commits, install fails with both
+root-to-package paths and requested refs. Different tag names, or a tag and its
+commit SHA, are compatible when they identify the same commit. Errors show
+ordered `owner/repo@ref -> owner/repo@ref` chains; manifests still use `#ref`.
+Unchanged locked refs use their recorded commits without Git ref discovery.
+New named refs may need a lookup; a failed lookup is not proof of compatibility.
+
+Align the refs in your `apm.yml`, or select a parent package release that requires
+the same commit. Then run `apm install` to regenerate the lockfile. Do not edit
+`apm.lock.yaml` to hide a conflict. `--frozen` also rejects a locked commit that
+drops an immutable requirement discovered in a dependency manifest, including
+on a cold cache after the parent package is fetched. Short SHA pins must match
+the prefix of the recorded full commit. Side-by-side versions are not supported.
+
 ## Add a dependency
 
 You have two paths.
@@ -361,14 +378,20 @@ apm prune --dry-run   # preview what gets deleted
 apm prune             # delete orphaned packages from apm_modules/
 ```
 
-`apm prune` removes any directory in `apm_modules/` that no longer
-corresponds to a declared dependency or a transitive dependency still
-required by another package. It does not touch your manifest.
+`apm prune` removes unneeded recognized package roots in `apm_modules/`,
+including manifestless `SKILL.md` installs whose lock entries are already gone.
+It preserves declared direct/dev and retained transitive packages, bundled
+skills, and entire roots containing needed nested packages. Personal files
+inside a removable root are also removed; keep personal source outside
+`apm_modules/`. It does not touch your manifest.
 Lockfile entries, deployed harness files (`.github/`, `.claude/`, etc.),
 and merged hook configuration owned by the pruned package are all
 reconciled immediately by `apm prune` itself -- remaining direct and
 transitive packages keep their hooks; no follow-up `apm install` is
 required.
+
+See [`apm prune`](../../reference/cli/prune/) for the managed-root boundary
+and the separate ownership protections for deployed files.
 
 If you also want to refresh remaining deps to their latest versions or refs, see
 [Update and refresh](../update-and-refresh/).

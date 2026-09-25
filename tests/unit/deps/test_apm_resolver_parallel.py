@@ -24,6 +24,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 
@@ -31,6 +32,7 @@ from apm_cli.deps import apm_resolver
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.dependency_graph import DependencyNode
 from apm_cli.models.apm_package import APMPackage, DependencyReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
 
 def _write_pkg(root: Path, name: str, deps: list[str] | None = None) -> Path:
@@ -240,8 +242,8 @@ def test_parallel_local_dependencies_serialize_shared_materialization_path(
     assert max_active == 1
 
 
-def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
-    """The flattened winner, callback, loaded metadata, and disk must agree."""
+def test_equivalent_refs_select_winner_before_parallel_download(tmp_path):
+    """Equivalent tag spellings still materialize one deterministic winner."""
     modules = tmp_path / "apm_modules"
     modules.mkdir()
     (tmp_path / "apm.yml").write_text(
@@ -285,10 +287,16 @@ def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
             with callback_lock:
                 active_workers -= 1
 
+    refs = Mock()
+    refs.list_remote_refs.return_value = [
+        RemoteRef("v1", GitReferenceType.TAG, "a" * 40),
+        RemoteRef("v2", GitReferenceType.TAG, "a" * 40),
+    ]
     graph = APMDependencyResolver(
         apm_modules_dir=modules,
         download_callback=download,
         max_parallel=2,
+        reference_resolver=refs,
     ).resolve_dependencies(tmp_path)
 
     winner = graph.flattened_dependencies.get_dependency("org/shared")
@@ -300,6 +308,7 @@ def test_conflicting_refs_select_winner_before_parallel_download(tmp_path):
     assert winner is not None and winner.reference == "v1"
     assert winner_node.package.version == "v1"
     assert disk_manifest["version"] == "v1"
+    assert graph.is_valid()
     assert graph.flattened_dependencies.has_conflicts()
 
 
