@@ -9,13 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.32.0] - 2026-09-25
 
-### Added
-
-- The Autopilot maintainer canvas lets CODEOWNERS label issues and PRs and launch isolated triage, delivery, and review sessions from Copilot App. PR reviews support `panel-mode: full | lean | delta`, and all Autopilot comments use a shared writer with an AI disclaimer. (by @sergio-sisternes-epam, #3024)
-
 ### Changed
 
-- **BREAKING:** Autopilot packages now use canonical `autopilot-{domain}-{stage}-{role}` scheduler/worker names, with CODEOWNER-aware review gates and no unattended implementation or assignment. Replace removed aliases such as `apm-review-panel`, `apm-issue-autopilot`, and `batch-bug-shepherd` using the map in `packages/autopilot/README.md`. (by @sergio-sisternes-epam, #3003)
 - `apm --help`, `apm doctor --help`, and `apm config get` no longer import heavyweight command modules; those load only when the matching command runs. (by @sergio-sisternes-epam, #3001)
 
 ### Fixed
