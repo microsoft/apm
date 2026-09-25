@@ -514,7 +514,11 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
-                deployed.append(_deployed_path_entry(tp, project_root, targets))
+                deployed.append(
+                    _deployed_path_entry(
+                        tp, project_root, targets, scope=scope or InstallScope.PROJECT
+                    )
+                )
             _adopted_attr = getattr(_int_result, "files_adopted", 0)
             # Coerce defensively: subclasses (e.g. HookIntegrationResult)
             # always set this, but tests use MagicMock results which
@@ -632,7 +636,9 @@ def integrate_package_primitives(  # noqa: PLR0913
                 ),
                 None,
             )
-            locator_name = target_name_for_locator(_deployed_path_entry(tp, project_root, targets))
+            locator_name = target_name_for_locator(
+                _deployed_path_entry(tp, project_root, targets, scope=scope or InstallScope.PROJECT)
+            )
             _skill_target_dirs.add(
                 owner.name
                 if owner is not None
@@ -667,7 +673,9 @@ def integrate_package_primitives(  # noqa: PLR0913
 
         log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
     for tp in skill_result.target_paths:
-        deployed.append(_deployed_path_entry(tp, project_root, targets))
+        deployed.append(
+            _deployed_path_entry(tp, project_root, targets, scope=scope or InstallScope.PROJECT)
+        )
         # #1716: also record the bundle's contained files so per-file
         # content hashes cover SKILL.md / assets / scripts. The directory
         # entry above is retained (cleanup's directory-rejection gate and

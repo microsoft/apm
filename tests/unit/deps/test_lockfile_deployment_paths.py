@@ -5,6 +5,7 @@ from pathlib import Path
 
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import LocatorKind
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -68,3 +69,51 @@ def test_outside_home_opencode_path_uses_target_relative_locator() -> None:
     )
     assert locator.kind is LocatorKind.TARGET_RELATIVE
     assert locator.value == entry
+
+
+def test_outside_home_opencode_user_locator_preserves_metadata_and_roundtrips() -> None:
+    project_root = Path("/tmp/apm-home")
+    config_root = Path("/tmp/opencode-config")
+    target = replace(
+        KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+        root_dir=config_root.as_posix(),
+    )
+    target_path = config_root / "skills" / "reviewer" / "SKILL.md"
+
+    value = deployed_path_entry(
+        target_path,
+        project_root,
+        [target],
+        scope=InstallScope.USER,
+    )
+    locator = DeploymentLedgerCodec.locator_for_path(
+        target_path,
+        project_root=project_root,
+        target=target,
+        scope=InstallScope.USER,
+    )
+
+    assert value == "skills/reviewer/SKILL.md"
+    assert locator.kind is LocatorKind.TARGET_RELATIVE
+    assert locator.target == "opencode"
+    assert locator.scope == "user"
+    assert locator.value == value
+    rows = DeploymentLedgerCodec.rows(
+        DeploymentLedgerCodec.from_rows(
+            [
+                {
+                    "kind": locator.kind.value,
+                    "target": locator.target,
+                    "value": locator.value,
+                    "runtime": locator.runtime,
+                    "scope": locator.scope,
+                    "owners": ["pkg"],
+                    "active_owner": "pkg",
+                    "content_hash": None,
+                }
+            ]
+        )
+    )
+    assert rows[0]["kind"] == "target-relative"
+    assert rows[0]["target"] == "opencode"
+    assert rows[0]["scope"] == "user"

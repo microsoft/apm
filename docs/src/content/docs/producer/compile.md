@@ -289,7 +289,9 @@ This reads **global instructions** from `~/.apm/apm_modules/` (instructions
 without `applyTo:` frontmatter) and writes user-scope root context files for
 root-context targets:
 
-- `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
+- `~/.claude/CLAUDE.md`, or `$CLAUDE_CONFIG_DIR/CLAUDE.md` when
+  `CLAUDE_CONFIG_DIR` is nonblank and absolute. Relative or blank values fall
+  back to `~/.claude/CLAUDE.md` (the same rule applies to Claude MCP config).
 - `~/.codex/AGENTS.md`
 - `AGENTS.md` in the resolved OpenCode user config root
 - `~/.copilot/AGENTS.md`

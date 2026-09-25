@@ -136,7 +136,7 @@ GitHub Copilot (CLI and IDE).
 Claude Code.
 
 - **Detection.** `.claude/` directory, or `CLAUDE.md`.
-- **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
+- **Deploy directory.** `.claude/` at project scope and `~/.claude/` at user scope. A nonblank absolute `CLAUDE_CONFIG_DIR` overrides the user-scope root; relative or blank values fall back to `~/.claude` (including MCP configuration).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
   - instructions: deployed directly by `apm install` to
@@ -145,7 +145,9 @@ Claude Code.
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md`; instructions already deployed under
+- **Compile output.** `CLAUDE.md` under the selected scope root; at user scope,
+  a nonblank absolute `CLAUDE_CONFIG_DIR` is honored, while relative or blank
+  values fall back to `~/.claude`. Instructions already deployed under
   `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
 
 ## cursor

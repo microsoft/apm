@@ -322,6 +322,35 @@ def union_preserving(
         return "legacy"
 
     def _locator(path: str) -> DeploymentLocator:
+        # User-scope deployments historically persisted only the compatibility
+        # value (for example ``agents/reviewer.md``). Reconstruct the richer
+        # target-relative identity when a scope-resolved target can prove that
+        # the value is below its managed root. The containment check is
+        # intentional: values containing ``..`` must never be accepted merely
+        # because they happen to normalize below a target root.
+        if user_scope and "://" not in path:
+            from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+            for profile in (
+                *targets,
+                *(declared_targets or []),
+                *scoped_known_targets.values(),
+            ):
+                deploy_root = getattr(profile, "managed_deploy_root", None)
+                if deploy_root is None or not isinstance(deploy_root, Path):
+                    continue
+                candidate = deploy_root / path
+                try:
+                    ensure_path_within(candidate, deploy_root)
+                except PathTraversalError:
+                    continue
+                return DeploymentLocator(
+                    kind=LocatorKind.TARGET_RELATIVE,
+                    target=profile.name,
+                    value=path,
+                    runtime=None,
+                    scope="user",
+                )
         return DeploymentLocator(
             kind=LocatorKind.URI if "://" in path else LocatorKind.PROJECT_RELATIVE,
             target=_target_for(path),
