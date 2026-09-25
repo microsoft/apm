@@ -59,13 +59,18 @@ def _env_with_home(fake_home, extra=None):
 
 def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60, extra_env=None):
     """Run an apm CLI command with an overridden home directory."""
+    env = _env_with_home(fake_home)
+    env.pop("OPENCODE_CONFIG_DIR", None)
+    env.pop("XDG_CONFIG_HOME", None)
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=_env_with_home(fake_home, extra_env),
+        env=env,
     )
 
 

@@ -1161,7 +1161,8 @@ def _is_flag_enabled(flag_name: str, *, create_config: bool = True) -> bool:
 def resolve_hermes_root() -> Path:
     """Resolve the Hermes home directory.
 
-    Honors ``$HERMES_HOME`` (default ``~/.hermes``).  Returns an expanded,
+    Honors a nonblank absolute ``$HERMES_HOME``; relative or blank values use
+    ``~/.hermes``. Returns an expanded,
     normalized ``Path`` (``..`` segments collapsed via ``resolve``) so traversal
     in ``$HERMES_HOME`` cannot create unintended intermediate directories during
     ``mkdir(parents=True)``; the directory is not required to exist.  Mirrors the

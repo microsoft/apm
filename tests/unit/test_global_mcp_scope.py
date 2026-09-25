@@ -334,7 +334,16 @@ class TestRemoveStaleScopeFiltering(unittest.TestCase):
             user_config.write_text(json.dumps(user_config_data), encoding="utf-8")
             project_config.write_text(json.dumps(project_config_data), encoding="utf-8")
 
-            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            with patch.dict(
+                os.environ,
+                {
+                    "HOME": str(root / "home"),
+                    "LOCALAPPDATA": str(root / "localappdata"),
+                    "XDG_CONFIG_HOME": str(root / "xdg-config"),
+                    "XDG_DATA_HOME": str(root / "xdg-data"),
+                    "OPENCODE_CONFIG_DIR": str(user_dir),
+                },
+            ):
                 MCPIntegrator.remove_stale(
                     {"server"},
                     runtime="opencode",
