@@ -75,6 +75,7 @@ class TestAddPluginHappy:
             version=">=3.0.0",
             subdir="src/plugin",
             tag_pattern="v{version}",
+            category="developer-tools",
             tags=["utilities", "testing"],
             include_prerelease=True,
         )
@@ -83,6 +84,7 @@ class TestAddPluginHappy:
         added = next(p for p in data["packages"] if p["name"] == "full-tool")
         assert added["subdir"] == "src/plugin"
         assert added["tag_pattern"] == "v{version}"
+        assert added["category"] == "developer-tools"
         assert added["tags"] == ["utilities", "testing"]
         assert added["include_prerelease"] is True
 
@@ -236,6 +238,12 @@ class TestUpdatePluginHappy:
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
         assert entry["subdir"] == "src/plugin"
+
+    def test_update_category(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        update_plugin_entry(yml, "existing-package", category="productivity")
+        data = yaml.safe_load(yml.read_text(encoding="utf-8"))
+        assert data["packages"][0]["category"] == "productivity"
 
     def test_setting_ref_clears_version(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
