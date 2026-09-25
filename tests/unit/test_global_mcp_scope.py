@@ -5,6 +5,9 @@ global-capable runtimes (Copilot CLI, Codex CLI, JetBrains Copilot)
 instead of blanket-skipping all MCP installation at user scope.
 """
 
+import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -292,19 +295,38 @@ class TestRemoveStaleScopeFiltering(unittest.TestCase):
         self.assertNotIn(".vscode", all_calls_str)
         self.assertNotIn(".cursor", all_calls_str)
 
-    @patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config")
-    @patch("apm_cli.factory.ClientFactory.create_client")
-    def test_user_scope_cleans_opencode_user_config(self, create_client, clean_config):
+    def test_user_scope_cleans_opencode_user_config(self):
+        """USER cleanup removes OpenCode's user entry, not project config."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        adapter = MagicMock()
-        adapter.get_config_path.return_value = "/tmp/opencode/opencode.json"
-        create_client.return_value = adapter
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_dir = root / "user-opencode"
+            project_root = root / "project"
+            user_config = user_dir / "opencode.json"
+            project_config = project_root / "opencode.json"
+            stale_entry = {"type": "local", "command": ["stale"]}
+            user_config_data = {"mcp": {"server": stale_entry}}
+            project_config_data = {"mcp": {"server": stale_entry}}
 
-        MCPIntegrator.remove_stale({"server"}, runtime="opencode", scope=InstallScope.USER)
+            user_dir.mkdir()
+            project_root.mkdir()
+            user_config.write_text(json.dumps(user_config_data), encoding="utf-8")
+            project_config.write_text(json.dumps(project_config_data), encoding="utf-8")
 
-        create_client.assert_called_once_with("opencode", project_root=Path.cwd(), user_scope=True)
-        clean_config.assert_called_once()
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+                MCPIntegrator.remove_stale(
+                    {"server"},
+                    runtime="opencode",
+                    project_root=project_root,
+                    scope=InstallScope.USER,
+                )
+
+            self.assertEqual(json.loads(user_config.read_text(encoding="utf-8")), {"mcp": {}})
+            self.assertEqual(
+                json.loads(project_config.read_text(encoding="utf-8")),
+                project_config_data,
+            )
 
 
 # ---------------------------------------------------------------------------

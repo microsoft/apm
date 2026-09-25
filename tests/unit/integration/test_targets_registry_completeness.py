@@ -40,7 +40,7 @@ _KNOWN_COMPILE_FAMILIES = {"vscode", "claude", "gemini", "agents"}
 # key means a new MCP config schema; ``MCPConflictDetector`` must learn how
 # to parse it (today only ``mcp_servers`` needs the codex-style flattened-
 # key fallback -- the others are plain top-level dicts).
-_KNOWN_MCP_KEYS = {"mcpServers", "mcp_servers", "servers"}
+_KNOWN_MCP_KEYS = {"mcp", "mcpServers", "mcp_servers", "servers"}
 
 # Adapter target_names that are MCP-only pseudo-targets (no entry in
 # KNOWN_TARGETS).  Code that joins adapter -> profile must tolerate misses
