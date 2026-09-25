@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
 ### Added
 
 - Global OpenCode MCP support now writes `opencode.json` to the resolved user configuration root, configurable with `OPENCODE_CONFIG_DIR` and falling back through `$XDG_CONFIG_HOME/opencode` to `~/.config/opencode`. (#3075)
