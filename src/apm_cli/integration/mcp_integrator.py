@@ -813,11 +813,18 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean opencode.json (only if .opencode/ directory exists)
+        # Clean the scope-resolved OpenCode config through its adapter.
         if "opencode" in target_runtimes:
-            if (project_root_path / ".opencode").is_dir():
+            from apm_cli.factory import ClientFactory
+
+            opencode_client = ClientFactory.create_client(
+                "opencode",
+                project_root=project_root_path,
+                user_scope=scope is InstallScope.USER,
+            )
+            if scope is InstallScope.USER or (project_root_path / ".opencode").is_dir():
                 _clean_json_mcp_config(
-                    project_root_path / "opencode.json",
+                    Path(opencode_client.get_config_path()),
                     expanded_stale,
                     logger,
                     "opencode.json",

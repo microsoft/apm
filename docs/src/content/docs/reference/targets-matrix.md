@@ -212,18 +212,17 @@ Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
 OpenCode.
 
-- **Detection.** `.opencode/` directory.
-- **Deploy directory.** `.opencode/` at project scope; `~/.config/opencode/` at user scope.
+- **Detection.** `.opencode/` directory for project scope. User-scope auto-discovery uses the resolved global config directory; it does not use the project marker.
+- **Deploy directory.** `.opencode/` at project scope; the resolved user scope is `OPENCODE_CONFIG_DIR`, then `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode`.
 - **Supported primitives.** agents, commands, skills, mcp.
 - **File conventions.**
   - agents: `.opencode/agents/<name>.md`
   - commands: `.opencode/commands/<name>.md`
   - skills: `.agents/skills/<name>/SKILL.md` (project) or
-    `~/.config/opencode/skills/<name>/SKILL.md` (user)
+    `skills/<name>/SKILL.md` in the resolved user config root (user)
 - **Caveat.** OpenCode has no hooks concept; the `hooks` primitive is silently skipped for this target.
-- **Global compile.** `apm compile -g` writes
-  `~/.config/opencode/AGENTS.md`. OpenCode also retains `applyTo` sections
-  in that generated file; other user-root targets compile only global instructions.
+- **MCP config.** `opencode.json` at the project root when `.opencode/` exists, or in the resolved user root at user scope.
+- **Global compile.** `apm compile -g` writes `AGENTS.md` to the same resolved user root. OpenCode also retains `applyTo` sections in that generated file; other user-root targets compile only global instructions. See the [OpenCode config environment variables](environment-variables/#opencode_config_dir). Changing the resolved root does not automatically migrate files; files in the old default root can remain orphaned.
 
 ## windsurf
 

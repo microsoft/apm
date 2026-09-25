@@ -84,8 +84,10 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 | `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
 | `CODEX_HOME` | Override the Codex home used by Codex target detection and user-scope writes. | platform auto-detect | Read by the Codex integration target. |
 | `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | Used by the explicit `hermes` target; it does not enable auto-detection. |
+| `OPENCODE_CONFIG_DIR` | Override the OpenCode user-scope configuration root used for skills, agents, compiled instructions, and MCP config. | `~/.config/opencode` | User-scope precedence is `OPENCODE_CONFIG_DIR` > `$XDG_CONFIG_HOME/opencode` > `~/.config/opencode`. This changes the resolved user root but does not enable OpenCode auto-detection. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
+| `XDG_CONFIG_HOME` | Standard XDG configuration root used as the OpenCode user-scope fallback when `OPENCODE_CONFIG_DIR` is unset. | unset | OpenCode uses `$XDG_CONFIG_HOME/opencode` before `~/.config/opencode`; setting it does not enable OpenCode auto-detection. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
 | `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are written to `$CLAUDE_CONFIG_DIR/.claude.json`; when unset or blank, APM uses `~/.claude.json`. |
 

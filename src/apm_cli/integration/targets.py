@@ -431,29 +431,40 @@ class TargetProfile:
 
         new_root = self.user_root_dir or self.root_dir
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
-        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
-        # `apm install -g` lands where the tool reads.
-        if self.name in ("claude", "hermes"):
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
+        # honors HERMES_HOME (default ~/.hermes), and OpenCode honors
+        # OPENCODE_CONFIG_DIR/XDG_CONFIG_HOME (default ~/.config/opencode);
+        # mirror that at user scope so `apm install -g` lands where the tool
+        # reads.
+        env_vars = {
+            "claude": "CLAUDE_CONFIG_DIR",
+            "hermes": "HERMES_HOME",
+        }
+        if self.name in ("claude", "hermes", "opencode"):
             import os
             from pathlib import Path
 
-            env_var = "CLAUDE_CONFIG_DIR" if self.name == "claude" else "HERMES_HOME"
-            env = os.environ.get(env_var, "").strip()
-            if env:
+            if self.name == "opencode":
+                from apm_cli.integration.opencode_paths import opencode_user_config_dir
+
+                abs_path = opencode_user_config_dir()
+            else:
+                env = os.environ.get(env_vars[self.name], "").strip()
+                abs_path = Path(env).expanduser().resolve(strict=False) if env else None
+
+            if abs_path is not None:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = Path(env).expanduser().resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
-                    # store an absolute path. ``pathlib.Path / <absolute>`` is
-                    # ``<absolute>`` so deploy + cleanup write to the right
-                    # place. The lockfile path translator treats an absolute
-                    # ``root_dir`` as a dynamic root.
+                    # Fallback: when a user config directory points outside
+                    # $HOME we store an absolute path. ``pathlib.Path /
+                    # <absolute>`` is ``<absolute>`` so deploy + cleanup write
+                    # to the right place. The lockfile path translator treats
+                    # an absolute ``root_dir`` as a dynamic root.
                     new_root = str(abs_path)
 
         if self.unsupported_user_primitives:
@@ -517,6 +528,7 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 # ------------------------------------------------------------------
 # Known targets
 # ------------------------------------------------------------------
+
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
@@ -1244,14 +1256,22 @@ def active_targets_user_scope(
 
     # --- auto-detect by directory presence at ~/ ---
     # Targets with detect_by_dir=False (cowork) are never auto-detected.
-    detected = [
-        p
-        for p in KNOWN_TARGETS.values()
-        if p.user_supported
-        and p.detect_by_dir
-        and _flag_gated(p, create_config=create_config)
-        and (home / p.effective_root(user_scope=True)).is_dir()
-    ]
+    detected = []
+    for p in KNOWN_TARGETS.values():
+        if (
+            not p.user_supported
+            or not p.detect_by_dir
+            or not _flag_gated(p, create_config=create_config)
+        ):
+            continue
+        if p.name == "opencode":
+            from apm_cli.integration.opencode_paths import opencode_user_config_dir
+
+            is_present = opencode_user_config_dir().is_dir()
+        else:
+            is_present = (home / p.effective_root(user_scope=True)).is_dir()
+        if is_present:
+            detected.append(p)
     if detected:
         return detected
 

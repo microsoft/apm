@@ -6,11 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.opencode_paths import opencode_user_config_dir
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
     RULE_FORMATS,
     PrimitiveMapping,
     active_targets,
+    active_targets_user_scope,
     resolve_targets,
 )
 from apm_cli.utils.path_security import PathTraversalError
@@ -91,6 +93,33 @@ class TestActiveTargets:
         (self.root / ".opencode").mkdir()
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["opencode"]
+
+    def test_opencode_user_scope_resolves_config_root(self, monkeypatch):
+        expected = self.root / "global-opencode"
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(expected))
+        profile = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
+        assert profile is not None
+        assert profile.resolved_deploy_root is None
+        assert profile.root_dir == str(opencode_user_config_dir())
+
+    def test_opencode_user_scope_auto_detects_explicit_config_dir(self, monkeypatch):
+        config_dir = self.root / "outside-home" / "opencode"
+        config_dir.mkdir(parents=True)
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(config_dir))
+
+        targets = active_targets_user_scope()
+
+        assert [target.name for target in targets] == ["opencode"]
+
+    def test_opencode_user_scope_auto_detects_xdg_config_home(self, monkeypatch):
+        xdg_config_home = self.root / "xdg-config"
+        (xdg_config_home / "opencode").mkdir(parents=True)
+        monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+
+        targets = active_targets_user_scope()
+
+        assert [target.name for target in targets] == ["opencode"]
 
     def test_github_and_claude_returns_both(self):
         (self.root / ".github").mkdir()

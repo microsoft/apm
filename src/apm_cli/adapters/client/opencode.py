@@ -1,6 +1,8 @@
 """OpenCode implementation of MCP client adapter.
 
-OpenCode uses ``opencode.json`` at the project root with an ``mcp`` key.
+At project scope, OpenCode uses ``opencode.json`` at the project root with an
+``mcp`` key when the project-root ``.opencode/`` directory exists. At user
+scope, it uses ``opencode.json`` in the resolved user configuration root.
 The schema differs from VSCode/Cursor:
 
 .. code-block:: json
@@ -31,17 +33,20 @@ import os
 from pathlib import Path
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST
+from ...utils.atomic_io import atomic_write_text
 from .copilot import CopilotClientAdapter
 
 
 class OpenCodeClientAdapter(CopilotClientAdapter):
     """OpenCode MCP client adapter.
 
-    Converts the standard Copilot config format into OpenCode's schema
-    and writes to ``opencode.json`` in the project root.
+    Converts the standard Copilot config format into OpenCode's schema.
+    Project scope writes ``opencode.json`` at the project root when
+    ``.opencode/`` exists; user scope writes to ``opencode.json`` in the
+    resolved user configuration root, creating that root when needed.
     """
 
-    supports_user_scope: bool = False
+    supports_user_scope: bool = True
     target_name: str = "opencode"
     mcp_servers_key: str = "mcpServers"
 
@@ -51,22 +56,35 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     # revisit in a follow-up.
     _supports_runtime_env_substitution: bool = False
 
+    def _get_config_dir(self) -> Path:
+        """Return the project or resolved user OpenCode configuration root."""
+        if not self.user_scope:
+            return self.project_root / ".opencode"
+        from ...integration.opencode_paths import opencode_user_config_dir
+
+        return opencode_user_config_dir()
+
     def get_config_path(self):
-        """Return the path to ``opencode.json`` in the repository root."""
+        """Return ``opencode.json`` in the scope-appropriate OpenCode root."""
+        if self.user_scope:
+            return str(self._get_config_dir() / "opencode.json")
         return str(self.project_root / "opencode.json")
 
     def update_config(self, config_updates, enabled=True):
         """Merge *config_updates* into the ``mcp`` section of ``opencode.json``.
 
-        The ``.opencode/`` directory must already exist; if it does not, this
-        method returns silently (opt-in behaviour).
+        At project scope, the ``.opencode/`` directory must already exist; if
+        it does not, this method returns silently (opt-in behaviour). At user
+        scope, the resolved user configuration root is created as needed.
 
         Translates Copilot-format entries (``command``/``args``/``env``) into
         OpenCode format (``command`` array / ``environment``).
         """
-        opencode_dir = self.project_root / ".opencode"
-        if not opencode_dir.is_dir():
+        opencode_dir = self._get_config_dir()
+        if not self.user_scope and not opencode_dir.is_dir():
             return
+        if self.user_scope:
+            opencode_dir.mkdir(parents=True, exist_ok=True)
 
         config_path = Path(self.get_config_path())
         current_config = self.get_current_config()
@@ -76,11 +94,11 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         for name, copilot_entry in config_updates.items():
             current_config["mcp"][name] = self._to_opencode_format(copilot_entry, enabled=enabled)
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
+        atomic_write_text(config_path, json.dumps(current_config, indent=2), new_file_mode=0o600)
+        os.chmod(config_path, 0o600)
 
     def get_current_config(self):
-        """Read the current ``opencode.json`` contents."""
+        """Read the scope-appropriate ``opencode.json`` contents."""
         config_path = self.get_config_path()
         if not os.path.exists(config_path):
             return {}
@@ -99,7 +117,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         server_info_cache=None,
         runtime_vars=None,
     ):
-        """Configure an MCP server in ``opencode.json``.
+        """Configure an MCP server in the scope-appropriate ``opencode.json``.
 
         Delegates to the parent for config formatting, then converts to
         OpenCode schema before writing.
@@ -108,8 +126,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             print("Error: server_url cannot be empty")
             return False
 
-        opencode_dir = self.project_root / ".opencode"
-        if not opencode_dir.is_dir():
+        if not self.user_scope and not self._get_config_dir().is_dir():
             return False
 
         try:

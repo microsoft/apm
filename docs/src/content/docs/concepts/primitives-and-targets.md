@@ -89,7 +89,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
 | `antigravity` | `.agents/` (project), `~/.gemini/` (user) | agents |
-| `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
+| `opencode` | `.opencode/` (project), `resolved OpenCode user config root` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
 | `hermes` | `.agents/` (project), `~/.hermes/` (user) | agents |

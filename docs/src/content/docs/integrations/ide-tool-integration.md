@@ -115,7 +115,7 @@ Dependency packages contribute only `dependencies.mcp`; their
 - `.cursor/mcp.json` (Cursor)
 - `.codex/config.toml` (Codex)
 - `.vscode/mcp.json` (VS Code)
-- `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
+- `opencode.json` at the repo root when `.opencode/` exists (OpenCode project scope), or in the OpenCode global config root for user scope. The global root resolves in this order: `OPENCODE_CONFIG_DIR`, `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode`.
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
 - `.kiro/settings/mcp.json` and `~/.kiro/settings/mcp.json` (Kiro IDE)

@@ -485,6 +485,10 @@ def _runtime_is_present(
         return _is_vscode_available(project_root=project_root_path)
     if runtime_name == "kiro" and user_scope:
         return True
+    if runtime_name == "opencode" and user_scope:
+        from apm_cli.integration.opencode_paths import opencode_user_config_dir
+
+        return opencode_user_config_dir().is_dir()
     if runtime_name in dir_signal:
         return (project_root_path / dir_signal[runtime_name]).is_dir()
     if runtime_name == "claude":
@@ -514,7 +518,13 @@ def _discover_installed_runtimes_fallback(
         ("windsurf", ".windsurf"),
         ("kiro", ".kiro"),
     ):
-        if (name == "kiro" and user_scope) or (project_root_path / signal).is_dir():
+        if name == "opencode" and user_scope:
+            from apm_cli.integration.opencode_paths import opencode_user_config_dir
+
+            present = opencode_user_config_dir().is_dir()
+        else:
+            present = (name == "kiro" and user_scope) or (project_root_path / signal).is_dir()
+        if present:
             installed_runtimes.append(name)
     # Claude Code: directory-presence OR binary-on-PATH
     if (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None:

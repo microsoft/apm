@@ -173,8 +173,9 @@ targets: [claude, codex]
 apm compile -g --dry-run
 ```
 
-For OpenCode, `apm compile -g` writes
-`~/.config/opencode/AGENTS.md` and retains scoped `applyTo` sections.
+For OpenCode, `apm compile -g` writes `AGENTS.md` to the resolved OpenCode
+user config root and retains scoped `applyTo` sections. See the
+[OpenCode config environment variables](../../environment-variables/#opencode_config_dir).
 
 ```bash
 apm compile -g

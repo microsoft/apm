@@ -1,6 +1,7 @@
 """Unit tests for OpenCodeClientAdapter and its MCP integrator wiring."""
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.factory import ClientFactory
+from apm_cli.integration.opencode_paths import opencode_user_config_dir
 
 
 class TestOpenCodeClientFactory(unittest.TestCase):
@@ -20,6 +22,30 @@ class TestOpenCodeClientFactory(unittest.TestCase):
     def test_create_opencode_client_case_insensitive(self):
         client = ClientFactory.create_client("OpenCode")
         self.assertIsInstance(client, OpenCodeClientAdapter)
+
+
+class TestOpenCodePaths(unittest.TestCase):
+    def test_config_dir_precedence_and_normalization(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENCODE_CONFIG_DIR": "~/custom/../custom-opencode",
+                "XDG_CONFIG_HOME": "/ignored",
+            },
+        ):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / "custom-opencode").resolve(strict=False),
+            )
+
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": "", "XDG_CONFIG_HOME": "~/xdg"},
+        ):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / "xdg" / "opencode").resolve(strict=False),
+            )
 
 
 class TestToOpencodeFormat(unittest.TestCase):
@@ -134,6 +160,25 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
     def test_config_path_is_repo_local(self):
         path = self.adapter.get_config_path()
         self.assertEqual(path, str(self.opencode_json))
+
+    def test_user_scope_uses_resolved_user_directory_and_secure_write(self):
+        user_dir = Path(self.tmp.name) / "user-opencode"
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            adapter = OpenCodeClientAdapter(project_root=self.tmp.name, user_scope=True)
+            self.assertEqual(
+                Path(adapter.get_config_path()), (user_dir / "opencode.json").resolve(strict=False)
+            )
+            adapter.update_config({"server": {"command": "npx", "args": ["pkg"]}})
+
+        self.assertTrue(user_dir.is_dir())
+        self.assertEqual((user_dir / "opencode.json").stat().st_mode & 0o777, 0o600)
+
+    def test_user_scope_does_not_require_project_opt_in_directory(self):
+        user_dir = Path(self.tmp.name) / "user-opencode"
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            adapter = OpenCodeClientAdapter(project_root=self.tmp.name, user_scope=True)
+            adapter.update_config({"server": {"command": "npx", "args": []}})
+        self.assertTrue((user_dir / "opencode.json").exists())
 
     # -- get_current_config --
 

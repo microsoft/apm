@@ -291,13 +291,14 @@ root-context targets:
 
 - `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
 - `~/.codex/AGENTS.md`
-- `~/.config/opencode/AGENTS.md`
+- `AGENTS.md` in the resolved OpenCode user config root
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
 
-OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
-retains explicit sections for `applyTo` instructions as well.
+OpenCode is the exception: its generated `AGENTS.md` in the resolved user
+config root retains explicit sections for `applyTo` instructions as well. See
+the [OpenCode config environment variables](../reference/environment-variables/#opencode_config_dir).
 
 ### Overwrite protection
 

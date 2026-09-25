@@ -55,25 +55,26 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
         adapter = CursorClientAdapter()
         self.assertFalse(adapter.supports_user_scope)
 
-    def test_opencode_does_not_support_user_scope(self):
-        """OpenCode writes to opencode.json (workspace) and should NOT support user scope."""
+    def test_opencode_supports_user_scope(self):
+        """OpenCode writes to its user config directory at user scope."""
         adapter = OpenCodeClientAdapter()
-        self.assertFalse(adapter.supports_user_scope)
+        self.assertTrue(adapter.supports_user_scope)
 
     def test_cursor_does_not_inherit_copilot_true(self):
         """CursorClientAdapter inherits CopilotClientAdapter but overrides to False."""
         self.assertTrue(issubclass(CursorClientAdapter, CopilotClientAdapter))
         self.assertFalse(CursorClientAdapter.supports_user_scope)
 
-    def test_opencode_does_not_inherit_copilot_true(self):
-        """OpenCodeClientAdapter inherits CopilotClientAdapter but overrides to False."""
+    def test_opencode_inherits_copilot_true(self):
+        """OpenCodeClientAdapter inherits the global-scope capability."""
         self.assertTrue(issubclass(OpenCodeClientAdapter, CopilotClientAdapter))
-        self.assertFalse(OpenCodeClientAdapter.supports_user_scope)
+        self.assertTrue(OpenCodeClientAdapter.supports_user_scope)
 
     def test_factory_created_adapters_scope(self):
         """ClientFactory-created adapters report the correct scope support."""
         global_runtimes = {"copilot", "codex", "intellij"}
-        workspace_runtimes = {"vscode", "cursor", "opencode"}
+        workspace_runtimes = {"vscode", "cursor"}
+        global_runtimes.add("opencode")
 
         for rt in global_runtimes:
             adapter = ClientFactory.create_client(rt)
@@ -290,7 +291,7 @@ class TestRemoveStaleScopeFiltering(unittest.TestCase):
         # Workspace paths should NOT appear
         self.assertNotIn(".vscode", all_calls_str)
         self.assertNotIn(".cursor", all_calls_str)
-        self.assertNotIn("opencode.json", all_calls_str)
+        self.assertIn("opencode.json", all_calls_str)
 
 
 # ---------------------------------------------------------------------------
