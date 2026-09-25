@@ -10,7 +10,10 @@ from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.factory import ClientFactory
-from apm_cli.integration.opencode_paths import opencode_user_config_dir
+from apm_cli.integration.opencode_paths import (
+    opencode_user_config_dir,
+    opencode_user_config_path,
+)
 
 
 class TestOpenCodeClientFactory(unittest.TestCase):
@@ -57,6 +60,37 @@ class TestOpenCodePaths(unittest.TestCase):
                 opencode_user_config_dir(),
                 (Path.home() / ".config" / "opencode").resolve(strict=False),
             )
+
+    def test_lexical_path_preserves_custom_and_xdg_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real"
+            real.mkdir()
+            link = root / "link"
+            link.symlink_to(real, target_is_directory=True)
+
+            with patch.dict(
+                os.environ,
+                {"OPENCODE_CONFIG_DIR": str(link), "XDG_CONFIG_HOME": str(root / "ignored")},
+            ):
+                self.assertEqual(opencode_user_config_path(), link)
+                self.assertEqual(opencode_user_config_dir(), real.resolve())
+
+            with patch.dict(
+                os.environ,
+                {"OPENCODE_CONFIG_DIR": "relative", "XDG_CONFIG_HOME": str(link)},
+            ):
+                self.assertEqual(opencode_user_config_path(), link / "opencode")
+                self.assertEqual(opencode_user_config_dir(), (real / "opencode").resolve())
+
+    def test_lexical_path_default_preserves_home_components(self):
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": "", "XDG_CONFIG_HOME": ""},
+            clear=False,
+        ):
+            expected = Path.home() / ".config" / "opencode"
+            self.assertEqual(opencode_user_config_path(), expected)
 
 
 class TestToOpencodeFormat(unittest.TestCase):
@@ -182,13 +216,11 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
 
         self.assertEqual(self.opencode_json.stat().st_mode & 0o777, 0o644)
 
-    def test_user_scope_uses_resolved_user_directory_and_secure_write(self):
+    def test_user_scope_uses_lexical_user_directory_and_secure_write(self):
         user_dir = Path(self.tmp.name) / "user-opencode"
         with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
             adapter = OpenCodeClientAdapter(project_root=self.tmp.name, user_scope=True)
-            self.assertEqual(
-                Path(adapter.get_config_path()), (user_dir / "opencode.json").resolve(strict=False)
-            )
+            self.assertEqual(Path(adapter.get_config_path()), user_dir / "opencode.json")
             adapter.update_config({"server": {"command": "npx", "args": ["pkg"]}})
 
         self.assertTrue(user_dir.is_dir())
@@ -570,6 +602,28 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         user_data = json.loads(user_json.read_text(encoding="utf-8"))
         self.assertNotIn("stale", project_data["mcp"])
         self.assertIn("stale", user_data["mcp"])
+
+    @unittest.skipIf(os.name == "nt", "directory symlinks require elevated Windows rights")
+    def test_remove_stale_refuses_symlinked_opencode_root(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        external_dir = Path(self.tmp.name) / "external-opencode"
+        external_dir.mkdir()
+        external_json = external_dir / "opencode.json"
+        original = json.dumps({"mcp": {"stale": {"type": "remote"}}})
+        external_json.write_text(original, encoding="utf-8")
+        symlink_root = Path(self.tmp.name) / "linked-opencode"
+        symlink_root.symlink_to(external_dir, target_is_directory=True)
+
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(symlink_root)}):
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="opencode",
+                project_root=Path(self.tmp.name),
+                user_scope=True,
+            )
+
+        self.assertEqual(external_json.read_text(encoding="utf-8"), original)
 
 
 if __name__ == "__main__":

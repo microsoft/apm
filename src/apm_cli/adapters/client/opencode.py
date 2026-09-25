@@ -63,9 +63,9 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
 
     def _user_config_root(self) -> Path:
         """Return the native OpenCode user configuration root."""
-        from ...integration.opencode_paths import opencode_user_config_dir
+        from ...integration.opencode_paths import opencode_user_config_path
 
-        return opencode_user_config_dir()
+        return opencode_user_config_path()
 
     def _get_config_dir(self) -> Path:
         """Return the scope-appropriate OpenCode directory."""

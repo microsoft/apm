@@ -291,7 +291,9 @@ root-context targets:
 
 - `~/.claude/CLAUDE.md`, or `$CLAUDE_CONFIG_DIR/CLAUDE.md` when
   `CLAUDE_CONFIG_DIR` is nonblank and absolute. Relative or blank values fall
-  back to `~/.claude/CLAUDE.md` (the same rule applies to Claude MCP config).
+  back to `~/.claude/CLAUDE.md`. This absolute/nonblank override rule applies
+  to every Claude file primitive as well as compile output (and Claude MCP
+  configuration).
 - `~/.codex/AGENTS.md`
 - `AGENTS.md` in the resolved OpenCode user config root
 - `~/.copilot/AGENTS.md`
