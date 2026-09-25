@@ -1,6 +1,6 @@
 """Lockfile (apm.lock.yaml) conformance tests -- sec.5.
 
-Covers req-lk-001..022. The integrity sub-cluster (req-lk-012..017)
+Covers req-lk-001..023. The integrity sub-cluster (req-lk-012..017)
 now drives REAL fail-closed oracles against the committed binary
 fixture pair under `integrity/`.
 """
@@ -21,6 +21,7 @@ from tests.spec_conformance._helpers import (
     validate_against,
     waive,
 )
+from tests.utils.diagnostic_recipe import shell_commands_in
 
 V1 = ("lockfile", "v1-git-only.yml")
 V2 = ("lockfile", "v2-with-registry.yml")
@@ -757,4 +758,104 @@ def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
         "the merge-based hook configuration document is already absent for a\n"
         "target while its ownership record remains",
         "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
+    )
+
+
+_CONFLICTED_LOCKFILE = (
+    "lockfile_version: '1'\n"
+    "<<<<<<< HEAD\n"
+    "dependencies: []\n"
+    "=======\n"
+    "dependencies:\n"
+    "- repo_url: example/x\n"
+    ">>>>>>> feature\n"
+)
+
+
+@pytest.mark.req("req-lk-023")
+def test_conflict_markers_recognised_at_load_without_raw_parser_output(
+    tmp_path: Path,
+) -> None:
+    """Clause (a): the loading authority names the path and cause, not the parser error."""
+    from apm_cli.deps.lockfile import LockFile, LockfileConflictError
+
+    lockfile_path = tmp_path / "apm.lock.yaml"
+    lockfile_path.write_text(_CONFLICTED_LOCKFILE, encoding="utf-8")
+
+    with pytest.raises(LockfileConflictError) as conflict:
+        LockFile.read(lockfile_path)
+
+    message = str(conflict.value)
+    assert str(lockfile_path) in message, "the diagnostic MUST report the lockfile path"
+    assert "conflict markers" in message, "the diagnostic MUST report the cause"
+    assert "<<<<<<<" not in message
+    assert "could not find expected" not in message, "raw parser output MUST NOT surface"
+
+
+@pytest.mark.req("req-lk-023")
+def test_conflict_diagnostic_names_an_action_for_the_unreadable_file(
+    tmp_path: Path,
+) -> None:
+    """Clause (b): resolve or restore, never another read of the same file."""
+    from apm_cli.deps.lockfile import LockFile, LockfileConflictError
+
+    lockfile_path = tmp_path / "apm.lock.yaml"
+    lockfile_path.write_text(_CONFLICTED_LOCKFILE, encoding="utf-8")
+
+    with pytest.raises(LockfileConflictError) as conflict:
+        LockFile.read(lockfile_path)
+
+    message = str(conflict.value)
+    commands = shell_commands_in(message)
+    assert commands, "the diagnostic MUST name an action the user can run"
+    for operation in ("apm outdated", "apm update"):
+        assert operation not in message, (
+            f"{operation!r} reads the same unreadable lockfile and MUST NOT be offered"
+        )
+    resolving = next(i for i, c in enumerate(commands) if c.startswith("git "))
+    for i, command in enumerate(commands):
+        if command.startswith("apm "):
+            assert i > resolving, (
+                "an apm operation MUST be sequenced after the resolving action, "
+                f"but {command!r} precedes it"
+            )
+
+
+@pytest.mark.req("req-lk-023")
+def test_lockfile_is_left_unmodified_across_reading_operations(tmp_path: Path) -> None:
+    """Clause (c): recognition never removes, rewrites, or re-resolves the lockfile."""
+    import os
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    (tmp_path / "apm.yml").write_text(
+        "name: conformance\nversion: '1.0.0'\ntargets:\n  - claude\n", encoding="utf-8"
+    )
+    instructions = tmp_path / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "c.instructions.md").write_text("conformance\n", encoding="utf-8")
+    lockfile_path = tmp_path / "apm.lock.yaml"
+
+    runner = CliRunner()
+    for args in (["install"], ["install", "--frozen"], ["install", "--dry-run"], ["lock"]):
+        lockfile_path.write_text(_CONFLICTED_LOCKFILE, encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            with patch("apm_cli.commands._helpers.check_for_updates", return_value=None):
+                runner.invoke(cli, args, catch_exceptions=True)
+        finally:
+            os.chdir(cwd)
+        assert lockfile_path.read_text(encoding="utf-8") == _CONFLICTED_LOCKFILE, (
+            f"{args} MUST leave the conflicted lockfile byte-for-byte unmodified"
+        )
+
+    assert_spec_contains(
+        "MUST identify the markers through the same authority that\nloads the lockfile",
+        "without emitting raw parser output",
+        "MUST NOT present an operation\nthat reads the same lockfile as the repair for the markers",
+        "MUST NOT remove,\nrewrite, or re-resolve the lockfile in response to the markers",
     )

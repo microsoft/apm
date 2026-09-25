@@ -406,6 +406,14 @@ constructs lock state. Pre-versioned legacy files migrate as v1 inputs. Fix or
 remove other invalid files explicitly; APM does not silently replace them with
 an empty lockfile.
 
+A lockfile left with unresolved git merge conflict markers (`<<<<<<<`,
+`>>>>>>>`, or `|||||||` at the start of a line) is reported as a merge conflict
+rather than a YAML scanner error. Commands that require the lockfile name the
+file and the cause, and name the git command that keeps one side of the
+merge so you can reinstall from it. APM does not discard, rewrite, or re-resolve the file: the
+recorded bytes are preserved for you to resolve. A bare `=======` separator is
+not treated as a conflict marker.
+
 ## Example
 
 A small project with one remote APM package, one MCP server, and its own

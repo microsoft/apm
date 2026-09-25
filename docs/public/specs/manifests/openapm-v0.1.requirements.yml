@@ -226,6 +226,11 @@ requirements:
     section: "5.2"
     conformance_class: consumer
     notes: "source-cased materialization_repo_url remains non-identity metadata and drives rollback-safe, collision-closed materialization/link spelling"
+  - id: req-lk-023
+    keyword: MUST
+    section: "5.4"
+    conformance_class: consumer
+    notes: "diagnosis only: merge-conflict markers are recognised at lockfile load, reported with an action the user can take on the unreadable file, and the lockfile is left unmodified"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"

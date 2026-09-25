@@ -294,7 +294,7 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     re-resolves, re-hashes, or touches the network.
     """
     from apm_cli.core.scope import InstallScope, get_apm_dir
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from apm_cli.export.sbom import export_sbom
 
     if global_:
@@ -303,12 +303,12 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
         manifest_path = _find_apm_yml()
         project_root = manifest_path.parent if manifest_path else Path.cwd().resolve()
 
-    lockfile_path = get_lockfile_path(project_root)
-    if not lockfile_path.is_file():
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
         _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
         sys.exit(1)
 
-    lockfile = LockFile.from_yaml(lockfile_path.read_text(encoding="utf-8"))
     resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)
 
     document = export_sbom(lockfile, fmt, timestamp=resolved_timestamp)

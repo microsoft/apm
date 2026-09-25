@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **123 normative statements (118 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **124 normative statements (119 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1169,6 +1169,33 @@ of the versions it recognises, with a diagnostic that explicitly
 offers the user a choice of either upgrading the consumer or
 regenerating the lockfile from the manifest.
 
+<a id="req-lk-023"></a>
+**[req-lk-023]** A conforming **consumer** implementation that
+encounters a lockfile carrying unresolved version-control merge
+conflict markers MUST satisfy all of the following:
+
+(a) **Recognise the condition where the lockfile is loaded.** The
+consumer MUST identify the markers through the same authority that
+loads the lockfile, and MUST report the lockfile path and the cause
+without emitting raw parser output.
+
+(b) **Name an action the user can take on the unreadable file.** The
+diagnostic MUST direct the user to resolve the conflict in that file
+or restore a known-good lockfile. It MUST NOT present an operation
+that reads the same lockfile as the repair for the markers, because
+such an operation cannot succeed while they are present; naming one
+as a follow-up step, sequenced after the resolving action, is
+permitted.
+
+(c) **Leave the lockfile unmodified.** The consumer MUST NOT remove,
+rewrite, or re-resolve the lockfile in response to the markers. The
+recorded bytes are preserved for the user to resolve.
+
+This requirement governs diagnosis only. A lockfile that is
+unreadable for any other reason is out of scope and continues to be
+handled as before, and this requirement neither defines nor
+authorises automatic recovery from a conflicted lockfile.
+
 ### 5.5 Drift and integrity model
 
 The lockfile is the contract `apm audit` validates the workspace
@@ -1333,7 +1360,8 @@ This section's normative statements are:
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
-  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022).
+  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+  [req-lk-023](#req-lk-023).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -3509,6 +3537,7 @@ conformance statement identifying:
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+[req-lk-023](#req-lk-023),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -3931,6 +3960,7 @@ renumbering of conformance classes.
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
 | [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-lk-022](#req-lk-022)                | MUST    | 5.2     | consumer    |
+| [req-lk-023](#req-lk-023)                | MUST    | 5.4     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -4006,7 +4036,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 123** (118 MUST, 5 SHOULD).
+**Total normative statements: 124** (119 MUST, 5 SHOULD).
 
 ---
 
@@ -4057,6 +4087,7 @@ renumbering of conformance classes.
 | 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
 | 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
 | 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 10.7, 10.11, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
+| 0.1.42  | 2026-09-25 | Diagnostic-only spec citation for conflicted lockfiles (closes the #2979 Mode-B silent-extension gate for PR #3028's bounded scope). Added [req-lk-023] (Section 5.4, consumer MUST): a consumer encountering unresolved version-control merge conflict markers recognises them through the same authority that loads the lockfile and reports the path and cause without raw parser output (a); directs the user to resolve the conflict or restore a known-good lockfile, never to another operation that reads the same unreadable file (b); and leaves the lockfile unmodified, never removing, rewriting, or re-resolving it (c). The requirement governs diagnosis only: lockfiles unreadable for other reasons are out of scope, and automatic recovery from a conflicted lockfile is neither defined nor authorised here. Section 5.7, Section 11.3.2, and Appendix C updated. Statement count: 123 -> 124 (119 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Commands that read `apm.lock.yaml` now report a lockfile left with unresolved git merge conflict markers by name, instead of exiting with a raw YAML parse error, and name the git command that keeps one side of the merge so you can reinstall from it. The `--frozen` and unreadable-lockfile guidance no longer points at `apm outdated` or `apm update`, which cannot read the same file. The conflicted lockfile is preserved byte-for-byte; automatic recovery remains deferred to #2979. -- by @lachieh (#3028)
+
 ## [0.32.0] - 2026-09-25
 
 ### Changed

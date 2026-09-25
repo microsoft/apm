@@ -28,7 +28,7 @@ def render_and_exit(
     The caller is responsible for ``return``-ing after this function
     completes -- this function does NOT exit or return early on its own.
     """
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.deps.lockfile import LockFile, LockfileConflictError, get_lockfile_path
     from apm_cli.drift import detect_orphans
 
     logger.progress("Dry run mode - showing what would change:")
@@ -81,6 +81,9 @@ def render_and_exit(
     # required, accurate to compute.
     try:
         _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))
+    except LockfileConflictError as exc:
+        logger.warning(str(exc))
+        _dryrun_lock = None
     except Exception:
         _dryrun_lock = None
     if _dryrun_lock:
