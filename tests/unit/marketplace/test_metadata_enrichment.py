@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import urllib.error
+import urllib.parse
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -48,6 +52,46 @@ marketplace:
       category: Productivity
 """,
         encoding="utf-8",
+    )
+
+
+def _write_manifestless_range_config(project_root: Path) -> None:
+    """Create the manifestless marketplace fixture from issue #3055."""
+    (project_root / "apm.yml").write_text(
+        """\
+name: generic-marketplace
+description: Manifestless metadata reproduction
+version: 0.1.0
+marketplace:
+  owner:
+    name: public-repro
+    url: https://github.com/public-repro
+  build:
+    tagPattern: "v{version}"
+  outputs:
+    claude: {}
+  packages:
+    - name: brainstorming
+      description: Public brainstorming skill
+      source: obra/superpowers
+      subdir: skills/brainstorming
+      version: "^4.0.0"
+""",
+        encoding="utf-8",
+    )
+
+
+def _resolved_range_refs(
+    *_args: object,
+    **_kwargs: object,
+) -> subprocess.CompletedProcess[str]:
+    """Return one compatible remote tag without invoking Git."""
+    resolved_sha = "a" * 40
+    return subprocess.CompletedProcess(
+        args=["git", "ls-remote"],
+        returncode=0,
+        stdout=f"{resolved_sha}\trefs/tags/v4.3.1\n",
+        stderr="",
     )
 
 
@@ -286,6 +330,203 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     )
     assert strict_payload["warnings"] == payload["warnings"]
     assert not artifact.exists()
+
+
+def test_pack_check_clean_certifies_manifestless_skill_with_version_range(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A verified remote SKILL.md makes an absent apm.yml certifiable."""
+    _write_manifestless_range_config(tmp_path)
+    resolved_sha = "a" * 40
+
+    requested_urls: list[tuple[str | None, str, str | None]] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        *,
+        timeout: int,
+    ) -> BytesIO:
+        """Return the issue fixture's remote package documents."""
+        assert timeout == 5
+        parsed = urllib.parse.urlparse(request.full_url)
+        requested_urls.append((parsed.hostname, parsed.path, request.get_header("Authorization")))
+        if parsed.path.endswith("/apm.yml"):
+            raise urllib.error.HTTPError(
+                url=request.full_url,
+                code=404,
+                msg="Not Found",
+                hdrs=None,
+                fp=None,
+            )
+        if parsed.path.endswith("/SKILL.md"):
+            return BytesIO(
+                b"---\nname: brainstorming\ndescription: Public brainstorming skill\n---\n"
+            )
+        raise AssertionError(f"unexpected metadata URL path: {parsed.path}")
+
+    monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
+    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    packed = runner.invoke(pack_cmd, [])
+    checked = runner.invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
+
+    assert packed.exit_code == 0, packed.output
+    assert checked.exit_code == 0, checked.output
+    assert "metadata enrichment failed" not in (packed.output + checked.output)
+    payload = json.loads(checked.output)
+    assert payload["metadata_enrichment"] == {
+        "certifiable": True,
+        "outcomes": [{"package": "brainstorming", "status": "manifestless"}],
+    }
+    expected_base = f"/obra/superpowers/{resolved_sha}/skills/brainstorming"
+    assert requested_urls == [
+        ("raw.githubusercontent.com", f"{expected_base}/apm.yml", None),
+        ("raw.githubusercontent.com", f"{expected_base}/SKILL.md", None),
+        ("raw.githubusercontent.com", f"{expected_base}/apm.yml", None),
+        ("raw.githubusercontent.com", f"{expected_base}/SKILL.md", None),
+    ]
+
+
+def test_pack_check_clean_rejects_missing_manifestless_skill_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing apm.yml remains uncertifiable when SKILL.md is also absent."""
+    _write_manifestless_range_config(tmp_path)
+    requested_urls: list[tuple[str | None, str]] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        *,
+        timeout: int,
+    ) -> BytesIO:
+        """Return 404 for every manifest and skill marker probe."""
+        assert timeout == 5
+        parsed = urllib.parse.urlparse(request.full_url)
+        requested_urls.append((parsed.hostname, parsed.path))
+        raise urllib.error.HTTPError(
+            url=request.full_url,
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
+    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    packed = runner.invoke(pack_cmd, [])
+    checked = runner.invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
+
+    assert packed.exit_code == 0, packed.output
+    assert checked.exit_code == 4, checked.output
+    payload = json.loads(checked.output)
+    assert payload["metadata_enrichment"]["certifiable"] is False
+    assert payload["metadata_enrichment"]["outcomes"] == [
+        {"package": "brainstorming", "status": "failed", "cause": "HTTP 404"}
+    ]
+    assert {hostname for hostname, _path in requested_urls} == {
+        "api.github.com",
+        "raw.githubusercontent.com",
+    }
+    assert {Path(path).name for _hostname, path in requested_urls} == {
+        "SKILL.md",
+        "apm.yml",
+    }
+
+
+@pytest.mark.parametrize(
+    ("metadata_error", "expected_cause"),
+    [
+        (PermissionError("authentication required"), "authentication required"),
+        (urllib.error.URLError("connection refused"), "network request failed"),
+    ],
+)
+def test_pack_check_clean_rejects_metadata_access_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_error: Exception,
+    expected_cause: str,
+) -> None:
+    """Authentication and network failures remain uncertifiable."""
+    _write_manifestless_range_config(tmp_path)
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        *,
+        timeout: int,
+    ) -> BytesIO:
+        """Raise the selected external metadata-access failure."""
+        del request
+        assert timeout == 5
+        raise metadata_error
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
+    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.chdir(tmp_path)
+
+    checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
+
+    assert checked.exit_code == 4, checked.output
+    payload = json.loads(checked.output)
+    assert payload["metadata_enrichment"]["outcomes"] == [
+        {"package": "brainstorming", "status": "failed", "cause": expected_cause}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("remote_result", "expected_error"),
+    [
+        (
+            subprocess.CompletedProcess(
+                args=["git", "ls-remote"],
+                returncode=128,
+                stdout="",
+                stderr="fatal: repository not found",
+            ),
+            "repository not found during ls-remote",
+        ),
+        (
+            subprocess.CompletedProcess(
+                args=["git", "ls-remote"],
+                returncode=0,
+                stdout=("b" * 40) + "\trefs/tags/v5.0.0\n",
+                stderr="",
+            ),
+            "No tag matching version '^4.0.0'",
+        ),
+    ],
+)
+def test_pack_check_clean_rejects_invalid_remote_or_ref(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remote_result: subprocess.CompletedProcess[str],
+    expected_error: str,
+) -> None:
+    """Missing repositories and incompatible refs fail before certification."""
+    _write_manifestless_range_config(tmp_path)
+
+    def fake_remote_refs(
+        *_args: object,
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        """Return the selected repository or ref resolution failure."""
+        return remote_result
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", fake_remote_refs)
+    monkeypatch.chdir(tmp_path)
+
+    checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run"])
+
+    assert checked.exit_code == 1, checked.output
+    assert expected_error in checked.output
 
 
 def test_check_clean_never_writes_before_reporting_uncertifiable_metadata(

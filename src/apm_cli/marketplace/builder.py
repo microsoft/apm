@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 from ..utils.github_host import default_host, is_azure_devops_hostname
 from ..utils.path_security import ensure_path_within
-from ..utils.yaml_io import load_yaml_str
+from ..utils.yaml_io import load_yaml_str, loads_frontmatter
 from ._io import atomic_write
 from ._shared import iter_semver_tags
 from .auth_helpers import resolve_auth_for_host
@@ -74,10 +74,22 @@ from .yml_schema import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_METADATA_MAX_BYTES = 64 * 1024
-_METADATA_STATUSES = frozenset({"fetched", "empty", "failed", "offline", "local", "explicit"})
-_CERTIFIABLE_METADATA_STATUSES = frozenset({"fetched", "empty", "local", "explicit"})
+_METADATA_STATUSES = frozenset(
+    {"fetched", "empty", "manifestless", "failed", "offline", "local", "explicit"}
+)
+_CERTIFIABLE_METADATA_STATUSES = frozenset(
+    {"fetched", "empty", "manifestless", "local", "explicit"}
+)
 _CERTIFYING_METADATA_FIELDS = frozenset({"description", "version"})
-MetadataEnrichmentStatus = Literal["fetched", "empty", "failed", "offline", "local", "explicit"]
+MetadataEnrichmentStatus = Literal[
+    "fetched",
+    "empty",
+    "manifestless",
+    "failed",
+    "offline",
+    "local",
+    "explicit",
+]
 
 
 def _read_capped_text(resp: Any) -> str:
@@ -168,6 +180,14 @@ class MetadataEnrichmentOutcome:
         if self.cause is not None:
             payload["cause"] = self.cause
         return payload
+
+
+@dataclass(frozen=True)
+class _RemoteMetadataDocument:
+    """Remote manifest content or a verified manifestless skill marker."""
+
+    content: str | None
+    manifestless: bool = False
 
 
 @dataclass(frozen=True)
@@ -1153,7 +1173,7 @@ class MarketplaceBuilder:
         self,
         pkg: ResolvedPackage,
     ) -> MetadataEnrichmentOutcome:
-        """Fetch remote metadata while preserving complete failure state.
+        """Fetch remote metadata while preserving complete package state.
 
         When a token is available for the package's host, it is included
         as an ``Authorization`` header so private repos can be accessed.
@@ -1164,14 +1184,17 @@ class MarketplaceBuilder:
         first, then fall back to the GitHub REST Contents endpoint when
         raw returns 404 (the private / INTERNAL repository symptom).
         GHES and GHE Cloud packages use the GitHub REST API on the
-        package's host.  For non-GitHub-class hosts, metadata enrichment
-        is skipped.
+        package's host.  When ``apm.yml`` is absent, the same transport
+        verifies a root ``SKILL.md`` before returning the certifiable
+        ``manifestless`` state.  For non-GitHub-class hosts, metadata
+        enrichment is skipped.
         """
         try:
             from ..core.auth import AuthResolver
 
             path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
-            file_path = f"{path_prefix}apm.yml"
+            manifest_path = f"{path_prefix}apm.yml"
+            skill_path = f"{path_prefix}SKILL.md"
 
             # Resolve the effective host for this package and its
             # classification.  Falls back to the builder default when the
@@ -1202,66 +1225,95 @@ class MarketplaceBuilder:
 
             auth_resolver = self._auth_resolver
 
-            def _open_metadata(token: str | None, _git_env: dict[str, str]) -> str:
+            def _open_metadata(
+                token: str | None,
+                _git_env: dict[str, str],
+            ) -> _RemoteMetadataDocument:
                 """Fetch the manifest with the credential selected for this attempt."""
                 if host_kind == "ghe_cloud" and token is None:
                     raise PermissionError(
                         f"metadata fetch for '{effective_host}' requires a credential"
                     )
-                if effective_host == "github.com":
-                    raw_url = (
-                        f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
-                    )
-                    req = urllib.request.Request(raw_url)  # noqa: S310
+
+                def _request_text(url: str, *, rest: bool = False) -> str:
+                    """Read one bounded remote document with attempt credentials."""
+                    req = urllib.request.Request(url)  # noqa: S310
+                    if rest:
+                        req.add_header("Accept", "application/vnd.github.raw")
                     if token:
                         req.add_header("Authorization", f"token {token}")
+                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                        return _read_capped_text(resp)
+
+                def _is_valid_skill(url: str, *, rest: bool = False) -> bool:
+                    """Return whether the URL contains parseable Agent Skills metadata."""
                     try:
-                        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                            return _read_capped_text(resp)
+                        skill = loads_frontmatter(_request_text(url, rest=rest))
+                    except urllib.error.HTTPError as exc:
+                        if exc.code == 404:
+                            return False
+                        raise
+                    name = skill.metadata.get("name")
+                    description = skill.metadata.get("description")
+                    return (
+                        isinstance(name, str)
+                        and bool(name.strip())
+                        and isinstance(description, str)
+                        and bool(description.strip())
+                    )
+
+                def _rest_url(file_path: str) -> str:
+                    """Build a Contents API URL for the resolved package path."""
+                    api_base = (
+                        host_info.api_base if host_info else None
+                    ) or f"https://{effective_host}/api/v3"
+                    return f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+
+                if effective_host == "github.com":
+                    raw_manifest_url = (
+                        "https://raw.githubusercontent.com/"
+                        f"{pkg.source_repo}/{pkg.sha}/{manifest_path}"
+                    )
+                    try:
+                        return _RemoteMetadataDocument(_request_text(raw_manifest_url))
                     except urllib.error.HTTPError as exc:
                         if exc.code != 404:
                             raise
+                        raw_skill_url = (
+                            "https://raw.githubusercontent.com/"
+                            f"{pkg.source_repo}/{pkg.sha}/{skill_path}"
+                        )
+                        if _is_valid_skill(raw_skill_url):
+                            return _RemoteMetadataDocument(None, manifestless=True)
                         if token is None:
                             raise
-                        api_base = (
-                            host_info.api_base if host_info else None
-                        ) or "https://api.github.com"
-                        rest_url = (
-                            f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
-                        )
-                        req = urllib.request.Request(rest_url)  # noqa: S310
-                        req.add_header("Accept", "application/vnd.github.raw")
-                        if token:
-                            req.add_header("Authorization", f"token {token}")
-                        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                            return _read_capped_text(resp)
-
-                api_base = (
-                    host_info.api_base if host_info else None
-                ) or f"https://{effective_host}/api/v3"
-                url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
-                req = urllib.request.Request(url)  # noqa: S310
-                req.add_header("Accept", "application/vnd.github.raw")
-                if token:
-                    req.add_header("Authorization", f"token {token}")
-                with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    return _read_capped_text(resp)
+                rest_manifest_url = _rest_url(manifest_path)
+                try:
+                    return _RemoteMetadataDocument(_request_text(rest_manifest_url, rest=True))
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    if _is_valid_skill(_rest_url(skill_path), rest=True):
+                        return _RemoteMetadataDocument(None, manifestless=True)
+                    raise
 
             org = pkg.source_repo.split("/", 1)[0] if pkg.source_repo else None
             if auth_resolver is None:
                 # Legacy direct callers do not enter the concurrent prefetch
                 # path, which initializes AuthResolver before worker threads.
-                raw = _open_metadata(self._github_token, {})
+                document = _open_metadata(self._github_token, {})
             else:
                 unauth_first = auth_resolver.uses_public_github_anonymous_first(effective_host)
-                raw = auth_resolver.try_with_fallback(
+                document = auth_resolver.try_with_fallback(
                     effective_host,
                     _open_metadata,
                     org=org,
                     path=pkg.source_repo,
                     unauth_first=unauth_first,
                 )
-            data = load_yaml_str(raw)
+            if document.manifestless:
+                return MetadataEnrichmentOutcome(pkg.name, "manifestless")
+            data = load_yaml_str(document.content or "")
             if not isinstance(data, dict):
                 return MetadataEnrichmentOutcome(pkg.name, "empty")
             result: dict[str, str] = {}
@@ -1349,7 +1401,8 @@ class MarketplaceBuilder:
 
         This is the single authority for deciding whether metadata-dependent
         output is certifiable.  A reachable manifest without description or
-        version is ``empty``; an unavailable remote source is ``failed`` or
+        version is ``empty``; a verified skill without a manifest is
+        ``manifestless``; an unavailable remote source is ``failed`` or
         intentionally ``offline`` and cannot certify a clean regeneration.
         """
         if self._metadata_enrichment is not None:
