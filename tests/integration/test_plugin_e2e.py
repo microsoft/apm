@@ -77,6 +77,38 @@ def _existing_deployed_file_paths(project_root: Path, deployed_files: list[str])
     return existing
 
 
+def _deployed_skill_contents(project_root: Path, dependency: dict) -> dict[Path, bytes]:
+    """Snapshot real skill files so retained deployment checks cannot pass vacuously."""
+    paths = _existing_deployed_file_paths(project_root, dependency["deployed_files"])
+    contents = {path: path.read_bytes() for path in paths if path.is_file()}
+    assert any(path.name == "SKILL.md" for path in contents), "Skill must be deployed"
+    return contents
+
+
+def _assert_plugin_removed_skill_retained(
+    project_root: Path,
+    plugin_key: str,
+    plugin_deployed_paths: list[Path],
+    skill_dependency: dict,
+    skill_contents: dict[Path, bytes],
+) -> None:
+    """Check filesystem cleanup and surviving lock ownership, not diagnostic wording."""
+    import yaml
+
+    assert plugin_deployed_paths, "Plugin must have deployed files before uninstall"
+    remaining = [path.as_posix() for path in plugin_deployed_paths if path.exists()]
+    assert not remaining, f"Plugin deployed files remained after uninstall: {remaining}"
+    lockfile = yaml.safe_load((project_root / "apm.lock.yaml").read_text())
+    dep_keys = {_locked_dependency_key(entry) for entry in lockfile["dependencies"]}
+    skill_key = _locked_dependency_key(skill_dependency)
+    assert plugin_key not in dep_keys, "Plugin ownership must be removed from the lockfile"
+    assert dep_keys == {skill_key}, f"Expected only the retained skill, got {dep_keys}"
+    assert _locked_dependency(lockfile, skill_key) == skill_dependency
+    for path, content in skill_contents.items():
+        assert path.is_file(), f"Retained skill file removed: {path}"
+        assert path.read_bytes() == content, f"Retained skill file changed: {path}"
+
+
 def _make_package_info(
     package: APMPackage, install_path: Path, package_type: PackageType
 ) -> PackageInfo:
@@ -422,10 +454,11 @@ class TestPluginHeroScenarios:
         assert revalidated.package_type is PackageType.SKILL_BUNDLE
 
     @pytest.mark.requires_apm_binary
+    @pytest.mark.parametrize("plugin_subskill", [False, True], ids=["standalone", "plugin-skill"])
     def test_local_plugin_uninstall_after_sequential_skill_install_cleans_deployed_files(
-        self, apm_binary_path, tmp_path
-    ):
-        """Sequential CLI installs must retain plugin deployed_files for uninstall cleanup."""
+        self, apm_binary_path: Path, tmp_path: Path, plugin_subskill: bool
+    ) -> None:
+        """Removing a plugin cleans its files without removing a separately installed skill."""
         import yaml as yaml_lib
 
         if not FIXTURE_DIR.exists():
@@ -435,8 +468,11 @@ class TestPluginHeroScenarios:
         workspace.mkdir()
         plugin_dir = workspace / "plugin-src"
         shutil.copytree(FIXTURE_DIR, plugin_dir)
-        skill_dir = workspace / "skill-src"
-        _write_local_skill_package(skill_dir)
+        if plugin_subskill:
+            skill_dir = plugin_dir / "skills" / "test-skill"
+        else:
+            skill_dir = workspace / "skill-src"
+            _write_local_skill_package(skill_dir)
 
         project = workspace / "project"
         project.mkdir()
@@ -466,6 +502,8 @@ class TestPluginHeroScenarios:
 
         deployed_paths = _existing_deployed_file_paths(project, deployed_files)
         assert project / ".github" / "agents" / "test-agent.agent.md" in deployed_paths
+        skill_dep = _locked_dependency(lockfile, f"_local/{skill_dir.name}")
+        skill_contents = _deployed_skill_contents(project, skill_dep)
 
         uninstall = _run_apm_command(
             apm_binary_path, ["uninstall", str(plugin_dir)], project, timeout=60
@@ -473,9 +511,9 @@ class TestPluginHeroScenarios:
         assert uninstall.returncode == 0, (
             f"Uninstall failed:\n{uninstall.stdout}\n{uninstall.stderr}"
         )
-        combined = uninstall.stdout + uninstall.stderr
-        assert "Uninstall complete" in combined
-        assert all(not path.exists() for path in deployed_paths)
+        _assert_plugin_removed_skill_retained(
+            project, "_local/plugin-src", deployed_paths, skill_dep, skill_contents
+        )
 
     @pytest.mark.requires_apm_binary
     def test_copilot_dialect_plugin_lsp_survives_install_reinstall_and_audit(
@@ -998,8 +1036,10 @@ class TestPluginNetworkE2E:
 
     # ---- Test 6: lockfile preserved on sequential installs ---------------
 
-    def test_lockfile_preserved_on_sequential_install(self, apm_binary_path, temp_project):
-        """Installing packages one at a time must preserve previous lockfile entries."""
+    def test_lockfile_preserved_on_sequential_install(
+        self, apm_binary_path: Path, temp_project: Path
+    ) -> None:
+        """Sequential installs preserve ownership through scoped plugin removal."""
         skill_ref = self.SKILL_REF
 
         # Install plugin
@@ -1037,6 +1077,8 @@ class TestPluginNetworkE2E:
         plugin_dep = _locked_dependency(lockfile, plugin_key)
         plugin_deployed_files = plugin_dep.get("deployed_files", [])
         plugin_deployed_paths = _existing_deployed_file_paths(temp_project, plugin_deployed_files)
+        skill_dep = _locked_dependency(lockfile, self.SKILL_PATH)
+        skill_contents = _deployed_skill_contents(temp_project, skill_dep)
 
         # deps tree should show both
         tree = subprocess.run(
@@ -1046,6 +1088,7 @@ class TestPluginNetworkE2E:
             cwd=str(temp_project),
             timeout=60,
         )
+        assert tree.returncode == 0, f"Deps tree failed:\n{tree.stdout}\n{tree.stderr}"
         combined = tree.stdout + tree.stderr
         assert "mock-marketplace-plugin" in combined, "Plugin missing from deps tree"
         assert "test-skill" in combined, "Skill missing from deps tree"
@@ -1059,13 +1102,9 @@ class TestPluginNetworkE2E:
             timeout=60,
         )
         assert r3.returncode == 0, f"Uninstall failed:\n{r3.stderr}"
-        combined = r3.stdout + r3.stderr
-        if plugin_deployed_paths:
-            assert "Cleaned up" in combined and "integrated" in combined.lower(), (
-                f"Uninstall should report integration cleanup:\n{combined}"
-            )
-        remaining = [path.as_posix() for path in plugin_deployed_paths if path.exists()]
-        assert not remaining, f"Plugin deployed files remained after uninstall: {remaining}"
+        _assert_plugin_removed_skill_retained(
+            temp_project, plugin_key, plugin_deployed_paths, skill_dep, skill_contents
+        )
 
     # ---- Test 7: compile includes plugin primitives ---------------------
 
