@@ -46,16 +46,39 @@ def test_neutral_hook_intent_translates_at_native_edges() -> None:
     """One portable timeout must render in each target's native unit."""
     from apm_cli.integration.hook_native_formats import (
         _to_antigravity_hook_entries,
+        _to_codex_hook_entries,
         _to_gemini_hook_entries,
     )
 
     source = [{"command": "echo ok", "timeoutSec": 3}]
 
     gemini = _to_gemini_hook_entries(source)
+    codex = _to_codex_hook_entries(source)
     antigravity = _to_antigravity_hook_entries(source, "PreInvocation")
 
     assert gemini[0]["hooks"][0]["timeout"] == 3000
+    assert codex[0]["hooks"][0]["timeout"] == 3
     assert antigravity[0]["timeout"] == 3
+
+
+def test_codex_native_edge_preserves_nested_entries() -> None:
+    """Codex-native entries must not gain a second handler wrapper."""
+    from apm_cli.integration.hook_native_formats import _to_codex_hook_entries
+
+    source = [
+        {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "echo check",
+                    "timeout": 10,
+                }
+            ],
+        }
+    ]
+
+    assert _to_codex_hook_entries(source) == source
 
 
 def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path) -> None:
@@ -73,6 +96,35 @@ def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path) -> None:
     )
 
     settings = json.loads((tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"] == [
+        {
+            "matcher": "fs_write|str_replace",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "echo check",
+                    "timeout": 10,
+                }
+            ],
+        }
+    ]
+
+
+def test_codex_edge_nests_flat_portable_hook_entries(tmp_path: Path) -> None:
+    """Codex output must wrap portable handlers in matcher/hooks entries."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / ".codex").mkdir()
+    package_info = _write_portable_hook_package(tmp_path)
+
+    HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["codex"],
+        package_info,
+        tmp_path,
+    )
+
+    settings = json.loads((tmp_path / ".codex" / "hooks.json").read_text(encoding="utf-8"))
     assert settings["hooks"]["PreToolUse"] == [
         {
             "matcher": "fs_write|str_replace",

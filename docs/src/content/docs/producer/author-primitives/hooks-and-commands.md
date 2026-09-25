@@ -196,7 +196,9 @@ Supported targets and where the integrator writes:
 APM parses the source into vendor-neutral hook intent, then each target
 integrator renders its native schema. Flat command entries become Claude's
 required `{ "matcher": "*", "hooks": [...] }` entries in
-`.claude/settings.json`. Kiro receives its current v1 standalone schema:
+`.claude/settings.json`. For Codex, flat command entries become intermediate
+hook groups containing a nested `hooks` array in `.codex/hooks.json`. Kiro
+receives its current v1 standalone schema:
 `{ "version": "v1", "hooks": [{ "name", "trigger", "matcher", "action" }] }`.
 Kiro trigger names are PascalCase and command timeouts remain in seconds.
 
