@@ -55,6 +55,30 @@ my-project/
 Always commit it. The lockfile is what makes a fresh clone install identically
 on any machine.
 
+### `apm_modules/` is derived
+
+`apm_modules/` is an install cache/materialization directory, not a source of
+truth. Keep `apm.yml` and `apm.lock.yaml` in version control; the installed
+package sources under `apm_modules/` can be recreated by running `apm install`
+again.
+
+It is therefore safe, and recommended for normal repositories, to ignore the
+directory:
+
+```gitignore
+apm_modules/
+```
+
+This also works well in CI: check out the repository with its committed
+manifest and lockfile, run `apm install` to materialize dependencies for that
+job, and discard the workspace afterward. The lockfile remains the durable
+record of the resolved graph and deployed-file integrity.
+
+APM does not currently provide an install flag that automatically removes
+`apm_modules/` after a successful run. If a workflow needs an entirely
+ephemeral checkout today, remove the directory as a separate cleanup step
+after the APM operation completes.
+
 ## Top-level structure
 
 ```yaml
