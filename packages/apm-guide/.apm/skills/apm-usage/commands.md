@@ -186,10 +186,12 @@ root context files. Run `apm compile` explicitly for `AGENTS.md`, `CLAUDE.md`,
 or `GEMINI.md`; `apm run` separately compiles referenced prompt files at
 execution time.
 
-For OpenCode user scope, first create or open an OpenCode config directory.
-Then run `apm install -g --target opencode` to deploy skills to
-`~/.config/opencode/skills/`, followed by `apm compile -g` to update
-`~/.config/opencode/AGENTS.md` with scoped instruction sections.
+For OpenCode user scope, the resolved config root takes precedence in this
+order: `OPENCODE_CONFIG_DIR`, `$XDG_CONFIG_HOME/opencode`, then the default
+`~/.config/opencode`. User-scope installation creates the resolved root when
+needed. Run `apm install -g --target opencode` to deploy skills there, followed
+by `apm compile -g` to write `AGENTS.md` in that root with scoped instruction
+sections.
 
 `apm compile -g` rejects `--target`, so `target:` or `targets:` in
 `~/.apm/apm.yml` selects

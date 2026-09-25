@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -181,7 +182,8 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
             adapter.update_config({"server": {"command": "npx", "args": ["pkg"]}})
 
         self.assertTrue(user_dir.is_dir())
-        self.assertEqual((user_dir / "opencode.json").stat().st_mode & 0o777, 0o600)
+        if sys.platform != "win32":
+            self.assertEqual((user_dir / "opencode.json").stat().st_mode & 0o777, 0o600)
 
     def test_user_scope_does_not_require_project_opt_in_directory(self):
         user_dir = Path(self.tmp.name) / "user-opencode"

@@ -1,7 +1,7 @@
 """Characterisation tests for MCPIntegrator.remove_stale()."""
 
 import os
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,6 +34,30 @@ class TestRemoveStaleCharacterisation:
 
         result = MCPIntegrator.remove_stale(stale_names=set())
         assert result is None
+
+    def test_copilot_uses_legacy_user_scope_when_scope_unspecified(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        copilot_client = MagicMock()
+        copilot_client.get_config_path.return_value = "/tmp/copilot-mcp.json"
+        with (
+            patch(
+                "apm_cli.factory.ClientFactory.create_client",
+                return_value=copilot_client,
+            ) as create_client,
+            patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config"),
+        ):
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="copilot",
+                scope=None,
+            )
+
+        create_client.assert_called_once_with(
+            "copilot",
+            project_root=Path.cwd(),
+            user_scope=True,
+        )
 
     def test_remove_stale_with_runtime(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator

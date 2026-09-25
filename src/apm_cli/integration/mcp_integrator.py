@@ -781,7 +781,7 @@ class MCPIntegrator:
             copilot_client = ClientFactory.create_client(
                 "copilot",
                 project_root=project_root_path,
-                user_scope=effective_user_scope,
+                user_scope=True if scope is None else effective_user_scope,
             )
             _clean_json_mcp_config(
                 Path(copilot_client.get_config_path()),
