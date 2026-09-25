@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now fails on incompatible immutable dependency requirements instead of silently keeping one version, including inconsistent frozen replay and short SHA pins; equivalent tag/SHA pins remain valid. Align root/parent refs, then run `apm install` without `--frozen` to regenerate the lockfile. (#3061)
 - Partial dependency updates preserve concrete deployment targets for refreshed and untouched packages, including skills under `.agents/skills/`, instead of demoting them to `legacy`. (#2924)
 - Transient resolution-staging paths are shorter, so `apm install` no longer fails with `[WinError 206] The filename or extension is too long.` from a deep Windows checkout. The staging root drops from a full `uuid4().hex` to 12 hex characters and each per-destination slot from a full SHA-256 digest to 16, freeing 68 characters on every staged path. This is not a guarantee of arbitrary long-path support. Orphaned staging roots left by earlier versions are still cleaned up. (#2896)
 
@@ -42,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm prune` removes unneeded manifestless skill installs after their lock entries disappear, while retaining bundles and whole roots containing needed nested packages. Personal files inside removable package roots are also removed; keep personal source outside `apm_modules/` and preview with `--dry-run`. -- by @fangkangmi (#3057)
 - Autopilot maintainer canvas removes a Decide row as soon as GitHub confirms `status/accepted`, without waiting for a full issue/PR refetch.
 - Issue and PR triage no longer skip bot-authored items (Copilot, Dependabot, github-actions). They stay in the queue like any other contribution. (#3024)
 - PR-review scheduler no longer queues every open pull request. A fresh review requires the `panel-review` label (same trigger as the Agentic Workflow), `status/accepted` on the PR, or an explicit named PR list. The reviewing session also requires `status/accepted` on the PR or a linked issue; otherwise scheduler and review-worker stop with no comment. The worker may clear `panel-review`; the scheduler does not comment or change labels. Both also apply a CODEOWNERS last-comment gate: read the last CODEOWNER comment as conditions and evaluate them against later comments AND labels on the PR and linked issues. Drop or `noop` only when those conditions are unmet or unclear. Named list does not bypass that gate.
@@ -78,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The Unix installer now declares the prebuilt Linux glibc 2.38 minimum and routes older systems to the existing eligible Python/pip fallback before downloading an incompatible binary, with matching recovery guidance. (#2931)
+
+### Fixed
+
+- `apm marketplace check` now resolves bare `owner/repo` sources through the configured default host and standard authentication chain, so `GITHUB_APM_PAT` works consistently for private GitHub and GHES repositories. (#2917)
 
 ### Security
 
