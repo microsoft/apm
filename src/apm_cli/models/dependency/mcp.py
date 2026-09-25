@@ -24,6 +24,7 @@ _KNOWN_DICT_KEYS = frozenset(
         "url",
         "command",
         "cwd",
+        "enabled",
         "extra",  # explicit extra block is also a known key
         # Install-time provenance field: reserved here so a manifest key named
         # ``resolved_by`` is treated as known (ignored by from_dict, never
@@ -46,6 +47,8 @@ _RESERVED_EXTRA_KEYS = _KNOWN_DICT_KEYS - {"extra"}
 # Harness aliases for modeled fields share the same passthrough boundary. Keeping
 # them beside the manifest vocabulary lets parsing report rejected keys truthfully
 # before every adapter consumes the filtered ``extra`` mapping.
+# ``enabled`` is also the modeled optional boolean below. It stays in this set so
+# an explicit ``extra:`` block cannot override that field.
 _HARNESS_EXTRA_ALIASES = frozenset({"enabled", "environment", "http_headers", "id"})
 _EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | _HARNESS_EXTRA_ALIASES
 
@@ -81,6 +84,7 @@ class MCPDependency:
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
     cwd: str | None = None  # Working directory for stdio transports
+    enabled: bool | None = None  # None omits the flag; OpenCode then writes true
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
@@ -143,6 +147,9 @@ class MCPDependency:
             )
 
         transport = d.get("transport") or d.get("type")  # legacy 'type' -> 'transport'
+        enabled = d.get("enabled")
+        if enabled is not None and not isinstance(enabled, bool):
+            raise ValueError(f"MCP dependency '{safe_name}': 'enabled' must be true or false")
 
         instance = cls(
             name=d["name"],
@@ -157,6 +164,7 @@ class MCPDependency:
             url=d.get("url"),
             command=d.get("command"),
             cwd=d.get("cwd"),
+            enabled=enabled,
             extra=extra,
         )
 
@@ -196,6 +204,7 @@ class MCPDependency:
             "url",
             "command",
             "cwd",
+            "enabled",
         ):
             value = getattr(self, field_name)
             if value is not None or (field_name == "registry" and value is False):
@@ -244,6 +253,8 @@ class MCPDependency:
                 parts.append(f"command=<{type(self.command).__name__}>")
         if self.cwd:
             parts.append(f"cwd={self.cwd!r}")
+        if self.enabled is not None:
+            parts.append(f"enabled={self.enabled}")
         if self.extra:
             parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
@@ -277,6 +288,8 @@ class MCPDependency:
                 f"'..' path segments. "
                 f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
+        if self.enabled is not None and not isinstance(self.enabled, bool):
+            raise ValueError(f"MCP dependency '{self.name}': 'enabled' must be true or false")
         if self.url is not None:
             scheme = urlparse(self.url).scheme.lower()
             if scheme not in _ALLOWED_URL_SCHEMES:

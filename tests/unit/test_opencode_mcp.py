@@ -49,6 +49,26 @@ class TestToOpencodeFormat(unittest.TestCase):
         result = OpenCodeClientAdapter._to_opencode_format(copilot, enabled=False)
         self.assertFalse(result["enabled"])
 
+    def test_entry_enabled_false_overrides_default_true(self):
+        copilot = {"url": "https://example.com/mcp", "enabled": False}
+        result = OpenCodeClientAdapter._to_opencode_format(copilot)
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["type"], "remote")
+
+    def test_entry_enabled_true_overrides_parameter_false(self):
+        copilot = {"command": "npx", "args": [], "enabled": True}
+        result = OpenCodeClientAdapter._to_opencode_format(copilot, enabled=False)
+        self.assertTrue(result["enabled"])
+
+    def test_omitted_enabled_uses_parameter_default_true(self):
+        result = OpenCodeClientAdapter._to_opencode_format({"command": "npx", "args": []})
+        self.assertTrue(result["enabled"])
+
+    def test_non_boolean_entry_enabled_keeps_parameter(self):
+        copilot = {"command": "npx", "args": [], "enabled": "false"}
+        result = OpenCodeClientAdapter._to_opencode_format(copilot, enabled=False)
+        self.assertFalse(result["enabled"])
+
     # -- remote entries --
 
     def test_remote_basic(self):
@@ -212,6 +232,19 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
         self.assertFalse(data["mcp"]["my-server"]["enabled"])
 
+    def test_update_config_per_entry_enabled_false(self):
+        self.adapter.update_config(
+            {
+                "off": {"url": "https://example.com/mcp", "enabled": False},
+                "on": {"url": "https://example.com/other", "enabled": True},
+                "defaulted": {"url": "https://example.com/default"},
+            }
+        )
+        data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        self.assertFalse(data["mcp"]["off"]["enabled"])
+        self.assertTrue(data["mcp"]["on"]["enabled"])
+        self.assertTrue(data["mcp"]["defaulted"]["enabled"])
+
 
 class TestOpenCodeConfigureMCPServer(unittest.TestCase):
     def setUp(self):
@@ -307,6 +340,48 @@ class TestOpenCodeConfigureMCPServer(unittest.TestCase):
         self.adapter.configure_mcp_server("simple", server_info_cache=cache)
         data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
         self.assertIn("simple", data["mcp"])
+
+    def test_manifest_enabled_false_overrides_default_parameter(self):
+        cache = {
+            "example": {
+                "name": "example",
+                "remotes": [{"transport_type": "http", "url": "https://example.com/mcp"}],
+                "_apm_enabled": False,
+            }
+        }
+        self.assertTrue(self.adapter.configure_mcp_server("example", server_info_cache=cache))
+        data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        server = data["mcp"]["example"]
+        self.assertEqual(server["type"], "remote")
+        self.assertEqual(server["url"], "https://example.com/mcp")
+        self.assertFalse(server["enabled"])
+
+    def test_manifest_enabled_true_is_written(self):
+        cache = {
+            "example": {
+                "name": "example",
+                "remotes": [{"transport_type": "http", "url": "https://example.com/mcp"}],
+                "_apm_enabled": True,
+            }
+        }
+        self.adapter.configure_mcp_server("example", server_info_cache=cache, enabled=False)
+        data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        self.assertTrue(data["mcp"]["example"]["enabled"])
+
+    def test_omitted_manifest_enabled_keeps_parameter(self):
+        cache = {
+            "example": {
+                "name": "example",
+                "remotes": [{"transport_type": "http", "url": "https://example.com/mcp"}],
+            }
+        }
+        self.adapter.configure_mcp_server("example", server_info_cache=cache)
+        data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        self.assertTrue(data["mcp"]["example"]["enabled"])
+
+        self.adapter.configure_mcp_server("example", server_info_cache=cache, enabled=False)
+        data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        self.assertFalse(data["mcp"]["example"]["enabled"])
 
     def test_env_overrides_written_for_local_server(self):
         server_info = {

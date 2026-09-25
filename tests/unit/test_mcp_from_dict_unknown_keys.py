@@ -623,3 +623,58 @@ class TestResolvedByKeyReserved:
         with patch(_WARN_PATH):
             dep = MCPDependency.from_dict({"name": "svc", "extra": {"resolved_by": "@evil/pkg"}})
         assert "resolved_by" not in dep.to_dict()
+
+
+def _remote(name: str = "example", **fields):
+    payload = {
+        "name": name,
+        "registry": False,
+        "transport": "http",
+        "url": "https://example.com/mcp",
+    }
+    payload.update(fields)
+    return payload
+
+
+class TestEnabledModeledField:
+    """``enabled`` is a modeled boolean, not an extra passthrough key."""
+
+    def test_false_is_stored_without_warning(self):
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(_remote(enabled=False))
+        mock_warn.assert_not_called()
+        assert dep.enabled is False
+        assert dep.extra is None
+        assert dep.to_dict()["enabled"] is False
+
+    def test_true_round_trips(self):
+        dep = MCPDependency.from_dict(_remote(enabled=True))
+        assert dep.enabled is True
+        assert dep.to_dict()["enabled"] is True
+
+    def test_omitted_stays_unset(self):
+        dep = MCPDependency.from_dict(_remote())
+        assert dep.enabled is None
+        assert "enabled" not in dep.to_dict()
+
+    def test_null_is_omitted(self):
+        dep = MCPDependency.from_dict(_remote(enabled=None))
+        assert dep.enabled is None
+        assert "enabled" not in dep.to_dict()
+
+    def test_non_boolean_rejected(self):
+        with pytest.raises(ValueError, match="enabled"):
+            MCPDependency.from_dict(_remote(enabled="false"))
+
+    def test_explicit_extra_cannot_override_modeled_enabled(self):
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(
+                _remote(enabled=False, extra={"enabled": True, "oauth": {"clientId": "abc"}})
+            )
+        assert dep.enabled is False
+        assert dep.extra == {"oauth": {"clientId": "abc"}}
+        assert dep.to_dict()["enabled"] is False
+        assert "oauth" in dep.to_dict()
+        warning = mock_warn.call_args[0][0]
+        assert "enabled" in warning
+        assert "reserved passthrough" in warning

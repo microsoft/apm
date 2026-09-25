@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OpenCode MCP install writes `enabled: false` from `apm.yml` into `opencode.json` instead of forcing `true`. An omitted `enabled` still writes `true`. (#3050)
 - `apm prune` removes unneeded manifestless skill installs after their lock entries disappear, while retaining bundles and whole roots containing needed nested packages. Personal files inside removable package roots are also removed; keep personal source outside `apm_modules/` and preview with `--dry-run`. -- by @fangkangmi (#3057)
 - Autopilot maintainer canvas removes a Decide row as soon as GitHub confirms `status/accepted`, without waiting for a full issue/PR refetch.
 - Issue and PR triage no longer skip bot-authored items (Copilot, Dependabot, github-actions). They stay in the queue like any other contribution. (#3024)

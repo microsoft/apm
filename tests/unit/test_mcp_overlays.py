@@ -674,6 +674,27 @@ class TestBuildSelfDefinedServerInfo:
         result = MCPIntegrator._build_self_defined_info(dep)
         assert "_apm_tools_override" not in result
 
+    def test_enabled_false_embedded(self):
+        dep = MCPDependency(
+            name="opt-in",
+            registry=False,
+            transport="http",
+            url="https://example.com/mcp",
+            enabled=False,
+        )
+        result = MCPIntegrator._build_self_defined_info(dep)
+        assert result["_apm_enabled"] is False
+
+    def test_enabled_omitted_has_no_key(self):
+        dep = MCPDependency(
+            name="defaulted",
+            registry=False,
+            transport="http",
+            url="https://example.com/mcp",
+        )
+        result = MCPIntegrator._build_self_defined_info(dep)
+        assert "_apm_enabled" not in result
+
 
 # ---------------------------------------------------------------------------
 # _apply_mcp_overlay
@@ -716,6 +737,16 @@ class TestApplyMCPOverlay:
         MCPIntegrator._apply_overlay(cache, dep)
         assert len(cache["srv"]["packages"]) == 1
         assert cache["srv"]["packages"][0]["registry_name"] == "npm"
+
+    def test_enabled_overlay_embedded(self):
+        cache = {"srv": {"remotes": [{"url": "https://example.com/mcp"}]}}
+        MCPIntegrator._apply_overlay(cache, MCPDependency(name="srv", enabled=False))
+        assert cache["srv"]["_apm_enabled"] is False
+
+    def test_enabled_overlay_omitted_leaves_key_absent(self):
+        cache = {"srv": {"remotes": [{"url": "https://example.com/mcp"}]}}
+        MCPIntegrator._apply_overlay(cache, MCPDependency(name="srv"))
+        assert "_apm_enabled" not in cache["srv"]
 
     def test_headers_merged_into_remotes(self):
         cache = {

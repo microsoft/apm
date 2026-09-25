@@ -481,6 +481,9 @@ class MCPIntegrator:
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
 
+        if isinstance(getattr(dep, "enabled", None), bool):
+            info["_apm_enabled"] = dep.enabled
+
         # Pass through harness-specific extra keys for adapters to merge
         if dep.extra:
             info["_extra"] = dict(dep.extra)
@@ -546,6 +549,9 @@ class MCPIntegrator:
         # Tools overlay: embed for adapters to pick up
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
+
+        if isinstance(getattr(dep, "enabled", None), bool):
+            info["_apm_enabled"] = dep.enabled
 
         # Pass through harness-specific extra keys for adapters to merge
         if dep.extra:

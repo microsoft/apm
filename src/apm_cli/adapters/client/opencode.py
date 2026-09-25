@@ -120,6 +120,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             config_key = self._determine_config_key(server_url, server_name)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
+            manifest_enabled = (
+                server_info.get("_apm_enabled") if isinstance(server_info, dict) else None
+            )
+            enabled = self._coerce_enabled(manifest_enabled, enabled)
             self.update_config({config_key: server_config}, enabled=enabled)
 
             print(f"Successfully configured MCP server '{config_key}' for OpenCode")
@@ -136,7 +140,11 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         Copilot: ``{"command": "npx", "args": ["-y", "pkg"], "env": {...}}``
         OpenCode: ``{"type": "local", "command": ["npx", "-y", "pkg"],
                      "environment": {...}, "enabled": true}``
+
+        A boolean ``enabled`` on *copilot_entry* wins over the method default.
+        Omitted (or non-boolean) values keep *enabled*, which defaults to true.
         """
+        enabled = OpenCodeClientAdapter._coerce_enabled(copilot_entry.get("enabled"), enabled)
         entry: dict = {"type": "local", "enabled": enabled}
 
         cmd = copilot_entry.get("command", "")
@@ -160,3 +168,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                 entry[key] = value
 
         return entry
+
+    @staticmethod
+    def _coerce_enabled(value, default: bool) -> bool:
+        """Return *value* when it is a boolean, otherwise *default*."""
+        if isinstance(value, bool):
+            return value
+        return default
