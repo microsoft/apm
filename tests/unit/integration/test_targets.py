@@ -105,6 +105,7 @@ class TestActiveTargets:
     def test_opencode_user_scope_auto_detects_explicit_config_dir(self, monkeypatch):
         config_dir = self.root / "outside-home" / "opencode"
         config_dir.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: self.root)
         monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(config_dir))
 
         targets = active_targets_user_scope()
@@ -114,6 +115,7 @@ class TestActiveTargets:
     def test_opencode_user_scope_auto_detects_xdg_config_home(self, monkeypatch):
         xdg_config_home = self.root / "xdg-config"
         (xdg_config_home / "opencode").mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: self.root)
         monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
 

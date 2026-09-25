@@ -746,8 +746,8 @@ class MCPIntegrator:
         # config only -- never touch ~/.claude.json on the user's behalf without
         # an explicit USER scope, since that file is shared across all Claude
         # Code projects on the host.
-        clean_claude_project = "claude" in target_runtimes and not effective_user_scope
-        clean_claude_user = "claude" in target_runtimes and effective_user_scope
+        clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
+        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
         if "claude" in target_runtimes and scope is None:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
