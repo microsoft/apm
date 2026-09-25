@@ -101,7 +101,7 @@ class TestActiveTargets:
         profile = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
         assert profile is not None
         assert profile.resolved_deploy_root is None
-        assert profile.root_dir == str(opencode_user_config_dir())
+        assert profile.root_dir == opencode_user_config_dir().as_posix()
 
     def test_opencode_user_scope_auto_detects_explicit_config_dir(self, monkeypatch):
         config_dir = self.root / "outside-home" / "opencode"
@@ -142,7 +142,7 @@ class TestActiveTargets:
         try:
             expected_prefix = expected.relative_to(Path.home()).as_posix() + "/"
         except ValueError:
-            expected_prefix = f"{expected.resolve(strict=False)}/"
+            expected_prefix = f"{expected.resolve(strict=False).as_posix()}/"
 
         assert expected_prefix in prefixes
         assert KNOWN_TARGETS["opencode"].prefix in prefixes
