@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Issue-triage sweep no longer classifies real GitHub bug forms as spam: heading/list line matches no longer swallow the rest of the body after markup strip.
 - Preserve marketplace discovery provenance across dependency updates so `plugin@marketplace` uninstall aliases keep working in project and global scope. -- by @mfroembgen (#2949)
 - Copilot hooks: `UserPromptSubmit` and `userPromptSubmit` now deploy as `userPromptSubmitted`, the event Copilot CLI runs; they were written as `userPromptSubmit`, which never fired. -- by @sheilagithub (#3030)
+- Cursor target no longer emits a quoted, multi-item YAML list for `globs` when an instruction's `applyTo` has comma-separated globs; it now emits the single comma-joined, always-bare scalar Cursor's own `.mdc` docs document -- including patterns starting with `**`, which every Cursor doc example leaves unquoted too. `description` no longer forces `\uXXXX`-escaped non-ASCII text either. (#3002)
 
 ### Security
 

@@ -621,30 +621,33 @@ class TestConvertToCursorRules:
     def test_maps_apply_to_to_globs(self):
         content = "---\napplyTo: 'src/**/*.py'\n---\n\n# Python rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'globs: "src/**/*.py"' in result
+        # Plain (unquoted) scalar, matching Cursor's documented .mdc format.
+        assert "globs: src/**/*.py" in result
         assert "applyTo" not in result
 
     def test_preserves_description(self):
         content = "---\napplyTo: '**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'description: "TypeScript guidelines"' in result
-        assert 'globs: "**/*.ts"' in result
+        assert "description: TypeScript guidelines" in result
+        # globs is always bare, even for a leading "**" -- Cursor's docs
+        # never show a quoted globs value, no exceptions.
+        assert "globs: **/*.ts" in result
 
     def test_generates_description_from_heading(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# Python coding standards\n\nUse type hints."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'description: "Python coding standards"' in result
+        assert "description: Python coding standards" in result
 
     def test_generates_description_from_first_sentence(self):
         content = "---\napplyTo: '**'\n---\n\nAlways use descriptive names. Follow PEP8."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'description: "Always use descriptive names"' in result
+        assert "description: Always use descriptive names" in result
 
     def test_no_frontmatter(self):
         content = "# Simple rules\n\nJust some guidelines."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert result.startswith("---\n")
-        assert 'description: "Simple rules"' in result
+        assert "description: Simple rules" in result
         # No globs when no applyTo
         assert "globs" not in result
 
@@ -658,7 +661,45 @@ class TestConvertToCursorRules:
         content = "---\ndescription: General rules\n---\n\n# Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert "globs" not in result
-        assert 'description: "General rules"' in result
+        assert "description: General rules" in result
+
+    def test_multiple_globs_join_into_single_comma_scalar(self):
+        """Issue #3002: comma-separated applyTo must NOT become a YAML list."""
+        content = "---\napplyTo: 'services/**/*.py,plugins/services/**/*.py'\n---\n\n# Body"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs: services/**/*.py, plugins/services/**/*.py" in result
+        assert "  - " not in result
+
+    def test_non_ascii_description_stays_literal_utf8(self):
+        """Issue #3002: non-ASCII description text must not be \\uXXXX-escaped."""
+        content = "---\napplyTo: '**/*.py'\ndescription: 'Python patterns \u2014 async \u2192 sync'\n---\n\n# Body"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "description: Python patterns \u2014 async \u2192 sync" in result
+        assert "\\u" not in result
+
+    def test_escaped_literal_comma_in_glob_survives_the_comma_join(self):
+        """PR #3011 Copilot follow-up: joining parsed globs with ", " must not
+        erase the ``\\,`` escape that protects a literal comma inside one
+        glob -- otherwise it becomes indistinguishable from the separator
+        between two globs.
+        """
+        content = "---\napplyTo: 'src/foo\\,bar/*.py,other/**'\n---\n\n# Body"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs: src/foo\\,bar/*.py, other/**" in result
+
+    def test_lone_surrogate_description_does_not_crash_utf8_encode(self):
+        """PR #3011 Copilot follow-up: a description whose YAML source
+        escapes a lone UTF-16 surrogate (the project's hidden-unicode
+        security-gate attack shape, e.g. ``\\uDB40\\uDC01``) decodes to a
+        Python string containing that lone surrogate. The pure-ASCII
+        source text passes the frontmatter parser's own printable-input
+        check; the *decoded* value must still render to something
+        UTF-8-encodable rather than crash the eventual file write.
+        """
+        content = '---\napplyTo: src/**\ndescription: "\\uDB40\\uDC01hidden"\n---\n\n# Body'
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        result.encode("utf-8")
+        assert "\\udb40\\udc01hidden" in result
 
 
 class TestCursorRulesIntegration:
@@ -703,7 +744,7 @@ class TestCursorRulesIntegration:
         target = self.project_root / ".cursor" / "rules" / "python.mdc"
         assert target.exists()
         content = target.read_text()
-        assert 'globs: "**/*.py"' in content
+        assert "globs: **/*.py" in content
         assert "# Python rules" in content
 
     def test_creates_rules_subdirectory(self):
@@ -872,8 +913,8 @@ class TestCursorRulesIntegration:
         self.integrator.integrate_package_instructions_cursor(pkg_info, self.project_root)
 
         deployed = (self.project_root / ".cursor" / "rules" / "ts.mdc").read_text()
-        assert 'globs: "src/**/*.ts"' in deployed
-        assert 'description: "TypeScript rules"' in deployed
+        assert "globs: src/**/*.ts" in deployed
+        assert "description: TypeScript rules" in deployed
         assert "applyTo" not in deployed
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
@@ -1418,7 +1459,7 @@ class TestApplyToCommaSplitting:
         ("converter", "scope_marker"),
         [
             ("_convert_to_claude_rules", '  - "src/**"'),
-            ("_convert_to_cursor_rules", 'globs: "src/**"'),
+            ("_convert_to_cursor_rules", "globs: src/**"),
             ("_convert_to_windsurf_rules", 'globs: "src/**"'),
             ("_convert_to_kiro_steering", 'fileMatchPattern: "src/**"'),
             ("_convert_to_antigravity_rules", 'globs: "src/**"'),
@@ -1444,8 +1485,15 @@ class TestApplyToCommaSplitting:
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         post = loads_frontmatter(result)
 
+        # "src/**" is plain-scalar-safe (no leading YAML indicator) and stays bare.
         assert post.metadata["globs"] == "src/**"
+        assert "globs: src/**" in result
         assert post.metadata["description"] == "safe\n---"
+        # A description containing a real newline can't be a bare or
+        # single-quoted scalar without corruption (YAML line-folding), so
+        # it must still fall back to a double-quoted scalar -- this is the
+        # frontmatter-injection defence this test guards.
+        assert 'description: "safe\\n---"' in result
         assert post.content == "# Scoped rule"
 
     # ---- Claude ----
@@ -1454,7 +1502,6 @@ class TestApplyToCommaSplitting:
         ("converter", "target_key"),
         [
             ("_convert_to_claude_rules", "paths:"),
-            ("_convert_to_cursor_rules", "globs:"),
             ("_convert_to_windsurf_rules", "globs:"),
         ],
     )
@@ -1466,6 +1513,14 @@ class TestApplyToCommaSplitting:
         assert target_key in result
         assert '  - "**/*.py"' in result
         assert '  - "**/*.pyi"' in result
+
+    def test_cursor_yaml_list_apply_to_joins_into_single_scalar(self):
+        """Issue #3002: a YAML-list applyTo still becomes one comma-joined Cursor scalar."""
+        content = "---\napplyTo:\n  - '**/*.py'\n  - '**/*.pyi'\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+
+        assert "globs: **/*.py, **/*.pyi" in result
+        assert "  - " not in result
 
     def test_claude_comma_list_emits_yaml_list(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Rules"
@@ -1510,28 +1565,26 @@ class TestApplyToCommaSplitting:
         assert "# R" in result
 
     # ---- Cursor ----
+    # Issue #3002: Cursor's native `.mdc` format never uses a YAML list for
+    # `globs` -- multiple globs are one comma-joined scalar, matching
+    # Cursor's own documented format (cursor.com/docs/context/rules).
 
-    def test_cursor_comma_list_emits_yaml_list(self):
+    def test_cursor_comma_list_joins_into_single_scalar(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "globs:" in result
-        assert '  - "**/src/**"' in result
-        assert '  - "**/api/**"' in result
-        assert '  - "**/services/**"' in result
-        assert 'globs: "**/src/**,' not in result
+        assert "globs: **/src/**, **/api/**, **/services/**" in result
+        assert "  - " not in result
 
     def test_cursor_single_glob_stays_scalar(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'globs: "**/*.py"' in result
+        assert "globs: **/*.py" in result
         assert '  - "**/*.py"' not in result
 
     def test_cursor_comma_whitespace_trimmed(self):
         content = "---\napplyTo: 'a, b , c'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert '  - "a"' in result
-        assert '  - "b"' in result
-        assert '  - "c"' in result
+        assert "globs: a, b, c" in result
 
     def test_cursor_single_comma_treated_as_empty(self):
         content = "---\napplyTo: ','\n---\n\n# R"
@@ -1541,7 +1594,7 @@ class TestApplyToCommaSplitting:
     def test_cursor_trailing_comma_normalises_to_single(self):
         content = "---\napplyTo: '**/*.py,'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'globs: "**/*.py"' in result
+        assert "globs: **/*.py" in result
 
     # ---- Windsurf ----
 
