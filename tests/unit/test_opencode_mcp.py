@@ -218,7 +218,8 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
 
     def test_get_current_config_corrupt_json(self):
         self.opencode_json.write_text("{invalid json", encoding="utf-8")
-        self.assertEqual(self.adapter.get_current_config(), {})
+        with self.assertRaises(json.JSONDecodeError):
+            self.adapter.get_current_config()
 
     # -- update_config --
 
@@ -237,6 +238,15 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
         self.assertIn("old-server", data["mcp"])
         self.assertIn("new-server", data["mcp"])
+
+    def test_update_config_leaves_corrupt_file_unchanged(self):
+        corrupt_config = "{invalid json"
+        self.opencode_json.write_text(corrupt_config, encoding="utf-8")
+
+        with self.assertRaises(json.JSONDecodeError):
+            self.adapter.update_config({"server": {"command": "npx", "args": []}})
+
+        self.assertEqual(self.opencode_json.read_text(encoding="utf-8"), corrupt_config)
 
     def test_update_config_noop_when_opencode_dir_missing(self):
         self.opencode_dir.rmdir()
@@ -509,6 +519,27 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         data = json.loads(opencode_json.read_text(encoding="utf-8"))
         self.assertIn("keep", data["mcp"])
         self.assertNotIn("stale", data["mcp"])
+
+    def test_remove_stale_vscode_symlink_does_not_change_external_config(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        external_dir = Path(self.tmp.name) / "external-vscode"
+        external_dir.mkdir()
+        external_json = external_dir / "mcp.json"
+        original = json.dumps({"servers": {"keep": {"type": "local"}, "stale": {"type": "remote"}}})
+        external_json.write_text(original, encoding="utf-8")
+        try:
+            (Path(self.tmp.name) / ".vscode").symlink_to(external_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not supported")
+
+        MCPIntegrator.remove_stale(
+            {"stale"},
+            runtime="vscode",
+            project_root=Path(self.tmp.name),
+        )
+
+        self.assertEqual(external_json.read_text(encoding="utf-8"), original)
 
     def test_remove_stale_project_scope_overrides_legacy_user_scope(self):
         from apm_cli.core.scope import InstallScope

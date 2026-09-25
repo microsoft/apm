@@ -67,6 +67,7 @@ def _reject_symlink_config(
     symlink_candidates = {config_path}
     current = config_path.parent
     while current != current.parent:
+        symlink_candidates.add(current)
         resolved_current = current.resolve(strict=False)
         if resolved_current == boundary:
             symlink_candidates.add(current)

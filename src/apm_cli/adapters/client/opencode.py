@@ -120,11 +120,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         config_path = self.get_config_path()
         if not os.path.exists(config_path):
             return {}
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError):
-            return {}
+        with open(config_path, encoding="utf-8") as f:
+            return json.load(f)
 
     def configure_mcp_server(
         self,
