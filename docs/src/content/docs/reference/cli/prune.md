@@ -32,17 +32,27 @@ wiring) and rewrites the lockfile.
    canonical deployment ownership rows
 
 An installed package is **orphaned** when it is neither declared in either
-dependency list nor retained as a lockfile-resolved transitive dependency.
-`apm prune` removes the orphan's directory under `apm_modules/`, deletes every
-file the orphan deployed into your harness directories (using the
-`deployed_files` manifest in the lockfile), removes the entry from
+dependency list nor needed by a retained package. This preserves transitive
+dependencies, bundled skills, and whole roots containing a needed nested
+package. An unrelated sibling root can still be pruned.
+
+Recognized roots under `apm_modules/`, including manifestless `SKILL.md`
+packages, are managed installation content. Pruning an eligible root removes
+its contents, including manually copied packages and personal files. Keep
+personal source outside `apm_modules/`; preview cleanup with `apm prune --dry-run`.
+Neither a surviving lock entry nor an `.apm-pin` cache marker is required.
+
+`apm prune` removes the orphan's directory under `apm_modules/`, cleans up its
+owned harness deployments using the protections below, removes its entry from
 `apm.lock.yaml`, and cleans up empty parent directories.
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
 no package is orphaned. It also removes stale direct-dependency records whose
-package directory is already absent, allowing a retry to finish after an
-earlier lockfile write failed. A stale dependency or owner reference is not
+package directory is already absent or retained for a needed nested package,
+allowing a retry to finish after an earlier lockfile write failed. Retained
+source content does not preserve an undeclared package's deployment ownership.
+A stale dependency or owner reference is not
 "nothing to prune." If `apm.yml` is missing, the command exits with an error.
 
 ## Options
@@ -125,7 +135,13 @@ reconciles hooks for packages and targets still declared.
 
 Notes:
 
-- Packages that share an install root with a still-declared sibling subdirectory dependency are not falsely protected by ancestor expansion. The check uses lockfile membership (with `apm.yml` fallback) to identify genuine standalone packages.
+- Manifestless installs containing `SKILL.md` are detected even after `apm install`
+  removes their lockfile entry. Skills inside a declared or retained transitive
+  package remain part of that package and are preserved.
+- A recognized ancestor containing a declared direct/dev or retained transitive
+  dependency is kept intact and reported as retained, not removed.
+- Unrecognized directories are not package-removal candidates. Files deployed
+  outside `apm_modules/` retain the ownership protections described above.
 - A manifest embedded at any depth inside an installed package is owned by that
   package. It is not an independent dependency, orphan, or prune candidate.
 - Deploy paths are validated before deletion; entries that escape the project root are skipped.
