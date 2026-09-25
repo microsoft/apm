@@ -139,7 +139,12 @@ class TestActiveTargets:
 
         prefixes = get_integration_prefixes(user_scope=True)
 
-        assert f"{expected.resolve(strict=False)}/" in prefixes
+        try:
+            expected_prefix = expected.relative_to(Path.home()).as_posix() + "/"
+        except ValueError:
+            expected_prefix = f"{expected.resolve(strict=False)}/"
+
+        assert expected_prefix in prefixes
         assert KNOWN_TARGETS["opencode"].prefix in prefixes
 
     def test_github_and_claude_returns_both(self):

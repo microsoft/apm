@@ -15,6 +15,7 @@ import builtins
 import copy
 import json
 import logging
+import os
 import re
 import shutil
 import warnings
@@ -58,20 +59,25 @@ def _reject_symlink_config(
     label: str,
     logger: CommandLogger | None,
     *,
+    config_root: Path | None = None,
     fail_on_write_error: bool,
 ) -> bool:
     """Reject MCP cleanup through a symlink without reading its target."""
-    protected_markers = {".claude", ".config", ".cursor", ".vscode"}
-    symlink_candidates = {config_path, config_path.parent}
-    parts = config_path.parts
-    for index, part in enumerate(parts):
-        if part in protected_markers:
-            current = Path(*parts[: index + 1])
-            symlink_candidates.add(current)
-            for child in parts[index + 1 :]:
-                current = current / child
-                symlink_candidates.add(current)
+    boundary = (config_root or config_path.parent).resolve(strict=False)
+    symlink_candidates = {config_path}
+    current = config_path.parent
+    while current != current.parent:
+        resolved_current = current.resolve(strict=False)
+        if resolved_current == boundary:
             break
+        # A path routed through an ancestor symlink can resolve directly to
+        # the configured root. That ancestor is outside the deployment root
+        # and must not be treated as a symlinked config directory.
+        if boundary not in resolved_current.parents:
+            current = current.parent
+            continue
+        symlink_candidates.add(current)
+        current = current.parent
     try:
         has_symlink = any(path.is_symlink() for path in symlink_candidates)
     except OSError:
@@ -128,6 +134,7 @@ def _clean_json_mcp_config(
     servers_key: str = "mcpServers",
     trailing_newline: bool = False,
     use_rich: bool = False,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a JSON-based MCP config file.
@@ -150,6 +157,7 @@ def _clean_json_mcp_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -190,6 +198,7 @@ def _clean_hermes_mcp_config(
     config_path: Path,
     stale_names: builtins.set,
     logger,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Atomically remove stale servers from Hermes' YAML config."""
@@ -199,6 +208,7 @@ def _clean_hermes_mcp_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -237,6 +247,7 @@ def _clean_toml_mcp_config(
     label: str,
     logger: CommandLogger | None = None,
     use_rich: bool = True,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a TOML-based MCP config file.
@@ -258,6 +269,7 @@ def _clean_toml_mcp_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -294,6 +306,7 @@ def _clean_claude_config(
     stale_names: builtins.set,
     logger,
     is_user_scope: bool = False,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a Claude Code JSON config file.
@@ -318,6 +331,7 @@ def _clean_claude_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -771,6 +785,7 @@ class MCPIntegrator:
                 logger,
                 ".vscode/mcp.json",
                 servers_key="servers",
+                config_root=project_root_path,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -790,6 +805,7 @@ class MCPIntegrator:
                 logger,
                 "Copilot CLI config",
                 use_rich=True,
+                config_root=Path(copilot_client.get_config_path()).parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -808,6 +824,7 @@ class MCPIntegrator:
                 codex_cfg,
                 expanded_stale,
                 "Codex CLI config",
+                config_root=codex_cfg.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -818,6 +835,7 @@ class MCPIntegrator:
                 logger,
                 ".cursor/mcp.json",
                 use_rich=True,
+                config_root=project_root_path,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -837,6 +855,7 @@ class MCPIntegrator:
                     logger,
                     "opencode.json",
                     servers_key="mcp",
+                    config_root=Path(opencode_client.get_config_path()).parent,
                     fail_on_write_error=fail_on_write_error,
                 )
 
@@ -847,6 +866,7 @@ class MCPIntegrator:
                 logger,
                 "Windsurf config",
                 use_rich=True,
+                config_root=Path.home() / ".codeium" / "windsurf",
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -866,6 +886,7 @@ class MCPIntegrator:
                 logger,
                 "Kiro MCP config",
                 use_rich=True,
+                config_root=kiro_cfg.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -893,6 +914,7 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 ".gemini/settings.json",
+                config_root=project_root_path,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -912,6 +934,7 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 "Antigravity MCP config",
+                config_root=antigravity_cfg.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -924,10 +947,17 @@ class MCPIntegrator:
                 user_scope=effective_user_scope,
             )
             unresolved_cfg = Path(hermes_client.get_config_path())
+            hermes_env = os.environ.get("HERMES_HOME", "").strip()
+            hermes_check_root = (
+                Path(hermes_env).expanduser() if hermes_env else Path.home() / ".hermes"
+            )
+            hermes_boundary = hermes_check_root.parent.resolve(strict=False)
+            hermes_check_cfg = hermes_check_root / "config.yaml"
             if _reject_symlink_config(
-                unresolved_cfg,
+                hermes_check_cfg,
                 "Hermes config.yaml",
                 logger,
+                config_root=hermes_boundary,
                 fail_on_write_error=fail_on_write_error,
             ):
                 return
@@ -935,6 +965,7 @@ class MCPIntegrator:
                 unresolved_cfg,
                 expanded_stale,
                 logger,
+                config_root=hermes_boundary,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -945,6 +976,7 @@ class MCPIntegrator:
                     project_root_path / ".mcp.json",
                     expanded_stale,
                     logger,
+                    config_root=project_root_path,
                     fail_on_write_error=fail_on_write_error,
                 )
 
@@ -962,6 +994,7 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 is_user_scope=True,
+                config_root=Path(claude_client.get_config_path()).parent,
                 fail_on_write_error=fail_on_write_error,
             )
 

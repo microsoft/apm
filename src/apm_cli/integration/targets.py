@@ -451,10 +451,14 @@ class TargetProfile:
         if self.user_scope_root_resolver is not None:
             abs_path = self.user_scope_root_resolver()
             if abs_path is not None:
-                new_root = str(abs_path)
+                abs_path = Path(abs_path).resolve(strict=False)
+                home = Path.home().resolve(strict=False)
+                try:
+                    new_root = abs_path.relative_to(home).as_posix()
+                except ValueError:
+                    new_root = str(abs_path)
         elif self.name in ("claude", "hermes"):
             import os
-            from pathlib import Path
 
             env = os.environ.get(env_vars[self.name], "").strip()
             abs_path = Path(env).expanduser().resolve(strict=False) if env else None

@@ -276,24 +276,44 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
 class TestRemoveStaleScopeFiltering(unittest.TestCase):
     """Verify MCPIntegrator.remove_stale() respects scope."""
 
-    @patch("apm_cli.integration.mcp_integrator.Path")
-    def test_user_scope_does_not_touch_workspace_configs(self, mock_path_cls):
+    @patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config")
+    @patch("apm_cli.integration.mcp_integrator._clean_toml_mcp_config")
+    @patch("apm_cli.integration.mcp_integrator._clean_hermes_mcp_config")
+    @patch("apm_cli.integration.mcp_integrator._clean_claude_config")
+    def test_user_scope_does_not_touch_workspace_configs(
+        self,
+        mock_clean_claude,
+        mock_clean_hermes,
+        mock_clean_toml,
+        mock_clean_json,
+    ):
         """At USER scope, .vscode/mcp.json and .cursor/mcp.json are not cleaned."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        # Call remove_stale with USER scope
-        MCPIntegrator.remove_stale(
-            stale_names={"test-server"},
-            scope=InstallScope.USER,
-        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            project_root = root / "project"
+            home.mkdir()
+            project_root.mkdir()
 
-        # Path.cwd() is used for workspace configs (.vscode, .cursor)
-        # Path.home() is used for global configs (~/.copilot, ~/.codex)
-        # At USER scope, we should only try to access home-dir configs
-        all_calls_str = str(mock_path_cls.mock_calls)
-        # Workspace paths should NOT appear
-        self.assertNotIn(".vscode", all_calls_str)
-        self.assertNotIn(".cursor", all_calls_str)
+            with patch.dict(os.environ, {"HOME": str(home)}):
+                MCPIntegrator.remove_stale(
+                    stale_names={"test-server"},
+                    project_root=project_root,
+                    scope=InstallScope.USER,
+                )
+
+            cleanup_calls = (
+                mock_clean_json.call_args_list
+                + mock_clean_toml.call_args_list
+                + mock_clean_hermes.call_args_list
+                + mock_clean_claude.call_args_list
+            )
+            cleanup_paths = [str(call.args[0]) for call in cleanup_calls]
+            self.assertTrue(cleanup_paths)
+            self.assertFalse(any(".vscode" in path for path in cleanup_paths))
+            self.assertFalse(any(".cursor" in path for path in cleanup_paths))
 
     def test_user_scope_cleans_opencode_user_config(self):
         """USER cleanup removes OpenCode's user entry, not project config."""

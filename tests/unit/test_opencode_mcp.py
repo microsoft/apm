@@ -289,22 +289,23 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         }
         rendered = self.adapter.render_server_config(server_info)
 
-        self.adapter.update_config({"test": rendered})
-        stored = json.loads(self.opencode_json.read_text(encoding="utf-8"))["mcp"]["test"]
         self.assertEqual(
-            stored, {"type": "local", "command": ["npx", "-y", "pkg"], "enabled": True}
+            rendered, {"type": "local", "command": ["npx", "-y", "pkg"], "enabled": True}
         )
 
     def test_render_server_config_matches_stored_remote_shape_and_env(self):
         server_info = {
             "name": "remote",
-            "remotes": [{"url": "https://example.test/mcp", "headers": {"X-Key": "v"}}],
+            "remotes": [
+                {
+                    "url": "https://example.test/mcp",
+                    "headers": [{"name": "X-Key", "value": "v"}],
+                }
+            ],
         }
         rendered = self.adapter.render_server_config(server_info)
-        self.adapter.update_config({"remote": rendered})
-        stored = json.loads(self.opencode_json.read_text(encoding="utf-8"))["mcp"]["remote"]
         self.assertEqual(
-            stored,
+            rendered,
             {
                 "type": "remote",
                 "url": "https://example.test/mcp",

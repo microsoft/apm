@@ -142,6 +142,34 @@ def opencode_package(tmp_path):
     return pkg
 
 
+@pytest.fixture
+def opencode_mcp_package(tmp_path):
+    """Create a local package declaring a self-defined OpenCode MCP server."""
+    pkg = tmp_path / "opencode-mcp-package"
+    pkg.mkdir()
+    (pkg / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "opencode-mcp-package",
+                "version": "1.0.0",
+                "dependencies": {
+                    "mcp": [
+                        {
+                            "name": "custom-server",
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "npx",
+                            "args": ["-y", "custom-server"],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return pkg
+
+
 # ---------------------------------------------------------------------------
 # User-scope directory creation
 # ---------------------------------------------------------------------------
@@ -645,7 +673,9 @@ class TestGlobalOpenCodeScope:
         assert not (claude_root / "CLAUDE.md").exists()
 
     @pytest.mark.lifecycle_smoke
-    def test_opencode_global_mcp_lifecycle_uses_custom_config_dir(self, apm_binary_path, fake_home):
+    def test_opencode_global_mcp_lifecycle_uses_custom_config_dir(
+        self, apm_binary_path, fake_home, opencode_mcp_package
+    ):
         """Global MCP install/uninstall follows OPENCODE_CONFIG_DIR exactly."""
         custom_root = fake_home / "custom-opencode"
         env = {"OPENCODE_CONFIG_DIR": str(custom_root)}
@@ -655,14 +685,9 @@ class TestGlobalOpenCodeScope:
             [
                 "install",
                 "--global",
+                str(opencode_mcp_package),
                 "--target",
                 "opencode",
-                "--mcp",
-                "custom-server",
-                "--",
-                "npx",
-                "-y",
-                "custom-server",
             ],
             fake_home,
             fake_home,
@@ -680,7 +705,7 @@ class TestGlobalOpenCodeScope:
 
         uninstall = _run_apm(
             apm_binary_path,
-            ["uninstall", "--global", "custom-server"],
+            ["uninstall", "--global", str(opencode_mcp_package)],
             fake_home,
             fake_home,
             extra_env=env,

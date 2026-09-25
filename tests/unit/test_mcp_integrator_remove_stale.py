@@ -449,6 +449,30 @@ def test_remove_stale_rejects_symlinked_hermes_ancestor(tmp_path, monkeypatch):
     assert config_path.read_bytes() == original
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
+def test_symlink_ancestor_above_configured_root_is_ignored(tmp_path):
+    """System-style symlinks above the deployment root are not config links."""
+    from apm_cli.integration.mcp_integrator import _reject_symlink_config
+
+    target = tmp_path / "real-parent"
+    deployment_root = target / "deployment"
+    deployment_root.mkdir(parents=True)
+    link = tmp_path / "system-link"
+    link.symlink_to(target, target_is_directory=True)
+    config_path = link / "deployment" / "config.yaml"
+
+    assert (
+        _reject_symlink_config(
+            config_path,
+            "test config",
+            MagicMock(),
+            config_root=deployment_root,
+            fail_on_write_error=True,
+        )
+        is False
+    )
+
+
 class TestCleanCodexToml:
     def test_preserves_windows_literal_keys_while_removing_stale_server(self, tmp_path):
         import tomlkit
