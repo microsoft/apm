@@ -175,7 +175,7 @@ apm compile -g --dry-run
 
 For OpenCode, `apm compile -g` writes `AGENTS.md` to the resolved OpenCode
 user config root and retains scoped `applyTo` sections. See the
-[OpenCode config environment variables](../../environment-variables/#opencode_config_dir).
+[OpenCode config environment variables](../../environment-variables).
 
 ```bash
 apm compile -g

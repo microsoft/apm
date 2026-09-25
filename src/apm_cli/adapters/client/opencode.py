@@ -1,8 +1,9 @@
 """OpenCode implementation of MCP client adapter.
 
 At project scope, OpenCode uses ``opencode.json`` at the project root with an
-``mcp`` key when the project-root ``.opencode/`` directory exists. At user
-scope, it uses ``opencode.json`` in the resolved user configuration root.
+``mcp`` key when the project-root ``.opencode/`` directory exists. Project
+writes require ``.opencode/``; user writes create the resolved user
+configuration root as needed.
 The schema differs from VSCode/Cursor:
 
 .. code-block:: json
@@ -48,7 +49,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
 
     supports_user_scope: bool = True
     target_name: str = "opencode"
-    mcp_servers_key: str = "mcpServers"
+    mcp_servers_key: str = "mcp"
 
     # OpenCode's config runtime-substitution support has not yet been
     # individually audited (see #1152). Pin to legacy install-time

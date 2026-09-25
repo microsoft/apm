@@ -1,4 +1,8 @@
-"""OpenCode user-scope configuration paths."""
+"""OpenCode user-scope configuration paths.
+
+This module is the canonical owner of OpenCode configuration-directory
+environment-variable resolution.
+"""
 
 import os
 from pathlib import Path

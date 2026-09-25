@@ -723,7 +723,14 @@ class MCPIntegrator:
         # Scope filtering: at USER scope, only clean global-capable runtimes.
         from apm_cli.core.scope import InstallScope
 
-        if scope is InstallScope.USER:
+        if scope is InstallScope.PROJECT:
+            effective_user_scope = False
+        elif scope is InstallScope.USER:
+            effective_user_scope = True
+        else:
+            effective_user_scope = user_scope
+
+        if effective_user_scope:
             from apm_cli.factory import ClientFactory as _CF
 
             supported = builtins.set()
@@ -739,8 +746,8 @@ class MCPIntegrator:
         # config only -- never touch ~/.claude.json on the user's behalf without
         # an explicit USER scope, since that file is shared across all Claude
         # Code projects on the host.
-        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
-        clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
+        clean_claude_project = "claude" in target_runtimes and not effective_user_scope
+        clean_claude_user = "claude" in target_runtimes and effective_user_scope
         if "claude" in target_runtimes and scope is None:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
@@ -774,7 +781,7 @@ class MCPIntegrator:
             copilot_client = ClientFactory.create_client(
                 "copilot",
                 project_root=project_root_path,
-                user_scope=scope is not InstallScope.PROJECT,
+                user_scope=effective_user_scope,
             )
             _clean_json_mcp_config(
                 Path(copilot_client.get_config_path()),
@@ -793,7 +800,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "codex",
                     project_root=project_root,
-                    user_scope=user_scope,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_toml_mcp_config(
@@ -820,9 +827,9 @@ class MCPIntegrator:
             opencode_client = ClientFactory.create_client(
                 "opencode",
                 project_root=project_root_path,
-                user_scope=scope is InstallScope.USER,
+                user_scope=effective_user_scope,
             )
-            if scope is InstallScope.USER or (project_root_path / ".opencode").is_dir():
+            if effective_user_scope or (project_root_path / ".opencode").is_dir():
                 _clean_json_mcp_config(
                     Path(opencode_client.get_config_path()),
                     expanded_stale,
@@ -849,7 +856,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "kiro",
                     project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_json_mcp_config(
@@ -896,7 +903,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "antigravity",
                     project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_json_mcp_config(
@@ -925,7 +932,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "hermes",
                     project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_hermes_mcp_config(

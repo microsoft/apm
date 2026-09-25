@@ -222,7 +222,7 @@ OpenCode.
     `skills/<name>/SKILL.md` in the resolved user config root (user)
 - **Caveat.** OpenCode has no hooks concept; the `hooks` primitive is silently skipped for this target.
 - **MCP config.** `opencode.json` at the project root when `.opencode/` exists, or in the resolved user root at user scope.
-- **Global compile.** `apm compile -g` writes `AGENTS.md` to the same resolved user root. OpenCode also retains `applyTo` sections in that generated file; other user-root targets compile only global instructions. See the [OpenCode config environment variables](environment-variables/#opencode_config_dir). Changing the resolved root does not automatically migrate files; files in the old default root can remain orphaned.
+- **Global compile.** `apm compile -g` writes `AGENTS.md` to the same resolved user root. OpenCode also retains `applyTo` sections in that generated file; other user-root targets compile only global instructions. See the [OpenCode config environment variables](environment-variables). Changing the resolved root does not automatically migrate files; files in the old default root can remain orphaned.
 
 ## windsurf
 

@@ -298,7 +298,7 @@ root-context targets:
 
 OpenCode is the exception: its generated `AGENTS.md` in the resolved user
 config root retains explicit sections for `applyTo` instructions as well. See
-the [OpenCode config environment variables](../reference/environment-variables/#opencode_config_dir).
+the [OpenCode config environment variables](../reference/environment-variables).
 
 ### Overwrite protection
 

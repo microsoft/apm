@@ -47,6 +47,16 @@ class TestOpenCodePaths(unittest.TestCase):
                 (Path.home() / "xdg" / "opencode").resolve(strict=False),
             )
 
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": "", "XDG_CONFIG_HOME": ""},
+            clear=False,
+        ):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / ".config" / "opencode").resolve(strict=False),
+            )
+
 
 class TestToOpencodeFormat(unittest.TestCase):
     """_to_opencode_format static conversion logic."""
@@ -439,6 +449,36 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         data = json.loads(opencode_json.read_text(encoding="utf-8"))
         self.assertIn("keep", data["mcp"])
         self.assertNotIn("stale", data["mcp"])
+
+    def test_remove_stale_project_scope_overrides_legacy_user_scope(self):
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        self.opencode_json.write_text(
+            json.dumps({"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}),
+            encoding="utf-8",
+        )
+        user_dir = Path(self.tmp.name) / "user-opencode"
+        user_dir.mkdir()
+        user_json = user_dir / "opencode.json"
+        user_json.write_text(
+            json.dumps({"mcp": {"stale": {"type": "remote"}}}),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="opencode",
+                project_root=Path(self.tmp.name),
+                user_scope=True,
+                scope=InstallScope.PROJECT,
+            )
+
+        project_data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        user_data = json.loads(user_json.read_text(encoding="utf-8"))
+        self.assertNotIn("stale", project_data["mcp"])
+        self.assertIn("stale", user_data["mcp"])
 
 
 if __name__ == "__main__":

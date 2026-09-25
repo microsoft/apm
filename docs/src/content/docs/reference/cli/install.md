@@ -156,7 +156,7 @@ in `apm.yml`, then run `apm install` again.
 - **OpenCode user scope.** `apm install -g --target opencode` deploys skills to
   the resolved OpenCode user config root. Run `apm compile -g` to refresh
   `AGENTS.md` there, including scoped instruction sections. See the
-  [OpenCode config environment variables](../../environment-variables/#opencode_config_dir).
+  [OpenCode config environment variables](../../environment-variables).
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
 - **Interrupted-install recovery.** After a successful install, APM removes inactive resolution backup directories left by interrupted lock-aware runs. Active install backups and entries that do not match APM's staging name format are preserved. Lockless backups from older APM versions are retained because they may belong to a running install; inactive orphaned activity-lock files are reported for manual cleanup. Stop other APM installs, rerun with `--verbose`, then manually delete the reported paths.
