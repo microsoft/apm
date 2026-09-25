@@ -29,6 +29,7 @@ from . import (
 @click.option("--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
+@click.option("--category", default=None, help="Marketplace category")
 @click.option(
     "--include-prerelease",
     is_flag=True,
@@ -44,6 +45,7 @@ def set_cmd(
     subdir,
     tag_pattern,
     tags,
+    category,
     include_prerelease,
     verbose,
 ):
@@ -94,6 +96,8 @@ def set_cmd(
         fields["tag_pattern"] = tag_pattern
     if parsed_tags is not None:
         fields["tags"] = parsed_tags
+    if category is not None:
+        fields["category"] = category
     if include_prerelease is not None:
         fields["include_prerelease"] = include_prerelease
 
