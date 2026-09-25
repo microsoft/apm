@@ -576,6 +576,11 @@ class TestHermesTarget:
         assert "skills" in profile.primitives
         assert profile.primitives["skills"].format_id == "skill_standard"
 
+    def test_hermes_user_root_resolver_is_canonical(self):
+        import apm_cli.integration.targets as tg
+
+        assert tg.KNOWN_TARGETS["hermes"].user_scope_root_resolver is tg._resolve_hermes_user_root
+
     @pytest.mark.windows_compat
     def test_hermes_explicit_target_resolves_without_flag(self):
         targets = active_targets(self.root, explicit_target="hermes")

@@ -541,6 +541,16 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 # ------------------------------------------------------------------
 
 
+def _resolve_hermes_user_root() -> Path:
+    """Resolve Hermes' user-scope root through its canonical resolver.
+
+    The wrapper is defined before ``KNOWN_TARGETS`` so registry construction
+    does not reference a not-yet-created function.  Its body resolves the
+    canonical function at call time because that function is defined below.
+    """
+    return resolve_hermes_root()
+
+
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
     # instead of ~/.github/.  Instructions are concatenated into
@@ -921,9 +931,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # standard, both already emitted by APM, so skills + instructions reuse
     # the existing skill_standard / compile_family="agents" paths.  Skills
     # land in .agents/skills/ at project scope (read by Hermes via
-    # skills.external_dirs) and ~/.hermes/skills/ at user scope.  MCP servers
-    # are written separately by HermesClientAdapter to ~/.hermes/config.yaml.
-    # $HERMES_HOME overrides the user-scope root (handled in for_scope).
+    # skills.external_dirs) and the canonical Hermes home/skills/ at user
+    # scope. MCP servers are written separately by HermesClientAdapter to
+    # the canonical Hermes home/config.yaml. $HERMES_HOME overrides that
+    # home only when it is an absolute path.
     "hermes": TargetProfile(
         capability=TARGET_CAPABILITIES["hermes"],
         root_dir=".agents",
@@ -938,7 +949,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_dir=".hermes",
-        user_scope_root_resolver=lambda: _resolve_env_user_root("HERMES_HOME", ".hermes"),
+        user_scope_root_resolver=_resolve_hermes_user_root,
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.

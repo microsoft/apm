@@ -941,33 +941,35 @@ class MCPIntegrator:
             )
 
         if "hermes" in target_runtimes:
-            from apm_cli.factory import ClientFactory
+            from apm_cli.integration.targets import resolve_hermes_root
 
-            hermes_client = ClientFactory.create_client(
-                "hermes",
-                project_root=project_root_path,
-                user_scope=effective_user_scope,
+            effective_root = resolve_hermes_root()
+            config_path = effective_root / "config.yaml"
+
+            # Check the configured lexical path before normalization so a
+            # symlink used as HERMES_HOME is rejected. Relative overrides are
+            # intentionally ignored by resolve_hermes_root(), so they check
+            # the canonical default root instead.
+            configured = os.environ.get("HERMES_HOME", "").strip()
+            configured_path = Path(configured).expanduser() if configured else None
+            lexical_root = (
+                configured_path
+                if configured_path is not None and configured_path.is_absolute()
+                else effective_root
             )
-            unresolved_cfg = Path(hermes_client.get_config_path())
-            hermes_env = os.environ.get("HERMES_HOME", "").strip()
-            hermes_check_root = (
-                Path(hermes_env).expanduser() if hermes_env else Path.home() / ".hermes"
-            )
-            hermes_boundary = hermes_check_root.parent.resolve(strict=False)
-            hermes_check_cfg = hermes_check_root / "config.yaml"
             if _reject_symlink_config(
-                hermes_check_cfg,
+                lexical_root / "config.yaml",
                 "Hermes config.yaml",
                 logger,
-                config_root=hermes_boundary,
+                config_root=effective_root,
                 fail_on_write_error=fail_on_write_error,
             ):
                 return
             _clean_hermes_mcp_config(
-                unresolved_cfg,
+                config_path,
                 expanded_stale,
                 logger,
-                config_root=hermes_boundary,
+                config_root=effective_root,
                 fail_on_write_error=fail_on_write_error,
             )
 

@@ -61,7 +61,7 @@ class TestRemoveStaleCharacterisation:
             user_scope=True,
         )
 
-    @pytest.mark.parametrize("runtime", ["codex", "kiro", "antigravity", "hermes"])
+    @pytest.mark.parametrize("runtime", ["codex", "kiro", "antigravity"])
     def test_explicit_project_scope_overrides_legacy_user_scope(self, runtime):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -82,7 +82,7 @@ class TestRemoveStaleCharacterisation:
         kwargs = create_client.call_args.kwargs
         assert kwargs["user_scope"] is False
 
-    @pytest.mark.parametrize("runtime", ["codex", "kiro", "antigravity", "hermes"])
+    @pytest.mark.parametrize("runtime", ["codex", "kiro", "antigravity"])
     def test_legacy_user_scope_selects_preferred_user_config(self, runtime):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -346,6 +346,46 @@ def test_remove_stale_hermes_preserves_unrelated_yaml(tmp_path, monkeypatch, mod
     assert config["mcp_servers"]["user-authored"]["command"] == "keep"
     if os.name != "nt":
         assert stat.S_IMODE(config_path.stat().st_mode) == mode
+
+
+@pytest.mark.windows_compat
+def test_remove_stale_hermes_relative_home_uses_default_root(tmp_path, monkeypatch):
+    """A relative HERMES_HOME must not redirect cleanup into the CWD."""
+    import yaml
+
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    default_home = tmp_path / ".hermes"
+    default_home.mkdir()
+    config_path = default_home / "config.yaml"
+    config_path.write_text(
+        "mcp_servers:\n  stale:\n    command: old\n  keep:\n    command: keep\n",
+        encoding="utf-8",
+    )
+    relative_home = tmp_path / "relative-hermes"
+    relative_home.mkdir()
+    (relative_home / "config.yaml").write_text(
+        "mcp_servers:\n  stale:\n    command: must-remain\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setenv("HERMES_HOME", "relative-hermes")
+
+    MCPIntegrator.remove_stale(
+        {"stale"},
+        runtime="hermes",
+        logger=MagicMock(),
+        fail_on_write_error=True,
+    )
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert "stale" not in config["mcp_servers"]
+    assert (
+        yaml.safe_load((relative_home / "config.yaml").read_text(encoding="utf-8"))["mcp_servers"][
+            "stale"
+        ]["command"]
+        == "must-remain"
+    )
 
 
 @pytest.mark.windows_compat
