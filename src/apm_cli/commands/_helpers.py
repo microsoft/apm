@@ -19,6 +19,7 @@ from ..constants import (
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
+    SKILL_MD_FILENAME,
 )
 from ..core import project_name as _project_name
 from ..update_policy import get_update_hint_message, is_self_update_enabled
@@ -191,7 +192,7 @@ def _expand_with_ancestors(
     unless that path is also directly declared in *paths*. Callers should
     pass only the subset of installed paths that look like *real
     standalone packages* (i.e., directories that ship their own
-    ``apm.yml``) -- not filesystem intermediaries (which typically have
+    ``apm.yml`` or ``SKILL.md``) -- not filesystem intermediaries (which typically have
     only a ``.apm/`` subtree from a cloned subdir dep). This preserves
     orphan detection for the case where a user has a genuinely orphaned
     ``owner/repo`` package on disk alongside a declared sibling
@@ -256,19 +257,17 @@ def _standalone_installed_packages(
     1. Path appears as a dependency key in *lockfile* -- the canonical
        record of what APM installed. The lockfile is integrity-checked
        and not forgeable by dropping/omitting files in ``apm_modules/``.
-    2. Fallback: path has its own ``apm.yml``. Used when the lockfile
+    2. Fallback: path has its own ``apm.yml`` or ``SKILL.md`` file. Used when the lockfile
        is absent (older installs / fresh checkouts) or does not list
        the key. A directory with only a ``.apm/`` marker is treated as
        a filesystem intermediary, not a standalone package.
 
-    Combining both signals closes the suppression-via-absence gap
-    (panel finding: forgeable ``apm.yml`` heuristic) while preserving
-    behaviour for projects that pre-date the lockfile or have not yet
-    re-installed.
+    Package markers preserve standalone orphan detection even when a
+    declaration points at a subdirectory of a removed package root.
 
     Failure mode: only narrowly-typed shape errors against
     ``lockfile.dependencies`` (``AttributeError`` / ``TypeError`` /
-    ``KeyError``) are absorbed and degrade to the ``apm.yml``-only
+    ``KeyError``) are absorbed and degrade to the package-marker
     fallback. Any other exception (e.g. lockfile parse / I/O failure)
     propagates so the outer caller can decide whether to log or fail
     closed -- preventing a corrupted or attacker-crafted lockfile from
@@ -287,7 +286,9 @@ def _standalone_installed_packages(
         if p in lockfile_keys:
             standalone.append(p)
             continue
-        if (apm_modules_dir / p / APM_YML_FILENAME).exists():
+        if (apm_modules_dir / p / APM_YML_FILENAME).exists() or (
+            apm_modules_dir / p / SKILL_MD_FILENAME
+        ).is_file():
             standalone.append(p)
     return standalone
 
@@ -322,21 +323,42 @@ def _check_orphaned_packages():
             return []
 
         installed = _scan_installed_packages(apm_modules_dir)
-        # Combined lockfile-membership + apm.yml fallback determines
-        # which installed paths are real standalone packages (and so
-        # must NOT be masked by ancestor expansion). The lockfile is
-        # the canonical, tamper-evident record; apm.yml-existence is
-        # the fallback for projects without a lockfile yet.
-        # See _expand_with_ancestors for the user-safety rationale.
-        standalone_installed = _standalone_installed_packages(
-            installed, apm_modules_dir, lockfile=lockfile
-        )
-        expected_with_ancestors = _expand_with_ancestors(expected, standalone_installed)
-        # Sort for deterministic, diffable output across runs (rglob
-        # traversal order is filesystem-dependent).
-        return sorted(p for p in installed if p not in expected_with_ancestors)
+        return _find_orphaned_packages(installed, expected)
     except Exception:
         return []
+
+
+def _find_orphaned_packages(installed: Iterable[str], expected: set[str]) -> list[str]:
+    """Select roots unrelated to the retained dependency graph.
+
+    Keep both bundled descendants and whole roots containing needed children.
+    Ancestor prefixes protect only those containing roots, not their siblings.
+    Unlike dependency-list classification, deletion must retain recognized
+    ancestors at every depth, including aliases and hidden subdirectories.
+    """
+    roots = set()
+    retained = set(expected)
+    for path in expected:
+        try:
+            validate_path_segments(path, context="orphan selection")
+        except PathTraversalError:
+            # Invalid tokens protect only an exact match, never a wider subtree.
+            continue
+        normalized = path.replace("\\", "/")
+        roots.add(normalized)
+        parts = normalized.split("/")
+        retained.update("/".join(parts[:depth]) for depth in range(1, len(parts) + 1))
+
+    orphaned = []
+    for path in installed:
+        normalized = path.replace("\\", "/")
+        if normalized in retained:
+            continue
+        parts = normalized.split("/")
+        if any("/".join(parts[:depth]) in roots for depth in range(1, len(parts))):
+            continue
+        orphaned.append(path)
+    return sorted(orphaned)
 
 
 # ------------------------------------------------------------------

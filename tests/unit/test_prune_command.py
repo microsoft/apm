@@ -23,6 +23,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands._helpers import _check_orphaned_packages
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
@@ -35,6 +36,7 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.cleanup import remove_stale_deployed_files
 from apm_cli.models.apm_package import clear_apm_yml_cache
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -257,6 +259,73 @@ class TestPruneCommand:
             assert declared_dir.exists(), "Declared package must remain"
             assert not orphan_dir.exists(), "Orphaned package must be removed"
 
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize("dry_run", [False, True])
+    @pytest.mark.parametrize("declared", [False, True])
+    @pytest.mark.parametrize("with_pin", [False, True])
+    def test_prune_skill_only_subdirectory_without_lockfile(self, dry_run, declared, with_pin):
+        """Find skill-only installs after install has dropped their lock entry."""
+        with self._chdir_tmp() as tmp:
+            dependency = "microsoft/skills/.github/plugins/azure-skills/skills/azure-ai"
+            manifest = _APM_YML_NO_DEPS
+            if declared:
+                manifest = manifest.replace("apm: []", f"apm:\n    - {dependency}")
+            (tmp / "apm.yml").write_text(manifest)
+            skill_dir = tmp / "apm_modules" / dependency
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Azure AI\n")
+            if with_pin:
+                (skill_dir / ".apm-pin").write_text("a" * 40)
+            references = skill_dir / "references"
+            references.mkdir()
+            (references / "guide.md").write_text("Reference material\n")
+
+            result = self.runner.invoke(cli, ["prune", *(["--dry-run"] if dry_run else [])])
+
+            assert result.exit_code == 0, result.output
+            assert skill_dir.exists() == (declared or dry_run)
+            if declared:
+                assert "No orphaned packages" in result.output
+            else:
+                assert "No orphaned packages" not in result.output
+                assert "1 orphaned package(s)" in result.output
+            if declared or dry_run:
+                assert (references / "guide.md").read_text() == "Reference material\n"
+
+    @pytest.mark.parametrize("transitive", [False, True])
+    def test_prune_preserves_retained_sibling_skill(self, transitive):
+        """Removing one skill preserves direct and locked transitive siblings."""
+        with self._chdir_tmp() as tmp:
+            retained_key = "owner/repo/.github/skills/retained"
+            manifest = _APM_YML_NO_DEPS
+            if transitive:
+                LockFile(
+                    dependencies={
+                        retained_key: LockedDependency(
+                            repo_url="owner/repo",
+                            virtual_path=".github/skills/retained",
+                            is_virtual=True,
+                            depth=2,
+                        )
+                    }
+                ).write(tmp / "apm.lock.yaml")
+            else:
+                manifest = manifest.replace("apm: []", f"apm:\n    - {retained_key}")
+            (tmp / "apm.yml").write_text(manifest)
+            retained = tmp / "apm_modules" / retained_key
+            orphan = retained.with_name("orphan")
+            for skill in (retained, orphan):
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("# Skill\n")
+
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert not orphan.exists()
+            assert (retained / "SKILL.md").read_text() == "# Skill\n"
+            if transitive:
+                assert retained_key in LockFile.read(tmp / "apm.lock.yaml").dependencies
+
     def test_prune_reports_count_removed(self):
         """prune output should mention how many packages were removed."""
         with self._chdir_tmp() as tmp:
@@ -266,6 +335,107 @@ class TestPruneCommand:
             assert result.exit_code == 0
             # Output should mention the removal (count or package name)
             assert "Pruned" in result.output or "orphan-org/orphan-repo" in result.output
+
+    @pytest.mark.parametrize("parent_marker", ["apm.yml", "SKILL.md"])
+    def test_prune_preserves_embedded_skill_bytes(self, parent_marker):
+        """A declared package owns its embedded skills, even without lock entries."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_WITH_DEP)
+            parent = tmp / "apm_modules" / "declared-org" / "declared-repo"
+            embedded = parent / "skills" / "embedded"
+            embedded.mkdir(parents=True)
+            (parent / parent_marker).write_text("package marker\n")
+            (embedded / "SKILL.md").write_text("# Embedded skill\n")
+            (embedded / "apm.yml").write_text("name: embedded\nversion: 1.0.0\n")
+
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert "No orphaned packages" in result.output
+            assert (embedded / "SKILL.md").read_text() == "# Embedded skill\n"
+            assert (embedded / "apm.yml").read_text() == "name: embedded\nversion: 1.0.0\n"
+
+    @pytest.mark.parametrize("retention", ["direct", "dev", "transitive"])
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_prune_preserves_manifestless_bundle(self, retention, dry_run):
+        """Expected bundle roots protect children without hiding adjacent orphans."""
+        with self._chdir_tmp() as tmp:
+            manifest = _APM_YML_NO_DEPS
+            if retention == "direct":
+                manifest = manifest.replace("apm: []", "apm:\n    - owner/bundle")
+            elif retention == "dev":
+                manifest += "devDependencies:\n  apm:\n    - owner/bundle\n"
+            else:
+                LockFile(
+                    dependencies={
+                        "owner/bundle": LockedDependency(repo_url="owner/bundle", depth=2)
+                    }
+                ).write(tmp / "apm.lock.yaml")
+            (tmp / "apm.yml").write_text(manifest)
+            bundle = tmp / "apm_modules" / "owner" / "bundle"
+            for name in ("alpha", "beta"):
+                skill = bundle / "skills" / name
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text(f"# {name}\n")
+            orphan = bundle.with_name("bundle-other") / "skills" / "orphan"
+            orphan.mkdir(parents=True)
+            (orphan / "SKILL.md").write_text("# Orphan\n")
+
+            assert _check_orphaned_packages() == ["owner/bundle-other/skills/orphan"]
+            result = self.runner.invoke(cli, ["prune", *(["--dry-run"] if dry_run else [])])
+
+            assert result.exit_code == 0, result.output
+            assert "1 orphaned package(s)" in result.output
+            assert orphan.exists() == dry_run
+            for name in ("alpha", "beta"):
+                assert (bundle / "skills" / name / "SKILL.md").read_text() == f"# {name}\n"
+
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize("retention", ["direct", "dev", "transitive"])
+    @pytest.mark.parametrize("parent_marker", ["apm.yml", "SKILL.md"])
+    @pytest.mark.parametrize("root_path", ["owner/repo", "owner/repo/.github/plugins/bundle"])
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_prune_retains_root_containing_needed_child(
+        self, dry_run: bool, root_path: str, parent_marker: str, retention: str
+    ) -> None:
+        """A needed nested package protects its containing root at every depth."""
+        with self._chdir_tmp() as tmp:
+            child_key = f"{root_path}/skills/child"
+            manifest = _APM_YML_NO_DEPS
+            if retention == "direct":
+                manifest = manifest.replace("apm: []", f"apm:\n    - {child_key}")
+            elif retention == "dev":
+                manifest += f"devDependencies:\n  apm:\n    - {child_key}\n"
+            else:
+                LockFile(
+                    dependencies={
+                        child_key: LockedDependency(
+                            repo_url="owner/repo",
+                            virtual_path=child_key.removeprefix("owner/repo/"),
+                            is_virtual=True,
+                            depth=2,
+                        )
+                    }
+                ).write(tmp / "apm.lock.yaml")
+            (tmp / "apm.yml").write_text(manifest)
+            root = tmp / "apm_modules" / root_path
+            child = root / "skills" / "child"
+            child.mkdir(parents=True)
+            (root / parent_marker).write_text("name: bundle\nversion: 1.0.0\n")
+            (child / "SKILL.md").write_text("# Child skill\n")
+            unrelated = root.with_name(f"{root.name}-other")
+            unrelated.mkdir()
+            (unrelated / "SKILL.md").write_text("# Orphan\n")
+            retained = ArtifactSnapshot.capture(root)
+
+            assert _check_orphaned_packages() == [f"{root_path}-other"]
+            result = self.runner.invoke(cli, ["prune", *(["--dry-run"] if dry_run else [])])
+
+            assert result.exit_code == 0, result.output
+            assert "1 orphaned package(s)" in result.output
+            assert f"Retained {root_path}" in " ".join(result.output.split())
+            assert unrelated.exists() == dry_run
+            assert_unchanged(retained, ArtifactSnapshot.capture(root))
 
     def test_prune_removes_multiple_orphans(self):
         """prune removes all orphaned packages in one pass."""
@@ -278,19 +448,42 @@ class TestPruneCommand:
             assert not dir1.exists()
             assert not dir2.exists()
 
-    def test_prune_removes_real_orphan_with_sibling_subdir_dep(self):
-        """Regression: the destructive ``apm prune`` command must
-        delete a genuinely orphaned ``owner/repo`` package even when
-        a sibling subdirectory dep ``owner/repo/.apm/skills/foo`` is
-        declared in apm.yml.
+    def test_retained_ancestor_removes_only_stale_lock_entry(self) -> None:
+        """Retaining source bytes does not keep an undeclared deployment owner."""
+        with self._chdir_tmp() as tmp:
+            child_key = "owner/repo/skills/child"
+            (tmp / "apm.yml").write_text(
+                _APM_YML_NO_DEPS.replace("apm: []", f"apm:\n    - {child_key}")
+            )
+            root = tmp / "apm_modules" / "owner" / "repo"
+            child = root / "skills" / "child"
+            child.mkdir(parents=True)
+            (root / "SKILL.md").write_text("# Root\n")
+            (child / "SKILL.md").write_text("# Child\n")
+            lock_path = tmp / "apm.lock.yaml"
+            LockFile(
+                dependencies={
+                    "owner/repo": LockedDependency(repo_url="owner/repo", depth=1),
+                    child_key: LockedDependency(
+                        repo_url="owner/repo",
+                        virtual_path="skills/child",
+                        is_virtual=True,
+                        depth=1,
+                    ),
+                }
+            ).write(lock_path)
+            before = ArtifactSnapshot.capture(root)
 
-        Previously, ``prune.py`` called ``_expand_with_ancestors``
-        without the ``standalone_installed`` guard, so ``owner/repo``
-        was added to the expected set as an ancestor of the subdir
-        dep -- silently suppressing deletion of a real orphan and
-        diverging from the advisory display path. ``apm prune`` is a
-        safety command; missing a real orphan is a correctness bug.
-        """
+            result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code == 0, result.output
+            assert "Retained owner/repo" in result.output
+            assert "without removable package content" in " ".join(result.output.split())
+            assert set(LockFile.read(lock_path).dependencies) == {child_key}
+            assert_unchanged(before, ArtifactSnapshot.capture(root))
+
+    def test_prune_retains_shared_root_with_declared_subdir_dep(self):
+        """Whole-root deletion must not collateral-delete a declared subdirectory."""
         with self._chdir_tmp() as tmp:
             # Declare ONLY the subdirectory dep. The standalone
             # owner/repo package is not declared anywhere.
@@ -313,22 +506,13 @@ class TestPruneCommand:
 
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0, result.output
-            # Real orphan MUST be deleted -- this is the security
-            # invariant the panel flagged as a required fix.
-            assert not (pkg_dir / "apm.yml").exists(), (
-                "Real orphan owner/repo (apm.yml) must be removed even "
-                "when a sibling subdir dep shares the same root"
-            )
-            # Subdir dep content collateral-damages because the whole
-            # owner/repo tree is the orphan's filesystem footprint;
-            # the user is expected to re-install. This matches the
-            # advisory display path in deps/cli.py.
-            assert not skill_dir.exists()
+            assert (pkg_dir / "apm.yml").read_text() == "name: repo\nversion: 1.0\n"
+            assert (skill_dir / "SKILL.md").read_text() == "# Skill\n"
+            assert "No orphaned packages" in result.output
+            assert "Retained owner/repo" in result.output
 
-    def test_prune_dry_run_lists_real_orphan_with_sibling_subdir_dep(self):
-        """Dry-run path must also surface the real orphan (display
-        parity with the advisory check).
-        """
+    def test_prune_dry_run_reports_retained_shared_root(self):
+        """Dry-run reports retention rather than proposing destructive cleanup."""
         with self._chdir_tmp() as tmp:
             (tmp / "apm.yml").write_text(
                 "name: test\n"
@@ -347,7 +531,9 @@ class TestPruneCommand:
 
             result = self.runner.invoke(cli, ["prune", "--dry-run"])
             assert result.exit_code == 0, result.output
-            assert "owner/repo" in result.output
+            assert "Retained owner/repo" in result.output
+            assert "would be removed" not in result.output
+            assert _check_orphaned_packages() == []
             # No deletion occurred.
             assert (pkg_dir / "apm.yml").exists()
 

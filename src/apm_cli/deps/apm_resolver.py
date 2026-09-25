@@ -24,6 +24,11 @@ from .dependency_graph import (
     DependencyTree,
     FlatDependencyMap,
 )
+from .immutable_requirements import (
+    ImmutableRequirementError,
+    ImmutableRequirements,
+    ReferenceResolver,
+)
 
 if TYPE_CHECKING:
     from .lockfile import LockFile
@@ -100,6 +105,8 @@ class APMDependencyResolver:
         existing_lockfile: "LockFile | None" = None,
         activation_callback: ActivationCallback | None = None,
         cache_validation_callback: Callable[[Path, str], Path | None] | None = None,
+        reference_resolver: ReferenceResolver | None = None,
+        frozen: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -139,6 +146,8 @@ class APMDependencyResolver:
         self._cache_validation_callback = cache_validation_callback
         self._update_refs = update_refs
         self._existing_lockfile = existing_lockfile
+        self._reference_resolver = reference_resolver
+        self._frozen = frozen
         # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
         # Detected once via signature inspection so legacy callbacks that
         # predate the field still work without raising a silent TypeError
@@ -653,6 +662,13 @@ class APMDependencyResolver:
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
+        requirements = ImmutableRequirements(
+            root_package.name,
+            self._reference_resolver,
+            self._existing_lockfile,
+            frozen=self._frozen,
+            update_refs=self._update_refs,
+        )
 
         # Queue for breadth-first traversal: (dependency_ref, depth, parent_node, is_dev)
         processing_queue: deque[tuple[DependencyReference, int, DependencyNode | None, bool]] = (
@@ -782,6 +798,12 @@ class APMDependencyResolver:
                 work_items.append((node, dep_ref, parent_node, is_dev))
 
             winner_candidates.extend(item[0] for item in work_items)
+            for node, _, _, _ in work_items:
+                try:
+                    requirements.add(node)
+                except ImmutableRequirementError as exc:
+                    tree.resolution_errors.append(str(exc))
+                    return tree
             _, winner_ids = _select_dependency_winners(winner_candidates)
             work_items = [
                 item

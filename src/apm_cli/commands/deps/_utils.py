@@ -11,8 +11,8 @@ from ...utils.yaml_io import load_yaml
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
     """Scan *apm_modules_dir* for installed package paths.
 
-    Walks the tree to find top-level directories containing ``apm.yml`` or
-    ``.apm``, supporting aliases (1-level), GitHub (2-level), ADO (3-level),
+    Walks the tree to find top-level directories containing ``apm.yml``,
+    ``.apm``, or ``SKILL.md``, supporting aliases (1-level), GitHub (2-level), ADO (3-level),
     and subdirectory packages. Manifests nested below another package are part of that
     parent package and are excluded.
 
@@ -27,7 +27,11 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
             continue
         if candidate.name.startswith(".") and candidate.parent != apm_modules_dir:
             continue
-        if not ((candidate / APM_YML_FILENAME).exists() or (candidate / APM_DIR).exists()):
+        if not (
+            (candidate / APM_YML_FILENAME).exists()
+            or (candidate / APM_DIR).exists()
+            or (candidate / SKILL_MD_FILENAME).is_file()
+        ):
             continue
         if _is_nested_under_package(candidate, apm_modules_dir):
             continue
@@ -42,7 +46,7 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     When a package ships nested package or skill manifests, the ``rglob`` scan
     would otherwise treat each sub-directory as an independent package. This
     helper walks up from *candidate* towards *apm_modules_path* and returns
-    ``True`` if any intermediate parent already contains ``apm.yml``, ``.apm``,
+    ``True`` if any intermediate parent already contains ``apm.yml``, ``.apm``, ``SKILL.md``,
     or a canonical Agent Plugin manifest -- meaning the candidate is part of
     that package, not a standalone one.
     """
@@ -51,6 +55,7 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
         if (
             (parent / APM_YML_FILENAME).exists()
             or (parent / APM_DIR).exists()
+            or (parent / SKILL_MD_FILENAME).is_file()
             or _is_agent_plugin_root(parent)
         ):
             return True
