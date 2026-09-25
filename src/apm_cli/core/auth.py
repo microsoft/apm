@@ -221,6 +221,21 @@ class AuthCacheKey(NamedTuple):
     transport: str  # Empty for callers without a concrete remote URL.
 
 
+class AdoAuthChainExhaustedError(RuntimeError):
+    """ADO PAT/az/fill chain ended without a usable credential."""
+
+
+def _join_attempted_auth_steps(names: list[str]) -> str:
+    """Render attempted auth steps for a terminal ADO error."""
+    if not names:
+        return "the Azure DevOps credential chain"
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+
 class AuthResolver:
     """Single source of truth for auth resolution.
 
@@ -699,7 +714,8 @@ class AuthResolver:
             """
             if ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
                 raise exc
-            # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
+            # ADO fill is owned by _try_ado_credential_fallback after PAT
+            # and az bearer, not this GitHub-class secondary chain.
             if host_info.kind == "ado":
                 raise exc
             _log(
@@ -738,6 +754,7 @@ class AuthResolver:
             raise exc
 
         # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
+        ado_attempts: list[str] = []
         ado_bearer_fallback_available = bool(
             auth_ctx is not None
             and auth_ctx.host_info.kind == "ado"
@@ -751,13 +768,14 @@ class AuthResolver:
                 raise exc
             from apm_cli.utils.github_host import is_ado_auth_failure_signal
 
-            if not is_ado_auth_failure_signal(str(exc)):
+            if not is_ado_auth_failure_signal(exc):
                 raise exc
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
 
             provider = get_bearer_provider()
             if not provider.is_available():
                 raise exc
+            ado_attempts.append("az CLI bearer")
             try:
                 bearer = provider.get_bearer_token()
                 bearer_env = self._build_git_env(
@@ -792,6 +810,72 @@ class AuthResolver:
                 )
             raise exc
 
+        def _ado_chain_exhausted(exc: Exception) -> T:
+            named = _join_attempted_auth_steps(ado_attempts)
+            verb = "was" if len(ado_attempts) == 1 else "were"
+            if self._supports_ado_bearer(host_info.host):
+                recovery = (
+                    "Refresh ADO_APM_PAT, run 'az login', or store "
+                    "a repository credential in Git Credential Manager, then retry."
+                )
+            else:
+                recovery = (
+                    "Refresh ADO_APM_PAT or store a repository credential "
+                    "in Git Credential Manager, then retry."
+                )
+            raise AdoAuthChainExhaustedError(
+                f"Authentication failed for {host_info.display_name}: "
+                f"{named} {verb} rejected. {recovery}"
+            ) from exc
+
+        def _try_ado_credential_fallback(exc: Exception) -> T:
+            """Retry ADO with a repository-scoped Git credential helper."""
+            if not self._allow_external_fallback:
+                raise exc
+            from apm_cli.utils.github_host import is_ado_auth_failure_signal
+
+            if not is_ado_auth_failure_signal(exc):
+                raise exc
+            path_suffix = f" (path={path})" if path else ""
+            _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
+            credential = self._token_manager.resolve_credential_from_git(
+                host_info.host,
+                port=host_info.port,
+                path=path,
+            )
+            ado_attempts.append("git credential fill")
+            if not credential:
+                _log(
+                    f"git credential fill returned no credential for "
+                    f"{host_info.display_name}; wrapping exhausted-chain error"
+                )
+                return _ado_chain_exhausted(exc)
+            _log(f"git credential fill resolved a credential for {host_info.display_name}")
+            try:
+                return operation(
+                    credential,
+                    self._build_git_env(
+                        credential,
+                        scheme="basic",
+                        host_kind="ado",
+                        base_env=base_env,
+                    ),
+                )
+            except Exception as fill_exc:
+                prior_context = fill_exc.__context__
+                fill_exc.__context__ = None
+                try:
+                    fill_is_auth_failure = is_ado_auth_failure_signal(fill_exc)
+                finally:
+                    fill_exc.__context__ = prior_context
+                if not fill_is_auth_failure:
+                    raise fill_exc from None
+                _log(
+                    f"git credential fill was rejected for {host_info.display_name}; "
+                    "wrapping exhausted-chain error"
+                )
+                return _ado_chain_exhausted(fill_exc)
+
         # Hosts that never have public repos -> auth-only
         if host_info.kind == "ghe_cloud":
             ctx = _auth_context()
@@ -811,6 +895,10 @@ class AuthResolver:
         # ADO: auth-first with bearer fallback when PAT fails
         if host_info.kind == "ado":
             ctx = _auth_context()
+            if ctx.source == "ADO_APM_PAT":
+                ado_attempts.append("ADO_APM_PAT")
+            elif ctx.source == GitHubTokenManager.ADO_BEARER_SOURCE:
+                ado_attempts.append("az CLI bearer")
             _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
             try:
                 return operation(ctx.token, _git_env_for_context(ctx))
@@ -822,7 +910,11 @@ class AuthResolver:
                     host_info.display_name,
                     exc,
                 )
-                return _try_ado_bearer_fallback(exc)
+                try:
+                    result = _try_ado_bearer_fallback(exc)
+                except Exception as auth_exc:
+                    result = _try_ado_credential_fallback(auth_exc)
+                return result
 
         if unauth_first:
             # Validation path: save rate limits, EMU-safe
@@ -979,12 +1071,14 @@ class AuthResolver:
             # No PAT set
             if not bearer_supported:
                 return (
-                    "\n    Azure DevOps Server requires ADO_APM_PAT.\n\n"
+                    "\n    Azure DevOps Server requires ADO_APM_PAT or a Git "
+                    "credential helper.\n\n"
                     "    To fix:\n"
                     "      1. Create a PAT with Code (Read) scope in your "
                     "Azure DevOps Server collection.\n"
                     "      2. Set it for this process: export ADO_APM_PAT=your_token\n"
-                    "      3. Retry: apm install\n\n"
+                    "      3. Or store a repository credential in Git Credential Manager\n"
+                    "      4. Retry: apm install\n\n"
                     "    Azure CLI bearer authentication applies to Azure DevOps "
                     "Services, not Server.\n\n"
                     "    Docs: https://microsoft.github.io/apm/"
@@ -1129,13 +1223,18 @@ class AuthResolver:
         Resolution order (``generic``): credential helper only (no GitHub or
         GitLab platform env vars).
 
-        Resolution order (ADO Services): ``ADO_APM_PAT`` -> AAD bearer -> ``none``.
-        Resolution order (ADO Server): ``ADO_APM_PAT`` -> ``none``.
+        Resolution order (ADO Services, ``resolve``): ``ADO_APM_PAT`` ->
+        AAD bearer -> ``none``. ``try_with_fallback`` then retries
+        path-scoped ``git credential fill``.
+        Resolution order (ADO Server, ``resolve``): ``ADO_APM_PAT`` ->
+        ``none``. ``try_with_fallback`` then retries path-scoped
+        ``git credential fill``.
 
         All token-bearing requests use HTTPS.
         """
         if host_info.kind == "ado":
-            # ADO resolution chain: PAT env -> cloud AAD bearer -> none.
+            # ADO resolve() chain: PAT env -> cloud AAD bearer -> none.
+            # Path-scoped git credential fill is owned by try_with_fallback.
             # Azure DevOps Server does not support Entra OAuth credentials.
             pat = os.environ.get("ADO_APM_PAT")
             if pat:
@@ -1160,8 +1259,8 @@ class AuthResolver:
                     )
             return None, "none", "basic"
 
-        # ADO uses ADO_APM_PAT (single var) + AAD bearer fallback;
-        # per-org vars and credential fill are out of scope.
+        # ADO uses ADO_APM_PAT (single var) + AAD bearer in resolve();
+        # path-scoped git credential fill is owned by try_with_fallback.
 
         # 1. Per-org GitHub PAT (GitHub-class hosts only -- not GitLab / generic / ADO)
         if org and host_info.kind in ("github", "ghe_cloud", "ghes"):

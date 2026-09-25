@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Azure DevOps Git clones now retry path-scoped `git credential fill` (Git Credential Manager) after `ADO_APM_PAT` and `az` bearer fail, so Windows GCM-backed marketplace and package installs can succeed without a PAT. Auth-failure detection reads git stderr on wrapped clone errors and does not treat Azure DevOps `TF401xxx` codes as HTTP 401. — by @mheeaxa (#2610)
 - Autopilot maintainer canvas removes a Decide row as soon as GitHub confirms `status/accepted`, without waiting for a full issue/PR refetch.
 - Issue and PR triage no longer skip bot-authored items (Copilot, Dependabot, github-actions). They stay in the queue like any other contribution. (#3024)
 - PR-review scheduler no longer queues every open pull request. A fresh review requires the `panel-review` label (same trigger as the Agentic Workflow), `status/accepted` on the PR, or an explicit named PR list. The reviewing session also requires `status/accepted` on the PR or a linked issue; otherwise scheduler and review-worker stop with no comment. The worker may clear `panel-review`; the scheduler does not comment or change labels. Both also apply a CODEOWNERS last-comment gate: read the last CODEOWNER comment as conditions and evaluate them against later comments AND labels on the PR and linked issues. Drop or `noop` only when those conditions are unmet or unclear. Named list does not bypass that gate.

@@ -18,6 +18,7 @@ preflight raised AuthenticationError on the first 401 without retrying.
 
 import os
 import stat
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -352,3 +353,128 @@ sys.exit(0)
     # bearer_also_failed signal should be in the diagnostic context.
     diag = exc_info.value.diagnostic_context or ""
     assert "bearer" in diag.lower() or "az cli" in diag.lower()
+
+
+FAKE_GIT_GCM_FILL = r"""#!/usr/bin/env python3
+"""
+"""Fake git: PAT and Bearer 401; GCM Basic password gcm-token succeeds."""
+FAKE_GIT_GCM_FILL += r"""
+import base64
+import os
+import sys
+
+argv = sys.argv[1:]
+
+if "config" in argv and "--list" in argv:
+    fields = bytearray()
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if key:
+            fields.extend(f"command\0{key}\n{value}\0".encode())
+    os.write(1, fields)
+    sys.exit(0)
+
+if "config" in argv and "--get-urlmatch" in argv:
+    target = argv[-1]
+    matches = []
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        normalized = key.lower()
+        if normalized == "http.extraheader":
+            matches.append((0, index, value))
+        elif normalized.startswith("http.") and normalized.endswith(".extraheader"):
+            scope = key[5:-12]
+            if target.startswith(scope):
+                matches.append((len(scope), index, value))
+    if not matches:
+        sys.exit(1)
+    os.write(1, (max(matches)[2] + "\0").encode())
+    sys.exit(0)
+
+if argv[:2] == ["credential", "fill"]:
+    sys.stdout.write("protocol=https\nhost=dev.azure.com\nusername=unused\npassword=gcm-token\n")
+    sys.exit(0)
+
+if argv[:1] == ["ls-remote"]:
+    password = ""
+    for key, value in os.environ.items():
+        if not key.startswith("GIT_CONFIG_VALUE_"):
+            continue
+        if "Bearer " in value:
+            sys.stderr.write(
+                "fatal: unable to access 'https://dev.azure.com/...': "
+                "The requested URL returned error: 401\n"
+            )
+            sys.exit(128)
+        if "Basic " in value:
+            blob = value.split("Basic ", 1)[1].strip()
+            try:
+                password = base64.b64decode(blob).decode("utf-8", errors="replace").split(":", 1)[-1]
+            except Exception:
+                password = ""
+    if password == "gcm-token":
+        sys.stdout.write("abc123\trefs/heads/main\n")
+        sys.exit(0)
+    sys.stderr.write(
+        "fatal: unable to access 'https://dev.azure.com/...': "
+        "The requested URL returned error: 401\n"
+    )
+    sys.exit(128)
+
+sys.exit(0)
+"""
+
+
+def test_ado_bearer_rejected_falls_back_to_git_credential_fill(tmp_path, monkeypatch):
+    """PAT and az bearer 401; path-scoped git credential fill succeeds."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake(bin_dir / "git", FAKE_GIT_GCM_FILL)
+    _write_fake(bin_dir / "az", FAKE_AZ)
+
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin:/bin")
+    monkeypatch.setenv("ADO_APM_PAT", "stale-pat-value")
+    monkeypatch.delenv("AZURE_CLI_TEST_DEV_SP_NAME", raising=False)
+
+    from apm_cli.core.azure_cli import get_bearer_provider
+
+    get_bearer_provider().clear_cache()
+
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.utils.git_env import get_git_executable
+
+    resolver = AuthResolver()
+
+    def _op(_token, git_env):
+        result = subprocess.run(
+            [
+                get_git_executable(),
+                "ls-remote",
+                "--heads",
+                "https://dev.azure.com/org/proj/_git/repo",
+            ],
+            capture_output=True,
+            text=True,
+            env=git_env,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                result.args,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        return result.stdout
+
+    outcome = resolver.try_with_fallback(
+        "dev.azure.com",
+        _op,
+        org="org",
+        path="org/proj/_git/repo",
+    )
+    assert "refs/heads/main" in outcome
