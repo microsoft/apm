@@ -1,7 +1,13 @@
 """Tests for lockfile-owned deployment path mutations."""
 
+from dataclasses import replace
+from pathlib import Path
+
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import LocatorKind
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.install.deployed_paths import deployed_path_entry
+from apm_cli.integration.targets import KNOWN_TARGETS
 
 
 def test_rename_local_deployed_path_moves_path_and_hash_without_duplicates() -> None:
@@ -40,3 +46,25 @@ def test_rename_local_deployed_path_invalidates_canonical_projection() -> None:
 
     assert lockfile.deployment_ledger.records == {}
     assert lockfile._deployments_present is False
+
+
+def test_outside_home_opencode_path_uses_target_relative_locator() -> None:
+    project_root = Path("/tmp/apm-home")
+    config_root = Path("/tmp/opencode-config")
+    target = replace(
+        KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+        root_dir=config_root.as_posix(),
+    )
+    target_path = config_root / "agents" / "reviewer.md"
+
+    entry = deployed_path_entry(target_path, project_root, [target])
+
+    assert entry == "agents/reviewer.md"
+    locator = DeploymentLedgerCodec.locator_for_path(
+        target_path,
+        project_root=project_root,
+        target=target,
+        scope="user",
+    )
+    assert locator.kind is LocatorKind.TARGET_RELATIVE
+    assert locator.value == entry

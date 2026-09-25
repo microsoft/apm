@@ -46,15 +46,6 @@ def deployed_path_entry(
                     encoded = None
                 if encoded is not None:
                     return encoded
-            absolute_static_root = _t.resolved_deploy_root is None and deploy_root is not None
-            if absolute_static_root:
-                try:
-                    target_path.relative_to(deploy_root)
-                except ValueError:
-                    pass
-                else:
-                    resolved_target = ensure_path_within(target_path, deploy_root)
-                    return portable_relpath(resolved_target, project_root)
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
                     target_path,
