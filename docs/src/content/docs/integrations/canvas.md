@@ -173,3 +173,12 @@ isolated canonical autopilot skills. It does not assign, request
 reviewers, merge, or run scheduler/worker logic in the canvas session.
 Agentic Workflows must not open it. Open it in Copilot App after
 install: "Open the Autopilot maintainer canvas".
+
+### Maintainer workbench development snapshot
+
+`packages/autopilot/maintainer-workbench-canvas` preserves the separate
+`maintainer-control-plane` prototype: scope/permission/review queues, background
+GPT-6 Sol explanations, and explicitly confirmed workflow approvals. It is a
+source-only backup, not an installed APM package. Its README covers deliberate
+restoration, required trusted-checkout configuration and fixture tests. Live
+state, credentials and private journals are not included.
