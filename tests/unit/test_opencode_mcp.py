@@ -200,6 +200,18 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         self._cwd_patcher.stop()
         self.tmp.cleanup()
 
+    def test_user_write_creates_ordinary_new_root(self):
+        """User-scope writes allow a new root under an ordinary parent."""
+        root = Path(self.tmp.name) / "new-opencode"
+        adapter = OpenCodeClientAdapter(user_scope=True)
+
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(root)}):
+            adapter.update_config({"new": {"command": "npx"}})
+
+        config_path = root / "opencode.json"
+        self.assertTrue(config_path.is_file())
+        self.assertIn("new", json.loads(config_path.read_text(encoding="utf-8"))["mcp"])
+
     # -- config path --
 
     def test_config_path_is_repo_local(self):

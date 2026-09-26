@@ -38,6 +38,16 @@ from ...utils.atomic_io import atomic_write_text
 from .copilot import CopilotClientAdapter
 
 
+def _reject_symlink_root(root: Path) -> None:
+    """Fail closed when the user OpenCode root is symlinked."""
+    from ...install.errors import RequiredIntegrationError
+
+    if root.is_symlink() or root.parent.is_symlink():
+        raise RequiredIntegrationError(
+            f"Refusing to write OpenCode config through symlinked root: {root}"
+        )
+
+
 class OpenCodeClientAdapter(CopilotClientAdapter):
     """OpenCode MCP client adapter.
 
@@ -91,6 +101,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         if not self.user_scope and not opencode_dir.is_dir():
             return
         if self.user_scope:
+            _reject_symlink_root(opencode_dir)
             opencode_dir.mkdir(parents=True, exist_ok=True)
 
         config_path = Path(self.get_config_path())

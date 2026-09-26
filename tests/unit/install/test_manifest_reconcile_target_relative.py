@@ -8,8 +8,8 @@ from apm_cli.install.manifest_reconcile import union_preserving
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 
-def test_reconcile_reconstructs_external_opencode_user_locator() -> None:
-    external_root = Path("/tmp/opencode-config")
+def test_reconcile_reconstructs_external_opencode_user_locator(tmp_path: Path) -> None:
+    external_root = tmp_path / "opencode-config"
     target = replace(
         KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
         root_dir=external_root.as_posix(),
@@ -34,10 +34,10 @@ def test_reconcile_reconstructs_external_opencode_user_locator() -> None:
     assert record.locator.scope == InstallScope.USER.value
 
 
-def test_reconcile_does_not_accept_parent_traversal_as_target_relative() -> None:
+def test_reconcile_does_not_accept_parent_traversal_as_target_relative(tmp_path: Path) -> None:
     target = replace(
         KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
-        root_dir="/tmp/opencode-config",
+        root_dir=str(tmp_path / "opencode-config"),
     )
 
     _, _, ledger = union_preserving(
@@ -56,8 +56,8 @@ def test_reconcile_does_not_accept_parent_traversal_as_target_relative() -> None
     assert record.locator.kind.value == "project-relative"
 
 
-def test_reconcile_falls_back_when_external_targets_share_relative_path() -> None:
-    external_root = Path("/tmp/shared-config")
+def test_reconcile_falls_back_when_external_targets_share_relative_path(tmp_path: Path) -> None:
+    external_root = tmp_path / "shared-config"
     first_target = replace(
         KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
         root_dir=external_root.as_posix(),

@@ -49,9 +49,9 @@ def test_rename_local_deployed_path_invalidates_canonical_projection() -> None:
     assert lockfile._deployments_present is False
 
 
-def test_outside_home_opencode_path_uses_target_relative_locator() -> None:
-    project_root = Path("/tmp/apm-home")
-    config_root = Path("/tmp/opencode-config")
+def test_outside_home_opencode_path_uses_target_relative_locator(tmp_path: Path) -> None:
+    project_root = tmp_path / "apm-home"
+    config_root = tmp_path / "opencode-config"
     target = replace(
         KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
         root_dir=config_root.as_posix(),
@@ -71,9 +71,11 @@ def test_outside_home_opencode_path_uses_target_relative_locator() -> None:
     assert locator.value == entry
 
 
-def test_outside_home_opencode_user_locator_preserves_metadata_and_roundtrips() -> None:
-    project_root = Path("/tmp/apm-home")
-    config_root = Path("/tmp/opencode-config")
+def test_outside_home_opencode_user_locator_preserves_metadata_and_roundtrips(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "apm-home"
+    config_root = tmp_path / "opencode-config"
     target = replace(
         KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
         root_dir=config_root.as_posix(),

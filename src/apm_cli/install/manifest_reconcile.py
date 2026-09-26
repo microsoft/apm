@@ -670,6 +670,10 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
+        locator_mapping={
+            record.locator.value: record.locator
+            for record in (prior_ledger.records.values() if prior_ledger is not None else ())
+        },
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)

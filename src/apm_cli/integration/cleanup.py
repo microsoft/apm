@@ -34,10 +34,12 @@ takes no logger.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLocator, LocatorKind
 from apm_cli.security.gate import is_python_bytecode_cache_path
 
 from .base_integrator import BaseIntegrator
@@ -274,6 +276,7 @@ def remove_stale_deployed_files(
     failed_path_retained: bool = True,
     user_scope: bool = False,
     allow_final_symlink: bool = False,
+    locator_mapping: Mapping[str, DeploymentLocator] | None = None,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -304,6 +307,10 @@ def remove_stale_deployed_files(
             the user to remove the file manually instead.
         user_scope: Include registered user-root prefixes such as
             ``.copilot/`` when validating legacy deployed-file paths.
+        locator_mapping: Optional persisted locator metadata keyed by the
+            compatibility path value. Target-relative locators are resolved
+            through their scope-resolved target profile before the existing
+            safety gates run.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -319,6 +326,7 @@ def remove_stale_deployed_files(
     """
     result = CleanupResult()
     recorded_hashes = recorded_hashes or {}
+    locator_mapping = locator_mapping or {}
 
     # Materialise stale_paths so we can iterate twice: once for the main
     # file-deletion loop and once as a lookup set for the deferred
@@ -387,16 +395,53 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(
-                stale_path,
-                project_root,
-                targets=targets,
-                user_scope=user_scope,
-                allow_final_symlink=allow_final_symlink,
-            ):
-                result.skipped_unmanaged.append(stale_path)
-                continue
-            stale_target = project_root / stale_path
+            locator = locator_mapping.get(stale_path)
+            resolved_target = None
+            if locator is not None and locator.kind is LocatorKind.TARGET_RELATIVE:
+                from apm_cli.integration.targets import KNOWN_TARGETS
+
+                profiles = [*(targets or ())]
+                for profile in KNOWN_TARGETS.values():
+                    scoped_profile = profile.for_scope(user_scope=user_scope)
+                    if scoped_profile is not None:
+                        profiles.append(scoped_profile)
+                target_profile = next(
+                    (profile for profile in profiles if profile.name == locator.target),
+                    None,
+                )
+                if target_profile is None:
+                    result.skipped_unmanaged.append(stale_path)
+                    continue
+                try:
+                    resolved_target = DeploymentLedgerCodec.resolve_locator(
+                        locator,
+                        project_root=project_root,
+                        target=target_profile,
+                    )
+                except (OSError, RuntimeError, ValueError):
+                    result.skipped_unmanaged.append(stale_path)
+                    continue
+                if not isinstance(resolved_target, Path) or not BaseIntegrator.validate_deploy_path(
+                    str(resolved_target),
+                    project_root,
+                    targets=[target_profile],
+                    user_scope=user_scope,
+                    allow_final_symlink=allow_final_symlink,
+                ):
+                    result.skipped_unmanaged.append(stale_path)
+                    continue
+                stale_target = resolved_target
+            else:
+                if not BaseIntegrator.validate_deploy_path(
+                    stale_path,
+                    project_root,
+                    targets=targets,
+                    user_scope=user_scope,
+                    allow_final_symlink=allow_final_symlink,
+                ):
+                    result.skipped_unmanaged.append(stale_path)
+                    continue
+                stale_target = project_root / stale_path
 
         if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).

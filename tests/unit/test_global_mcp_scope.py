@@ -64,6 +64,28 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
         adapter = OpenCodeClientAdapter()
         self.assertTrue(adapter.supports_user_scope)
 
+    def test_opencode_user_write_rejects_symlinked_root(self):
+        """User-scope writes fail closed before mkdir or atomic replacement."""
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            real_root = root / "real-opencode"
+            symlink_root = root / "linked-opencode"
+            real_root.mkdir()
+            config_path = real_root / "opencode.json"
+            original = '{"mcp": {"foreign": {"command": ["keep"]}}}'
+            config_path.write_text(original, encoding="utf-8")
+            symlink_root.symlink_to(real_root, target_is_directory=True)
+
+            adapter = OpenCodeClientAdapter(user_scope=True)
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(symlink_root)}):
+                with self.assertRaises(RequiredIntegrationError):
+                    adapter.update_config({"new": {"command": "npx"}})
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+            self.assertTrue(symlink_root.is_symlink())
+
     def test_cursor_does_not_inherit_copilot_true(self):
         """CursorClientAdapter inherits CopilotClientAdapter but overrides to False."""
         self.assertTrue(issubclass(CursorClientAdapter, CopilotClientAdapter))
