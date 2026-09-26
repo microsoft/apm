@@ -278,6 +278,33 @@ def test_skill_bundle_file_entries_omit_python_compiled_artifacts(tmp_path: Path
     ]
 
 
+def test_skill_bundle_file_entries_use_user_scope_for_external_opencode_root(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from apm_cli.core.scope import InstallScope
+
+    project_root = tmp_path / "project"
+    external_root = tmp_path / "opencode-config"
+    skill_dir = external_root / "skills" / "example"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Example\n", encoding="utf-8")
+    target = replace(
+        KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+        root_dir=external_root.as_posix(),
+    )
+
+    entries = skill_bundle_file_entries(
+        skill_dir,
+        project_root,
+        targets=[target],
+        scope=InstallScope.USER,
+    )
+
+    assert entries == ["skills/example/SKILL.md"]
+
+
 # ---------------------------------------------------------------------------
 # TestAmendment6Warning
 # ---------------------------------------------------------------------------

@@ -166,8 +166,9 @@ in `apm.yml`, then run `apm install` again.
 - **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped at `--global` and with `--only mcp`.
 - **User-scope root context hint.** Compilation stays explicit. After `apm install -g`, targets with native user-scope instruction files pick up global instructions during install. Targets whose user-scope instruction surface is a root context file require [`apm compile --global`](../compile/#global-compilation); install prints a one-line `[i]` hint and writes no root context file.
 - **OpenCode user scope.** `apm install -g --target opencode` deploys skills to
-  `~/.config/opencode/skills/`. Run `apm compile -g` to refresh
-  `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
+  the resolved OpenCode user config root. Run `apm compile -g` to refresh
+  `AGENTS.md` there, including scoped instruction sections. See the
+  [OpenCode config environment variables](../../environment-variables).
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
 - **Interrupted-install recovery.** After a successful install, APM removes inactive resolution backup directories left by interrupted lock-aware runs. Active install backups and entries that do not match APM's staging name format are preserved. Lockless backups from older APM versions are retained because they may belong to a running install; inactive orphaned activity-lock files are reported for manual cleanup. Stop other APM installs, rerun with `--verbose`, then manually delete the reported paths.

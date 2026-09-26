@@ -46,24 +46,31 @@ def fake_home(tmp_path):
     return home_dir
 
 
-def _env_with_home(fake_home):
+def _env_with_home(fake_home, extra=None):
     """Return an env dict with HOME/USERPROFILE pointing to *fake_home*."""
     env = os.environ.copy()
     env["HOME"] = str(fake_home)
     if sys.platform == "win32":
         env["USERPROFILE"] = str(fake_home)
+    if extra:
+        env.update(extra)
     return env
 
 
-def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60):
+def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60, extra_env=None):
     """Run an apm CLI command with an overridden home directory."""
+    env = _env_with_home(fake_home)
+    env.pop("OPENCODE_CONFIG_DIR", None)
+    env.pop("XDG_CONFIG_HOME", None)
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [apm_binary_path] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=_env_with_home(fake_home),
+        env=env,
     )
 
 
@@ -137,6 +144,34 @@ def opencode_package(tmp_path):
     skill = pkg / ".apm" / "skills" / "reviewer"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("# Reviewer\n", encoding="utf-8")
+    return pkg
+
+
+@pytest.fixture
+def opencode_mcp_package(tmp_path):
+    """Create a local package declaring a self-defined OpenCode MCP server."""
+    pkg = tmp_path / "opencode-mcp-package"
+    pkg.mkdir()
+    (pkg / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "opencode-mcp-package",
+                "version": "1.0.0",
+                "dependencies": {
+                    "mcp": [
+                        {
+                            "name": "custom-server",
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "npx",
+                            "args": ["-y", "custom-server"],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return pkg
 
 
@@ -641,6 +676,48 @@ class TestGlobalOpenCodeScope:
         assert project_skill.is_file()
         assert (project_root / "AGENTS.md").read_text(encoding="utf-8") == project_agents
         assert not (claude_root / "CLAUDE.md").exists()
+
+    @pytest.mark.lifecycle_smoke
+    def test_opencode_global_mcp_lifecycle_uses_custom_config_dir(
+        self, apm_binary_path, fake_home, opencode_mcp_package
+    ):
+        """Global MCP install/uninstall follows OPENCODE_CONFIG_DIR exactly."""
+        custom_root = fake_home / "custom-opencode"
+        env = {"OPENCODE_CONFIG_DIR": str(custom_root)}
+
+        install = _run_apm(
+            apm_binary_path,
+            [
+                "install",
+                "--global",
+                str(opencode_mcp_package),
+                "--target",
+                "opencode",
+            ],
+            fake_home,
+            fake_home,
+            extra_env=env,
+        )
+        assert install.returncode == 0, install.stdout + install.stderr
+
+        config_path = custom_root / "opencode.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        assert config["mcp"]["custom-server"] == {
+            "type": "local",
+            "command": ["npx", "-y", "custom-server"],
+            "enabled": True,
+        }
+
+        uninstall = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(opencode_mcp_package)],
+            fake_home,
+            fake_home,
+            extra_env=env,
+        )
+        assert uninstall.returncode == 0, uninstall.stdout + uninstall.stderr
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        assert "custom-server" not in config.get("mcp", {})
 
 
 class TestGlobalUninstallLifecycle:

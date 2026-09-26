@@ -59,24 +59,38 @@ def _reject_symlink_config(
     label: str,
     logger: CommandLogger | None,
     *,
+    config_root: Path | None = None,
     fail_on_write_error: bool,
 ) -> bool:
     """Reject MCP cleanup through a symlink without reading its target."""
-    protected_markers = {".claude", ".config", ".cursor", ".vscode"}
-    symlink_candidates = {config_path, config_path.parent}
-    parts = config_path.parts
-    for index, part in enumerate(parts):
-        if part in protected_markers:
-            current = Path(*parts[: index + 1])
-            symlink_candidates.add(current)
-            for child in parts[index + 1 :]:
-                current = current / child
-                symlink_candidates.add(current)
-            break
+    symlink_candidates = {config_path}
+    has_symlink = False
     try:
-        has_symlink = any(path.is_symlink() for path in symlink_candidates)
-    except OSError:
+        # Detect resolution failures before any filesystem write. The lexical
+        # walk below remains authoritative for symlink identity.
+        config_path.parent.resolve(strict=False)
+        boundary = Path(config_root or config_path.parent)
+        symlink_candidates.add(boundary)
+        try:
+            relative = config_path.parent.relative_to(boundary)
+        except ValueError:
+            # A lexical root may itself be a symlink to the resolved root.
+            # Walk the supplied lexical path instead of comparing resolved
+            # ancestry; components above the lexical root remain ignored.
+            relative = Path()
+            boundary = config_path.parent
+        current = boundary
+        for part in relative.parts:
+            current /= part
+            symlink_candidates.add(current)
+        symlink_candidates.add(config_path)
+    except (OSError, RuntimeError):
         has_symlink = True
+    else:
+        try:
+            has_symlink = any(path.is_symlink() for path in symlink_candidates)
+        except OSError:
+            has_symlink = True
     if not has_symlink:
         return False
     message = (
@@ -129,6 +143,7 @@ def _clean_json_mcp_config(
     servers_key: str = "mcpServers",
     trailing_newline: bool = False,
     use_rich: bool = False,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a JSON-based MCP config file.
@@ -151,6 +166,7 @@ def _clean_json_mcp_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -191,6 +207,7 @@ def _clean_hermes_mcp_config(
     config_path: Path,
     stale_names: builtins.set,
     logger,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Atomically remove stale servers from Hermes' YAML config."""
@@ -200,6 +217,7 @@ def _clean_hermes_mcp_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -238,6 +256,7 @@ def _clean_toml_mcp_config(
     label: str,
     logger: CommandLogger | None = None,
     use_rich: bool = True,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a TOML-based MCP config file.
@@ -259,6 +278,7 @@ def _clean_toml_mcp_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -295,6 +315,7 @@ def _clean_claude_config(
     stale_names: builtins.set,
     logger,
     is_user_scope: bool = False,
+    config_root: Path | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Remove stale entries from a Claude Code JSON config file.
@@ -319,6 +340,7 @@ def _clean_claude_config(
             config_path,
             label,
             logger,
+            config_root=config_root,
             fail_on_write_error=fail_on_write_error,
         )
         or not config_path.exists()
@@ -723,7 +745,14 @@ class MCPIntegrator:
         # Scope filtering: at USER scope, only clean global-capable runtimes.
         from apm_cli.core.scope import InstallScope
 
-        if scope is InstallScope.USER:
+        if scope is InstallScope.PROJECT:
+            effective_user_scope = False
+        elif scope is InstallScope.USER:
+            effective_user_scope = True
+        else:
+            effective_user_scope = user_scope
+
+        if effective_user_scope:
             from apm_cli.factory import ClientFactory as _CF
 
             supported = builtins.set()
@@ -739,8 +768,8 @@ class MCPIntegrator:
         # config only -- never touch ~/.claude.json on the user's behalf without
         # an explicit USER scope, since that file is shared across all Claude
         # Code projects on the host.
-        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
         clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
+        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
         if "claude" in target_runtimes and scope is None:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
@@ -765,6 +794,7 @@ class MCPIntegrator:
                 logger,
                 ".vscode/mcp.json",
                 servers_key="servers",
+                config_root=project_root_path,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -774,7 +804,9 @@ class MCPIntegrator:
             copilot_client = ClientFactory.create_client(
                 "copilot",
                 project_root=project_root_path,
-                user_scope=scope is not InstallScope.PROJECT,
+                # Preserve the historical unspecified-scope global cleanup
+                # behavior for Copilot; Claude is handled explicitly below.
+                user_scope=True if scope is None else effective_user_scope,
             )
             _clean_json_mcp_config(
                 Path(copilot_client.get_config_path()),
@@ -782,6 +814,7 @@ class MCPIntegrator:
                 logger,
                 "Copilot CLI config",
                 use_rich=True,
+                config_root=Path(copilot_client.get_config_path()).parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -793,13 +826,14 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "codex",
                     project_root=project_root,
-                    user_scope=user_scope,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_toml_mcp_config(
                 codex_cfg,
                 expanded_stale,
                 "Codex CLI config",
+                config_root=codex_cfg.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -810,18 +844,32 @@ class MCPIntegrator:
                 logger,
                 ".cursor/mcp.json",
                 use_rich=True,
+                config_root=project_root_path,
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean opencode.json (only if .opencode/ directory exists)
+        # Clean the scope-resolved OpenCode config through its adapter.
         if "opencode" in target_runtimes:
-            if (project_root_path / ".opencode").is_dir():
+            from apm_cli.factory import ClientFactory
+
+            opencode_client = ClientFactory.create_client(
+                "opencode",
+                project_root=project_root_path,
+                user_scope=effective_user_scope,
+            )
+            if effective_user_scope or (project_root_path / ".opencode").is_dir():
+                from apm_cli.integration.opencode_paths import opencode_user_config_path
+
+                lexical_root = (
+                    opencode_user_config_path() if effective_user_scope else project_root_path
+                )
                 _clean_json_mcp_config(
-                    project_root_path / "opencode.json",
+                    Path(opencode_client.get_config_path()),
                     expanded_stale,
                     logger,
                     "opencode.json",
                     servers_key="mcp",
+                    config_root=lexical_root,
                     fail_on_write_error=fail_on_write_error,
                 )
 
@@ -832,6 +880,7 @@ class MCPIntegrator:
                 logger,
                 "Windsurf config",
                 use_rich=True,
+                config_root=Path.home() / ".codeium" / "windsurf",
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -842,7 +891,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "kiro",
                     project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_json_mcp_config(
@@ -851,6 +900,7 @@ class MCPIntegrator:
                 logger,
                 "Kiro MCP config",
                 use_rich=True,
+                config_root=kiro_cfg.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -878,6 +928,7 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 ".gemini/settings.json",
+                config_root=project_root_path,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -889,7 +940,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "antigravity",
                     project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
+                    user_scope=effective_user_scope,
                 ).get_config_path()
             )
             _clean_json_mcp_config(
@@ -897,34 +948,40 @@ class MCPIntegrator:
                 expanded_stale,
                 logger,
                 "Antigravity MCP config",
+                config_root=antigravity_cfg.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 
         if "hermes" in target_runtimes:
-            from apm_cli.factory import ClientFactory
+            from apm_cli.integration.targets import resolve_hermes_root
 
-            hermes_home = os.environ.get("HERMES_HOME", "").strip()
-            unresolved_cfg = (
-                Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
-            ) / "config.yaml"
+            effective_root = resolve_hermes_root()
+            config_path = effective_root / "config.yaml"
+
+            # Check the configured lexical path before normalization so a
+            # symlink used as HERMES_HOME is rejected. Relative overrides are
+            # intentionally ignored by resolve_hermes_root(), so they check
+            # the canonical default root instead.
+            configured = os.environ.get("HERMES_HOME", "").strip()
+            configured_path = Path(configured).expanduser() if configured else None
+            lexical_root = (
+                configured_path
+                if configured_path is not None and configured_path.is_absolute()
+                else effective_root
+            )
             if _reject_symlink_config(
-                unresolved_cfg,
+                lexical_root / "config.yaml",
                 "Hermes config.yaml",
                 logger,
+                config_root=lexical_root,
                 fail_on_write_error=fail_on_write_error,
             ):
                 return
-            hermes_cfg = Path(
-                ClientFactory.create_client(
-                    "hermes",
-                    project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
-                ).get_config_path()
-            )
             _clean_hermes_mcp_config(
-                hermes_cfg,
+                config_path,
                 expanded_stale,
                 logger,
+                config_root=effective_root,
                 fail_on_write_error=fail_on_write_error,
             )
 
@@ -935,16 +992,31 @@ class MCPIntegrator:
                     project_root_path / ".mcp.json",
                     expanded_stale,
                     logger,
+                    config_root=project_root_path,
                     fail_on_write_error=fail_on_write_error,
                 )
 
         # Clean Claude Code user ~/.claude.json (USER scope only)
         if clean_claude_user:
+            from apm_cli.factory import ClientFactory
+
+            claude_client = ClientFactory.create_client(
+                "claude",
+                project_root=project_root_path,
+                user_scope=True,
+            )
+            configured_path = claude_client.get_config_path()
+            config_path = (
+                Path(configured_path)
+                if isinstance(configured_path, (str, Path))
+                else Path.home() / ".claude.json"
+            )
             _clean_claude_config(
-                Path.home() / ".claude.json",
+                config_path,
                 expanded_stale,
                 logger,
                 is_user_scope=True,
+                config_root=config_path.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 

@@ -34,10 +34,12 @@ takes no logger.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLocator, LocatorKind
 from apm_cli.security.gate import is_python_bytecode_cache_path
 
 from .base_integrator import BaseIntegrator
@@ -66,6 +68,20 @@ class CleanupResult:
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
 
+    deleted_locators: list[DeploymentLocator] = field(default_factory=list)
+    retained_locators: list[DeploymentLocator] = field(default_factory=list)
+    skipped_user_edit_locators: list[DeploymentLocator] = field(default_factory=list)
+    skipped_unmanaged_locators: list[DeploymentLocator] = field(default_factory=list)
+    deferred_locators: list[DeploymentLocator] = field(default_factory=list)
+
+    @property
+    def deleted_values(self) -> list[str]:
+        return [locator.value for locator in self.deleted_locators]
+
+    @property
+    def retained_values(self) -> list[str]:
+        return [locator.value for locator in self.retained_locators]
+
     @property
     def retained(self) -> list[str]:
         """Return unique paths that were deliberately left on disk."""
@@ -78,6 +94,11 @@ class CleanupResult:
                 ]
             )
         )
+
+    @staticmethod
+    def _append_once(items: list[DeploymentLocator], locator: DeploymentLocator | None) -> None:
+        if locator is not None and locator not in items:
+            items.append(locator)
 
 
 def _is_skill_directory_entry(rel_path: str) -> bool:
@@ -114,6 +135,7 @@ def _safe_remove_skill_directory(
     diagnostics,
     dep_key: str,
     failed_path_retained: bool,
+    locator: DeploymentLocator | None = None,
 ) -> None:
     """Attempt safe removal of an APM-deployed skill directory.
 
@@ -139,6 +161,7 @@ def _safe_remove_skill_directory(
         remaining = list(skill_dir.iterdir())
     except OSError:
         result.failed.append(rel_path)
+        result._append_once(result.retained_locators, locator)
         return
 
     if not remaining:
@@ -146,8 +169,10 @@ def _safe_remove_skill_directory(
             skill_dir.rmdir()
             result.deleted.append(rel_path)
             result.deleted_targets.append(skill_dir)
+            result._append_once(result.deleted_locators, locator)
         except OSError as exc:
             result.failed.append(rel_path)
+            result._append_once(result.retained_locators, locator)
             _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
         return
 
@@ -223,6 +248,9 @@ def _safe_remove_skill_directory(
             package=dep_key,
         )
         result.skipped_unmanaged.append(rel_path)
+        result._append_once(result.skipped_unmanaged_locators, locator)
+        # The deferred directory's locator is attached by the caller; this
+        # path projection remains the compatibility surface.
         return
 
     # All remaining files are APM-tracked with matching hashes -- safe
@@ -231,8 +259,10 @@ def _safe_remove_skill_directory(
         shutil.rmtree(skill_dir)
         result.deleted.append(rel_path)
         result.deleted_targets.append(skill_dir)
+        result._append_once(result.deleted_locators, locator)
     except OSError as exc:
         result.failed.append(rel_path)
+        result._append_once(result.retained_locators, locator)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
 
 
@@ -274,6 +304,7 @@ def remove_stale_deployed_files(
     failed_path_retained: bool = True,
     user_scope: bool = False,
     allow_final_symlink: bool = False,
+    locator_mapping: Mapping[str, Sequence[DeploymentLocator] | DeploymentLocator] | None = None,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -304,6 +335,10 @@ def remove_stale_deployed_files(
             the user to remove the file manually instead.
         user_scope: Include registered user-root prefixes such as
             ``.copilot/`` when validating legacy deployed-file paths.
+        locator_mapping: Optional persisted locator metadata keyed by the
+            compatibility path value. Target-relative locators are resolved
+            through their scope-resolved target profile before the existing
+            safety gates run.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -319,6 +354,15 @@ def remove_stale_deployed_files(
     """
     result = CleanupResult()
     recorded_hashes = recorded_hashes or {}
+    locator_mapping = locator_mapping or {}
+
+    def _locators_for(path: str) -> tuple[DeploymentLocator, ...]:
+        value = locator_mapping.get(path)
+        if value is None:
+            return ()
+        if isinstance(value, DeploymentLocator):
+            return (value,)
+        return tuple(value)
 
     # Materialise stale_paths so we can iterate twice: once for the main
     # file-deletion loop and once as a lookup set for the deferred
@@ -330,7 +374,7 @@ def remove_stale_deployed_files(
     # files are removed first. After files are deleted the directory is
     # either empty (safe rmdir) or contains only verified APM-tracked
     # files (safe rmtree).
-    _deferred_dirs: list[tuple[str, Path]] = []
+    _deferred_dirs: list[tuple[str, Path, DeploymentLocator | None]] = []
 
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
@@ -339,7 +383,27 @@ def remove_stale_deployed_files(
     _cowork_orphans_skipped: int = 0
     _cowork_resolve_errors: int = 0
 
-    for stale_path in _stale_list:
+    cleanup_items = [
+        (stale_path, locator)
+        for stale_path in _stale_list
+        for locator in (_locators_for(stale_path) or (None,))
+    ]
+    for stale_path, locator in cleanup_items:
+
+        def mark_unmanaged(
+            path: str = stale_path,
+            item_locator: DeploymentLocator | None = locator,
+        ) -> None:
+            result.skipped_unmanaged.append(path)
+            result._append_once(result.skipped_unmanaged_locators, item_locator)
+
+        def mark_failed(
+            path: str = stale_path,
+            item_locator: DeploymentLocator | None = locator,
+        ) -> None:
+            result.failed.append(path)
+            result._append_once(result.retained_locators, item_locator)
+
         # -- Cowork:// paths ---------------------------------------
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable
@@ -352,13 +416,13 @@ def remove_stale_deployed_files(
         if stale_path.startswith(COWORK_URI_SCHEME):
             # Basic security: reject path-traversal components.
             if ".." in stale_path:
-                result.skipped_unmanaged.append(stale_path)
+                mark_unmanaged()
                 continue
             # Verify the path starts with a known integration prefix.
             from .targets import get_integration_prefixes
 
             if not stale_path.startswith(get_integration_prefixes(targets=targets)):
-                result.skipped_unmanaged.append(stale_path)
+                mark_unmanaged()
                 continue
             # Resolve the cowork:// URI to a real filesystem path.
             try:
@@ -373,7 +437,7 @@ def remove_stale_deployed_files(
                     # OneDrive unavailable -- retain lockfile entry so a
                     # later install with a configured root can clean up.
                     _cowork_orphans_skipped += 1
-                    result.failed.append(stale_path)
+                    mark_failed()
                     continue
                 from .copilot_cowork_paths import from_lockfile_path
 
@@ -382,24 +446,61 @@ def remove_stale_deployed_files(
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
                 _cowork_resolve_errors += 1
-                result.failed.append(stale_path)
+                mark_failed()
                 continue
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(
-                stale_path,
-                project_root,
-                targets=targets,
-                user_scope=user_scope,
-                allow_final_symlink=allow_final_symlink,
-            ):
-                result.skipped_unmanaged.append(stale_path)
-                continue
-            stale_target = project_root / stale_path
+            resolved_target = None
+            if locator is not None and locator.kind is LocatorKind.TARGET_RELATIVE:
+                from apm_cli.integration.targets import KNOWN_TARGETS
+
+                profiles = [*(targets or ())]
+                for profile in KNOWN_TARGETS.values():
+                    scoped_profile = profile.for_scope(user_scope=user_scope)
+                    if scoped_profile is not None:
+                        profiles.append(scoped_profile)
+                target_profile = next(
+                    (profile for profile in profiles if profile.name == locator.target),
+                    None,
+                )
+                if target_profile is None:
+                    mark_unmanaged()
+                    continue
+                try:
+                    resolved_target = DeploymentLedgerCodec.resolve_locator(
+                        locator,
+                        project_root=project_root,
+                        target=target_profile,
+                    )
+                except (OSError, RuntimeError, ValueError):
+                    mark_unmanaged()
+                    continue
+                if not isinstance(resolved_target, Path) or not BaseIntegrator.validate_deploy_path(
+                    str(resolved_target),
+                    project_root,
+                    targets=[target_profile],
+                    user_scope=user_scope,
+                    allow_final_symlink=allow_final_symlink,
+                ):
+                    mark_unmanaged()
+                    continue
+                stale_target = resolved_target
+            else:
+                if not BaseIntegrator.validate_deploy_path(
+                    stale_path,
+                    project_root,
+                    targets=targets,
+                    user_scope=user_scope,
+                    allow_final_symlink=allow_final_symlink,
+                ):
+                    mark_unmanaged()
+                    continue
+                stale_target = project_root / stale_path
 
         if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).
+            result._append_once(result.deleted_locators, locator)
             continue
 
         # Gate 2: directory handling. APM-managed primitives are
@@ -411,9 +512,11 @@ def remove_stale_deployed_files(
         # non-skill directory entries are still rejected immediately.
         if stale_target.is_dir() and not stale_target.is_symlink():
             if _is_skill_directory_entry(stale_path):
-                _deferred_dirs.append((stale_path, stale_target))
+                _deferred_dirs.append((stale_path, stale_target, locator))
+                result._append_once(result.deferred_locators, locator)
             else:
                 result.skipped_unmanaged.append(stale_path)
+                result._append_once(result.skipped_unmanaged_locators, locator)
                 diagnostics.warn(
                     (
                         f"Refused to remove directory entry {stale_path}: APM "
@@ -435,6 +538,7 @@ def remove_stale_deployed_files(
         if expected_hash:
             if allow_final_symlink and stale_target.is_symlink():
                 result.skipped_user_edit.append(stale_path)
+                result._append_once(result.skipped_user_edit_locators, locator)
                 diagnostics.warn(
                     (
                         f"Skipped removing {stale_path}: the deployed file was "
@@ -450,6 +554,7 @@ def remove_stale_deployed_files(
                 actual_hash = compute_file_hash(stale_target)
             except Exception as _hash_exc:
                 result.skipped_user_edit.append(stale_path)
+                result._append_once(result.skipped_user_edit_locators, locator)
                 diagnostics.warn(
                     (
                         f"Skipped removing {stale_path}: could not verify "
@@ -469,6 +574,7 @@ def remove_stale_deployed_files(
             # comparing to avoid false "user-edited" classifications.
             if _strip_sha256_prefix(actual_hash) != _strip_sha256_prefix(expected_hash):
                 result.skipped_user_edit.append(stale_path)
+                result._append_once(result.skipped_user_edit_locators, locator)
                 diagnostics.warn(
                     (
                         f"Skipped removing {stale_path}: file has been "
@@ -485,8 +591,12 @@ def remove_stale_deployed_files(
             stale_target.unlink()
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
+            if locator is not None:
+                result._append_once(result.deleted_locators, locator)
         except Exception as exc:
             result.failed.append(stale_path)
+            if locator is not None:
+                result._append_once(result.retained_locators, locator)
             if failed_path_retained:
                 diagnostics.warn(
                     (
@@ -509,7 +619,7 @@ def remove_stale_deployed_files(
     # -- Second pass: deferred skill directories -------------------
     # Individual files have been deleted above. Now attempt safe removal
     # of skill directories that APM itself created.
-    for _dir_path, _dir_target in _deferred_dirs:
+    for _dir_path, _dir_target, _dir_locator in _deferred_dirs:
         _safe_remove_skill_directory(
             _dir_target,
             _dir_path,
@@ -519,6 +629,7 @@ def remove_stale_deployed_files(
             diagnostics,
             dep_key,
             failed_path_retained,
+            _dir_locator,
         )
 
     # One-time warnings for cowork edge cases (mirrors sync_remove_files).

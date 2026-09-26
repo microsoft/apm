@@ -10,15 +10,18 @@ local-package stale-file deletion. These tests pin its invariants:
 * unlink failures are retained for retry on next install
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.core.deployment_state import DeploymentLocator, LocatorKind
 from apm_cli.integration.cleanup import (
     CleanupResult,
     remove_stale_deployed_files,
 )
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -58,6 +61,65 @@ def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger
     assert not result.failed
     assert not result.skipped_unmanaged
     assert not target.exists()
+
+
+def test_target_relative_locator_deletes_external_file(project_root, diagnostics, logger, tmp_path):
+    external_root = tmp_path / "opencode"
+    target = replace(
+        KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+        root_dir=str(external_root),
+    )
+    target_file = external_root / "skills" / "reviewer" / "SKILL.md"
+    target_file.parent.mkdir(parents=True)
+    target_file.write_text("stale\n", encoding="utf-8")
+    locator = DeploymentLocator(
+        kind=LocatorKind.TARGET_RELATIVE,
+        target="opencode",
+        value="skills/reviewer/SKILL.md",
+        runtime=None,
+        scope="user",
+    )
+
+    result = remove_stale_deployed_files(
+        [locator.value],
+        project_root,
+        dep_key="pkg",
+        targets=[target],
+        diagnostics=diagnostics,
+        locator_mapping={locator.value: locator},
+    )
+
+    assert result.deleted == [locator.value]
+    assert not target_file.exists()
+
+
+def test_same_compatibility_path_deletes_each_target_locator(project_root, diagnostics, tmp_path):
+    claude_root = tmp_path / "claude"
+    opencode_root = tmp_path / "opencode"
+    claude_file = claude_root / "skills" / "reviewer" / "SKILL.md"
+    opencode_file = opencode_root / "skills" / "reviewer" / "SKILL.md"
+    for path in (claude_file, opencode_file):
+        path.parent.mkdir(parents=True)
+        path.write_text("stale\n", encoding="utf-8")
+    claude = replace(KNOWN_TARGETS["claude"].for_scope(user_scope=True), root_dir=claude_root)
+    opencode = replace(KNOWN_TARGETS["opencode"].for_scope(user_scope=True), root_dir=opencode_root)
+    value = "skills/reviewer/SKILL.md"
+    locators = [
+        DeploymentLocator(LocatorKind.TARGET_RELATIVE, "claude", value, None, "user"),
+        DeploymentLocator(LocatorKind.TARGET_RELATIVE, "opencode", value, None, "user"),
+    ]
+    result = remove_stale_deployed_files(
+        [value],
+        project_root,
+        dep_key="pkg",
+        targets=[claude, opencode],
+        diagnostics=diagnostics,
+        user_scope=True,
+        locator_mapping={value: locators},
+    )
+    assert not claude_file.exists()
+    assert not opencode_file.exists()
+    assert result.deleted == [value, value]
 
 
 def test_path_traversal_rejected(project_root, diagnostics, logger):

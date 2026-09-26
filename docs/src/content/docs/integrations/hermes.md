@@ -40,14 +40,19 @@ Run your normal `apm compile` flow when you also need `AGENTS.md`; Hermes shares
 
 ## HERMES_HOME override
 
-By default the user-scope root is `~/.hermes`. Set `HERMES_HOME` to point APM at a different Hermes home (useful for containers and multi-profile setups):
+By default the user-scope root is `~/.hermes`. Set `HERMES_HOME` to a
+nonblank absolute path to point APM at a different Hermes home (useful for
+containers and multi-profile setups). Relative or blank values fall back to
+`~/.hermes`:
 
 ```bash
 export HERMES_HOME="$HOME/.config/hermes"
 apm install --target hermes --global
 ```
 
-When `HERMES_HOME` lives under `$HOME`, APM keeps the deploy root home-relative; otherwise it uses the absolute path. The directory does not need to exist yet.
+When `HERMES_HOME` is an absolute path under `$HOME`, APM keeps the deploy root
+home-relative; otherwise it uses the absolute path. Relative or blank
+`HERMES_HOME` values use `~/.hermes`. The directory does not need to exist yet.
 
 ## MCP servers
 

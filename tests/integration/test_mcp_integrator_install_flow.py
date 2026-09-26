@@ -14,6 +14,7 @@ import json
 import warnings
 from unittest.mock import MagicMock, patch
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 
 # ---------------------------------------------------------------------------
@@ -527,6 +528,29 @@ class TestRemoveStaleClaudeProject:
         )
 
         data = json.loads((tmp_path / ".mcp.json").read_text())
+        assert "stale-srv" not in data["mcpServers"]
+        assert "keep-srv" in data["mcpServers"]
+
+
+class TestRemoveStaleClaudeUser:
+    def test_uses_custom_claude_config_dir(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / "custom-claude"
+        config_dir.mkdir()
+        config_path = config_dir / ".claude.json"
+        config_path.write_text(
+            json.dumps({"mcpServers": {"stale-srv": {}, "keep-srv": {}}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        MCPIntegrator.remove_stale(
+            stale_names={"stale-srv"},
+            runtime="claude",
+            project_root=tmp_path / "project",
+            scope=InstallScope.USER,
+        )
+
+        data = json.loads(config_path.read_text(encoding="utf-8"))
         assert "stale-srv" not in data["mcpServers"]
         assert "keep-srv" in data["mcpServers"]
 

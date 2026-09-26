@@ -6,11 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.opencode_paths import opencode_user_config_dir
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
     RULE_FORMATS,
     PrimitiveMapping,
     active_targets,
+    active_targets_user_scope,
+    get_integration_prefixes,
     resolve_targets,
 )
 from apm_cli.utils.path_security import PathTraversalError
@@ -91,6 +94,58 @@ class TestActiveTargets:
         (self.root / ".opencode").mkdir()
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["opencode"]
+
+    def test_opencode_user_scope_resolves_config_root(self, monkeypatch):
+        expected = self.root / "global-opencode"
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(expected))
+        profile = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
+        assert profile is not None
+        assert profile.resolved_deploy_root is None
+        assert profile.root_dir == opencode_user_config_dir().as_posix()
+
+    def test_opencode_user_scope_auto_detects_explicit_config_dir(self, monkeypatch):
+        config_dir = self.root / "outside-home" / "opencode"
+        config_dir.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: self.root)
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(config_dir))
+
+        targets = active_targets_user_scope()
+
+        assert [target.name for target in targets] == ["opencode"]
+
+    def test_opencode_user_scope_auto_detects_xdg_config_home(self, monkeypatch):
+        xdg_config_home = self.root / "xdg-config"
+        (xdg_config_home / "opencode").mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: self.root)
+        monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+
+        targets = active_targets_user_scope()
+
+        assert [target.name for target in targets] == ["opencode"]
+
+    @pytest.mark.parametrize("config_dir_kind", ["default", "inside-home", "outside-home"])
+    def test_user_scope_prefixes_include_resolved_opencode_root(self, monkeypatch, config_dir_kind):
+        monkeypatch.setattr(Path, "home", lambda: self.root)
+        monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        expected = self.root / ".config" / "opencode"
+        if config_dir_kind == "inside-home":
+            expected = self.root / "custom-opencode"
+            monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(expected))
+        elif config_dir_kind == "outside-home":
+            expected = self.root.parent / "outside-opencode"
+            monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(expected))
+
+        prefixes = get_integration_prefixes(user_scope=True)
+
+        try:
+            expected_prefix = expected.relative_to(Path.home()).as_posix() + "/"
+        except ValueError:
+            expected_prefix = f"{expected.resolve(strict=False).as_posix()}/"
+
+        assert expected_prefix in prefixes
+        assert KNOWN_TARGETS["opencode"].prefix in prefixes
 
     def test_github_and_claude_returns_both(self):
         (self.root / ".github").mkdir()
@@ -520,6 +575,11 @@ class TestHermesTarget:
         assert profile.compile_family == "agents"
         assert "skills" in profile.primitives
         assert profile.primitives["skills"].format_id == "skill_standard"
+
+    def test_hermes_user_root_resolver_is_canonical(self):
+        import apm_cli.integration.targets as tg
+
+        assert tg.KNOWN_TARGETS["hermes"].user_scope_root_resolver is tg._resolve_hermes_user_root
 
     @pytest.mark.windows_compat
     def test_hermes_explicit_target_resolves_without_flag(self):

@@ -1,6 +1,8 @@
 """Unit tests for OpenCodeClientAdapter and its MCP integrator wiring."""
 
 import json
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +10,11 @@ from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.factory import ClientFactory
+from apm_cli.integration.opencode_paths import (
+    opencode_user_config_dir,
+    opencode_user_config_path,
+    opencode_user_config_roots,
+)
 
 
 class TestOpenCodeClientFactory(unittest.TestCase):
@@ -20,6 +27,108 @@ class TestOpenCodeClientFactory(unittest.TestCase):
     def test_create_opencode_client_case_insensitive(self):
         client = ClientFactory.create_client("OpenCode")
         self.assertIsInstance(client, OpenCodeClientAdapter)
+
+
+class TestOpenCodePaths(unittest.TestCase):
+    def test_roots_return_lexical_and_resolved_identity(self):
+        lexical, resolved = opencode_user_config_roots()
+        self.assertEqual(lexical, opencode_user_config_path())
+        self.assertEqual(resolved, opencode_user_config_dir())
+
+    def test_config_dir_precedence_and_normalization(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENCODE_CONFIG_DIR": "~/custom/../custom-opencode",
+                "XDG_CONFIG_HOME": "/ignored",
+            },
+        ):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / "custom-opencode").resolve(strict=False),
+            )
+
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": "", "XDG_CONFIG_HOME": "~/xdg"},
+        ):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / "xdg" / "opencode").resolve(strict=False),
+            )
+
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": "", "XDG_CONFIG_HOME": ""},
+            clear=False,
+        ):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / ".config" / "opencode").resolve(strict=False),
+            )
+
+    def test_lexical_path_preserves_custom_and_xdg_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real"
+            real.mkdir()
+            link = root / "link"
+            link.symlink_to(real, target_is_directory=True)
+
+            with patch.dict(
+                os.environ,
+                {"OPENCODE_CONFIG_DIR": str(link), "XDG_CONFIG_HOME": str(root / "ignored")},
+            ):
+                self.assertEqual(opencode_user_config_path(), link)
+                self.assertEqual(opencode_user_config_dir(), real.resolve())
+
+            with patch.dict(
+                os.environ,
+                {"OPENCODE_CONFIG_DIR": "relative", "XDG_CONFIG_HOME": str(link)},
+            ):
+                self.assertEqual(opencode_user_config_path(), link / "opencode")
+                self.assertEqual(opencode_user_config_dir(), (real / "opencode").resolve())
+
+    def test_lexical_path_default_preserves_home_components(self):
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": "", "XDG_CONFIG_HOME": ""},
+            clear=False,
+        ):
+            expected = Path.home() / ".config" / "opencode"
+            self.assertEqual(opencode_user_config_path(), expected)
+
+    def test_symlinked_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            real = tmp_path / "real"
+            real.mkdir()
+            link = tmp_path / "link"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(link)}):
+                adapter = OpenCodeClientAdapter(project_root=tmp_path, user_scope=True)
+                with self.assertRaisesRegex(Exception, "symlinked root"):
+                    adapter.update_config({"server": {"command": "true"}})
+
+    def test_nested_symlinked_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            real = tmp_path / "real"
+            real.mkdir()
+            nested = tmp_path / "nested"
+            nested.mkdir()
+            link = nested / "link"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(link / "child")}):
+                adapter = OpenCodeClientAdapter(project_root=tmp_path, user_scope=True)
+                with self.assertRaisesRegex(Exception, "symlinked root"):
+                    adapter.update_config({"server": {"command": "true"}})
 
 
 class TestToOpencodeFormat(unittest.TestCase):
@@ -129,11 +238,51 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         self._cwd_patcher.stop()
         self.tmp.cleanup()
 
+    def test_user_write_creates_ordinary_new_root(self):
+        """User-scope writes allow a new root under an ordinary parent."""
+        root = Path(self.tmp.name) / "new-opencode"
+        adapter = OpenCodeClientAdapter(user_scope=True)
+
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(root)}):
+            adapter.update_config({"new": {"command": "npx"}})
+
+        config_path = root / "opencode.json"
+        self.assertTrue(config_path.is_file())
+        self.assertIn("new", json.loads(config_path.read_text(encoding="utf-8"))["mcp"])
+
     # -- config path --
 
     def test_config_path_is_repo_local(self):
         path = self.adapter.get_config_path()
         self.assertEqual(path, str(self.opencode_json))
+
+    def test_project_update_preserves_non_windows_file_mode(self):
+        if os.name == "nt":
+            self.skipTest("POSIX file modes are not portable to Windows")
+        self.opencode_json.write_text("{}", encoding="utf-8")
+        self.opencode_json.chmod(0o644)
+
+        self.adapter.update_config({"server": {"command": "npx", "args": []}})
+
+        self.assertEqual(self.opencode_json.stat().st_mode & 0o777, 0o644)
+
+    def test_user_scope_uses_lexical_user_directory_and_secure_write(self):
+        user_dir = Path(self.tmp.name) / "user-opencode"
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            adapter = OpenCodeClientAdapter(project_root=self.tmp.name, user_scope=True)
+            self.assertEqual(Path(adapter.get_config_path()), user_dir / "opencode.json")
+            adapter.update_config({"server": {"command": "npx", "args": ["pkg"]}})
+
+        self.assertTrue(user_dir.is_dir())
+        if sys.platform != "win32":
+            self.assertEqual((user_dir / "opencode.json").stat().st_mode & 0o777, 0o600)
+
+    def test_user_scope_does_not_require_project_opt_in_directory(self):
+        user_dir = Path(self.tmp.name) / "user-opencode"
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            adapter = OpenCodeClientAdapter(project_root=self.tmp.name, user_scope=True)
+            adapter.update_config({"server": {"command": "npx", "args": []}})
+        self.assertTrue((user_dir / "opencode.json").exists())
 
     # -- get_current_config --
 
@@ -151,7 +300,8 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
 
     def test_get_current_config_corrupt_json(self):
         self.opencode_json.write_text("{invalid json", encoding="utf-8")
-        self.assertEqual(self.adapter.get_current_config(), {})
+        with self.assertRaises(json.JSONDecodeError):
+            self.adapter.get_current_config()
 
     # -- update_config --
 
@@ -170,6 +320,15 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
         self.assertIn("old-server", data["mcp"])
         self.assertIn("new-server", data["mcp"])
+
+    def test_update_config_leaves_corrupt_file_unchanged(self):
+        corrupt_config = "{invalid json"
+        self.opencode_json.write_text(corrupt_config, encoding="utf-8")
+
+        with self.assertRaises(json.JSONDecodeError):
+            self.adapter.update_config({"server": {"command": "npx", "args": []}})
+
+        self.assertEqual(self.opencode_json.read_text(encoding="utf-8"), corrupt_config)
 
     def test_update_config_noop_when_opencode_dir_missing(self):
         self.opencode_dir.rmdir()
@@ -205,6 +364,54 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
         server = data["mcp"]["my-server"]
         self.assertEqual(server["type"], "local")
         self.assertEqual(server["environment"], {"KEY": "val"})
+
+    def test_render_server_config_matches_stored_local_shape(self):
+        server_info = {
+            "name": "test",
+            "packages": [
+                {
+                    "name": "pkg",
+                    "registry_name": "npm",
+                    "runtime_hint": "npx",
+                    "runtime_arguments": [],
+                    "package_arguments": [],
+                    "environment_variables": [],
+                }
+            ],
+        }
+        rendered = self.adapter.render_server_config(server_info)
+
+        self.assertEqual(
+            rendered, {"type": "local", "command": ["npx", "-y", "pkg"], "enabled": True}
+        )
+
+    def test_render_server_config_matches_stored_remote_shape_and_env(self):
+        server_info = {
+            "name": "remote",
+            "remotes": [
+                {
+                    "url": "https://example.test/mcp",
+                    "headers": [{"name": "X-Key", "value": "v"}],
+                }
+            ],
+        }
+        rendered = self.adapter.render_server_config(server_info)
+        self.assertEqual(
+            rendered,
+            {
+                "type": "remote",
+                "url": "https://example.test/mcp",
+                "headers": {"X-Key": "v"},
+                "enabled": True,
+            },
+        )
+
+    def test_relative_opencode_config_dir_falls_through(self):
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": "relative", "XDG_CONFIG_HOME": ""}):
+            self.assertEqual(
+                opencode_user_config_dir(),
+                (Path.home() / ".config" / "opencode").resolve(strict=False),
+            )
 
     def test_update_config_enabled_false(self):
         copilot_entry = {"command": "npx", "args": []}
@@ -394,6 +601,81 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         data = json.loads(opencode_json.read_text(encoding="utf-8"))
         self.assertIn("keep", data["mcp"])
         self.assertNotIn("stale", data["mcp"])
+
+    def test_remove_stale_vscode_symlink_does_not_change_external_config(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        external_dir = Path(self.tmp.name) / "external-vscode"
+        external_dir.mkdir()
+        external_json = external_dir / "mcp.json"
+        original = json.dumps({"servers": {"keep": {"type": "local"}, "stale": {"type": "remote"}}})
+        external_json.write_text(original, encoding="utf-8")
+        try:
+            (Path(self.tmp.name) / ".vscode").symlink_to(external_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not supported")
+
+        MCPIntegrator.remove_stale(
+            {"stale"},
+            runtime="vscode",
+            project_root=Path(self.tmp.name),
+        )
+
+        self.assertEqual(external_json.read_text(encoding="utf-8"), original)
+
+    def test_remove_stale_project_scope_overrides_legacy_user_scope(self):
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        self.opencode_json.write_text(
+            json.dumps({"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}),
+            encoding="utf-8",
+        )
+        user_dir = Path(self.tmp.name) / "user-opencode"
+        user_dir.mkdir()
+        user_json = user_dir / "opencode.json"
+        user_json.write_text(
+            json.dumps({"mcp": {"stale": {"type": "remote"}}}),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(user_dir)}):
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="opencode",
+                project_root=Path(self.tmp.name),
+                user_scope=True,
+                scope=InstallScope.PROJECT,
+            )
+
+        project_data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        user_data = json.loads(user_json.read_text(encoding="utf-8"))
+        self.assertNotIn("stale", project_data["mcp"])
+        self.assertIn("stale", user_data["mcp"])
+
+    def test_remove_stale_refuses_symlinked_opencode_root(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        external_dir = Path(self.tmp.name) / "external-opencode"
+        external_dir.mkdir()
+        external_json = external_dir / "opencode.json"
+        original = json.dumps({"mcp": {"stale": {"type": "remote"}}})
+        external_json.write_text(original, encoding="utf-8")
+        symlink_root = Path(self.tmp.name) / "linked-opencode"
+        try:
+            symlink_root.symlink_to(external_dir, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlinks are unavailable: {exc}")
+
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(symlink_root)}):
+            MCPIntegrator.remove_stale(
+                {"stale"},
+                runtime="opencode",
+                project_root=Path(self.tmp.name),
+                user_scope=True,
+            )
+
+        self.assertEqual(external_json.read_text(encoding="utf-8"), original)
 
 
 if __name__ == "__main__":

@@ -179,17 +179,19 @@ diagnostic; it does not certify real install success.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm compile` | Compile agent context; catalog root context files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are skipped when they lack an APM generated marker; after a successful write, reconcile deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries when the declared target set contracts | `-o` output, `-t` target (comma-separated; resolution chain `--target` > apm.yml `targets:` > auto-detect), `--all` compile for every canonical target (preferred over deprecated `--target all`), `-g`/`--global` (read global instructions from `~/.apm/apm_modules/`, write user-scope root files; OpenCode also retains its `applyTo` sections in `~/.config/opencode/AGENTS.md`; cannot combine with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`; critical hidden-character findings stop the write and exit 1), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution`, `--force-instructions` / `--no-dedup` (opt out of Claude/Copilot deduplication), `--root DIR` redirect generated artifacts under DIR while sources resolve from `$PWD` (mirrors `pip install --target`; not valid with `--watch`) |
+| `apm compile` | Compile agent context; catalog root context files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are skipped when they lack an APM generated marker; after a successful write, reconcile deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries when the declared target set contracts | `-o` output, `-t` target (comma-separated; resolution chain `--target` > apm.yml `targets:` > auto-detect), `--all` compile for every canonical target (preferred over deprecated `--target all`), `-g`/`--global` (read global instructions from `~/.apm/apm_modules/`, write user-scope root files; OpenCode writes `AGENTS.md` in its resolved user config root; resolution precedence is `OPENCODE_CONFIG_DIR`, `$XDG_CONFIG_HOME/opencode`, then the default `~/.config/opencode`; cannot combine with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`; critical hidden-character findings stop the write and exit 1), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution`, `--force-instructions` / `--no-dedup` (opt out of Claude/Copilot deduplication), `--root DIR` redirect generated artifacts under DIR while sources resolve from `$PWD` (mirrors `pip install --target`; not valid with `--watch`) |
 
 `apm install` deploys individual primitives but does not generate aggregate
 root context files. Run `apm compile` explicitly for `AGENTS.md`, `CLAUDE.md`,
 or `GEMINI.md`; `apm run` separately compiles referenced prompt files at
 execution time.
 
-For OpenCode user scope, first create or open an OpenCode config directory.
-Then run `apm install -g --target opencode` to deploy skills to
-`~/.config/opencode/skills/`, followed by `apm compile -g` to update
-`~/.config/opencode/AGENTS.md` with scoped instruction sections.
+For OpenCode user scope, the resolved config root takes precedence in this
+order: `OPENCODE_CONFIG_DIR`, `$XDG_CONFIG_HOME/opencode`, then the default
+`~/.config/opencode`. User-scope installation creates the resolved root when
+needed. Run `apm install -g --target opencode` to deploy skills there, followed
+by `apm compile -g` to write `AGENTS.md` in that root with scoped instruction
+sections.
 
 `apm compile -g` rejects `--target`, so `target:` or `targets:` in
 `~/.apm/apm.yml` selects

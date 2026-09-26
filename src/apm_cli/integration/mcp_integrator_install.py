@@ -475,6 +475,13 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
         )
 
 
+def _opencode_user_config_present() -> bool:
+    """Return whether OpenCode's resolved user configuration root exists."""
+    from apm_cli.integration.opencode_paths import opencode_user_config_dir
+
+    return opencode_user_config_dir().is_dir()
+
+
 def _runtime_is_present(
     runtime_name, project_root_path, manager, dir_signal, *, user_scope: bool
 ) -> bool:
@@ -485,6 +492,8 @@ def _runtime_is_present(
         return _is_vscode_available(project_root=project_root_path)
     if runtime_name == "kiro" and user_scope:
         return True
+    if runtime_name == "opencode" and user_scope:
+        return _opencode_user_config_present()
     if runtime_name in dir_signal:
         return (project_root_path / dir_signal[runtime_name]).is_dir()
     if runtime_name == "claude":
@@ -514,7 +523,11 @@ def _discover_installed_runtimes_fallback(
         ("windsurf", ".windsurf"),
         ("kiro", ".kiro"),
     ):
-        if (name == "kiro" and user_scope) or (project_root_path / signal).is_dir():
+        if name == "opencode" and user_scope:
+            present = _opencode_user_config_present()
+        else:
+            present = (name == "kiro" and user_scope) or (project_root_path / signal).is_dir()
+        if present:
             installed_runtimes.append(name)
     # Claude Code: directory-presence OR binary-on-PATH
     if (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None:
@@ -907,7 +920,7 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, JetBrains Copilot)"
+                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, OpenCode, JetBrains Copilot)"
             )
             return None
 

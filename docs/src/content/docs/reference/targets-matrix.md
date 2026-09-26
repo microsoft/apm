@@ -136,7 +136,7 @@ GitHub Copilot (CLI and IDE).
 Claude Code.
 
 - **Detection.** `.claude/` directory, or `CLAUDE.md`.
-- **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
+- **Deploy directory.** `.claude/` at project scope and `~/.claude/` at user scope. For file primitives and compile output, a nonblank absolute `CLAUDE_CONFIG_DIR` overrides the user-scope root; relative or blank values fall back to `~/.claude`. This fallback is a file-primitive/compile rule only: the MCP adapter rejects a nonblank relative value instead of applying it.
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
   - instructions: deployed directly by `apm install` to
@@ -145,7 +145,11 @@ Claude Code.
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md`; instructions already deployed under
+- **Compile output.** `CLAUDE.md` under the selected scope root; at user scope,
+  a nonblank absolute `CLAUDE_CONFIG_DIR` is honored, while relative or blank
+  values fall back to `~/.claude`. This rule applies to Claude file
+  primitives and compile output; the MCP adapter rejects relative nonblank
+  values. Instructions already deployed under
   `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
 
 ## cursor
@@ -212,18 +216,17 @@ Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
 OpenCode.
 
-- **Detection.** `.opencode/` directory.
-- **Deploy directory.** `.opencode/` at project scope; `~/.config/opencode/` at user scope.
+- **Detection.** `.opencode/` directory for project scope. User-scope auto-discovery uses the resolved global config directory; it does not use the project marker.
+- **Deploy directory.** `.opencode/` at project scope; the resolved user scope is `OPENCODE_CONFIG_DIR`, then `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode`.
 - **Supported primitives.** agents, commands, skills, mcp.
 - **File conventions.**
   - agents: `.opencode/agents/<name>.md`
   - commands: `.opencode/commands/<name>.md`
   - skills: `.agents/skills/<name>/SKILL.md` (project) or
-    `~/.config/opencode/skills/<name>/SKILL.md` (user)
+    `skills/<name>/SKILL.md` in the resolved user config root (user)
 - **Caveat.** OpenCode has no hooks concept; the `hooks` primitive is silently skipped for this target.
-- **Global compile.** `apm compile -g` writes
-  `~/.config/opencode/AGENTS.md`. OpenCode also retains `applyTo` sections
-  in that generated file; other user-root targets compile only global instructions.
+- **MCP config.** `opencode.json` at the project root when `.opencode/` exists, or in the resolved user root at user scope.
+- **Global compile.** `apm compile -g` writes `AGENTS.md` to the same resolved user root. OpenCode also retains `applyTo` sections in that generated file; other user-root targets compile only global instructions. See the [OpenCode config environment variables](environment-variables). Changing the resolved root does not automatically migrate files; files in the old default root can remain orphaned.
 
 ## windsurf
 

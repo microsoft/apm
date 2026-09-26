@@ -149,8 +149,8 @@ unresolved required entries fail closed.
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
-| Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
-| OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
+| Hermes Agent | `$HERMES_HOME/config.yaml` when `HERMES_HOME` is absolute and nonblank (relative/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
+| OpenCode | `opencode.json` at the project root (only if `.opencode/` exists), or `opencode.json` in the resolved user config root | both | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
@@ -226,18 +226,21 @@ user-scope MCP config (for example, Copilot CLI to
 non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or
-`~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`,
+`~/.codex/config.toml` otherwise, OpenCode to `opencode.json` beneath its
+resolved user config root (the root is created automatically when needed),
+Gemini CLI to `~/.gemini/settings.json`,
 Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
-`$HERMES_HOME/config.yaml` whenever selected explicitly (or
-`~/.hermes/config.yaml` when unset or blank), Windsurf to
+`$HERMES_HOME/config.yaml` whenever selected explicitly and `HERMES_HOME` is
+absolute and nonblank (or `~/.hermes/config.yaml` when unset, blank, or
+relative), Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
 and JetBrains Copilot to its OS-specific user config).
 When the user-scope manifest declares a `targets:` field (or the CLI passes
 `--target`), only the matching runtimes receive the config write. When no CLI
 target, user-scope manifest target, or saved `apm config target` restricts
 targets, all detected user-scope-capable runtimes are configured.
-Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped with a warning
-when a mixed target set also contains a global-capable runtime. If none of the
+Workspace-only runtimes (VS Code and Cursor) are skipped with a warning when a
+mixed target set also contains a global-capable runtime. If none of the
 selected targets supports user scope, the command exits `2` before changing the
 user manifest, lockfile, or runtime configuration. The direct command creates
 or updates `~/.apm/apm.yml`; it does not fall back to the current project's

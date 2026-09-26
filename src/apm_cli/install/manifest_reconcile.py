@@ -51,6 +51,15 @@ def _profiles_by_name(
     return by_name
 
 
+def _group_locators(records, paths):
+    """Preserve every ledger locator sharing a compatibility path."""
+    grouped = {}
+    for record in records:
+        if record.locator.value in paths:
+            grouped.setdefault(record.locator.value, []).append(record.locator)
+    return grouped
+
+
 def _has_gated_resolver(profile: TargetProfile) -> bool:
     """Return whether an inactive supplemental target must not resolve."""
     return profile.requires_flag is not None and profile.user_root_resolver is not None
@@ -322,6 +331,49 @@ def union_preserving(
         return "legacy"
 
     def _locator(path: str) -> DeploymentLocator:
+        # User-scope deployments historically persisted only the compatibility
+        # value (for example ``agents/reviewer.md``). Reconstruct the richer
+        # target-relative identity when a scope-resolved target can prove that
+        # the value is below its managed root. The containment check is
+        # intentional: values containing ``..`` must never be accepted merely
+        # because they happen to normalize below a target root.
+        if user_scope and "://" not in path:
+            from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+            candidates: set[str] = set()
+            supplied_candidates: set[str] = set()
+            supplied_names = {profile.name for profile in (*targets, *(declared_targets or []))}
+            for profile in (
+                *targets,
+                *(declared_targets or []),
+                *(
+                    profile.for_scope(user_scope=True) or profile
+                    for name, profile in scoped_known_targets.items()
+                    if name not in supplied_names
+                ),
+            ):
+                deploy_root = getattr(profile, "managed_deploy_root", None)
+                if deploy_root is None or not isinstance(deploy_root, Path):
+                    continue
+                candidate = deploy_root / path
+                try:
+                    ensure_path_within(candidate, deploy_root)
+                except PathTraversalError:
+                    continue
+                candidates.add(profile.name)
+                if profile.name in supplied_names:
+                    supplied_candidates.add(profile.name)
+
+            proven = supplied_candidates if len(supplied_candidates) == 1 else candidates
+            if len(proven) == 1:
+                target_name = next(iter(proven))
+                return DeploymentLocator(
+                    kind=LocatorKind.TARGET_RELATIVE,
+                    target=target_name,
+                    value=path,
+                    runtime=None,
+                    scope="user",
+                )
         return DeploymentLocator(
             kind=LocatorKind.URI if "://" in path else LocatorKind.PROJECT_RELATIVE,
             target=_target_for(path),
@@ -414,6 +466,13 @@ def union_preserving(
         path for path in prior_files or () if path not in current_set and path in retained_values
     ]
     merged_hashes = dict(current_hashes or {})
+    # A current local file can be supplied by the caller without a freshly
+    # computed hash (for example a lockfile-only persistence pass). Preserve
+    # the prior hash when the path is unchanged so deterministic lockfile
+    # writes do not erase content-integrity metadata.
+    for path in current_files or ():
+        if path not in merged_hashes and path in prior_hashes:
+            merged_hashes[path] = prior_hashes[path]
     for path in cleanup_retained_hashes:
         if path in current_set and path in prior_hashes:
             merged_hashes[path] = prior_hashes[path]
@@ -579,6 +638,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         user_scope=user_scope,
     )
     dropped = set(prior_files) - set(files)
+    removed_ledger_keys = (
+        set(prior_ledger.records) - set(ledger.records) if prior_ledger is not None else set()
+    )
     # Ledger-authoritative orphan detection. A prior value that HELD a ledger
     # row, LOST it during reconciliation (its owning target went stale), yet
     # still lingers in `files` -- a stale-cleanup retention re-inserts shared
@@ -593,6 +655,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         prior_owned = {record.locator.value for record in prior_ledger.records.values()}
         surviving = {record.locator.value for record in ledger.records.values()}
         dropped |= (set(prior_files) & prior_owned) - surviving
+        dropped |= {prior_ledger.records[key].locator.value for key in removed_ledger_keys}
     if not dropped:
         if include_ledger:
             return files, hashes, ledger
@@ -627,25 +690,79 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
 
     from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.integration.cleanup import remove_stale_deployed_files
+    from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+
+    # Generic cleanup needs concrete target profiles for prefix and locator
+    # resolution. Some callers intentionally provide lightweight active-target
+    # test/context objects; forwarding those objects makes cleanup attempt
+    # target-relative resolution without the required root metadata.
+    cleanup_targets = [target for target in active_targets if isinstance(target, TargetProfile)]
+    locator_targets = {
+        record.locator.target
+        for key, record in (prior_ledger.records.items() if prior_ledger is not None else ())
+        if key in removed_ledger_keys and record.locator.kind.value == "target-relative"
+    }
+    for target_name in locator_targets:
+        profile = KNOWN_TARGETS.get(target_name)
+        if profile is None:
+            continue
+        scoped = profile.for_scope(user_scope=user_scope)
+        if scoped is not None and scoped.name not in {target.name for target in cleanup_targets}:
+            cleanup_targets.append(scoped)
+    # Legacy/project-relative ledger rows may not carry a target-relative
+    # identity even when their value belongs to a target-specific shared root
+    # (for example ``.agents/skills``). Add only profiles that govern a dropped
+    # value, rather than forwarding the complete known-target registry.
+    cleanup_names = {target.name for target in cleanup_targets}
+    for path in dropped:
+        for profile in KNOWN_TARGETS.values():
+            scoped = profile.for_scope(user_scope=user_scope)
+            if scoped is None or scoped.name in cleanup_names:
+                continue
+            prefixes, schemes = install_governance([scoped])
+            if is_governed_by_install(path, prefixes, schemes):
+                cleanup_targets.append(scoped)
+                cleanup_names.add(scoped.name)
+    cleanup_target_arg = cleanup_targets or None
 
     cleanup = remove_stale_deployed_files(
         dropped,
         project_root,
         dep_key=dep_key,
-        targets=None,
+        targets=cleanup_target_arg,
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
+        locator_mapping=_group_locators(
+            [
+                record
+                for key, record in (
+                    prior_ledger.records.items() if prior_ledger is not None else ()
+                )
+                if key in removed_ledger_keys
+            ],
+            dropped,
+        ),
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
     # Orphan candidates (unlike the classic dropped set) can still be present in
     # `files`; a proven deletion must therefore also retract the value from the
     # returned manifest and hashes so the lockfile row and disk state agree.
-    if cleanup.deleted:
-        deleted = set(cleanup.deleted)
-        files = [path for path in files if path not in deleted]
-        for path in deleted:
+    if cleanup.deleted or cleanup.deleted_locators:
+        from apm_cli.core.deployment_state import DeploymentLedger
+
+        deleted_keys = {locator.key for locator in cleanup.deleted_locators}
+        if deleted_keys:
+            ledger = DeploymentLedger(
+                records={
+                    key: record for key, record in ledger.records.items() if key not in deleted_keys
+                }
+            )
+        deleted = set(cleanup.deleted_values or cleanup.deleted)
+        surviving_values = {record.locator.value for record in ledger.records.values()}
+        files = [path for path in files if path not in deleted or path in surviving_values]
+        for path in deleted - surviving_values:
             hashes.pop(path, None)
     for path in cleanup.retained:
         if path not in files:
@@ -655,13 +772,36 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     if cleanup.retained and prior_ledger is not None:
         from apm_cli.core.deployment_state import DeploymentLedger
 
-        retained_values = set(cleanup.retained)
+        retained_values = set(cleanup.retained_values or cleanup.retained)
+        identity_outcomes = (
+            tuple(cleanup.deleted_locators)
+            + tuple(cleanup.retained_locators)
+            + tuple(cleanup.skipped_user_edit_locators)
+            + tuple(cleanup.skipped_unmanaged_locators)
+            + tuple(cleanup.deferred_locators)
+        )
+        identity_outcome_keys = {locator.key for locator in identity_outcomes}
+        identity_retained_keys = {
+            locator.key
+            for locator in (
+                tuple(cleanup.retained_locators)
+                + tuple(cleanup.skipped_user_edit_locators)
+                + tuple(cleanup.skipped_unmanaged_locators)
+                + tuple(cleanup.deferred_locators)
+            )
+        }
         records = dict(ledger.records)
         records.update(
             {
                 key: record
                 for key, record in prior_ledger.records.items()
-                if record.locator.value in retained_values
+                if key in removed_ledger_keys
+                and (
+                    key in identity_retained_keys
+                    or (
+                        key not in identity_outcome_keys and record.locator.value in retained_values
+                    )
+                )
             }
         )
         ledger = DeploymentLedger(records=records)

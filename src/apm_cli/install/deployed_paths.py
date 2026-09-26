@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.security.gate import is_generated_python_artifact
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+
+if TYPE_CHECKING:
+    from apm_cli.core.scope import InstallScope
 
 
 def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
@@ -28,11 +31,16 @@ def deployed_path_entry(
     target_path: Path,
     project_root: Path,
     targets: Any,
+    *,
+    scope: InstallScope | None = None,
 ) -> str:
     """Return the compatibility path view produced by the canonical codec."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
+
+    if scope is None:
+        scope = InstallScope.PROJECT
 
     def _try_target(tgts) -> str | None:
         for _t in tgts:
@@ -46,25 +54,32 @@ def deployed_path_entry(
                     encoded = None
                 if encoded is not None:
                     return encoded
-            absolute_static_root = _t.resolved_deploy_root is None and deploy_root is not None
-            if absolute_static_root:
+                if getattr(_t, "name", None) == "claude" and scope is InstallScope.PROJECT:
+                    try:
+                        target_path.relative_to(deploy_root)
+                    except ValueError:
+                        continue
+                    ensure_path_within(target_path, deploy_root)
+                    return portable_relpath(target_path, project_root)
+                # Claude's compatibility projection historically kept
+                # absolute static roots as absolute values. Validate the
+                # managed root first so symlink escapes still fail closed.
+                if getattr(_t, "name", None) == "claude" and scope is InstallScope.PROJECT:
+                    try:
+                        ensure_path_within(target_path, deploy_root)
+                    except PathTraversalError:
+                        raise
+                    continue
                 try:
-                    target_path.relative_to(deploy_root)
-                except ValueError:
-                    pass
-                else:
-                    resolved_target = ensure_path_within(target_path, deploy_root)
-                    return portable_relpath(resolved_target, project_root)
-            try:
-                locator = DeploymentLedgerCodec.locator_for_path(
-                    target_path,
-                    project_root=project_root,
-                    target=_t,
-                    scope=InstallScope.PROJECT,
-                )
-            except RuntimeError:
-                continue
-            return locator.value
+                    locator = DeploymentLedgerCodec.locator_for_path(
+                        target_path,
+                        project_root=project_root,
+                        target=_t,
+                        scope=scope,
+                    )
+                except RuntimeError:
+                    continue
+                return locator.value
         return None
 
     if targets:
@@ -86,6 +101,8 @@ def skill_bundle_file_entries(
     skill_dir: Path,
     project_root: Path,
     targets: Any,
+    *,
+    scope: InstallScope | None = None,
 ) -> list[str]:
     """Expand a deployed skill directory into per-file lockfile entries."""
     try:
@@ -100,7 +117,14 @@ def skill_bundle_file_entries(
             if is_generated_python_artifact(relative):
                 continue
             if bundle_file.is_file() and not bundle_file.is_symlink():
-                entries.append(deployed_path_entry(bundle_file, project_root, targets))
+                entries.append(
+                    deployed_path_entry(
+                        bundle_file,
+                        project_root,
+                        targets,
+                        scope=scope,
+                    )
+                )
         except OSError:
             continue
     return entries

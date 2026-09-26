@@ -289,15 +289,20 @@ This reads **global instructions** from `~/.apm/apm_modules/` (instructions
 without `applyTo:` frontmatter) and writes user-scope root context files for
 root-context targets:
 
-- `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
+- `~/.claude/CLAUDE.md`, or `$CLAUDE_CONFIG_DIR/CLAUDE.md` when
+  `CLAUDE_CONFIG_DIR` is nonblank and absolute. Relative or blank values fall
+  back to `~/.claude/CLAUDE.md`. This fallback is specific to Claude file
+  primitives and compile output; the MCP adapter has the separate strict
+  contract of rejecting a nonblank relative value.
 - `~/.codex/AGENTS.md`
-- `~/.config/opencode/AGENTS.md`
+- `AGENTS.md` in the resolved OpenCode user config root
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
 
-OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
-retains explicit sections for `applyTo` instructions as well.
+OpenCode is the exception: its generated `AGENTS.md` in the resolved user
+config root retains explicit sections for `applyTo` instructions as well. See
+the [OpenCode config environment variables](../reference/environment-variables).
 
 ### Overwrite protection
 

@@ -34,6 +34,16 @@ from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.cleanup import remove_stale_deployed_files
 
+
+def _group_locators(records, paths):
+    """Preserve every ledger locator sharing a compatibility path."""
+    grouped = {}
+    for record in records:
+        if record.locator.value in paths:
+            grouped.setdefault(record.locator.value, []).append(record.locator)
+    return grouped
+
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -117,6 +127,9 @@ def run(ctx: InstallContext) -> None:
                 recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                 failed_path_retained=False,
                 user_scope=user_scope,
+                locator_mapping=_group_locators(
+                    existing_lockfile.deployment_ledger.records.values(), orphan_only_files
+                ),
             )
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
@@ -189,6 +202,9 @@ def run(ctx: InstallContext) -> None:
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
                 user_scope=user_scope,
+                locator_mapping=_group_locators(
+                    existing_lockfile.deployment_ledger.records.values(), stale
+                ),
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.

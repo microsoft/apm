@@ -5,7 +5,11 @@ global-capable runtimes (Copilot CLI, Codex CLI, JetBrains Copilot)
 instead of blanket-skipping all MCP installation at user scope.
 """
 
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.base import MCPClientAdapter
@@ -55,25 +59,47 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
         adapter = CursorClientAdapter()
         self.assertFalse(adapter.supports_user_scope)
 
-    def test_opencode_does_not_support_user_scope(self):
-        """OpenCode writes to opencode.json (workspace) and should NOT support user scope."""
+    def test_opencode_supports_user_scope(self):
+        """OpenCode writes to its user config directory at user scope."""
         adapter = OpenCodeClientAdapter()
-        self.assertFalse(adapter.supports_user_scope)
+        self.assertTrue(adapter.supports_user_scope)
+
+    def test_opencode_user_write_rejects_symlinked_root(self):
+        """User-scope writes fail closed before mkdir or atomic replacement."""
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            real_root = root / "real-opencode"
+            symlink_root = root / "linked-opencode"
+            real_root.mkdir()
+            config_path = real_root / "opencode.json"
+            original = '{"mcp": {"foreign": {"command": ["keep"]}}}'
+            config_path.write_text(original, encoding="utf-8")
+            symlink_root.symlink_to(real_root, target_is_directory=True)
+
+            adapter = OpenCodeClientAdapter(user_scope=True)
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(symlink_root)}):
+                with self.assertRaises(RequiredIntegrationError):
+                    adapter.update_config({"new": {"command": "npx"}})
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+            self.assertTrue(symlink_root.is_symlink())
 
     def test_cursor_does_not_inherit_copilot_true(self):
         """CursorClientAdapter inherits CopilotClientAdapter but overrides to False."""
         self.assertTrue(issubclass(CursorClientAdapter, CopilotClientAdapter))
         self.assertFalse(CursorClientAdapter.supports_user_scope)
 
-    def test_opencode_does_not_inherit_copilot_true(self):
-        """OpenCodeClientAdapter inherits CopilotClientAdapter but overrides to False."""
+    def test_opencode_inherits_copilot_true(self):
+        """OpenCodeClientAdapter inherits the global-scope capability."""
         self.assertTrue(issubclass(OpenCodeClientAdapter, CopilotClientAdapter))
-        self.assertFalse(OpenCodeClientAdapter.supports_user_scope)
+        self.assertTrue(OpenCodeClientAdapter.supports_user_scope)
 
     def test_factory_created_adapters_scope(self):
         """ClientFactory-created adapters report the correct scope support."""
-        global_runtimes = {"copilot", "codex", "intellij"}
-        workspace_runtimes = {"vscode", "cursor", "opencode"}
+        global_runtimes = {"copilot", "codex", "intellij", "opencode"}
+        workspace_runtimes = {"vscode", "cursor"}
 
         for rt in global_runtimes:
             adapter = ClientFactory.create_client(rt)
@@ -132,9 +158,9 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
             )
 
         # Only copilot/codex should have been called (global-capable),
-        # not vscode/cursor/opencode
+        # not vscode/cursor
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        workspace_only = {"vscode", "cursor", "opencode"}
+        workspace_only = {"vscode", "cursor"}
         self.assertFalse(
             called_runtimes & workspace_only,
             f"Workspace-only runtimes should not be called at USER scope, "
@@ -272,25 +298,86 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
 class TestRemoveStaleScopeFiltering(unittest.TestCase):
     """Verify MCPIntegrator.remove_stale() respects scope."""
 
-    @patch("apm_cli.integration.mcp_integrator.Path")
-    def test_user_scope_does_not_touch_workspace_configs(self, mock_path_cls):
+    @patch("apm_cli.integration.mcp_integrator._clean_json_mcp_config")
+    @patch("apm_cli.integration.mcp_integrator._clean_toml_mcp_config")
+    @patch("apm_cli.integration.mcp_integrator._clean_hermes_mcp_config")
+    @patch("apm_cli.integration.mcp_integrator._clean_claude_config")
+    def test_user_scope_does_not_touch_workspace_configs(
+        self,
+        mock_clean_claude,
+        mock_clean_hermes,
+        mock_clean_toml,
+        mock_clean_json,
+    ):
         """At USER scope, .vscode/mcp.json and .cursor/mcp.json are not cleaned."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        # Call remove_stale with USER scope
-        MCPIntegrator.remove_stale(
-            stale_names={"test-server"},
-            scope=InstallScope.USER,
-        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            project_root = root / "project"
+            home.mkdir()
+            project_root.mkdir()
 
-        # Path.cwd() is used for workspace configs (.vscode, .cursor, opencode)
-        # Path.home() is used for global configs (~/.copilot, ~/.codex)
-        # At USER scope, we should only try to access home-dir configs
-        all_calls_str = str(mock_path_cls.mock_calls)
-        # Workspace paths should NOT appear
-        self.assertNotIn(".vscode", all_calls_str)
-        self.assertNotIn(".cursor", all_calls_str)
-        self.assertNotIn("opencode.json", all_calls_str)
+            with patch.dict(os.environ, {"HOME": str(home)}):
+                MCPIntegrator.remove_stale(
+                    stale_names={"test-server"},
+                    project_root=project_root,
+                    scope=InstallScope.USER,
+                )
+
+            cleanup_calls = (
+                mock_clean_json.call_args_list
+                + mock_clean_toml.call_args_list
+                + mock_clean_hermes.call_args_list
+                + mock_clean_claude.call_args_list
+            )
+            cleanup_paths = [str(call.args[0]) for call in cleanup_calls]
+            self.assertTrue(cleanup_paths)
+            self.assertFalse(any(".vscode" in path for path in cleanup_paths))
+            self.assertFalse(any(".cursor" in path for path in cleanup_paths))
+
+    def test_user_scope_cleans_opencode_user_config(self):
+        """USER cleanup removes OpenCode's user entry, not project config."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_dir = root / "user-opencode"
+            project_root = root / "project"
+            user_config = user_dir / "opencode.json"
+            project_config = project_root / "opencode.json"
+            stale_entry = {"type": "local", "command": ["stale"]}
+            user_config_data = {"mcp": {"server": stale_entry}}
+            project_config_data = {"mcp": {"server": stale_entry}}
+
+            user_dir.mkdir()
+            project_root.mkdir()
+            user_config.write_text(json.dumps(user_config_data), encoding="utf-8")
+            project_config.write_text(json.dumps(project_config_data), encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "HOME": str(root / "home"),
+                    "LOCALAPPDATA": str(root / "localappdata"),
+                    "XDG_CONFIG_HOME": str(root / "xdg-config"),
+                    "XDG_DATA_HOME": str(root / "xdg-data"),
+                    "OPENCODE_CONFIG_DIR": str(user_dir),
+                },
+            ):
+                MCPIntegrator.remove_stale(
+                    {"server"},
+                    runtime="opencode",
+                    project_root=project_root,
+                    scope=InstallScope.USER,
+                )
+
+            self.assertEqual(json.loads(user_config.read_text(encoding="utf-8")), {"mcp": {}})
+            self.assertEqual(
+                json.loads(project_config.read_text(encoding="utf-8")),
+                project_config_data,
+            )
 
 
 # ---------------------------------------------------------------------------

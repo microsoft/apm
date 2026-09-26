@@ -165,6 +165,14 @@ class TargetProfile:
     ``~/.github/``).
     """
 
+    user_scope_root_resolver: Callable[[], Path | None] | None = None
+    """Resolve a native user root without using the dynamic-root mechanism.
+
+    This resolver is for ordinary user-scope configuration roots whose path
+    can be overridden by environment variables. Unlike ``user_root_resolver``,
+    it does not populate ``resolved_deploy_root``.
+    """
+
     unsupported_user_primitives: tuple[str, ...] = ()
     """Primitives that are **not** available at user scope even when the
     target itself is partially supported."""
@@ -213,6 +221,9 @@ class TargetProfile:
     Downstream code uses ``deploy_path()`` to route filesystem I/O
     through this root instead of ``project_root / root_dir``.
     """
+
+    lexical_deploy_root: Path | None = None
+    """Unresolved identity of a dynamic deployment root."""
 
     scope_invariant_resolver: bool = False
     """When True, ``user_root_resolver`` runs in BOTH project and user
@@ -322,10 +333,12 @@ class TargetProfile:
     @property
     def managed_deploy_root(self) -> Path | None:
         """Return the resolved or absolute static deployment root."""
+        configured_root = Path(self.root_dir)
+        if configured_root.is_absolute():
+            return configured_root
         if self.resolved_deploy_root is not None:
             return self.resolved_deploy_root
-        root = Path(self.root_dir)
-        return root if root.is_absolute() else None
+        return None
 
     def supports_at_user_scope(self, primitive: str) -> bool:
         """Return ``True`` if *primitive* can be deployed at user scope."""
@@ -346,11 +359,14 @@ class TargetProfile:
             project_root: Workspace or home directory root.
             *parts: Additional path segments (e.g. ``"skills"``, ``"my-skill"``).
         """
-        if self.resolved_deploy_root is not None:
+        if Path(self.root_dir).is_absolute():
+            base = Path(self.root_dir)
+        elif self.resolved_deploy_root is not None:
             return (
                 self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root
             )
-        base = project_root / self.root_dir
+        else:
+            base = project_root / self.root_dir
         return base.joinpath(*parts) if parts else base
 
     def encode_external_locator(self, path: Path) -> str | None:
@@ -420,9 +436,11 @@ class TargetProfile:
                 merged = dict(filtered)
                 merged.update(self.user_primitive_overrides)
                 filtered = merged
+            lexical_root = Path(resolved_root)
             return replace(
                 self,
                 primitives=filtered,
+                lexical_deploy_root=lexical_root,
                 resolved_deploy_root=resolved_root,
             )
 
@@ -431,29 +449,43 @@ class TargetProfile:
 
         new_root = self.user_root_dir or self.root_dir
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
-        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
-        # `apm install -g` lands where the tool reads.
-        if self.name in ("claude", "hermes"):
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
+        # honors HERMES_HOME (default ~/.hermes), and OpenCode honors
+        # OPENCODE_CONFIG_DIR/XDG_CONFIG_HOME (default ~/.config/opencode);
+        # mirror that at user scope so `apm install -g` lands where the tool
+        # reads.
+        env_vars = {
+            "claude": "CLAUDE_CONFIG_DIR",
+            "hermes": "HERMES_HOME",
+        }
+        lexical_path = None
+        if self.user_scope_root_resolver is not None:
+            lexical_path = Path(self.user_scope_root_resolver())
+            abs_path = lexical_path.resolve(strict=False)
+            home = Path.home().resolve(strict=False)
+            try:
+                new_root = abs_path.relative_to(home).as_posix()
+            except ValueError:
+                new_root = abs_path.as_posix()
+        elif self.name in ("claude", "hermes"):
             import os
-            from pathlib import Path
 
-            env_var = "CLAUDE_CONFIG_DIR" if self.name == "claude" else "HERMES_HOME"
-            env = os.environ.get(env_var, "").strip()
-            if env:
+            env = os.environ.get(env_vars[self.name], "").strip()
+            abs_path = Path(env).expanduser().resolve(strict=False) if env else None
+
+            if abs_path is not None:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = Path(env).expanduser().resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
-                    # store an absolute path. ``pathlib.Path / <absolute>`` is
-                    # ``<absolute>`` so deploy + cleanup write to the right
-                    # place. The lockfile path translator treats an absolute
-                    # ``root_dir`` as a dynamic root.
+                    # Fallback: when a user config directory points outside
+                    # $HOME we store an absolute path. ``pathlib.Path /
+                    # <absolute>`` is ``<absolute>`` so deploy + cleanup write
+                    # to the right place. The lockfile path translator treats
+                    # an absolute ``root_dir`` as a dynamic root.
                     new_root = str(abs_path)
 
         if self.unsupported_user_primitives:
@@ -470,7 +502,13 @@ class TargetProfile:
             merged.update(self.user_primitive_overrides)
             filtered = merged
 
-        return replace(self, root_dir=new_root, primitives=filtered)
+        return replace(
+            self,
+            root_dir=new_root,
+            primitives=filtered,
+            lexical_deploy_root=lexical_path,
+            resolved_deploy_root=None,
+        )
 
 
 def _encode_cowork_locator(path: Path, deploy_root: Path) -> str:
@@ -517,6 +555,17 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 # ------------------------------------------------------------------
 # Known targets
 # ------------------------------------------------------------------
+
+
+def _resolve_hermes_user_root() -> Path:
+    """Resolve Hermes' user-scope root through its canonical resolver.
+
+    The wrapper is defined before ``KNOWN_TARGETS`` so registry construction
+    does not reference a not-yet-created function.  Its body resolves the
+    canonical function at call time because that function is defined below.
+    """
+    return resolve_hermes_root()
+
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
@@ -576,6 +625,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
+        user_scope_root_resolver=lambda: _resolve_env_user_root("CLAUDE_CONFIG_DIR", ".claude"),
         hooks_config_display=".claude/settings.json",
     ),
     # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
@@ -669,6 +719,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".config/opencode",
+        user_scope_root_resolver=lambda: _resolve_opencode_user_root(),
         unsupported_user_primitives=("hooks",),
         user_primitive_overrides={
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
@@ -896,9 +947,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # standard, both already emitted by APM, so skills + instructions reuse
     # the existing skill_standard / compile_family="agents" paths.  Skills
     # land in .agents/skills/ at project scope (read by Hermes via
-    # skills.external_dirs) and ~/.hermes/skills/ at user scope.  MCP servers
-    # are written separately by HermesClientAdapter to ~/.hermes/config.yaml.
-    # $HERMES_HOME overrides the user-scope root (handled in for_scope).
+    # skills.external_dirs) and the canonical Hermes home/skills/ at user
+    # scope. MCP servers are written separately by HermesClientAdapter to
+    # the canonical Hermes home/config.yaml. $HERMES_HOME overrides that
+    # home only when it is an absolute path.
     "hermes": TargetProfile(
         capability=TARGET_CAPABILITIES["hermes"],
         root_dir=".agents",
@@ -913,6 +965,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_dir=".hermes",
+        user_scope_root_resolver=_resolve_hermes_user_root,
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
@@ -1069,6 +1122,24 @@ def should_use_legacy_skill_paths() -> bool:
     return val in ("1", "true", "yes")
 
 
+def _resolve_env_user_root(env_name: str, default_dir: str) -> Path:
+    """Resolve a user target root from an absolute environment override."""
+    import os
+
+    configured = os.environ.get(env_name, "").strip()
+    configured_path = Path(configured).expanduser() if configured else None
+    if configured_path is not None and configured_path.is_absolute():
+        return configured_path.resolve(strict=False)
+    return (Path.home() / default_dir).resolve(strict=False)
+
+
+def _resolve_opencode_user_root() -> Path:
+    """Resolve OpenCode's native user configuration directory."""
+    from apm_cli.integration.opencode_paths import opencode_user_config_path
+
+    return opencode_user_config_path()
+
+
 def _resolve_copilot_cowork_root() -> Path | None:
     """Thin wrapper around ``copilot_cowork_paths.resolve_copilot_cowork_skills_dir()``.
 
@@ -1106,7 +1177,8 @@ def _is_flag_enabled(flag_name: str, *, create_config: bool = True) -> bool:
 def resolve_hermes_root() -> Path:
     """Resolve the Hermes home directory.
 
-    Honors ``$HERMES_HOME`` (default ``~/.hermes``).  Returns an expanded,
+    Honors a nonblank absolute ``$HERMES_HOME``; relative or blank values use
+    ``~/.hermes``. Returns an expanded,
     normalized ``Path`` (``..`` segments collapsed via ``resolve``) so traversal
     in ``$HERMES_HOME`` cannot create unintended intermediate directories during
     ``mkdir(parents=True)``; the directory is not required to exist.  Mirrors the
@@ -1118,8 +1190,9 @@ def resolve_hermes_root() -> Path:
     from pathlib import Path
 
     env = os.environ.get("HERMES_HOME", "").strip()
-    if env:
-        return Path(env).expanduser().resolve(strict=False)
+    env_path = Path(env).expanduser() if env else None
+    if env_path is not None and env_path.is_absolute():
+        return env_path.resolve(strict=False)
     return (Path.home() / ".hermes").resolve(strict=False)
 
 
@@ -1166,8 +1239,11 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
         if t.prefix not in seen:
             seen.add(t.prefix)
             prefixes.append(t.prefix)
-        if targets is None and user_scope and t.user_root_dir is not None:
-            user_prefix = f"{t.user_root_dir}/"
+        if targets is None and user_scope:
+            user_profile = t.for_scope(user_scope=True)
+            user_prefix = f"{user_profile.root_dir}/" if user_profile is not None else None
+            if user_prefix is None:
+                continue
             if user_prefix not in seen:
                 seen.add(user_prefix)
                 prefixes.append(user_prefix)
@@ -1244,14 +1320,18 @@ def active_targets_user_scope(
 
     # --- auto-detect by directory presence at ~/ ---
     # Targets with detect_by_dir=False (cowork) are never auto-detected.
-    detected = [
-        p
-        for p in KNOWN_TARGETS.values()
-        if p.user_supported
-        and p.detect_by_dir
-        and _flag_gated(p, create_config=create_config)
-        and (home / p.effective_root(user_scope=True)).is_dir()
-    ]
+    detected = []
+    for p in KNOWN_TARGETS.values():
+        if (
+            not p.user_supported
+            or not p.detect_by_dir
+            or not _flag_gated(p, create_config=create_config)
+        ):
+            continue
+        scoped = p.for_scope(user_scope=True)
+        is_present = scoped is not None and scoped.deploy_path(home).is_dir()
+        if is_present:
+            detected.append(p)
     if detected:
         return detected
 
@@ -1341,6 +1421,15 @@ def active_targets(
 def _validate_project_target_root(project_root: Path, profile: TargetProfile) -> Path:
     """Return a contained project target root without following symlinks."""
     deploy_path = profile.deploy_path(project_root)
+    if profile.lexical_deploy_root is not None:
+        # Only the configured lexical root is a trust boundary here. Do not
+        # inspect unrelated host ancestors (for example macOS's /var/folders
+        # indirections), but reject the configured root itself when it is a
+        # symlink.
+        if profile.lexical_deploy_root.is_symlink():
+            raise PathTraversalError(
+                f"Refusing deployment through symlinked target root: {profile.lexical_deploy_root}"
+            )
     if profile.resolved_deploy_root is not None:
         return deploy_path
     if has_symlink_component(project_root, deploy_path):
@@ -1381,8 +1470,7 @@ def resolve_targets(
     for t in raw:
         scoped = t.for_scope(user_scope=user_scope)
         if scoped is not None:
-            if not user_scope:
-                _validate_project_target_root(Path(project_root), scoped)
+            _validate_project_target_root(Path(project_root), scoped)
             resolved.append(scoped)
     return resolved
 
