@@ -132,6 +132,48 @@ def test_reconcile_tracks_same_value_by_target_identity(tmp_path: Path) -> None:
     assert retained.key in ledger.records
 
 
+def test_reconcile_uses_identity_for_deleted_and_user_edited_same_value(
+    tmp_path: Path,
+) -> None:
+    value = ".cursor/config.json"
+    deleted = DeploymentLocator(LocatorKind.PROJECT_RELATIVE, "claude", value, None, "project")
+    user_edited = DeploymentLocator(LocatorKind.PROJECT_RELATIVE, "cursor", value, None, "project")
+    prior_ledger = DeploymentLedger(
+        records={
+            deleted.key: DeploymentRecord(deleted, ("pkg",), "pkg", None),
+            user_edited.key: DeploymentRecord(user_edited, ("pkg",), "pkg", None),
+        }
+    )
+
+    cleanup_result = CleanupResult(
+        deleted=[value],
+        skipped_user_edit=[value],
+        deleted_locators=[deleted],
+        skipped_user_edit_locators=[user_edited],
+    )
+
+    with patch(
+        "apm_cli.integration.cleanup.remove_stale_deployed_files",
+        return_value=cleanup_result,
+    ):
+        _, _, ledger = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="pkg",
+            current_files=[value],
+            current_hashes={value: "sha256:current"},
+            prior_files=[value],
+            prior_hashes={},
+            active_targets=[KNOWN_TARGETS["cursor"]],
+            declared_targets=[KNOWN_TARGETS["cursor"]],
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=prior_ledger,
+            include_ledger=True,
+        )
+
+    assert deleted.key not in ledger.records
+    assert user_edited.key in ledger.records
+
+
 def test_cleanup_same_value_removes_only_deleted_locator(tmp_path: Path) -> None:
     """Compatibility values must not substitute for locator identity."""
     target_a = DeploymentLocator(

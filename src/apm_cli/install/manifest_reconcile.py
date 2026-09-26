@@ -772,15 +772,24 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     if cleanup.retained and prior_ledger is not None:
         from apm_cli.core.deployment_state import DeploymentLedger
 
-        retained_keys = {locator.key for locator in cleanup.retained_locators}
         retained_values = set(cleanup.retained_values or cleanup.retained)
         identity_outcomes = (
-            cleanup.deleted_locators
-            or cleanup.retained_locators
-            or cleanup.skipped_user_edit_locators
-            or cleanup.skipped_unmanaged_locators
-            or cleanup.deferred_locators
+            tuple(cleanup.deleted_locators)
+            + tuple(cleanup.retained_locators)
+            + tuple(cleanup.skipped_user_edit_locators)
+            + tuple(cleanup.skipped_unmanaged_locators)
+            + tuple(cleanup.deferred_locators)
         )
+        identity_outcome_keys = {locator.key for locator in identity_outcomes}
+        identity_retained_keys = {
+            locator.key
+            for locator in (
+                tuple(cleanup.retained_locators)
+                + tuple(cleanup.skipped_user_edit_locators)
+                + tuple(cleanup.skipped_unmanaged_locators)
+                + tuple(cleanup.deferred_locators)
+            )
+        }
         records = dict(ledger.records)
         records.update(
             {
@@ -788,9 +797,10 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
                 for key, record in prior_ledger.records.items()
                 if key in removed_ledger_keys
                 and (
-                    key in retained_keys
-                    or (not cleanup.retained_locators and record.locator.value in retained_values)
-                    or (not identity_outcomes and record.locator.value in retained_values)
+                    key in identity_retained_keys
+                    or (
+                        key not in identity_outcome_keys and record.locator.value in retained_values
+                    )
                 )
             }
         )
