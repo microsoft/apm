@@ -331,6 +331,7 @@ def union_preserving(
         if user_scope and "://" not in path:
             from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
+            candidates: set[str] = set()
             for profile in (
                 *targets,
                 *(declared_targets or []),
@@ -344,9 +345,13 @@ def union_preserving(
                     ensure_path_within(candidate, deploy_root)
                 except PathTraversalError:
                     continue
+                candidates.add(profile.name)
+
+            if len(candidates) == 1:
+                target_name = next(iter(candidates))
                 return DeploymentLocator(
                     kind=LocatorKind.TARGET_RELATIVE,
-                    target=profile.name,
+                    target=target_name,
                     value=path,
                     runtime=None,
                     scope="user",
