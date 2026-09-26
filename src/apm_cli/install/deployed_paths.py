@@ -101,6 +101,8 @@ def skill_bundle_file_entries(
     skill_dir: Path,
     project_root: Path,
     targets: Any,
+    *,
+    scope: InstallScope | None = None,
 ) -> list[str]:
     """Expand a deployed skill directory into per-file lockfile entries."""
     try:
@@ -115,7 +117,14 @@ def skill_bundle_file_entries(
             if is_generated_python_artifact(relative):
                 continue
             if bundle_file.is_file() and not bundle_file.is_symlink():
-                entries.append(deployed_path_entry(bundle_file, project_root, targets))
+                entries.append(
+                    deployed_path_entry(
+                        bundle_file,
+                        project_root,
+                        targets,
+                        scope=scope,
+                    )
+                )
         except OSError:
             continue
     return entries

@@ -539,6 +539,66 @@ class TestCurrentInstallGovernance:
         assert shared not in hashes
         assert not shared_path.exists()
 
+    def test_reconcile_cleanup_uses_removed_locator_identity(self, tmp_path):
+        """Same compatibility value must not collapse distinct target roots."""
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        shared = ".agents/skills/shared/SKILL.md"
+        prior_hash = "sha256:shared"
+        surviving = DeploymentLocator(
+            kind=LocatorKind.TARGET_RELATIVE,
+            target="cursor",
+            value=shared,
+            runtime=None,
+            scope="project",
+        )
+        removed = DeploymentLocator(
+            kind=LocatorKind.TARGET_RELATIVE,
+            target="claude",
+            value=shared,
+            runtime=None,
+            scope="project",
+        )
+        ledger = DeploymentLedger(
+            records={
+                surviving.key: DeploymentRecord(
+                    locator=surviving,
+                    owners=("cursor",),
+                    active_owner="cursor",
+                    content_hash=prior_hash,
+                ),
+                removed.key: DeploymentRecord(
+                    locator=removed,
+                    owners=("claude",),
+                    active_owner="claude",
+                    content_hash=prior_hash,
+                ),
+            }
+        )
+
+        with patch(
+            "apm_cli.integration.cleanup.remove_stale_deployed_files",
+            return_value=CleanupResult(failed=[shared]),
+        ) as cleanup:
+            _files, _hashes, reconciled = reconcile_deployed_block(
+                project_root=tmp_path,
+                dep_key="owner/pkg",
+                current_files=[shared],
+                current_hashes={shared: prior_hash},
+                prior_files=[shared],
+                prior_hashes={shared: prior_hash},
+                active_targets=[_known("cursor")],
+                declared_targets=[_known("cursor")],
+                diagnostics=DiagnosticCollector(),
+                prior_ledger=ledger,
+                include_ledger=True,
+            )
+
+        mapping = cleanup.call_args.kwargs["locator_mapping"]
+        assert mapping == {shared: [removed]}
+        assert set(reconciled.records) == {surviving.key, removed.key}
+
     def test_stale_orphan_preserved_when_another_active_target_still_owns(self, tmp_path):
         """The shared-root value survives while a concrete active target claims it.
 

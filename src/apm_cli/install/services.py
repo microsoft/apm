@@ -684,7 +684,14 @@ def integrate_package_primitives(  # noqa: PLR0913
         # the manifest dir-exclusion contract depend on it); the file
         # entries give ``content-integrity`` its per-file coverage so skill
         # drift is caught under ``apm audit --ci --no-drift``.
-        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
+        deployed.extend(
+            _skill_bundle_file_entries(
+                tp,
+                project_root,
+                targets,
+                scope=scope or InstallScope.PROJECT,
+            )
+        )
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep

@@ -622,6 +622,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         user_scope=user_scope,
     )
     dropped = set(prior_files) - set(files)
+    removed_ledger_keys = (
+        set(prior_ledger.records) - set(ledger.records) if prior_ledger is not None else set()
+    )
     # Ledger-authoritative orphan detection. A prior value that HELD a ledger
     # row, LOST it during reconciliation (its owning target went stale), yet
     # still lingers in `files` -- a stale-cleanup retention re-inserts shared
@@ -636,6 +639,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         prior_owned = {record.locator.value for record in prior_ledger.records.values()}
         surviving = {record.locator.value for record in ledger.records.values()}
         dropped |= (set(prior_files) & prior_owned) - surviving
+        dropped |= {prior_ledger.records[key].locator.value for key in removed_ledger_keys}
     if not dropped:
         if include_ledger:
             return files, hashes, ledger
@@ -680,7 +684,14 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
         locator_mapping=_group_locators(
-            prior_ledger.records.values() if prior_ledger is not None else (), dropped
+            [
+                record
+                for key, record in (
+                    prior_ledger.records.items() if prior_ledger is not None else ()
+                )
+                if key in removed_ledger_keys
+            ],
+            dropped,
         ),
     )
     if on_cleanup is not None:
@@ -690,8 +701,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     # returned manifest and hashes so the lockfile row and disk state agree.
     if cleanup.deleted:
         deleted = set(cleanup.deleted)
-        files = [path for path in files if path not in deleted]
-        for path in deleted:
+        surviving_values = {record.locator.value for record in ledger.records.values()}
+        files = [path for path in files if path not in deleted or path in surviving_values]
+        for path in deleted - surviving_values:
             hashes.pop(path, None)
     for path in cleanup.retained:
         if path not in files:
@@ -707,7 +719,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
             {
                 key: record
                 for key, record in prior_ledger.records.items()
-                if record.locator.value in retained_values
+                if key in removed_ledger_keys and record.locator.value in retained_values
             }
         )
         ledger = DeploymentLedger(records=records)
