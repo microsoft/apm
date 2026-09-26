@@ -92,6 +92,38 @@ class TestOpenCodePaths(unittest.TestCase):
             expected = Path.home() / ".config" / "opencode"
             self.assertEqual(opencode_user_config_path(), expected)
 
+    def test_symlinked_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            real = tmp_path / "real"
+            real.mkdir()
+            link = tmp_path / "link"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(link)}):
+                adapter = OpenCodeClientAdapter(project_root=tmp_path, user_scope=True)
+                with self.assertRaisesRegex(Exception, "symlinked root"):
+                    adapter.update_config({"server": {"command": "true"}})
+
+    def test_nested_symlinked_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            real = tmp_path / "real"
+            real.mkdir()
+            nested = tmp_path / "nested"
+            nested.mkdir()
+            link = nested / "link"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(link / "child")}):
+                adapter = OpenCodeClientAdapter(project_root=tmp_path, user_scope=True)
+                with self.assertRaisesRegex(Exception, "symlinked root"):
+                    adapter.update_config({"server": {"command": "true"}})
+
 
 class TestToOpencodeFormat(unittest.TestCase):
     """_to_opencode_format static conversion logic."""
@@ -615,7 +647,6 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         self.assertNotIn("stale", project_data["mcp"])
         self.assertIn("stale", user_data["mcp"])
 
-    @unittest.skipIf(os.name == "nt", "directory symlinks require elevated Windows rights")
     def test_remove_stale_refuses_symlinked_opencode_root(self):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -625,7 +656,10 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         original = json.dumps({"mcp": {"stale": {"type": "remote"}}})
         external_json.write_text(original, encoding="utf-8")
         symlink_root = Path(self.tmp.name) / "linked-opencode"
-        symlink_root.symlink_to(external_dir, target_is_directory=True)
+        try:
+            symlink_root.symlink_to(external_dir, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlinks are unavailable: {exc}")
 
         with patch.dict(os.environ, {"OPENCODE_CONFIG_DIR": str(symlink_root)}):
             MCPIntegrator.remove_stale(

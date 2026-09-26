@@ -93,6 +93,35 @@ def test_target_relative_locator_deletes_external_file(project_root, diagnostics
     assert not target_file.exists()
 
 
+def test_same_compatibility_path_deletes_each_target_locator(project_root, diagnostics, tmp_path):
+    claude_root = tmp_path / "claude"
+    opencode_root = tmp_path / "opencode"
+    claude_file = claude_root / "skills" / "reviewer" / "SKILL.md"
+    opencode_file = opencode_root / "skills" / "reviewer" / "SKILL.md"
+    for path in (claude_file, opencode_file):
+        path.parent.mkdir(parents=True)
+        path.write_text("stale\n", encoding="utf-8")
+    claude = replace(KNOWN_TARGETS["claude"].for_scope(user_scope=True), root_dir=claude_root)
+    opencode = replace(KNOWN_TARGETS["opencode"].for_scope(user_scope=True), root_dir=opencode_root)
+    value = "skills/reviewer/SKILL.md"
+    locators = [
+        DeploymentLocator(LocatorKind.TARGET_RELATIVE, "claude", value, None, "user"),
+        DeploymentLocator(LocatorKind.TARGET_RELATIVE, "opencode", value, None, "user"),
+    ]
+    result = remove_stale_deployed_files(
+        [value],
+        project_root,
+        dep_key="pkg",
+        targets=[claude, opencode],
+        diagnostics=diagnostics,
+        user_scope=True,
+        locator_mapping={value: locators},
+    )
+    assert not claude_file.exists()
+    assert not opencode_file.exists()
+    assert result.deleted == [value, value]
+
+
 def test_path_traversal_rejected(project_root, diagnostics, logger):
     """validate_deploy_path rejects '..' segments."""
     result = remove_stale_deployed_files(

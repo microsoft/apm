@@ -42,10 +42,17 @@ def _reject_symlink_root(root: Path) -> None:
     """Fail closed when the user OpenCode root is symlinked."""
     from ...install.errors import RequiredIntegrationError
 
-    if root.is_symlink() or root.parent.is_symlink():
-        raise RequiredIntegrationError(
-            f"Refusing to write OpenCode config through symlinked root: {root}"
-        )
+    current = Path(root.anchor) if root.anchor else Path()
+    for part in root.parts:
+        if part == root.anchor:
+            continue
+        current /= part
+        if current == Path("/var"):
+            continue
+        if current.is_symlink():
+            raise RequiredIntegrationError(
+                f"Refusing to write OpenCode config through symlinked root: {root}"
+            )
 
 
 class OpenCodeClientAdapter(CopilotClientAdapter):

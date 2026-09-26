@@ -34,7 +34,7 @@ takes no logger.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -276,7 +276,7 @@ def remove_stale_deployed_files(
     failed_path_retained: bool = True,
     user_scope: bool = False,
     allow_final_symlink: bool = False,
-    locator_mapping: Mapping[str, DeploymentLocator] | None = None,
+    locator_mapping: Mapping[str, Sequence[DeploymentLocator] | DeploymentLocator] | None = None,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -328,6 +328,14 @@ def remove_stale_deployed_files(
     recorded_hashes = recorded_hashes or {}
     locator_mapping = locator_mapping or {}
 
+    def _locators_for(path: str) -> tuple[DeploymentLocator, ...]:
+        value = locator_mapping.get(path)
+        if value is None:
+            return ()
+        if isinstance(value, DeploymentLocator):
+            return (value,)
+        return tuple(value)
+
     # Materialise stale_paths so we can iterate twice: once for the main
     # file-deletion loop and once as a lookup set for the deferred
     # directory pass.
@@ -347,7 +355,12 @@ def remove_stale_deployed_files(
     _cowork_orphans_skipped: int = 0
     _cowork_resolve_errors: int = 0
 
-    for stale_path in _stale_list:
+    cleanup_items = [
+        (stale_path, locator)
+        for stale_path in _stale_list
+        for locator in (_locators_for(stale_path) or (None,))
+    ]
+    for stale_path, locator in cleanup_items:
         # -- Cowork:// paths ---------------------------------------
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable
@@ -395,7 +408,6 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            locator = locator_mapping.get(stale_path)
             resolved_target = None
             if locator is not None and locator.kind is LocatorKind.TARGET_RELATIVE:
                 from apm_cli.integration.targets import KNOWN_TARGETS

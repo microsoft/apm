@@ -136,7 +136,7 @@ GitHub Copilot (CLI and IDE).
 Claude Code.
 
 - **Detection.** `.claude/` directory, or `CLAUDE.md`.
-- **Deploy directory.** `.claude/` at project scope and `~/.claude/` at user scope. For file primitives and compile output, a nonblank absolute `CLAUDE_CONFIG_DIR` overrides the user-scope root; relative or blank values fall back to `~/.claude`. The MCP adapter rejects relative nonblank values instead of applying this fallback.
+- **Deploy directory.** `.claude/` at project scope and `~/.claude/` at user scope. For file primitives and compile output, a nonblank absolute `CLAUDE_CONFIG_DIR` overrides the user-scope root; relative or blank values fall back to `~/.claude`. This fallback is a file-primitive/compile rule only: the MCP adapter rejects a nonblank relative value instead of applying it.
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
   - instructions: deployed directly by `apm install` to

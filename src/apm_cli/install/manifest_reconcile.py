@@ -51,6 +51,15 @@ def _profiles_by_name(
     return by_name
 
 
+def _group_locators(records, paths):
+    """Preserve every ledger locator sharing a compatibility path."""
+    grouped = {}
+    for record in records:
+        if record.locator.value in paths:
+            grouped.setdefault(record.locator.value, []).append(record.locator)
+    return grouped
+
+
 def _has_gated_resolver(profile: TargetProfile) -> bool:
     """Return whether an inactive supplemental target must not resolve."""
     return profile.requires_flag is not None and profile.user_root_resolver is not None
@@ -670,10 +679,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
-        locator_mapping={
-            record.locator.value: record.locator
-            for record in (prior_ledger.records.values() if prior_ledger is not None else ())
-        },
+        locator_mapping=_group_locators(
+            prior_ledger.records.values() if prior_ledger is not None else (), dropped
+        ),
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
