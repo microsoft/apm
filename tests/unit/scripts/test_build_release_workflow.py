@@ -1,4 +1,4 @@
-"""Regression tests for release-validation assets in build-release.yml."""
+"""Regression tests for release-validation assets in release workflows."""
 
 import os
 import shutil
@@ -11,11 +11,12 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "build-release.yml"
+CI_INTEGRATION_PATH = REPO_ROOT / ".github" / "workflows" / "ci-integration.yml"
 CANONICAL_HELPER = "./src/apm_cli/runtime/scripts/github-token-helper.sh"
 
 
-def _workflow() -> dict:
-    return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+def _workflow(path: Path = WORKFLOW_PATH) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _step(job: dict, name: str) -> dict:
@@ -92,6 +93,49 @@ def test_macos_prepare_block_preserves_script_layout(tmp_path, job_name, binary_
     assert helper.is_file()
     assert github_path.read_text(encoding="utf-8").strip() == str(isolated_dir)
 
+    _assert_validation_preamble_sources(validation, env)
+
+    run_script = _step(job, "Run release validation tests")["run"]
+    assert "./scripts/test-release-validation.sh" in run_script
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="workflow prepare blocks require POSIX tools")
+def test_ci_integration_release_validation_preserves_script_layout(tmp_path):
+    job = _workflow(CI_INTEGRATION_PATH)["jobs"]["release-validation"]
+    checkout = _step(job, "Checkout test scripts")["with"]
+    workspace = tmp_path / "workspace"
+    checkout_dir = workspace / checkout["path"]
+    for sparse_path in checkout["sparse-checkout"].split():
+        shutil.copytree(REPO_ROOT / sparse_path, checkout_dir / sparse_path)
+
+    isolated_dir = tmp_path / "apm-isolated-test"
+    isolated_dir.mkdir()
+    prepare_script = _step(job, "Prepare test scripts")["run"]
+    prepare_script = prepare_script.replace("/tmp/apm-isolated-test", str(isolated_dir))
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home), "PATH": os.environ["PATH"]}
+
+    subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", prepare_script],
+        cwd=workspace,
+        env=env,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    helper = isolated_dir / "src" / "apm_cli" / "runtime" / "scripts" / "github-token-helper.sh"
+    assert helper.is_file()
+    _assert_validation_preamble_sources(
+        isolated_dir / "scripts" / "test-release-validation.sh", env
+    )
+
+    run_script = _step(job, "Run release validation tests")["run"]
+    assert "./scripts/test-release-validation.sh" in run_script
+
+
+def _assert_validation_preamble_sources(validation: Path, env: dict) -> None:
     preamble = validation.with_name("release-validation-preamble.sh")
     validation_text = validation.read_text(encoding="utf-8")
     main_marker = "# Run main function"
@@ -114,6 +158,3 @@ def test_macos_prepare_block_preserves_script_layout(tmp_path, job_name, binary_
         "setup_github_tokens",
         "test_real_dependency_installation",
     ]
-
-    run_script = _step(job, "Run release validation tests")["run"]
-    assert "./scripts/test-release-validation.sh" in run_script
