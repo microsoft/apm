@@ -41,3 +41,8 @@ def opencode_user_config_path() -> Path:
 def opencode_user_config_dir() -> Path:
     """Return OpenCode's resolved user configuration directory for detection."""
     return _opencode_user_config_path(resolve=True)
+
+
+def opencode_user_config_roots() -> tuple[Path, Path]:
+    """Return lexical and resolved roots for safety and discovery."""
+    return opencode_user_config_path(), opencode_user_config_dir()

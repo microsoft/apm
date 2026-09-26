@@ -66,22 +66,24 @@ def _reject_symlink_config(
     symlink_candidates = {config_path}
     has_symlink = False
     try:
-        boundary = (config_root or config_path.parent).resolve(strict=False)
-        current = config_path.parent
-        while current != current.parent:
+        # Detect resolution failures before any filesystem write. The lexical
+        # walk below remains authoritative for symlink identity.
+        config_path.parent.resolve(strict=False)
+        boundary = Path(config_root or config_path.parent)
+        symlink_candidates.add(boundary)
+        try:
+            relative = config_path.parent.relative_to(boundary)
+        except ValueError:
+            # A lexical root may itself be a symlink to the resolved root.
+            # Walk the supplied lexical path instead of comparing resolved
+            # ancestry; components above the lexical root remain ignored.
+            relative = Path()
+            boundary = config_path.parent
+        current = boundary
+        for part in relative.parts:
+            current /= part
             symlink_candidates.add(current)
-            resolved_current = current.resolve(strict=False)
-            if resolved_current == boundary:
-                symlink_candidates.add(current)
-                break
-            # A path routed through an ancestor symlink can resolve directly to
-            # the configured root. That ancestor is outside the deployment root
-            # and must not be treated as a symlinked config directory.
-            if boundary not in resolved_current.parents:
-                current = current.parent
-                continue
-            symlink_candidates.add(current)
-            current = current.parent
+        symlink_candidates.add(config_path)
     except (OSError, RuntimeError):
         has_symlink = True
     else:
@@ -856,13 +858,18 @@ class MCPIntegrator:
                 user_scope=effective_user_scope,
             )
             if effective_user_scope or (project_root_path / ".opencode").is_dir():
+                from apm_cli.integration.opencode_paths import opencode_user_config_path
+
+                lexical_root = (
+                    opencode_user_config_path() if effective_user_scope else project_root_path
+                )
                 _clean_json_mcp_config(
                     Path(opencode_client.get_config_path()),
                     expanded_stale,
                     logger,
                     "opencode.json",
                     servers_key="mcp",
-                    config_root=Path(opencode_client.get_config_path()).parent,
+                    config_root=lexical_root,
                     fail_on_write_error=fail_on_write_error,
                 )
 
@@ -966,7 +973,7 @@ class MCPIntegrator:
                 lexical_root / "config.yaml",
                 "Hermes config.yaml",
                 logger,
-                config_root=effective_root,
+                config_root=lexical_root,
                 fail_on_write_error=fail_on_write_error,
             ):
                 return
@@ -998,12 +1005,18 @@ class MCPIntegrator:
                 project_root=project_root_path,
                 user_scope=True,
             )
+            configured_path = claude_client.get_config_path()
+            config_path = (
+                Path(configured_path)
+                if isinstance(configured_path, (str, Path))
+                else Path.home() / ".claude.json"
+            )
             _clean_claude_config(
-                Path(claude_client.get_config_path()),
+                config_path,
                 expanded_stale,
                 logger,
                 is_user_scope=True,
-                config_root=Path(claude_client.get_config_path()).parent,
+                config_root=config_path.parent,
                 fail_on_write_error=fail_on_write_error,
             )
 

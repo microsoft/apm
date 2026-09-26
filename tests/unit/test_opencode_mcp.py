@@ -13,6 +13,7 @@ from apm_cli.factory import ClientFactory
 from apm_cli.integration.opencode_paths import (
     opencode_user_config_dir,
     opencode_user_config_path,
+    opencode_user_config_roots,
 )
 
 
@@ -29,6 +30,11 @@ class TestOpenCodeClientFactory(unittest.TestCase):
 
 
 class TestOpenCodePaths(unittest.TestCase):
+    def test_roots_return_lexical_and_resolved_identity(self):
+        lexical, resolved = opencode_user_config_roots()
+        self.assertEqual(lexical, opencode_user_config_path())
+        self.assertEqual(resolved, opencode_user_config_dir())
+
     def test_config_dir_precedence_and_normalization(self):
         with patch.dict(
             os.environ,

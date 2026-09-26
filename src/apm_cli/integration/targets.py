@@ -222,6 +222,9 @@ class TargetProfile:
     through this root instead of ``project_root / root_dir``.
     """
 
+    lexical_deploy_root: Path | None = None
+    """Unresolved identity of a dynamic deployment root."""
+
     scope_invariant_resolver: bool = False
     """When True, ``user_root_resolver`` runs in BOTH project and user
     scope (the resolved deploy root does not depend on install intent).
@@ -330,10 +333,12 @@ class TargetProfile:
     @property
     def managed_deploy_root(self) -> Path | None:
         """Return the resolved or absolute static deployment root."""
+        configured_root = Path(self.root_dir)
+        if configured_root.is_absolute():
+            return configured_root
         if self.resolved_deploy_root is not None:
             return self.resolved_deploy_root
-        root = Path(self.root_dir)
-        return root if root.is_absolute() else None
+        return None
 
     def supports_at_user_scope(self, primitive: str) -> bool:
         """Return ``True`` if *primitive* can be deployed at user scope."""
@@ -354,11 +359,14 @@ class TargetProfile:
             project_root: Workspace or home directory root.
             *parts: Additional path segments (e.g. ``"skills"``, ``"my-skill"``).
         """
-        if self.resolved_deploy_root is not None:
+        if Path(self.root_dir).is_absolute():
+            base = Path(self.root_dir)
+        elif self.resolved_deploy_root is not None:
             return (
                 self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root
             )
-        base = project_root / self.root_dir
+        else:
+            base = project_root / self.root_dir
         return base.joinpath(*parts) if parts else base
 
     def encode_external_locator(self, path: Path) -> str | None:
@@ -428,9 +436,11 @@ class TargetProfile:
                 merged = dict(filtered)
                 merged.update(self.user_primitive_overrides)
                 filtered = merged
+            lexical_root = Path(resolved_root)
             return replace(
                 self,
                 primitives=filtered,
+                lexical_deploy_root=lexical_root,
                 resolved_deploy_root=resolved_root,
             )
 
@@ -448,15 +458,15 @@ class TargetProfile:
             "claude": "CLAUDE_CONFIG_DIR",
             "hermes": "HERMES_HOME",
         }
+        lexical_path = None
         if self.user_scope_root_resolver is not None:
-            abs_path = self.user_scope_root_resolver()
-            if abs_path is not None:
-                abs_path = Path(abs_path).resolve(strict=False)
-                home = Path.home().resolve(strict=False)
-                try:
-                    new_root = abs_path.relative_to(home).as_posix()
-                except ValueError:
-                    new_root = abs_path.as_posix()
+            lexical_path = Path(self.user_scope_root_resolver())
+            abs_path = lexical_path.resolve(strict=False)
+            home = Path.home().resolve(strict=False)
+            try:
+                new_root = abs_path.relative_to(home).as_posix()
+            except ValueError:
+                new_root = abs_path.as_posix()
         elif self.name in ("claude", "hermes"):
             import os
 
@@ -492,7 +502,13 @@ class TargetProfile:
             merged.update(self.user_primitive_overrides)
             filtered = merged
 
-        return replace(self, root_dir=new_root, primitives=filtered)
+        return replace(
+            self,
+            root_dir=new_root,
+            primitives=filtered,
+            lexical_deploy_root=lexical_path,
+            resolved_deploy_root=None,
+        )
 
 
 def _encode_cowork_locator(path: Path, deploy_root: Path) -> str:
@@ -1119,9 +1135,9 @@ def _resolve_env_user_root(env_name: str, default_dir: str) -> Path:
 
 def _resolve_opencode_user_root() -> Path:
     """Resolve OpenCode's native user configuration directory."""
-    from apm_cli.integration.opencode_paths import opencode_user_config_dir
+    from apm_cli.integration.opencode_paths import opencode_user_config_path
 
-    return opencode_user_config_dir()
+    return opencode_user_config_path()
 
 
 def _resolve_copilot_cowork_root() -> Path | None:
@@ -1405,6 +1421,15 @@ def active_targets(
 def _validate_project_target_root(project_root: Path, profile: TargetProfile) -> Path:
     """Return a contained project target root without following symlinks."""
     deploy_path = profile.deploy_path(project_root)
+    if profile.lexical_deploy_root is not None:
+        # Only the configured lexical root is a trust boundary here. Do not
+        # inspect unrelated host ancestors (for example macOS's /var/folders
+        # indirections), but reject the configured root itself when it is a
+        # symlink.
+        if profile.lexical_deploy_root.is_symlink():
+            raise PathTraversalError(
+                f"Refusing deployment through symlinked target root: {profile.lexical_deploy_root}"
+            )
     if profile.resolved_deploy_root is not None:
         return deploy_path
     if has_symlink_component(project_root, deploy_path):
@@ -1445,8 +1470,7 @@ def resolve_targets(
     for t in raw:
         scoped = t.for_scope(user_scope=user_scope)
         if scoped is not None:
-            if not user_scope:
-                _validate_project_target_root(Path(project_root), scoped)
+            _validate_project_target_root(Path(project_root), scoped)
             resolved.append(scoped)
     return resolved
 
