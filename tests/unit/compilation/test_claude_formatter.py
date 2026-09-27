@@ -819,3 +819,63 @@ class TestContextLinkResolution:
         assert f"({expected_relative})" in content
         assert "../context/conventions.context.md" not in content
         assert (temp_project / expected_relative).exists()
+
+    def test_repeat_call_clears_stale_context_registry(self, temp_project):
+        """Repeated ``format_distributed`` calls on one formatter must not
+        leak contexts registered by an earlier compile pass: a later pass
+        without that context must not rewrite links to its stale path."""
+        dep_root = temp_project / "apm_modules" / "_local" / "some-repo"
+        context_file = dep_root / ".apm" / "context" / "conventions.context.md"
+        context_file.parent.mkdir(parents=True)
+        context_file.write_text("Real content lives here.")
+
+        def make_instruction(file_path: Path, source: str) -> Instruction:
+            return Instruction(
+                name="signpost",
+                file_path=file_path,
+                description="Signpost",
+                apply_to="",
+                content="See [conventions](../context/conventions.context.md) for details.",
+                author="test",
+                source=source,
+            )
+
+        formatter = ClaudeFormatter(str(temp_project))
+
+        # First pass: the dependency context is registered and the link is
+        # rewritten to its apm_modules/ location.
+        first = PrimitiveCollection()
+        first.add_primitive(
+            Context(
+                name="conventions",
+                file_path=context_file,
+                content="Real content lives here.",
+                source="dependency:some-repo",
+            )
+        )
+        dep_instruction = make_instruction(
+            dep_root / ".apm" / "instructions" / "signpost.instructions.md",
+            "dependency:some-repo",
+        )
+        first.add_primitive(dep_instruction)
+        first_result = formatter.format_distributed(first, {temp_project: [dep_instruction]})
+
+        assert first_result.success
+        first_content = first_result.content_map[temp_project / "CLAUDE.md"]
+        assert "(apm_modules/_local/some-repo/.apm/context/conventions.context.md)" in first_content
+
+        # Second pass: the dependency context is gone. The file still exists
+        # on disk, so only a stale registry entry could point the link there.
+        second = PrimitiveCollection()
+        local_instruction = make_instruction(
+            temp_project / ".apm" / "instructions" / "signpost.instructions.md",
+            "local",
+        )
+        second.add_primitive(local_instruction)
+        second_result = formatter.format_distributed(second, {temp_project: [local_instruction]})
+
+        assert second_result.success
+        second_content = second_result.content_map[temp_project / "CLAUDE.md"]
+        assert formatter.link_resolver.context_registry == {}
+        assert "apm_modules/" not in second_content
+        assert "(../context/conventions.context.md)" in second_content
