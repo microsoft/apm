@@ -983,23 +983,18 @@ class TestRuntimeManagerInit:
 class TestRuntimeManagerScriptLoading:
     """Tests for get_embedded_script and get_common_script."""
 
-    def test_get_embedded_script_from_repo(self) -> None:
-        """get_embedded_script reads from the scripts/ directory in repo."""
+    def test_get_embedded_script_from_package(self) -> None:
+        """get_embedded_script reads from package resources."""
         from apm_cli.runtime.manager import RuntimeManager
 
         rm = RuntimeManager()
-        # The repo has real scripts; if they exist, we can read them.
-        # If not, the call should raise RuntimeError.
         import sys
 
         ext = ".ps1" if sys.platform == "win32" else ".sh"
-        try:
-            content = rm.get_embedded_script(f"setup-copilot{ext}")
-            assert isinstance(content, str)
-            assert len(content) > 0
-        except RuntimeError:
-            # Script not present in test environment -- acceptable
-            pass
+        content = rm.get_embedded_script(f"setup-copilot{ext}")
+
+        assert isinstance(content, str)
+        assert len(content) > 0
 
     def test_get_embedded_script_missing_raises(self) -> None:
         """Missing script raises RuntimeError."""

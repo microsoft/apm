@@ -13,7 +13,7 @@
 # will skip the test when its precondition is missing.
 #
 # This script's responsibilities are now narrow:
-#   - resolve GitHub / ADO tokens (via scripts/github-token-helper.sh)
+#   - resolve GitHub / ADO tokens (via the packaged runtime helper)
 #   - detect platform and execution environment (CI vs local)
 #   - locate or build the apm PyInstaller binary
 #   - install runtimes the binary needs (codex / copilot / llm)
@@ -42,7 +42,7 @@ NC='\033[0m' # No Color
 
 # Source the GitHub token management helper
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/github-token-helper.sh"
+source "$SCRIPT_DIR/../src/apm_cli/runtime/scripts/github-token-helper.sh"
 
 log_info() {
     echo -e "${BLUE}ℹ️  $1${NC}"
