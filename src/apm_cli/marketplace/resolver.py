@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
+from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner
 from ..models.dependency.reference import DependencyReference
 from ..utils.github_host import (
     is_azure_devops_hostname,
@@ -842,7 +843,7 @@ def _coords_from_package_locator(
             dep.to_clone_url(),
             dep.host or source.host,
             dep.port if dep.port is not None else source.port,
-            dep.repo_url.split("/", 1)[0],
+            repository_owner(dep.repo_url),
         )
     owner_repo = locator.rstrip("/")
     if owner_repo.endswith(".git"):
@@ -854,7 +855,7 @@ def _coords_from_package_locator(
         None,
         source.host,
         source.port,
-        owner_repo.split("/", 1)[0],
+        repository_owner(owner_repo),
     )
 
 
@@ -877,7 +878,7 @@ def _package_version_remote(
             None if dep_ref.is_local else dep_ref.to_clone_url(),
             dep_ref.host or source.host,
             dep_ref.port if dep_ref.port is not None else source.port,
-            dep_ref.repo_url.split("/", 1)[0] if dep_ref.repo_url else source.owner,
+            dependency_repository_owner(dep_ref) or source.owner,
         )
 
     src = plugin.source
@@ -886,9 +887,7 @@ def _package_version_remote(
         if kind in {"github", "gitlab", "git-subdir"}:
             locator = src.get("repo") or src.get("repository") or src.get("url")
             if isinstance(locator, str) and locator.strip():
-                coords = _coords_from_package_locator(
-                    locator.strip(), source, source_kind=kind
-                )
+                coords = _coords_from_package_locator(locator.strip(), source, source_kind=kind)
                 if coords is not None:
                     return coords
 

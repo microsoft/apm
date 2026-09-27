@@ -1178,7 +1178,6 @@ class TestGithubPackageTagHostOnForeignMarketplace:
         assert args[1] == "acme/tool"
         assert kwargs["host"] == "github.com"
         assert kwargs["host"] != "gitlab.example.invalid"
-        assert not args[1].startswith("github.com/")
 
     @patch(
         "apm_cli.marketplace.version_resolver.resolve_version_constraint",
@@ -1223,8 +1222,6 @@ class TestGithubPackageTagHostOnForeignMarketplace:
         resolve_marketplace_plugin("tool", "gl-mkt", version_spec="1.0.0")
 
         self._assert_github_tag_lookup(mock_resolve_version)
-        args, _kwargs = mock_resolve_version.call_args
-        assert not args[1].startswith("github.com/")
 
 
 class TestResolveMarketplacePluginGHECloud:
