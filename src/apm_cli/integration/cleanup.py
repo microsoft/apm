@@ -111,8 +111,8 @@ def _is_skill_directory_entry(rel_path: str) -> bool:
     entries or ``skills/`` itself do not match.
     """
     parts = Path(rel_path).parts
-    # Minimum: prefix, "skills", name -> 3 parts (e.g. ".agents/skills/my-skill")
-    if len(parts) < 3:
+    # Minimum: "skills", name or prefix, "skills", name.
+    if len(parts) < 2:
         return False
     # The second-to-last component must be "skills" and the last is the
     # skill name.  We require exactly one component after skills/ so that
@@ -123,7 +123,11 @@ def _is_skill_directory_entry(rel_path: str) -> bool:
     except ValueError:
         return False
     # Exactly one component after "skills" (the skill name)
-    return skills_idx == len(parts) - 2 and skills_idx >= 1
+    if skills_idx != len(parts) - 2:
+        return False
+    # Target-relative locators use ``skills/<name>``. Preserve the native
+    # prefixed forms emitted by existing integrations as well.
+    return skills_idx == 0 or parts[0] in {".agents", ".github", ".claude", ".cursor"}
 
 
 def _safe_remove_skill_directory(
@@ -513,7 +517,6 @@ def remove_stale_deployed_files(
         if stale_target.is_dir() and not stale_target.is_symlink():
             if _is_skill_directory_entry(stale_path):
                 _deferred_dirs.append((stale_path, stale_target, locator))
-                result._append_once(result.deferred_locators, locator)
             else:
                 result.skipped_unmanaged.append(stale_path)
                 result._append_once(result.skipped_unmanaged_locators, locator)

@@ -6,15 +6,18 @@ APM should safely remove that directory after deleting individual files
 instead of emitting a "Refused to remove directory entry" warning.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from apm_cli.core.deployment_state import DeploymentLocator, LocatorKind
 from apm_cli.install.deployed_paths import skill_bundle_file_entries
 from apm_cli.integration.cleanup import (
     _is_skill_directory_entry,
     remove_stale_deployed_files,
 )
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -55,7 +58,10 @@ class TestIsSkillDirectoryEntry:
         assert _is_skill_directory_entry(".cursor/skills/helper")
 
     def test_too_short_rejected(self):
-        assert not _is_skill_directory_entry("skills/name")
+        assert _is_skill_directory_entry("skills/name")
+
+    def test_unrecognised_prefix_rejected(self):
+        assert not _is_skill_directory_entry("other/skills/name")
 
     def test_skills_root_rejected(self):
         assert not _is_skill_directory_entry(".agents/skills")
@@ -98,6 +104,7 @@ class TestSkillDirectoryCleanup:
         assert ".agents/skills/my-skill" in result.deleted
         assert not skill_md.exists()
         assert not (project_root / ".agents/skills/my-skill").exists()
+        assert result.deferred_locators == []
         # No "Refused" warnings
         msgs = [d.message for d in diagnostics._diagnostics]
         assert not any("Refused to remove directory entry" in m for m in msgs)
@@ -191,6 +198,7 @@ class TestSkillDirectoryCleanup:
 
         assert loose_pyc.exists()
         assert ".agents/skills/my-skill" in result.skipped_unmanaged
+        assert result.deferred_locators == []
 
     def test_skill_dir_preserves_non_bytecode_file_inside_pycache(
         self,
@@ -277,6 +285,7 @@ class TestSkillDirectoryCleanup:
         # Directory skipped because guide.md is still there with mismatch
         assert ".agents/skills/my-skill" in result.skipped_unmanaged
         assert asset.exists()
+        assert result.deferred_locators == []
 
     def test_non_skill_dir_still_rejected(self, project_root, diagnostics):
         """Non-skill directory entries still get the old rejection."""
@@ -307,6 +316,50 @@ class TestSkillDirectoryCleanup:
         assert result.deleted == []
         assert result.failed == []
         assert result.skipped_unmanaged == []
+
+    def test_target_relative_skill_dir_uses_external_root(
+        self, project_root, diagnostics, tmp_path
+    ):
+        external_root = tmp_path / "opencode"
+        skill_dir = external_root / "skills" / "reviewer"
+        skill_md = skill_dir / "SKILL.md"
+        skill_dir.mkdir(parents=True)
+        skill_md.write_text("# stale\n", encoding="utf-8")
+        target = replace(
+            KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+            root_dir=str(external_root),
+        )
+        locator = DeploymentLocator(
+            LocatorKind.TARGET_RELATIVE,
+            "opencode",
+            "skills/reviewer",
+            None,
+            "user",
+        )
+
+        result = remove_stale_deployed_files(
+            [locator.value, "skills/reviewer/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=[target],
+            diagnostics=diagnostics,
+            user_scope=True,
+            locator_mapping={
+                locator.value: locator,
+                "skills/reviewer/SKILL.md": DeploymentLocator(
+                    LocatorKind.TARGET_RELATIVE,
+                    "opencode",
+                    "skills/reviewer/SKILL.md",
+                    None,
+                    "user",
+                ),
+            },
+        )
+
+        assert not skill_md.exists()
+        assert not skill_dir.exists()
+        assert result.deferred_locators == []
+        assert locator in result.deleted_locators
 
     def test_backward_compat_no_hashes_empty_dir_removed(self, project_root, diagnostics):
         """Legacy lockfile without hashes: skill dir removed when empty."""

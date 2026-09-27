@@ -1430,6 +1430,11 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
             raise PathTraversalError(
                 f"Refusing deployment through symlinked target root: {profile.lexical_deploy_root}"
             )
+    # Absolute roots are explicitly configured external deployment roots.
+    # They are not required to be descendants of the project root, but the
+    # lexical root above remains a trust-boundary check for symlinked roots.
+    if Path(profile.root_dir).is_absolute():
+        return deploy_path
     if profile.resolved_deploy_root is not None:
         return deploy_path
     if has_symlink_component(project_root, deploy_path):
