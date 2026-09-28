@@ -1832,7 +1832,7 @@ def _install_apm_packages(ctx, outcome):
     old_mcp_configs: builtins.dict = {}
     old_mcp_provenance: builtins.dict = {}
     old_mcp_target_servers: builtins.dict = {}
-    old_mcp_target_servers_present = True
+    old_mcp_target_servers_present = False
     _lock_path = get_lockfile_path(ctx.apm_dir)
     _existing_lock = LockFile.read(_lock_path)
     if _existing_lock:
