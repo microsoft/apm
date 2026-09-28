@@ -265,7 +265,7 @@ def run_mcp_integration(  # noqa: PLR0913
         old_mcp_target_servers = resolve_mcp_target_servers(
             recorded_target_servers=old_mcp_target_servers or {},
             ownership_present=old_mcp_target_servers_present,
-            server_names=builtins.set(old_mcp_servers) or builtins.set(adopt_configs),
+            server_names=builtins.set(old_mcp_servers) | builtins.set(adopt_configs),
             stored_configs=adopt_configs,
             project_root=project_root,
             user_scope=user_scope,
