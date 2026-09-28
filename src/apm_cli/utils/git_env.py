@@ -243,7 +243,9 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
-        candidate = shutil.which(str(directory / name))
+        # On Windows, shutil.which only applies PATHEXT when the command has no
+        # directory component. Pass path= so git.exe / gh.exe resolve (#2977).
+        candidate = shutil.which(name, path=str(directory))
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
