@@ -135,7 +135,36 @@ class TestResolveTrustedExecutable:
             result = _resolve_trusted_executable("git")
 
         assert result == str((trusted_bin / "git").resolve())
-        mock_which.assert_called_once_with(str(trusted_bin / "git"))
+        # Implementation uses which(name, path=dir) so PATHEXT applies on Windows.
+        mock_which.assert_called_once_with("git", path=str(trusted_bin))
+
+
+    def test_which_uses_path_kwarg_for_pathext(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows resolves git.exe only when which() gets a bare name + path=."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        monkeypatch.chdir(project)
+
+        calls: list[tuple] = []
+
+        def fake_which(cmd: str, path: str | None = None):
+            calls.append((cmd, path))
+            if cmd == "git" and path == str(trusted_bin):
+                return str(trusted_bin / "git.exe")
+            return None
+
+        with (
+            patch("os.get_exec_path", return_value=[str(trusted_bin)]),
+            patch("shutil.which", side_effect=fake_which),
+        ):
+            result = _resolve_trusted_executable("git")
+
+        assert result == str((trusted_bin / "git.exe").resolve())
+        assert calls == [("git", str(trusted_bin))]
 
     def test_rejects_candidate_resolving_inside_worktree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
