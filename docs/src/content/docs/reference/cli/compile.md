@@ -80,8 +80,10 @@ warning -- prefer `--all`.
 
 Every accepted project target is also accepted by `compile`. `grok-build`
 produces `AGENTS.md`. Targets without root-context output, including
-`agent-skills` and the experimental `grok-cloud` target, are successful no-ops.
-`antigravity` and `hermes` are explicit-only, while `intellij` is MCP-only.
+`agent-skills`, `grok-bot`, and the experimental `grok-cloud` target, are
+successful no-ops.
+`antigravity`, `hermes`, and `grok-bot` are explicit-only, while `intellij`
+is MCP-only.
 None is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
@@ -324,6 +326,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
 | `grok-cloud` | none |
+| `grok-bot` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first

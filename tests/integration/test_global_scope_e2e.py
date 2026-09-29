@@ -485,10 +485,19 @@ class TestCrossPlatformPaths:
 
     def test_user_root_strings_are_relative(self):
         """TargetProfile user_root_dir values should be relative paths starting
-        with a dot (or None for targets that use root_dir at user scope)."""
+        with a dot (or None for targets that use root_dir at user scope).
+
+        ``grok-bot`` is an intentional exception: Grok Bot reads skills from
+        a dotless ``agent-data/`` directory at both project and user scope
+        (issue #3083), so its ``user_root_dir`` is also dotless by design.
+        """
         from apm_cli.integration.targets import KNOWN_TARGETS
 
+        dotless_exceptions = {"grok-bot"}
+
         for name, profile in KNOWN_TARGETS.items():
+            if name in dotless_exceptions:
+                continue
             if profile.user_root_dir is not None:
                 assert profile.user_root_dir.startswith("."), (
                     f"{name} user_root_dir does not start with '.': {profile.user_root_dir}"

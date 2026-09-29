@@ -413,7 +413,7 @@ dependency's target-scoped primitives. They compose via intersection. See
 
 - Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
   `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
-  `opencode`, `agent-skills`, and `hermes`. Experimental targets are `openclaw`,
+  `opencode`, `agent-skills`, `hermes`, and `grok-bot`. Experimental targets are `openclaw`,
   `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
   target alias `vscode`, for Copilot-family dependency routing.
 - Default: omitted means all active install targets.

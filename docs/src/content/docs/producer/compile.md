@@ -95,10 +95,11 @@ apm compile --all                            # default stable target set
 ```
 
 Canonical targets are `copilot`, `claude`, `grok-build`, `cursor`, `opencode`,
-`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and `hermes`.
-The `all` selector is not a target; it expands to every canonical target except
-the explicit-only `antigravity`, `agent-skills`, and `hermes` targets. Compiling for
-`agent-skills` is a successful no-op because `apm install` deploys skills.
+`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`,
+and `grok-bot`. The `all` selector is not a target; it expands to every
+canonical target except the explicit-only `antigravity`, `agent-skills`,
+`hermes`, and `grok-bot` targets. Compiling for `agent-skills` or `grok-bot`
+is a successful no-op because `apm install` deploys skills.
 
 The accepted `intellij` entry is MCP-only, not a canonical target, and excluded
 from `all`. Compile uses the Copilot profile for its file primitives and produces

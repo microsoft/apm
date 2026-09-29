@@ -40,7 +40,7 @@ import click
     "show_all",
     is_flag=True,
     default=False,
-    help="Include the agent-skills meta-target in JSON output (excluded by default).",
+    help="Include agent-skills and grok-bot (explicit-only targets) in JSON output (excluded by default).",
 )
 @click.pass_context
 def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
@@ -58,9 +58,10 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     )
 
     project_root = Path.cwd()
-    # agent-skills is a meta-target (multi-harness fan-out), not a
-    # harness in itself. Excluded from the apm targets table; visible
-    # only in JSON output if invoked with --all (convergence item 13).
+    # agent-skills is a meta-target (multi-harness fan-out) and grok-bot is
+    # a stable explicit-only target; neither is auto-detected, so both are
+    # excluded from the apm targets table and visible only in JSON output
+    # if invoked with --all (convergence item 13).
 
     # Try to resolve targets using the v2 algorithm.
     # On ambiguous-harness, show all detected signals (the user ran
@@ -96,18 +97,27 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
 
     if as_json:
         if show_all:
-            # Surface meta-target only when explicitly requested.
-            rows = [
-                *rows,
-                {
-                    "target": "agent-skills",
-                    "status": "active" if "agent-skills" in active else "inactive",
-                    "source": None,
-                    "deploy_dir": ".agents/",
-                    "needs": None,
-                    "meta_target": True,
-                },
-            ]
+            # Surface explicit-only targets (never auto-detected, so absent
+            # from the default table) only when explicitly requested.
+            # ``agent-skills`` is a true meta-target (multi-harness fan-out);
+            # ``grok-bot`` is a first-class explicit-only target whose deploy
+            # root is read from the catalog rather than hard-coded.
+            from apm_cli.integration.targets import KNOWN_TARGETS
+
+            for name, is_meta in (("agent-skills", True), ("grok-bot", False)):
+                profile = KNOWN_TARGETS.get(name)
+                deploy_dir = f"{profile.root_dir}/" if profile is not None else "?"
+                rows = [
+                    *rows,
+                    {
+                        "target": name,
+                        "status": "active" if name in active else "inactive",
+                        "source": None,
+                        "deploy_dir": deploy_dir,
+                        "needs": None,
+                        "meta_target": is_meta,
+                    },
+                ]
         click.echo(_json.dumps(rows, indent=2))
         return
 

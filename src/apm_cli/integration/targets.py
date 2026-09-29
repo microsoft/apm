@@ -519,218 +519,25 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 # ------------------------------------------------------------------
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
-    # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
-    # instead of ~/.github/.  Instructions are concatenated into
-    # ~/.copilot/copilot-instructions.md because Copilot CLI reads only
-    # that single file at user scope (not individual *.instructions.md).
-    # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
-    "copilot": TargetProfile(
-        capability=TARGET_CAPABILITIES["copilot"],
-        root_dir=".github",
+    # Agent-skills: cross-client shared skills directory (.agents/skills/).
+    # Skills primitive only -- no agents, hooks, or commands.
+    # Not auto-detected (detect_by_dir=False) because .agents/ is shared by
+    # multiple tools (Codex, etc.). Explicit --target agent-skills only.
+    "agent-skills": TargetProfile(
+        capability=TARGET_CAPABILITIES["agent-skills"],
+        root_dir=".agents",
         primitives={
-            "instructions": PrimitiveMapping(
-                "instructions", ".instructions.md", "github_instructions"
-            ),
-            "prompts": PrimitiveMapping("prompts", ".prompt.md", "github_prompt"),
-            "agents": PrimitiveMapping("agents", ".agent.md", "github_agent"),
             "skills": PrimitiveMapping(
                 "skills",
                 "/SKILL.md",
                 "skill_standard",
-                deploy_root=".agents",
             ),
-            "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
-            "canvas": PrimitiveMapping("extensions", "", "copilot_canvas"),
-        },
-        auto_create=True,
-        detect_by_dir=True,
-        user_supported="partial",
-        user_root_dir=".copilot",
-        user_primitive_overrides={
-            "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
-        },
-        generated_files=("copilot-instructions.md",),
-    ),
-    # Claude Code -- the user-level config directory is whatever
-    # ``CLAUDE_CONFIG_DIR`` points to (default ``~/.claude``).  The env
-    # var override is honored by ``for_scope(user_scope=True)``.
-    # All primitives are supported at user scope.
-    # Ref: https://docs.anthropic.com/en/docs/claude-code/settings
-    # Instructions deploy to <root>/rules/*.md with paths: frontmatter.
-    # Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
-    "claude": TargetProfile(
-        capability=TARGET_CAPABILITIES["claude"],
-        root_dir=".claude",
-        primitives={
-            "instructions": PrimitiveMapping(
-                "rules",
-                ".md",
-                "claude_rules",
-                output_compare=True,
-            ),
-            "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
-            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
-            "hooks": PrimitiveMapping("hooks", ".json", "claude_hooks"),
-        },
-        auto_create=False,
-        detect_by_dir=True,
-        user_supported=True,
-        hooks_config_display=".claude/settings.json",
-    ),
-    # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
-    # and MCP.  Rules/instructions are managed via Cursor Settings UI only
-    # (not file-based), so "instructions" is excluded from user scope.
-    # Ref: https://cursor.com/docs/rules
-    "cursor": TargetProfile(
-        capability=TARGET_CAPABILITIES["cursor"],
-        root_dir=".cursor",
-        primitives={
-            "instructions": PrimitiveMapping(
-                "rules",
-                ".mdc",
-                "cursor_rules",
-                output_compare=True,
-            ),
-            "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
-            # TODO(cursor-command-format): track via dedicated issue once
-            # filed.  Cursor command deployment reuses the shared command
-            # transformer (claude_command), which preserves only the
-            # supported common frontmatter subset (description,
-            # allowed-tools, model, argument-hint, input).  Switch to a
-            # dedicated "cursor_command" format when the integrator
-            # implements a Cursor-specific writer that preserves
-            # Cursor-specific prompt metadata (author, mcp, parameters,
-            # ...) verbatim.  Dropped keys are surfaced via
-            # diagnostics.warn() at install time -- see
-            # command_integrator.
-            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-                deploy_root=".agents",
-            ),
-            "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
-        },
-        auto_create=False,
-        detect_by_dir=True,
-        user_supported="partial",
-        user_root_dir=".cursor",
-        unsupported_user_primitives=("instructions",),
-        hooks_config_display=".cursor/hooks.json",
-    ),
-    # Kiro IDE/CLI v3 -- spec-driven development editor.
-    # Agents are Markdown files under .kiro/agents/; identity derives from
-    # the relative path (no redundant 'name' frontmatter field).
-    # Steering files use Kiro frontmatter under .kiro/steering/.
-    # Skills use the open Agent Skills SKILL.md layout under .kiro/skills/.
-    # Hooks are individual JSON files under .kiro/hooks/.
-    # MCP config lives at .kiro/settings/mcp.json and ~/.kiro/settings/mcp.json.
-    # Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
-    # Ref: https://kiro.dev/docs/steering/
-    # Ref: https://kiro.dev/docs/skills/
-    # Ref: https://kiro.dev/docs/hooks/
-    "kiro": TargetProfile(
-        capability=TARGET_CAPABILITIES["kiro"],
-        root_dir=".kiro",
-        primitives={
-            "agents": PrimitiveMapping("agents", ".md", "kiro_agent"),
-            "instructions": PrimitiveMapping(
-                "steering",
-                ".md",
-                "kiro_steering",
-                output_compare=True,
-            ),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
-            "hooks": PrimitiveMapping("hooks", ".json", "kiro_hooks"),
-        },
-        auto_create=False,
-        detect_by_dir=True,
-        user_supported=True,
-        user_root_dir=".kiro",
-    ),
-    # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
-    # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.
-    "opencode": TargetProfile(
-        capability=TARGET_CAPABILITIES["opencode"],
-        root_dir=".opencode",
-        primitives={
-            "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
-            "commands": PrimitiveMapping("commands", ".md", "opencode_command"),
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-                deploy_root=".agents",
-            ),
-        },
-        auto_create=False,
-        detect_by_dir=True,
-        user_supported="partial",
-        user_root_dir=".config/opencode",
-        unsupported_user_primitives=("hooks",),
-        user_primitive_overrides={
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
-        },
-        include_scoped_in_user_root_context=True,
-    ),
-    # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
-    # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
-    # per-file rules from .gemini/rules/.
-    # Commands are TOML files under .gemini/commands/.
-    # Hooks merge into .gemini/settings.json (same pattern as Claude Code).
-    # Ref: https://geminicli.com/docs/cli/gemini-md/
-    # Ref: https://geminicli.com/docs/reference/configuration/
-    "gemini": TargetProfile(
-        capability=TARGET_CAPABILITIES["gemini"],
-        root_dir=".gemini",
-        primitives={
-            "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-                deploy_root=".agents",
-            ),
-            "hooks": PrimitiveMapping("hooks", ".json", "gemini_hooks"),
-        },
-        auto_create=False,
-        detect_by_dir=True,
-        user_supported=True,
-        user_root_dir=".gemini",
-        hooks_config_display=".gemini/settings.json",
-    ),
-    # Grok Build -- project and user configuration live under .grok/.
-    # Grok reads AGENTS.md for compiled project context and supports native
-    # rules, agents, legacy command markdown, and Agent Skills.
-    # Ref: https://github.com/xai-org/grok-build/tree/main/crates/codegen/xai-grok-pager/docs/user-guide
-    "grok-build": TargetProfile(
-        capability=TARGET_CAPABILITIES["grok-build"],
-        root_dir=".grok",
-        primitives={
-            "instructions": PrimitiveMapping("rules", ".md", "grok_rules"),
-            "agents": PrimitiveMapping("agents", ".md", "grok_agent"),
-            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
-        },
-        auto_create=False,
-        detect_by_dir=True,
-        user_supported=True,
-        user_root_dir=".grok",
-    ),
-    # Grok Cloud -- xAI docs verify project ``./.grok/skills/`` and user
-    # ``~/.grok/skills/``.  Skills are the only deployed primitive.
-    "grok-cloud": TargetProfile(
-        capability=TARGET_CAPABILITIES["grok-cloud"],
-        root_dir=".grok",
-        primitives={
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
         },
         auto_create=True,
         detect_by_dir=False,
         user_supported=True,
-        user_root_dir=".grok",
+        user_root_dir=".agents",
+        generated_files=(),
     ),
     # Antigravity CLI (agy) -- Google's Gemini-derived agentic CLI.
     # Workspace config lives under the cross-tool .agents/ root (the same
@@ -778,6 +585,33 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         unsupported_user_primitives=("instructions", "hooks"),
         hooks_config_display=".agents/hooks.json",
     ),
+    # Claude Code -- the user-level config directory is whatever
+    # ``CLAUDE_CONFIG_DIR`` points to (default ``~/.claude``).  The env
+    # var override is honored by ``for_scope(user_scope=True)``.
+    # All primitives are supported at user scope.
+    # Ref: https://docs.anthropic.com/en/docs/claude-code/settings
+    # Instructions deploy to <root>/rules/*.md with paths: frontmatter.
+    # Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
+    "claude": TargetProfile(
+        capability=TARGET_CAPABILITIES["claude"],
+        root_dir=".claude",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".md",
+                "claude_rules",
+                output_compare=True,
+            ),
+            "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "claude_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        hooks_config_display=".claude/settings.json",
+    ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
     # Instructions are compile-only (AGENTS.md) -- not installed.
@@ -799,6 +633,317 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         pack_prefixes=(".codex/", ".agents/"),
         hooks_config_display=".codex/hooks.json",
+    ),
+    # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
+    # instead of ~/.github/.  Instructions are concatenated into
+    # ~/.copilot/copilot-instructions.md because Copilot CLI reads only
+    # that single file at user scope (not individual *.instructions.md).
+    # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
+    "copilot": TargetProfile(
+        capability=TARGET_CAPABILITIES["copilot"],
+        root_dir=".github",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "instructions", ".instructions.md", "github_instructions"
+            ),
+            "prompts": PrimitiveMapping("prompts", ".prompt.md", "github_prompt"),
+            "agents": PrimitiveMapping("agents", ".agent.md", "github_agent"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+            "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
+            "canvas": PrimitiveMapping("extensions", "", "copilot_canvas"),
+        },
+        auto_create=True,
+        detect_by_dir=True,
+        user_supported="partial",
+        user_root_dir=".copilot",
+        user_primitive_overrides={
+            "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
+        },
+        generated_files=("copilot-instructions.md",),
+    ),
+    # GitHub Copilot desktop App -- experimental, user-scope only.
+    # Prompts whose frontmatter carries workflow-shape keys (``interval``,
+    # ``schedule_hour``, ``schedule_day``) are installed as rows in the
+    # app's ``workflows`` table at ``~/.copilot/data.db``.  ``mode`` /
+    # ``model`` / ``reasoning_effort`` are optional fields on a workflow
+    # but do NOT mark a plain prompt as a workflow (they overload with
+    # plain VSCode / Copilot slash-command prompts).  No files are
+    # written under the deploy root; the synthetic root is only used so
+    # the existing target machinery can address rows via the
+    # ``copilot-app-db://workflows/<id>`` lockfile URI scheme.
+    "copilot-app": TargetProfile(
+        capability=TARGET_CAPABILITIES["copilot-app"],
+        root_dir="copilot-app",  # display grouping placeholder only
+        primitives={
+            "prompts": PrimitiveMapping(
+                "workflows",
+                ".prompt.md",
+                "prompt_standard",
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_resolver=lambda: _resolve_copilot_app_root(),
+        scope_invariant_resolver=True,
+        external_locator_encoder=lambda path, _deploy_root: _encode_copilot_app_locator(path),
+        lockfile_uri_schemes=("copilot-app-db://",),
+    ),
+    # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
+    # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
+    # The deploy root is resolved dynamically at runtime via
+    # copilot_cowork_paths.resolve_copilot_cowork_skills_dir().
+    # Non-skill primitives are not supported.
+    "copilot-cowork": TargetProfile(
+        capability=TARGET_CAPABILITIES["copilot-cowork"],
+        root_dir="copilot-cowork",  # display grouping placeholder only
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_resolver=lambda: _resolve_copilot_cowork_root(),
+        external_locator_encoder=lambda path, deploy_root: _encode_cowork_locator(
+            path, deploy_root
+        ),
+        external_locator_decoder=lambda locator, deploy_root: _decode_cowork_locator(
+            locator, deploy_root
+        ),
+        lockfile_uri_schemes=("cowork://",),
+        warn_unsupported_primitives=True,
+    ),
+    # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
+    # and MCP.  Rules/instructions are managed via Cursor Settings UI only
+    # (not file-based), so "instructions" is excluded from user scope.
+    # Ref: https://cursor.com/docs/rules
+    "cursor": TargetProfile(
+        capability=TARGET_CAPABILITIES["cursor"],
+        root_dir=".cursor",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".mdc",
+                "cursor_rules",
+                output_compare=True,
+            ),
+            "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
+            # TODO(cursor-command-format): track via dedicated issue once
+            # filed.  Cursor command deployment reuses the shared command
+            # transformer (claude_command), which preserves only the
+            # supported common frontmatter subset (description,
+            # allowed-tools, model, argument-hint, input).  Switch to a
+            # dedicated "cursor_command" format when the integrator
+            # implements a Cursor-specific writer that preserves
+            # Cursor-specific prompt metadata (author, mcp, parameters,
+            # ...) verbatim.  Dropped keys are surfaced via
+            # diagnostics.warn() at install time -- see
+            # command_integrator.
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+            "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported="partial",
+        user_root_dir=".cursor",
+        unsupported_user_primitives=("instructions",),
+        hooks_config_display=".cursor/hooks.json",
+    ),
+    # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
+    # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
+    # per-file rules from .gemini/rules/.
+    # Commands are TOML files under .gemini/commands/.
+    # Hooks merge into .gemini/settings.json (same pattern as Claude Code).
+    # Ref: https://geminicli.com/docs/cli/gemini-md/
+    # Ref: https://geminicli.com/docs/reference/configuration/
+    "gemini": TargetProfile(
+        capability=TARGET_CAPABILITIES["gemini"],
+        root_dir=".gemini",
+        primitives={
+            "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+            "hooks": PrimitiveMapping("hooks", ".json", "gemini_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".gemini",
+        hooks_config_display=".gemini/settings.json",
+    ),
+    # Grok Bot -- stable, explicit-only, skills-only target for the Grok Bot
+    # agent runtime.  Grok Bot reads SKILL.md directories from
+    # agent-data/workflows/<skill-name>/ at project scope and
+    # ~/agent-data/workflows/<skill-name>/ at user scope.  Modelled on the
+    # hermes/agent-skills targets: skills primitive only, no agents, hooks,
+    # or commands.  Not auto-detected (detect_by_dir=False) since
+    # agent-data/ is not shared with any other target's root_dir.
+    "grok-bot": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-bot"],
+        root_dir="agent-data",
+        primitives={
+            "skills": PrimitiveMapping(
+                "workflows",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir="agent-data",
+    ),
+    # Grok Build -- project and user configuration live under .grok/.
+    # Grok reads AGENTS.md for compiled project context and supports native
+    # rules, agents, legacy command markdown, and Agent Skills.
+    # Ref: https://github.com/xai-org/grok-build/tree/main/crates/codegen/xai-grok-pager/docs/user-guide
+    "grok-build": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-build"],
+        root_dir=".grok",
+        primitives={
+            "instructions": PrimitiveMapping("rules", ".md", "grok_rules"),
+            "agents": PrimitiveMapping("agents", ".md", "grok_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".grok",
+    ),
+    # Grok Cloud -- xAI docs verify project ``./.grok/skills/`` and user
+    # ``~/.grok/skills/``.  Skills are the only deployed primitive.
+    "grok-cloud": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-cloud"],
+        root_dir=".grok",
+        primitives={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".grok",
+    ),
+    # Hermes agent (Nous Research) -- stable explicit-only. Hermes natively reads
+    # the agentskills.io SKILL.md format and the AGENTS.md context-file
+    # standard, both already emitted by APM, so skills + instructions reuse
+    # the existing skill_standard / compile_family="agents" paths.  Skills
+    # land in .agents/skills/ at project scope (read by Hermes via
+    # skills.external_dirs) and ~/.hermes/skills/ at user scope.  MCP servers
+    # are written separately by HermesClientAdapter to ~/.hermes/config.yaml.
+    # $HERMES_HOME overrides the user-scope root (handled in for_scope).
+    "hermes": TargetProfile(
+        capability=TARGET_CAPABILITIES["hermes"],
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".hermes",
+    ),
+    # Kiro IDE/CLI v3 -- spec-driven development editor.
+    # Agents are Markdown files under .kiro/agents/; identity derives from
+    # the relative path (no redundant 'name' frontmatter field).
+    # Steering files use Kiro frontmatter under .kiro/steering/.
+    # Skills use the open Agent Skills SKILL.md layout under .kiro/skills/.
+    # Hooks are individual JSON files under .kiro/hooks/.
+    # MCP config lives at .kiro/settings/mcp.json and ~/.kiro/settings/mcp.json.
+    # Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+    # Ref: https://kiro.dev/docs/steering/
+    # Ref: https://kiro.dev/docs/skills/
+    # Ref: https://kiro.dev/docs/hooks/
+    "kiro": TargetProfile(
+        capability=TARGET_CAPABILITIES["kiro"],
+        root_dir=".kiro",
+        primitives={
+            "agents": PrimitiveMapping("agents", ".md", "kiro_agent"),
+            "instructions": PrimitiveMapping(
+                "steering",
+                ".md",
+                "kiro_steering",
+                output_compare=True,
+            ),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "kiro_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".kiro",
+    ),
+    # OpenClaw -- experimental, skills-only target for the OpenClaw agent
+    # runtime (github.com/openclaw/openclaw).  OpenClaw reads SKILL.md
+    # directories from several locations; APM deploys to:
+    #   project scope: <workspace>/.agents/skills/ (agentskills.io standard,
+    #                  OpenClaw priority-2 load path)
+    #   user scope:    ~/.openclaw/skills/ (OpenClaw managed dir, priority-4)
+    # At project scope the output is identical to the agent-skills target;
+    # the --global user path is the distinguishing capability.
+    # Ref: https://docs.openclaw.ai/tools/skills
+    "openclaw": TargetProfile(
+        capability=TARGET_CAPABILITIES["openclaw"],
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".openclaw",
+    ),
+    # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
+    # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.
+    "opencode": TargetProfile(
+        capability=TARGET_CAPABILITIES["opencode"],
+        root_dir=".opencode",
+        primitives={
+            "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "opencode_command"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported="partial",
+        user_root_dir=".config/opencode",
+        unsupported_user_primitives=("hooks",),
+        user_primitive_overrides={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        include_scoped_in_user_root_context=True,
     ),
     # Windsurf/Cascade (now Devin Desktop) -- .windsurf/ is the workspace
     # config directory.
@@ -846,129 +991,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         unsupported_user_primitives=("instructions",),
         pack_prefixes=(".windsurf/", ".agents/"),
         hooks_config_display=".windsurf/hooks.json",
-    ),
-    # Agent-skills: cross-client shared skills directory (.agents/skills/).
-    # Skills primitive only -- no agents, hooks, or commands.
-    # Not auto-detected (detect_by_dir=False) because .agents/ is shared by
-    # multiple tools (Codex, etc.). Explicit --target agent-skills only.
-    "agent-skills": TargetProfile(
-        capability=TARGET_CAPABILITIES["agent-skills"],
-        root_dir=".agents",
-        primitives={
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-            ),
-        },
-        auto_create=True,
-        detect_by_dir=False,
-        user_supported=True,
-        user_root_dir=".agents",
-        generated_files=(),
-    ),
-    # OpenClaw -- experimental, skills-only target for the OpenClaw agent
-    # runtime (github.com/openclaw/openclaw).  OpenClaw reads SKILL.md
-    # directories from several locations; APM deploys to:
-    #   project scope: <workspace>/.agents/skills/ (agentskills.io standard,
-    #                  OpenClaw priority-2 load path)
-    #   user scope:    ~/.openclaw/skills/ (OpenClaw managed dir, priority-4)
-    # At project scope the output is identical to the agent-skills target;
-    # the --global user path is the distinguishing capability.
-    # Ref: https://docs.openclaw.ai/tools/skills
-    "openclaw": TargetProfile(
-        capability=TARGET_CAPABILITIES["openclaw"],
-        root_dir=".agents",
-        primitives={
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-            ),
-        },
-        auto_create=True,
-        detect_by_dir=False,
-        user_supported=True,
-        user_root_dir=".openclaw",
-    ),
-    # Hermes agent (Nous Research) -- stable explicit-only. Hermes natively reads
-    # the agentskills.io SKILL.md format and the AGENTS.md context-file
-    # standard, both already emitted by APM, so skills + instructions reuse
-    # the existing skill_standard / compile_family="agents" paths.  Skills
-    # land in .agents/skills/ at project scope (read by Hermes via
-    # skills.external_dirs) and ~/.hermes/skills/ at user scope.  MCP servers
-    # are written separately by HermesClientAdapter to ~/.hermes/config.yaml.
-    # $HERMES_HOME overrides the user-scope root (handled in for_scope).
-    "hermes": TargetProfile(
-        capability=TARGET_CAPABILITIES["hermes"],
-        root_dir=".agents",
-        primitives={
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-            ),
-        },
-        auto_create=True,
-        detect_by_dir=False,
-        user_supported=True,
-        user_root_dir=".hermes",
-    ),
-    # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
-    # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
-    # The deploy root is resolved dynamically at runtime via
-    # copilot_cowork_paths.resolve_copilot_cowork_skills_dir().
-    # Non-skill primitives are not supported.
-    "copilot-cowork": TargetProfile(
-        capability=TARGET_CAPABILITIES["copilot-cowork"],
-        root_dir="copilot-cowork",  # display grouping placeholder only
-        primitives={
-            "skills": PrimitiveMapping(
-                "skills",
-                "/SKILL.md",
-                "skill_standard",
-            ),
-        },
-        auto_create=False,
-        detect_by_dir=False,
-        user_supported=True,
-        user_root_resolver=lambda: _resolve_copilot_cowork_root(),
-        external_locator_encoder=lambda path, deploy_root: _encode_cowork_locator(
-            path, deploy_root
-        ),
-        external_locator_decoder=lambda locator, deploy_root: _decode_cowork_locator(
-            locator, deploy_root
-        ),
-        lockfile_uri_schemes=("cowork://",),
-        warn_unsupported_primitives=True,
-    ),
-    # GitHub Copilot desktop App -- experimental, user-scope only.
-    # Prompts whose frontmatter carries workflow-shape keys (``interval``,
-    # ``schedule_hour``, ``schedule_day``) are installed as rows in the
-    # app's ``workflows`` table at ``~/.copilot/data.db``.  ``mode`` /
-    # ``model`` / ``reasoning_effort`` are optional fields on a workflow
-    # but do NOT mark a plain prompt as a workflow (they overload with
-    # plain VSCode / Copilot slash-command prompts).  No files are
-    # written under the deploy root; the synthetic root is only used so
-    # the existing target machinery can address rows via the
-    # ``copilot-app-db://workflows/<id>`` lockfile URI scheme.
-    "copilot-app": TargetProfile(
-        capability=TARGET_CAPABILITIES["copilot-app"],
-        root_dir="copilot-app",  # display grouping placeholder only
-        primitives={
-            "prompts": PrimitiveMapping(
-                "workflows",
-                ".prompt.md",
-                "prompt_standard",
-            ),
-        },
-        auto_create=False,
-        detect_by_dir=False,
-        user_supported=True,
-        user_root_resolver=lambda: _resolve_copilot_app_root(),
-        scope_invariant_resolver=True,
-        external_locator_encoder=lambda path, _deploy_root: _encode_copilot_app_locator(path),
-        lockfile_uri_schemes=("copilot-app-db://",),
     ),
 }
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `grok-bot` install target deploys skill packages to `agent-data/workflows/<skill-name>/` for Grok Bot at project and user (`--global`) scope. (#3106)
+
 ## [0.32.0] - 2026-09-25
 
 ### Changed
