@@ -69,8 +69,10 @@ def _reject_symlink_config(
         # Detect resolution failures before any filesystem write. The lexical
         # walk below remains authoritative for symlink identity.
         config_path.parent.resolve(strict=False)
+        configured_root = config_root is not None
         boundary = Path(config_root or config_path.parent)
         symlink_candidates.add(boundary)
+        root_is_lexical_ancestor = True
         try:
             relative = config_path.parent.relative_to(boundary)
         except ValueError:
@@ -79,7 +81,16 @@ def _reject_symlink_config(
             # ancestry; components above the lexical root remain ignored.
             relative = Path()
             boundary = config_path.parent
+            root_is_lexical_ancestor = False
         current = boundary
+        if configured_root and root_is_lexical_ancestor:
+            # Preserve every lexical component of an absolute configured
+            # root; an earlier symlink must not disappear through resolve().
+            current = Path(current.anchor)
+            for part in boundary.parts[1:]:
+                current /= part
+                symlink_candidates.add(current)
+            current = boundary
         for part in relative.parts:
             current /= part
             symlink_candidates.add(current)

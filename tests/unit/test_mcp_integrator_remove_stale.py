@@ -522,6 +522,32 @@ def test_symlink_ancestor_above_configured_root_is_ignored(tmp_path):
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
+def test_earlier_symlink_inside_lexical_configured_root_is_rejected(tmp_path):
+    """A symlink before nested OpenCode root components remains visible."""
+    from apm_cli.integration.mcp_integrator import _reject_symlink_config
+
+    real = tmp_path / "real"
+    (real / "one" / "two" / "three").mkdir(parents=True)
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
+
+    config_root = link / "one" / "two" / "three"
+    config_path = config_root / "opencode.json"
+
+    with pytest.raises(Exception, match="symlinked MCP config"):
+        _reject_symlink_config(
+            config_path,
+            "OpenCode config",
+            MagicMock(),
+            config_root=config_root,
+            fail_on_write_error=True,
+        )
+
+
 @pytest.mark.parametrize("fail_on_write_error", [True, False])
 def test_symlink_config_resolution_failure_fails_closed(tmp_path, fail_on_write_error):
     from apm_cli.install.errors import RequiredIntegrationError
