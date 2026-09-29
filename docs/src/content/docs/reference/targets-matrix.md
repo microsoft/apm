@@ -325,6 +325,12 @@ Grok Bot agent skills deployment.
 - **Use case.** Deploys skill packages so Grok Bot reads them directly from
   `agent-data/workflows/` without a manual copy or symlink from
   `.agents/skills/` or `apm_modules`.
+- **Commit posture.** `agent-data/` is a project-visible directory like
+  `.claude/` or `.cursor/`, not a cache -- commit it (or `.gitignore` it
+  deliberately) the same way you would any other target's deploy root.
+- **Security model.** Skill deployment reuses the same `BaseIntegrator`
+  collision- and path-containment checks as `hermes` and `agent-skills`;
+  deployed files cannot escape the `agent-data/workflows/` subtree.
 
 ## grok-build
 

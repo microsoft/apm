@@ -275,3 +275,71 @@ class TestGrokBotCrossTargetMap:
         mapping = _CROSS_TARGET_MAPS["grok-bot"]
         assert ".github/skills/" in mapping
         assert mapping[".github/skills/"] == "agent-data/workflows/"
+
+
+# ===========================================================================
+# Drop-target reconcile -- ownership cleanup of agent-data/workflows
+# ===========================================================================
+
+
+def test_uninstall_grok_bot_cleans_agent_data_workflows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm uninstall`` removes ``agent-data/workflows/<name>/`` it owns.
+
+    Modelled on the analogous ``agent-skills`` regression
+    (``test_uninstall_agent_skills_cleans_dir``): the local-bundle installer
+    does not mutate ``apm.yml``, so we pre-construct an ``apm.yml`` +
+    ``apm.lock.yaml`` pair that advertises ownership of a grok-bot skill
+    and materialise the file on disk -- mirroring the post-install state a
+    real install would produce -- then assert uninstall reconciles it away.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+
+    pkg = "owner/test-grok-bot-plugin"
+    (project / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "test-project",
+                "version": "1.0.0",
+                "target": "grok-bot",
+                "dependencies": {"apm": [f"{pkg}#main"]},
+            },
+            default_flow_style=False,
+        ),
+        encoding="utf-8",
+    )
+
+    skill_rel = f"agent-data/workflows/{_SKILL_NAME}/SKILL.md"
+    deployed = project / skill_rel
+    deployed.parent.mkdir(parents=True, exist_ok=True)
+    deployed.write_bytes(_SKILL_BODY.encode("utf-8"))
+
+    lock = {
+        "dependencies": [
+            {
+                "repo_url": pkg,
+                "resolved_commit": "abc123",
+                "deployed_files": [skill_rel],
+                "deployed_file_hashes": {skill_rel: _sha256(_SKILL_BODY)},
+            }
+        ],
+    }
+    (project / "apm.lock.yaml").write_text(
+        yaml.dump(lock, default_flow_style=False), encoding="utf-8"
+    )
+
+    # Stub the modules dir so uninstall's apm_modules cleanup is a no-op.
+    (project / "apm_modules").mkdir()
+
+    monkeypatch.chdir(project)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["uninstall", pkg], catch_exceptions=False)
+
+    assert result.exit_code == 0, f"output={result.output!r}"
+    deployed_md = project / "agent-data" / "workflows" / _SKILL_NAME / "SKILL.md"
+    assert not deployed_md.exists(), (
+        f"expected {deployed_md} to be removed after uninstall (ownership "
+        f"cleanup of agent-data/workflows), output={result.output!r}"
+    )

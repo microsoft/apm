@@ -321,6 +321,58 @@ class TestTargetsJsonOutput:
         meta = next(r for r in data if r.get("target") == "agent-skills")
         assert meta["status"] == "active"
 
+    def test_json_all_includes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
+        """grok-bot is a stable explicit-only target, surfaced only via --all."""
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("claude", "CLAUDE.md")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json", "--all"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        grok_bot = [r for r in data if r.get("target") == "grok-bot"]
+        assert len(grok_bot) == 1
+        assert grok_bot[0]["deploy_dir"] == "agent-data/"
+        assert grok_bot[0]["meta_target"] is False
+
+    def test_json_without_all_excludes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("claude", "CLAUDE.md")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json"])
+        data = json.loads(result.output)
+        assert not any(r.get("target") == "grok-bot" for r in data)
+
+    def test_json_all_grok_bot_active_when_in_active(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """grok-bot shows 'active' when explicitly resolved (e.g. via --target)."""
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=_resolved(["grok-bot"]),
+            ),
+            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json", "--all"])
+        data = json.loads(result.output)
+        grok_bot = next(r for r in data if r.get("target") == "grok-bot")
+        assert grok_bot["status"] == "active"
+
     def test_json_inactive_target_has_null_source(self, runner: CliRunner, tmp_path: Path) -> None:
         with (
             patch("apm_cli.core.target_detection.resolve_targets", return_value=_resolved([])),
