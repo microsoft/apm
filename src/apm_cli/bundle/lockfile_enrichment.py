@@ -19,13 +19,16 @@ from .formats import BundleFormat, coerce_bundle_format
 # Windsurf agents still collapse into .windsurf/skills/ because the target
 # has no distinct agent envelope.
 _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
+    "agent-skills": {
+        ".github/skills/": ".agents/skills/",
+    },
     "claude": {
         ".github/skills/": ".claude/skills/",
         ".github/agents/": ".claude/agents/",
     },
-    "vscode": {
-        ".claude/skills/": ".github/skills/",
-        ".claude/agents/": ".github/agents/",
+    "codex": {
+        ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".codex/agents/",
     },
     "copilot": {
         ".claude/skills/": ".github/skills/",
@@ -35,36 +38,33 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/skills/": ".agents/skills/",
         ".github/agents/": ".cursor/agents/",
     },
-    "opencode": {
-        ".github/skills/": ".agents/skills/",
-        ".github/agents/": ".opencode/agents/",
-    },
-    "codex": {
-        ".github/skills/": ".agents/skills/",
-        ".github/agents/": ".codex/agents/",
-    },
-    "windsurf": {
-        ".github/skills/": ".agents/skills/",
-        ".github/agents/": ".windsurf/skills/",
-    },
-    "grok-cloud": {
-        ".github/skills/": ".grok/skills/",
+    "grok-bot": {
+        ".github/skills/": "agent-data/workflows/",
     },
     "grok-build": {
         ".github/skills/": ".grok/skills/",
         ".github/agents/": ".grok/agents/",
     },
-    "agent-skills": {
+    "grok-cloud": {
+        ".github/skills/": ".grok/skills/",
+    },
+    "hermes": {
         ".github/skills/": ".agents/skills/",
     },
     "openclaw": {
         ".github/skills/": ".agents/skills/",
     },
-    "hermes": {
+    "opencode": {
         ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".opencode/agents/",
     },
-    "grok-bot": {
-        ".github/skills/": "agent-data/workflows/",
+    "vscode": {
+        ".claude/skills/": ".github/skills/",
+        ".claude/agents/": ".github/agents/",
+    },
+    "windsurf": {
+        ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".windsurf/skills/",
     },
 }
 
