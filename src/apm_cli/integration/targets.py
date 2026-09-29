@@ -1434,6 +1434,12 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
     # They are not required to be descendants of the project root, but the
     # lexical root above remains a trust-boundary check for symlinked roots.
     if Path(profile.root_dir).is_absolute():
+        lexical_root = profile.lexical_deploy_root or Path(profile.root_dir)
+        bounded_base = lexical_root.parent.parent
+        if has_symlink_component(bounded_base, lexical_root):
+            raise PathTraversalError(
+                f"Refusing deployment through symlinked target root: {lexical_root}"
+            )
         return deploy_path
     if profile.resolved_deploy_root is not None:
         return deploy_path

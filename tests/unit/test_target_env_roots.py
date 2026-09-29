@@ -35,7 +35,7 @@ def test_opencode_scope_preserves_lexical_root(monkeypatch, tmp_path):
     lexical = tmp_path / "link"
     try:
         lexical.symlink_to(real, target_is_directory=True)
-    except OSError:
+    except (OSError, NotImplementedError):
         pytest.skip("directory symlinks are unavailable")
     monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(lexical))
     profile = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
@@ -53,7 +53,7 @@ def test_resolve_targets_rejects_symlinked_opencode_user_root(monkeypatch, tmp_p
     lexical = tmp_path / "link"
     try:
         lexical.symlink_to(real, target_is_directory=True)
-    except OSError:
+    except (OSError, NotImplementedError):
         pytest.skip("directory symlinks are unavailable")
     monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(lexical))
 
@@ -70,6 +70,21 @@ def test_resolve_targets_accepts_absolute_external_opencode_root(monkeypatch, tm
 
     assert [target.name for target in resolved] == ["opencode"]
     assert resolved[0].deploy_path(tmp_path / "project") == external
+
+
+def test_resolve_targets_rejects_symlink_component_in_absolute_external_root(monkeypatch, tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    lexical_parent = tmp_path / "link"
+    try:
+        lexical_parent.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
+    external = lexical_parent / "child"
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(external))
+
+    with pytest.raises(PathTraversalError, match="symlinked target root"):
+        resolve_targets(tmp_path / "project", user_scope=True, explicit_target="opencode")
 
 
 def test_custom_opencode_profile_root_wins_over_changed_environment(monkeypatch, tmp_path):

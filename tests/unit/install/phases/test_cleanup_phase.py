@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from apm_cli.core.deployment_state import DeploymentLocator, DeploymentRecord, LocatorKind
 from apm_cli.install.phases import cleanup
 from apm_cli.install.sources import Materialization
 from apm_cli.install.template import run_integration_template
@@ -44,6 +45,22 @@ def _make_lockfile(deps: dict) -> MagicMock:
     lf.dependencies = deps
     lf.get_dependency.side_effect = lambda key: deps.get(key)
     return lf
+
+
+def test_group_locators_only_includes_records_owned_by_package():
+    shared_value = ".github/agents/shared.md"
+    package_a = DeploymentLocator(
+        LocatorKind.PROJECT_RELATIVE, "copilot", shared_value, None, "project"
+    )
+    package_b = DeploymentLocator(
+        LocatorKind.PROJECT_RELATIVE, "claude", shared_value, None, "project"
+    )
+    records = (
+        DeploymentRecord(package_a, ("pkg-a",), "pkg-a", None),
+        DeploymentRecord(package_b, ("pkg-b",), "pkg-b", None),
+    )
+
+    assert cleanup._group_locators(records, {shared_value}, "pkg-a") == {shared_value: [package_a]}
 
 
 def _make_orphan_dep(deployed_files: list[str], file_hashes: dict | None = None) -> MagicMock:
