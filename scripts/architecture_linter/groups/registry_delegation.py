@@ -5,6 +5,12 @@ and guard-less semantic checks -- plus their shared helper module, so
 neither check module outgrows the module size budget.
 """
 
+from scripts.architecture_linter.checks.opencode_path_owner import (
+    COLLECTORS as _OPENCODE_COLLECTORS,
+)
+from scripts.architecture_linter.checks.opencode_path_owner import (
+    RULES as _OPENCODE_RULES,
+)
 from scripts.architecture_linter.checks.registry_owner_guards import (
     COLLECTORS as _OWNER_COLLECTORS,
 )
@@ -14,7 +20,7 @@ from scripts.architecture_linter.checks.registry_semantic_rules import (
 )
 from scripts.architecture_linter.checks.registry_semantic_rules import RULES as _SEMANTIC_RULES
 
-RULES = _OWNER_RULES + _SEMANTIC_RULES
-COLLECTORS = _OWNER_COLLECTORS + _SEMANTIC_COLLECTORS
+RULES = _OWNER_RULES + _OPENCODE_RULES + _SEMANTIC_RULES
+COLLECTORS = _OWNER_COLLECTORS + _OPENCODE_COLLECTORS + _SEMANTIC_COLLECTORS
 
 __all__ = ["COLLECTORS", "RULES"]

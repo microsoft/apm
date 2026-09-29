@@ -69,6 +69,13 @@
       "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context)",
       "selectors": ["src/apm_cli/integration/targets.py"],
       "guards": ["hooks-integrations-user-root-scope"]
+    },
+    {
+      "id": "opencode-user-config-path",
+      "decision": "OpenCode user configuration path resolution",
+      "owner": "integration/opencode_paths.py",
+      "selectors": ["src/apm_cli/integration/opencode_paths.py"],
+      "guards": ["hooks-integrations-opencode-path-owner"]
     }
   ]
 }

@@ -294,6 +294,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="HookIntegrator stops owning the neutral hook rewrite-scope resolver.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-opencode-path-owner",
+        rule_id="registry_delegation.opencode_path_owner",
+        path="src/apm_cli/integration/opencode_paths.py",
+        old='os.environ.get("OPENCODE_CONFIG_DIR", "")',
+        new='os.environ.get("OPENCODE_CONFIG_ROOT", "")',
+        intent="OpenCode path resolution stops reading its canonical environment override.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-user-root-scope",
         rule_id="mutation_writes.user_root_scope",
         path="src/apm_cli/integration/targets.py",
