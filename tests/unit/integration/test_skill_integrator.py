@@ -2144,8 +2144,8 @@ Detailed instructions here.
         paths = copy_skill_to_target(package_info, skill_source, self.project_root)
 
         assert len(paths) >= 2
-        github_path = paths[0]
-        claude_path = paths[1]
+        claude_path = paths[0]
+        github_path = paths[1]
         assert github_path == self.project_root / ".agents" / "skills" / "my-skill"
         assert claude_path == self.project_root / ".claude" / "skills" / "my-skill"
 
