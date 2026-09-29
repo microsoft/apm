@@ -203,6 +203,12 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "grok-bot",
+            "Grok Bot native agent-data/workflows skills configuration",
+            explicit_only=True,
+            primitive_profile="grok-bot",
+        ),
+        _capability(
             "copilot-cowork",
             "Microsoft 365 Copilot Cowork native skills configuration",
             experimental_flag="copilot_cowork",

@@ -935,6 +935,28 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".hermes",
     ),
+    # Grok Bot -- stable, explicit-only, skills-only target for the Grok Bot
+    # agent runtime.  Grok Bot reads SKILL.md directories from
+    # agent-data/workflows/<skill-name>/ at project scope and
+    # ~/agent-data/workflows/<skill-name>/ at user scope.  Modelled on the
+    # hermes/agent-skills targets: skills primitive only, no agents, hooks,
+    # or commands.  Not auto-detected (detect_by_dir=False) since
+    # agent-data/ is not shared with any other target's root_dir.
+    "grok-bot": TargetProfile(
+        capability=TARGET_CAPABILITIES["grok-bot"],
+        root_dir="agent-data",
+        primitives={
+            "skills": PrimitiveMapping(
+                "workflows",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir="agent-data",
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via

@@ -57,7 +57,8 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         == EXPERIMENTAL_TARGETS
     )
     assert (
-        frozenset({"agent-skills", "antigravity", "grok-cloud", "hermes"}) == EXPLICIT_ONLY_TARGETS
+        frozenset({"agent-skills", "antigravity", "grok-bot", "grok-cloud", "hermes"})
+        == EXPLICIT_ONLY_TARGETS
     )
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
@@ -81,6 +82,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
+                "grok-bot",
                 "grok-build",
                 "grok-cloud",
                 "hermes",
@@ -258,6 +260,12 @@ def test_current_native_profiles_are_characterized() -> None:
             ".agents",
             {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
             "agents",
+            None,
+        ),
+        "grok-bot": (
+            "agent-data",
+            {"skills": ("workflows", "/SKILL.md", "skill_standard", None, False)},
+            None,
             None,
         ),
         "copilot-cowork": (

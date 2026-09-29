@@ -75,6 +75,7 @@ TargetType = Literal[
     "kiro",
     "agent-skills",
     "hermes",
+    "grok-bot",
     "all",
     "minimal",
 ]
@@ -118,6 +119,7 @@ UserTargetType = Literal[
     "kiro",
     "agent-skills",
     "hermes",
+    "grok-bot",
     "all",
     "minimal",
 ]
@@ -169,6 +171,8 @@ def detect_target(  # noqa: PLR0911
             return "agent-skills", "explicit --target flag"
         elif explicit_target == "hermes":
             return "hermes", "explicit --target flag"
+        elif explicit_target == "grok-bot":
+            return "grok-bot", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -198,6 +202,8 @@ def detect_target(  # noqa: PLR0911
             return "agent-skills", "apm.yml target"
         elif config_target == "hermes":
             return "hermes", "apm.yml target"
+        elif config_target == "grok-bot":
+            return "grok-bot", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -422,6 +428,7 @@ def get_target_description(target: UserTargetType) -> str:
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
+        "grok-bot": "agent-data/workflows/ (project) or ~/agent-data/workflows/ (--global) -- skills only, explicit --target only",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }

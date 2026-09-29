@@ -32,6 +32,7 @@ see [Primitive types](../primitive-types/).
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 | hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
+| grok-bot        | `agent-data/` (`~/agent-data/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
@@ -100,7 +101,8 @@ the Copilot profile. `intellij` does not participate in plain `all` expansion.
 `agent-skills` and `hermes` are canonical target keys; `antigravity` and
 `hermes` are explicit-only for auto-detection. All are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
-install` pick them up automatically.
+install` pick them up automatically. `grok-bot` is also stable and
+explicit-only, available with `--target` and listable in `apm.yml`.
 
 `copilot-cowork`, `copilot-app`, `grok-cloud`, and `openclaw` are
 experimental targets that require `apm experimental enable <name>` before use.
@@ -308,6 +310,21 @@ Hermes Agent.
   - mcp: `$HERMES_HOME/config.yaml` under the `mcp_servers:` block
   - compiled instructions: `AGENTS.md`
 - **Compile behavior.** `apm compile --target hermes` emits `AGENTS.md`.
+
+## grok-bot
+
+Grok Bot agent skills deployment.
+
+- **Detection.** Never auto-detected. Select with `--target grok-bot` or list
+  it in `apm.yml`.
+- **Deploy directory.** `agent-data/` at project scope; `~/agent-data/` at
+  user scope (`--global`).
+- **Supported primitives.** skills only.
+- **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
+  `~/agent-data/workflows/<name>/SKILL.md` (user).
+- **Use case.** Deploys skill packages so Grok Bot reads them directly from
+  `agent-data/workflows/` without a manual copy or symlink from
+  `.agents/skills/` or `apm_modules`.
 
 ## grok-build
 

@@ -78,7 +78,7 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`). `agent-skills`, `antigravity`, and `hermes` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
@@ -93,6 +93,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
 | `hermes` | `.agents/` (project), `~/.hermes/` (user) | agents |
+| `grok-bot` | `agent-data/` (project and user) | none |
 
 Notes per target:
 
@@ -107,6 +108,7 @@ Notes per target:
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 - **kiro** -- Kiro IDE/CLI v3. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, MCP lands in `.kiro/settings/mcp.json`, and agents deploy to `.kiro/agents/<stem>.md` with frontmatter filtered to `description`, `model`, and `tools` only.
 - **hermes** -- Hermes Agent. Stable explicit-only target; skills use `.agents/skills/` at project scope and `~/.hermes/skills/` at user scope. Compiled instructions use `AGENTS.md`; MCP servers use `~/.hermes/config.yaml`.
+- **grok-bot** -- Grok Bot agent runtime. Stable explicit-only target, skills only; skills deploy to `agent-data/workflows/<name>/SKILL.md` at project scope and `~/agent-data/workflows/<name>/SKILL.md` at user scope (`--global`).
 
 ## The compatibility matrix
 

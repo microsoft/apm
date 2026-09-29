@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `grok-bot` install target deploys skill packages to `agent-data/workflows/<skill-name>/` for Grok Bot at project and user (`--global`) scope. (closes #3083)
+
 ### Changed
 
 - `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
