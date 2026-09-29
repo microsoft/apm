@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
+def compute_deployed_hashes(rel_paths, project_root: Path, targets=(), *, user_scope=False) -> dict:
     """Hash currently-on-disk deployed files for provenance.
 
     Module-level so both the local-package persist site (in
@@ -41,6 +41,16 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     out: dict = {}
     for _rel in rel_paths or ():
         _full = project_root / _rel
+        if not _full.is_file() and targets:
+            for target in targets:
+                # InstallContext.targets are already scope-resolved. Do not
+                # call for_scope again: doing so would discard a custom
+                # external root in favour of the current environment.
+                scoped = target
+                candidate = scoped.deploy_path(project_root, *_rel.replace("\\", "/").split("/"))
+                if candidate.is_file():
+                    _full = candidate
+                    break
         if _full.is_file() and not _full.is_symlink():
             try:  # noqa: SIM105
                 out[_rel] = compute_file_hash(_full)
@@ -264,6 +274,8 @@ class LockfileBuilder:
             current_hashes = compute_deployed_hashes(
                 (path for path in current if path not in retained_hashes),
                 self.ctx.project_root,
+                self.ctx.targets,
+                user_scope=is_user_scope(self.ctx.scope),
             )
             prior_files = list(claim.prior_files)
             prior_hashes = claim.prior_hashes
@@ -708,4 +720,9 @@ class LockfileBuilder:
 
     def compute_deployed_hashes(self, rel_paths) -> dict[str, str]:
         """Delegate to the module-level canonical implementation."""
-        return compute_deployed_hashes(rel_paths, self.ctx.project_root)
+        return compute_deployed_hashes(
+            rel_paths,
+            self.ctx.project_root,
+            self.ctx.targets,
+            user_scope=is_user_scope(self.ctx.scope),
+        )

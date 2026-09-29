@@ -173,6 +173,70 @@ class TestComputeDeployedHashesCoverage:
         extras = set(hashes.keys()) - set(deployed_files)
         assert extras == set(), f"hashes contain entries not in deployed_files: {sorted(extras)}"
 
+    def test_external_opencode_target_relative_file_is_hashed(self, tmp_path: Path) -> None:
+        from dataclasses import replace
+
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        external_root = tmp_path / "opencode-config"
+        target_file = external_root / "skills" / "reviewer" / "SKILL.md"
+        target_file.parent.mkdir(parents=True)
+        target_file.write_text("managed\n", encoding="utf-8")
+        target = replace(
+            KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+            root_dir=external_root.as_posix(),
+        )
+
+        hashes = compute_deployed_hashes(
+            ["skills/reviewer/SKILL.md"],
+            tmp_path / "project",
+            [target],
+            user_scope=InstallScope.USER.value == "user",
+        )
+
+        assert "skills/reviewer/SKILL.md" in hashes
+
+    def test_modified_external_opencode_file_is_retained_by_cleanup(self, tmp_path: Path) -> None:
+        from dataclasses import replace
+        from unittest.mock import MagicMock
+
+        from apm_cli.core.deployment_state import DeploymentLocator, LocatorKind
+        from apm_cli.integration.cleanup import remove_stale_deployed_files
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        external_root = tmp_path / "opencode-config"
+        target_file = external_root / "skills" / "reviewer" / "SKILL.md"
+        target_file.parent.mkdir(parents=True)
+        target_file.write_text("managed\n", encoding="utf-8")
+        original_hash = compute_file_hash(target_file)
+        target_file.write_text("user edit\n", encoding="utf-8")
+        target = replace(
+            KNOWN_TARGETS["opencode"].for_scope(user_scope=True),
+            root_dir=external_root.as_posix(),
+        )
+        locator = DeploymentLocator(
+            LocatorKind.TARGET_RELATIVE,
+            "opencode",
+            "skills/reviewer/SKILL.md",
+            None,
+            "user",
+        )
+        result = remove_stale_deployed_files(
+            [locator.value],
+            tmp_path / "project",
+            dep_key="pkg",
+            targets=[target],
+            diagnostics=MagicMock(),
+            recorded_hashes={locator.value: original_hash},
+            user_scope=True,
+            locator_mapping={locator.value: locator},
+        )
+
+        assert result.skipped_user_edit == [locator.value]
+        assert target_file.exists()
+
     def test_missing_files_are_skipped_silently(self, tmp_path: Path) -> None:
         """Paths in ``deployed_files`` that don't exist on disk produce no hash.
 
