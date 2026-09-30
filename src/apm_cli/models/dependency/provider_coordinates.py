@@ -2,7 +2,9 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import replace
-from typing import Self
+from typing import TypeVar
+
+_CoordinateT = TypeVar("_CoordinateT", bound="ProviderCoordinateMixin")
 
 
 class ProviderCoordinateMixin(ABC):
@@ -40,7 +42,7 @@ class ProviderCoordinateMixin(ABC):
         """Return whether a model field must never be persisted in lock state."""
         return field_name in {"ado_organization", "ado_project", "ado_repo"}
 
-    def with_derived_provider_coordinates(self) -> Self:
+    def with_derived_provider_coordinates(self: _CoordinateT) -> _CoordinateT:
         """Return a copy with transient provider coordinates derived from identity."""
         ado_organization, ado_project, ado_repo = self.canonical_ado_coordinates(
             self.host,

@@ -205,6 +205,7 @@ markers = [
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
     "windows_compat: load-bearing cross-platform regression contract family (CRLF-safe atomic writes, portable path formatting, git-executable resolution, socket/thread shutdown); runs on every OS and is additionally selected by the PR-time Windows Compatibility Gate -- NOT a requires_windows skip-gate, do not use requires_windows for this",
+    "trusted_executable: native trusted git/gh discovery and real consumer regressions; additionally selected on Windows Python 3.10 and 3.11",
     "requires_e2e_mode: requires APM_E2E_TESTS=1",
     "requires_github_token: requires GITHUB_APM_PAT or GITHUB_TOKEN",
     "requires_ado_pat: requires ADO_APM_PAT",

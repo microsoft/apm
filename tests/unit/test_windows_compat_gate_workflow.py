@@ -153,6 +153,37 @@ def test_windows_compat_gate_runs_on_windows_with_bounded_timeout() -> None:
     )
 
 
+def test_legacy_windows_git_discovery_runs_real_consumer_contracts() -> None:
+    """Python 3.10/3.11 must execute the native resolver and CLI marker family."""
+    job = workflow_job(_ci_workflow(), "windows-git-discovery")
+    assert job["runs-on"] == "windows-latest"
+    assert job["strategy"]["matrix"]["python-version"] == ["3.10", "3.11"]
+    assert job["env"]["UV_PYTHON"] == "${{ matrix.python-version }}"
+    assert job["strategy"]["fail-fast"] is False
+    assert 0 < job["timeout-minutes"] <= 15
+    assert job["permissions"] == {"contents": "read"}
+    python_step = workflow_step(job, "Set up Python")
+    assert python_step["with"]["python-version"] == "${{ matrix.python-version }}"
+    dependency_step = workflow_step(job, "Install dependencies")
+    assert "--python ${{ matrix.python-version }}" in dependency_step["run"]
+    step = workflow_step(job, "Run trusted executable contracts")
+    args = _gate_pytest_args(step)
+    assert args[args.index("-m") + 1] == "trusted_executable"
+    assert _positional_test_paths(args) == [
+        "tests/unit/cache/test_git_env.py",
+        "tests/integration/test_trusted_executable_discovery.py",
+    ]
+    assert "--frozen" in _gate_pytest_command(step)
+    assert not job.get("continue-on-error", False)
+    assert not step.get("continue-on-error", False)
+    checkout = job["steps"][0]
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    mutation_step = workflow_step(job, "Prove legacy PATHEXT regression")
+    assert mutation_step["shell"] == "python"
+    assert "assert result.returncode == 1" in mutation_step["run"]
+    assert "source.write_bytes(original)" in mutation_step["run"]
+
+
 def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:
     """The gate must select tests declaratively via `-m windows_compat`,
     across unit and integration collection roots.

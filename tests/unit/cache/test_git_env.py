@@ -1,14 +1,17 @@
 """Tests for git subprocess environment sanitization."""
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
 import pytest
 
+from apm_cli.utils import git_env
 from apm_cli.utils.git_env import (
     _STRIP_GIT_VARS,
     GitConfigEntry,
@@ -44,6 +47,41 @@ def _run_real_git_config_and_fake_clone(args, **kwargs):
     return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Modern qualified PATHEXT lookup")
+@pytest.mark.parametrize("name", ["git", "gh"])
+def test_modern_windows_missing_lookup_scales_linearly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Count real stdlib candidate probes without repeating modern PATHEXT scans."""
+    project = tmp_path / "project"
+    trusted_bin = tmp_path / "tools"
+    project.mkdir()
+    trusted_bin.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(shutil, "sys", SimpleNamespace(platform="win32"))
+    counts = []
+    for size in (20, 200):
+        extensions = [f".EXT{index}" for index in range(size)]
+        monkeypatch.setenv("PATHEXT", os.pathsep.join(extensions))
+        monkeypatch.setattr(
+            git_env,
+            "os",
+            SimpleNamespace(
+                name="nt",
+                pathsep=";",
+                environ={"PATHEXT": ";".join(extensions)},
+                get_exec_path=lambda: [str(trusted_bin)],
+            ),
+        )
+        with patch("shutil._access_check", return_value=False) as access:
+            with pytest.raises(FileNotFoundError, match="trusted PATH"):
+                _resolve_trusted_executable(name)
+            counts.append(access.call_count)
+
+    assert counts == [20, 200]
+
+
+@pytest.mark.trusted_executable
 class TestGetGitExecutable:
     """Test cached git binary lookup."""
 
@@ -94,6 +132,7 @@ class TestGetGitExecutable:
         assert mock_resolve.call_count == 2
 
 
+@pytest.mark.trusted_executable
 class TestGetGhExecutable:
     """Test cached GitHub CLI binary lookup."""
 
@@ -112,6 +151,7 @@ class TestGetGhExecutable:
             get_gh_executable()
 
 
+@pytest.mark.trusted_executable
 class TestResolveTrustedExecutable:
     """Test exclusion of executable candidates controlled by the project."""
 
@@ -136,6 +176,92 @@ class TestResolveTrustedExecutable:
 
         assert result == str((trusted_bin / "git").resolve())
         mock_which.assert_called_once_with(str(trusted_bin / "git"))
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    @pytest.mark.parametrize("extension", [".EXE", ".CMD"])
+    def test_real_lookup_expands_extensions_without_searching_project_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, extension: str
+    ) -> None:
+        """Real filesystem lookup honors PATH even with a project-local shadow."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "trusted tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        filename = f"{name}{extension}" if sys.platform == "win32" else name
+        trusted_executable = trusted_bin / filename
+        trusted_executable.touch()
+        trusted_executable.chmod(0o700)
+        shadow = project / filename
+        shadow.touch()
+        shadow.chmod(0o700)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(project), str(trusted_bin)]))
+        monkeypatch.setenv("PATHEXT", ".EXE;.CMD")
+        monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
+
+        assert _resolve_trusted_executable(name) == str(trusted_executable.resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    @pytest.mark.parametrize("marker", [".git", "apm.yml"])
+    def test_real_lookup_excludes_nested_project_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, marker: str
+    ) -> None:
+        """Both repository and manifest roots exclude executable descendants."""
+        project = tmp_path / "project"
+        nested = project / "nested"
+        nested.mkdir(parents=True)
+        (project / marker).touch()
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        executable = project / filename
+        executable.touch()
+        executable.chmod(0o700)
+        monkeypatch.chdir(nested)
+        monkeypatch.setenv("PATH", str(project))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            _resolve_trusted_executable(name)
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_real_lookup_preserves_path_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """An earlier trusted PATH directory wins without recursive discovery."""
+        project = tmp_path / "project"
+        project.mkdir()
+        directories = [tmp_path / "first", tmp_path / "second"]
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        for directory in directories:
+            directory.mkdir()
+            executable = directory / filename
+            executable.touch()
+            executable.chmod(0o700)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", os.pathsep.join(map(str, directories)))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        assert _resolve_trusted_executable(name) == str((directories[0] / filename).resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_real_lookup_rejects_symlink_into_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """A trusted directory cannot redirect execution into the excluded project."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        target = project / filename
+        target.touch()
+        target.chmod(0o700)
+        (trusted_bin / filename).symlink_to(target)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", str(trusted_bin))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            _resolve_trusted_executable(name)
 
     def test_rejects_candidate_resolving_inside_worktree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
