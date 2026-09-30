@@ -2860,6 +2860,7 @@ class TestCodexHookIntegration:
         assert "SessionStart" in data["hooks"]
         entries = data["hooks"]["SessionStart"]
         assert all("_apm_source" not in entry for entry in entries)
+        assert entries == [{"hooks": [{"type": "command", "command": "echo hello"}]}]
         sidecar = json.loads((self.root / ".codex" / "apm-hooks.json").read_text())
         assert sidecar["SessionStart"][0]["_apm_source"] == "test-pkg"
 
@@ -2869,7 +2870,13 @@ class TestCodexHookIntegration:
         hooks_json = self.root / ".codex" / "hooks.json"
         hooks_json.write_text(
             json.dumps(
-                {"hooks": {"PreToolUse": [{"type": "command", "command": "echo user-hook"}]}}
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"hooks": [{"type": "command", "command": "echo user-hook"}]}
+                        ]
+                    }
+                }
             )
         )
 
@@ -2882,7 +2889,7 @@ class TestCodexHookIntegration:
         assert "PreToolUse" in data["hooks"]
         user_entries = [e for e in data["hooks"]["PreToolUse"] if "_apm_source" not in e]
         assert len(user_entries) == 1
-        assert user_entries[0]["command"] == "echo user-hook"
+        assert user_entries[0]["hooks"][0]["command"] == "echo user-hook"
         # APM hook added
         assert "SessionStart" in data["hooks"]
 
@@ -2920,7 +2927,7 @@ class TestCodexHookIntegration:
         integrator.integrate_package_hooks_codex(pi, self.root)
 
         data = json.loads((self.root / ".codex" / "hooks.json").read_text())
-        cmd = data["hooks"]["SessionStart"][0]["command"]
+        cmd = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         assert cmd == ".codex/hooks/test-pkg/hooks/run.sh", (
             f"Project-scope Codex command must be repo-relative; got {cmd!r}"
         )
