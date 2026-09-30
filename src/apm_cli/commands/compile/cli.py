@@ -562,6 +562,7 @@ def _validate_project(
     callers must keep validation and watch modes on the content-required path.
     """
     from ...compilation.constitution import find_constitution
+    from ...core.scope import InstallScope, get_modules_dir
 
     if not (source_root / APM_YML_FILENAME).exists():
         logger.error("Not an APM project - no apm.yml found")
@@ -570,7 +571,9 @@ def _validate_project(
         sys.exit(1)
 
     # Check if there are any instruction files to compile
-    apm_modules_exists = (source_root / APM_MODULES_DIR).exists()
+    apm_modules_exists = (source_root / APM_MODULES_DIR).exists() or get_modules_dir(
+        InstallScope.PROJECT
+    ).exists()
     constitution_exists = find_constitution(source_root).exists()
 
     # Check if .apm directory has actual content

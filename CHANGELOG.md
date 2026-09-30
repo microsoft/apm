@@ -9,12 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm compile --target claude` now includes `CLAUDE.md` imports for Azure DevOps three-level dependency paths (`apm_modules/org/project/repo`), matching GitHub two-level packages. (#2951)
+- `apm compile --target claude` imports dependency-root `CLAUDE.md` files at any metadata-backed materialization depth, including ADO and nested GitLab paths, and resolves transitive imports with redirected `--root` output. Frozen replay also reads the selected installation's lockfile. (by @vyrnsynx, #2952)
 
-### Added
-
-- gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
-- OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
 ## [0.32.0] - 2026-09-25
 
 ### Changed

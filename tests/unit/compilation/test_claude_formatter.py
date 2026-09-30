@@ -338,6 +338,11 @@ class TestDependenciesImportSyntax:
 
     def test_ado_three_level_dependencies_included(self, tmp_path):
         """Azure DevOps packages live at apm_modules/org/project/repo (issue #2951)."""
+        (tmp_path / "apm.yml").write_text(
+            "name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - dev.azure.com/contoso/platform/standards\n",
+            encoding="utf-8",
+        )
         ado_pkg = tmp_path / "apm_modules" / "contoso" / "platform" / "standards"
         ado_pkg.mkdir(parents=True)
         (ado_pkg / "CLAUDE.md").write_text("# ADO package", encoding="utf-8")
@@ -368,6 +373,11 @@ class TestDependenciesImportSyntax:
 
     def test_mixed_github_and_ado_dependencies_sorted(self, tmp_path):
         """Two-level and three-level roots can coexist and stay sorted."""
+        (tmp_path / "apm.yml").write_text(
+            "name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - zeta/pkg\n    - dev.azure.com/alpha/proj/repo\n",
+            encoding="utf-8",
+        )
         gh = tmp_path / "apm_modules" / "zeta" / "pkg"
         gh.mkdir(parents=True)
         (gh / "CLAUDE.md").write_text("# gh", encoding="utf-8")
@@ -385,6 +395,11 @@ class TestDependenciesImportSyntax:
 
     def test_ado_dependency_appears_in_distributed_output(self, tmp_path):
         """format_distributed Dependencies section includes ADO three-level imports."""
+        (tmp_path / "apm.yml").write_text(
+            "name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n"
+            "    - dev.azure.com/org/project/repo\n",
+            encoding="utf-8",
+        )
         ado_pkg = tmp_path / "apm_modules" / "org" / "project" / "repo"
         ado_pkg.mkdir(parents=True)
         (ado_pkg / "CLAUDE.md").write_text("# ADO", encoding="utf-8")

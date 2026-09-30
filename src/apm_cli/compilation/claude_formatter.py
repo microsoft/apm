@@ -9,9 +9,11 @@ import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..deps.lockfile import resolve_lockfile_path_for_read
 from ..primitives.discovery import get_dependency_declaration_order
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
-from ..utils.paths import resolve_base_and_source_dirs
+from ..utils.path_security import ensure_path_within, validate_path_segments
+from ..utils.paths import portable_link_relpath, resolve_base_and_source_dirs
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
@@ -242,61 +244,54 @@ class ClaudeFormatter:
         return placements
 
     def _collect_dependencies(self) -> builtins.list[str]:
-        """Collect @import paths for apm_modules dependencies.
-
-        Prefers installed package roots from ``apm.yml`` / lockfile declaration
-        order (GitHub ``owner/repo``, Azure DevOps ``org/project/repo``, and
-        virtual paths). Falls back to a shallow filesystem scan that understands
-        both two-level and three-level layouts when no declarations are present
-        (e.g. unit fixtures).
-
-        Returns:
-            List[str]: List of @import paths for dependencies.
-        """
-        dependencies: builtins.list[str] = []
-
-        # Modules live with sources; honor --root by preferring source_dir.
-        modules_root = self.source_dir / "apm_modules"
-        if not modules_root.is_dir() and self.base_dir.resolve() != self.source_dir.resolve():
-            modules_root = self.base_dir / "apm_modules"
+        """Import installed package-root memory, independent of path depth."""
+        installed_root = self.source_dir
+        modules_root = installed_root / "apm_modules"
+        if not modules_root.exists() and not modules_root.is_symlink():
+            installed_root = self.base_dir
+            modules_root = installed_root / "apm_modules"
+        ensure_path_within(modules_root, installed_root)
         if not modules_root.is_dir():
-            return dependencies
+            return []
 
-        declared = get_dependency_declaration_order(str(self.source_dir))
-        if not declared and self.base_dir.resolve() != self.source_dir.resolve():
-            declared = get_dependency_declaration_order(str(self.base_dir))
-
-        if declared:
-            for rel in declared:
-                if (modules_root / rel / "CLAUDE.md").is_file():
-                    dependencies.append(f"@apm_modules/{rel}/CLAUDE.md")
-            return sorted(dependencies)
-
-        # Fallback FS scan: GitHub owner/repo and ADO org/project/repo.
-        # Only treat a third level as a package when the mid directory has no
-        # package-root CLAUDE.md (avoids picking nested docs under GitHub pkgs).
-        for owner_dir in modules_root.iterdir():
-            if not owner_dir.is_dir() or owner_dir.name.startswith("."):
-                continue
-
-            for mid_dir in owner_dir.iterdir():
-                if not mid_dir.is_dir() or mid_dir.name.startswith("."):
+        metadata_paths = (
+            self.source_dir / "apm.yml",
+            resolve_lockfile_path_for_read(installed_root, read_only=True),
+        )
+        if any(path.exists() or path.is_symlink() for path in metadata_paths):
+            relative_roots = get_dependency_declaration_order(
+                str(self.source_dir), installation_root=installed_root
+            )
+            package_roots = []
+            for relative in relative_roots:
+                validate_path_segments(relative, context="installed dependency path")
+                package_roots.append(modules_root / relative)
+        else:
+            # Preserve legacy, metadata-free owner/package trees without guessing
+            # that arbitrary deeper documentation directories are packages.
+            package_roots = []
+            for owner_dir in modules_root.iterdir():
+                if owner_dir.name.startswith("."):
                     continue
+                ensure_path_within(owner_dir, modules_root)
+                if owner_dir.is_dir():
+                    package_roots.extend(
+                        path for path in owner_dir.iterdir() if not path.name.startswith(".")
+                    )
 
-                package_claude = mid_dir / "CLAUDE.md"
-                if package_claude.is_file():
-                    dependencies.append(f"@apm_modules/{owner_dir.name}/{mid_dir.name}/CLAUDE.md")
-                    continue
-
-                for repo_dir in mid_dir.iterdir():
-                    if not repo_dir.is_dir() or repo_dir.name.startswith("."):
-                        continue
-                    ado_claude = repo_dir / "CLAUDE.md"
-                    if ado_claude.is_file():
-                        dependencies.append(
-                            f"@apm_modules/{owner_dir.name}/{mid_dir.name}/{repo_dir.name}/CLAUDE.md"
-                        )
-
+        dependencies: builtins.set[str] = set()
+        for package_root in package_roots:
+            ensure_path_within(package_root, modules_root)
+            claude_path = package_root / "CLAUDE.md"
+            ensure_path_within(claude_path, package_root)
+            if claude_path.is_file():
+                relative = portable_link_relpath(claude_path, self.base_dir)
+                if relative is None:
+                    raise ValueError(
+                        "Cannot link dependency CLAUDE.md across filesystem drives. "
+                        "Install dependencies under the compile output root with apm install --root."
+                    )
+                dependencies.add(f"@{relative}")
         return sorted(dependencies)
 
     def _generate_claude_content(

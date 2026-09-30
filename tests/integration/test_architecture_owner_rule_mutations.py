@@ -1207,6 +1207,20 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_frozen_preflight_uses_selected_lockfile_store() -> None:
+    """Scoped frozen preflight must not substitute a source-side lockfile."""
+    path = "src/apm_cli/install/service.py"
+    source = _source(path)
+    old = "project_dir = get_lockfile_dir(request.scope)"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "project_dir = Path(manifest_path)", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-frozen-mutation-eligibility"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 def test_ref_freshness_guard_rejects_unconditional_cache_publication() -> None:
     """A checkout must not promote a lock pin into a fresh named observation."""
     path = "src/apm_cli/deps/github_downloader.py"

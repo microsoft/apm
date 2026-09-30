@@ -257,18 +257,21 @@ class InstallService:
     def enforce_frozen(request: InstallRequest) -> None:
         """Raise :class:`FrozenInstallError` if lockfile is absent or stale.
 
-        Looks up ``apm.lock.yaml`` next to the manifest's ``apm.yml``,
-        loads it, and checks both package dependencies and the canonical
+        Reads the scoped installation's ``apm.lock.yaml`` (manifest-relative
+        for unscoped API callers) and checks package dependencies and the canonical
         current MCP config view. Any miss raises before install mutation.
         """
         from pathlib import Path
 
+        from apm_cli.core.scope import get_lockfile_dir
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import lockfile_satisfies_manifest
 
         manifest_path = getattr(request.apm_package, "package_path", None)
-        if manifest_path is None:
+        if request.scope is not None:
+            project_dir = get_lockfile_dir(request.scope)
+        elif manifest_path is None:
             project_dir = Path(".")
         elif Path(manifest_path).is_file():
             project_dir = Path(manifest_path).parent

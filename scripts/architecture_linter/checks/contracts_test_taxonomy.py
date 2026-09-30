@@ -537,6 +537,23 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                     "Dependency aliases must use shared validation and strict materialization ownership",
                 )
             )
+    discovery_path = "src/apm_cli/primitives/discovery.py"
+    discovery, errors = _facts_for(provider, discovery_path, rule_id)
+    findings.extend(errors)
+    if not errors and (
+        not _present(discovery, "dep.get_install_path(modules_root)")
+        or not _present(discovery, "lock.get_installed_paths(modules_root)")
+        or not _present(discovery, "resolve_lockfile_path_for_read(installed_root, read_only=True)")
+        or _present(discovery, 'dep.repo_url.split("/")')
+        or _present(discovery, "dep.get_virtual_package_name()")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                discovery_path,
+                "Dependency discovery must consume canonical materialization and lockfile paths",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )
