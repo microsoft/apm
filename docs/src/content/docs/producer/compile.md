@@ -307,6 +307,12 @@ root-context targets:
 OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
 retains explicit sections for `applyTo` instructions as well.
 
+For Claude, global compilation omits an instruction only when its rendered
+content matches its native user rule. If all instructions are covered, APM
+leaves any existing `CLAUDE.md` unchanged and does not generate a new one.
+Global `--clean` is unsupported. To generate `CLAUDE.md` anyway, use
+`--force-instructions`; see the [compile reference](../../reference/cli/compile/).
+
 ### Overwrite protection
 
 When a target root context file exists but contains no APM marker, it is
