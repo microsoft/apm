@@ -358,6 +358,29 @@ class TestCursorTokenInjection(unittest.TestCase):
         self.assertNotIn("env-secret", stored)
         self.assertNotIn("manager-secret", stored)
 
+    def test_explicit_manifest_authorization_wins_over_github_token(self):
+        """Only a manifest-authored Authorization header overrides auto auth."""
+        from apm_cli.models.dependency.mcp import ManifestHeaderValue
+
+        authorization = "Bearer author-supplied-static-value"
+        server_info = {
+            "name": "github-mcp-server",
+            "remotes": [
+                {
+                    "url": "https://api.github.com/v1",
+                    "transport_type": "http",
+                    "headers": [
+                        {"name": "Authorization", "value": ManifestHeaderValue(authorization)},
+                    ],
+                },
+            ],
+        }
+        with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
+            mock_tm.return_value.get_token_for_purpose.return_value = "unexpected-token"
+            config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["headers"]["Authorization"], authorization)
+        mock_tm.assert_not_called()
+
     def test_unsupported_packages_raises_valueerror(self):
         """When _select_best_package returns None, raise ValueError instead of silent {}."""
         server_info = {
