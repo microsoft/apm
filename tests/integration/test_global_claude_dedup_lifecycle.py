@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+from apm_cli.utils.yaml_io import dump_yaml_roundtrip, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -172,7 +173,7 @@ def test_stale_generated_memory_requires_explicit_clean_and_dry_run_is_read_only
 
     assert lifecycle.memory.read_bytes() == stale
     message = " ".join((result.stdout + result.stderr).split())
-    assert "CLAUDE.md" in message
+    assert "CLAUDE.md" in "".join(message.split())
     assert "--clean" in message
     assert "compile" in message
     roots = {
@@ -269,6 +270,38 @@ def test_canonical_native_content_accepts_platform_newlines(
     assert style.read_bytes() == native_before
 
 
+@pytest.mark.parametrize("flags", [(), ("--clean",), ("--clean", "--dry-run")])
+def test_matching_native_rules_cannot_bypass_compiled_output_policy(
+    tmp_path: Path, apm_binary_path: Path, flags: tuple[str, ...]
+) -> None:
+    """Native coverage cannot authorize unsafe content or cleanup before policy."""
+    lifecycle = _create_lifecycle(tmp_path, apm_binary_path)
+    lifecycle.stale_memory()
+    manifest_path = lifecycle.isolated.home / ".apm" / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    assert manifest is not None
+    manifest["target"] = "claude"
+    manifest.pop("targets", None)
+    dump_yaml_roundtrip(manifest, manifest_path)
+    sources = list(
+        (lifecycle.isolated.home / ".apm" / "apm_modules").rglob("style.instructions.md")
+    )
+    assert len(sources) == 1
+    native = lifecycle.rules / "style.md"
+    for path in (sources[0], native):
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(_STYLE, f"{_STYLE}\u202e"),
+            encoding="utf-8",
+        )
+    roots = {"claude": lifecycle.claude_root, "codex": lifecycle.codex.parent}
+    before = ArtifactSnapshotSet.capture(roots)
+
+    result = lifecycle.run("compile", "-g", *flags, expected_returncode=1)
+
+    assert "critical hidden characters" in result.stdout
+    assert ArtifactSnapshotSet.capture(roots) == before
+
+
 @pytest.mark.parametrize(
     "ownership", ["hand-authored", "edited-generated", "valid-prior-generation"]
 )
@@ -309,7 +342,6 @@ def test_clean_preserves_personal_memory_bytes(
     assert {path.name: path.read_bytes() for path in lifecycle.rules.glob("*.md")} == native_before
 
 
-@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
 @pytest.mark.parametrize("escaped", [False, True], ids=["within-config", "outside-config"])
 def test_clean_preserves_symlinked_memory_and_its_destination(
     tmp_path: Path, apm_binary_path: Path, escaped: bool
@@ -320,7 +352,10 @@ def test_clean_preserves_symlinked_memory_and_its_destination(
     destination_root = lifecycle.isolated.work_root if escaped else lifecycle.claude_root
     destination = destination_root / "personal-memory.md"
     lifecycle.memory.rename(destination)
-    lifecycle.memory.symlink_to(destination)
+    try:
+        lifecycle.memory.symlink_to(destination)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlinks unavailable: {exc}")
 
     result = lifecycle.run("compile", "-g", "--clean", expected_returncode=int(escaped))
 
@@ -332,7 +367,6 @@ def test_clean_preserves_symlinked_memory_and_its_destination(
     assert "Traceback" not in result.stdout + result.stderr
 
 
-@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
 @pytest.mark.parametrize("link_kind", ["rule-inside", "rule-outside", "rules-directory"])
 def test_symlinked_native_rules_retain_fallback_and_preserve_destination(
     tmp_path: Path, apm_binary_path: Path, link_kind: str
@@ -345,7 +379,6 @@ def test_symlinked_native_rules_retain_fallback_and_preserve_destination(
         link = lifecycle.rules
         destination = lifecycle.isolated.work_root / "saved-rules"
         link.rename(destination)
-        link.symlink_to(destination, target_is_directory=True)
     else:
         link = style
         destination_root = (
@@ -353,7 +386,10 @@ def test_symlinked_native_rules_retain_fallback_and_preserve_destination(
         )
         destination = destination_root / "saved-style.md"
         link.rename(destination)
-        link.symlink_to(destination)
+    try:
+        link.symlink_to(destination, target_is_directory=link_kind == "rules-directory")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlinks unavailable: {exc}")
 
     lifecycle.run("compile", "-g", "--clean")
 

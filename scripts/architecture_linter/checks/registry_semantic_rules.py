@@ -272,6 +272,8 @@ _NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         _USER_ROOT_CONTEXT,
         "compile_user_root_contexts",
         (
+            "_, coverage_verdict = CompiledOutputWriter().prepare("
+            "{output_path: _generate_content(unfiltered_instructions)})",
             "matched = integrator.deployed_rule_matches(instruction.file_path, scoped, deploy_root)",
             "if not matched:\n    target_instructions.append(instruction)",
         ),

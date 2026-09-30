@@ -1141,6 +1141,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="User-root cleanup bypasses the canonical protection and deletion owner.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-native-instruction-projection",
+        rule_id="hooks-integrations-native-instruction-projection",
+        path="src/apm_cli/compilation/user_root_context.py",
+        old="_, coverage_verdict = CompiledOutputWriter().prepare(",
+        new="_, coverage_verdict = _local_policy_prepare(",
+        intent="Native suppression bypasses the canonical compiled-output policy owner.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",
         path="src/apm_cli/compilation/root_context_protection.py",

@@ -174,6 +174,10 @@ compiled fallback. This uses the user rules directory, including an absolute
 `CLAUDE_CONFIG_DIR` outside your home, not the current project's rules. Other
 targets retain their existing output.
 
+The complete Claude instruction selection is checked by the compiled-output
+security policy before native-rule suppression or cleanup, including dry-run.
+Critical hidden characters fail compilation without changing the Claude root.
+
 An existing redundant user `CLAUDE.md` is retained until you explicitly clean it:
 
 ```bash

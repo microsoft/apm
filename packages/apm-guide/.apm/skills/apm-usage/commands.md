@@ -218,6 +218,9 @@ preview with `apm compile -g --clean --dry-run`, then run
 the current instructions and complete native coverage. Hand-authored, edited,
 unverifiable, and symlinked roots are retained. Partial coverage preserves
 fallback output. Dry-run never mutates files.
+Claude's complete instruction selection passes the compiled-output security
+check before suppression or cleanup, including dry-run; critical hidden
+characters fail compilation without changing its root.
 
 After a project install stages dependency instructions for Gemini, Codex,
 OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint naming

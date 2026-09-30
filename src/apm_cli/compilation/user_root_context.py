@@ -200,6 +200,7 @@ def compile_user_root_contexts(
     from ..integration.instruction_integrator import InstructionIntegrator
     from ..utils.path_security import PathTraversalError, ensure_path_within
     from .constants import AGENTS_MD_GENERATED_MARKER
+    from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
     from .root_context_protection import clean_redundant_user_root, protected_user_root_status
 
     log = logger or logging.getLogger(__name__)
@@ -264,6 +265,25 @@ def compile_user_root_contexts(
 
         unfiltered_instructions = target_instructions
         if family == "claude":
+            try:
+                _, coverage_verdict = CompiledOutputWriter().prepare(
+                    {output_path: _generate_content(unfiltered_instructions)}
+                )
+            except CompiledOutputPolicyError:
+                results.append(
+                    UserRootCompileResult(
+                        scoped.name,
+                        output_path,
+                        "error:critical hidden characters in compiled output",
+                        has_critical_security=True,
+                    )
+                )
+                continue
+            if coverage_verdict.has_findings:
+                log.warning(
+                    "user_root_context: selected Claude instructions contain hidden "
+                    "characters -- run 'apm audit' to inspect"
+                )
             target_instructions = []
             for instruction in unfiltered_instructions:
                 try:
@@ -345,8 +365,6 @@ def compile_user_root_contexts(
         pending.append((index, scoped.name, output_path, content))
 
     if pending:
-        from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
-
         try:
             verdict = CompiledOutputWriter().write_many(
                 {path: content for _, _, path, content in pending}
