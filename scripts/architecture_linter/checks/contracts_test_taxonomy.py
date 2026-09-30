@@ -178,6 +178,19 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
 
     findings: list[Violation] = []
     resolver = owner_index.function("resolve_lockfile_path_for_read")
+    if not all(
+        _present(owner, fragment)
+        for fragment in (
+            "and not new_path.is_symlink()",
+            "legacy_path.exists() or legacy_path.is_symlink()",
+            "not path.exists() and not path.is_symlink()",
+        )
+    ):
+        findings.append(
+            _summary(
+                rule_id, _LOCKFILE_OWNER, "Lockfile reads must retain present symlink metadata"
+            )
+        )
     if resolver is None:
         findings.append(
             _summary(rule_id, _LOCKFILE_OWNER, "Read-only lockfile resolver must have one owner")

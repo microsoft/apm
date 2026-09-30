@@ -10,6 +10,7 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.primitives.discovery import get_dependency_declaration_order
 from apm_cli.primitives.models import PrimitiveCollection
 from apm_cli.utils.yaml_io import dump_yaml
+from tests.utils.artifact_snapshot import ArtifactSnapshot
 
 pytestmark = pytest.mark.component
 
@@ -135,6 +136,90 @@ def test_declared_root_without_memory_does_not_import_nested_docs(tmp_path: Path
     _manifest(tmp_path, ["owner/rootless"])
     _memory(tmp_path, "owner/rootless/docs")
     assert ClaudeFormatter(str(tmp_path))._collect_dependencies() == []
+
+
+@pytest.mark.parametrize(
+    ("modern", "legacy", "selected"),
+    [
+        ("absent", "absent", None),
+        ("absent", "dangling", "apm.lock"),
+        ("absent", "valid-link", "apm.lock"),
+        ("dangling", "valid-link", "apm.lock.yaml"),
+        ("valid-link", "dangling", "apm.lock.yaml"),
+        ("dangling", "dangling", "apm.lock.yaml"),
+        ("valid-link", "valid-link", "apm.lock.yaml"),
+    ],
+)
+def test_lock_metadata_links_preserve_precedence_and_fail_closed(
+    tmp_path: Path, modern: str, legacy: str, selected: str | None
+) -> None:
+    _memory(tmp_path, "owner/unrecorded")
+    for filename, state in (("apm.lock.yaml", modern), ("apm.lock", legacy)):
+        if state == "absent":
+            continue
+        target = tmp_path / f"{filename}.target"
+        if state == "valid-link":
+            LockFile().write(target)
+        (tmp_path / filename).symlink_to(target)
+    before = ArtifactSnapshot.capture(tmp_path)
+    result = ClaudeFormatter(str(tmp_path)).format_distributed(PrimitiveCollection(), {})
+    invalid = selected is not None and (
+        modern == "dangling" if selected == "apm.lock.yaml" else legacy == "dangling"
+    )
+    assert result.success is not invalid
+    if invalid:
+        assert any(selected in error for error in result.errors)
+        assert not result.content_map
+    else:
+        imports = [
+            line
+            for line in result.content_map.get(tmp_path / "CLAUDE.md", "").splitlines()
+            if line.startswith("@")
+        ]
+        assert imports == (["@apm_modules/owner/unrecorded/CLAUDE.md"] if selected is None else [])
+    assert ArtifactSnapshot.capture(tmp_path) == before
+
+
+@pytest.mark.parametrize("file_count", [500, 5000])
+def test_local_bundle_containment_work_is_per_unique_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, file_count: int
+) -> None:
+    from apm_cli.primitives import discovery
+
+    lock = LockFile()
+    lock.local_deployed_files = [
+        f"apm_modules/bundle/.apm/instructions/rule-{index}.instructions.md"
+        for index in range(file_count)
+    ]
+    lock.write(tmp_path / "apm.lock.yaml")
+    _memory(tmp_path, "bundle")
+    calls = []
+    original = discovery.ensure_path_within
+
+    def track(path: Path, base: Path) -> Path:
+        calls.append(path)
+        return original(path, base)
+
+    monkeypatch.setattr(discovery, "ensure_path_within", track)
+    assert get_dependency_declaration_order(str(tmp_path)) == ["bundle"]
+    assert calls.count(tmp_path / "apm_modules/bundle") == 1
+
+
+def test_cross_drive_recovery_respects_selected_source_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, output = tmp_path / "source", tmp_path / "output"
+    _manifest(source, ["owner/pkg"])
+    _memory(source, "owner/pkg")
+    monkeypatch.setattr(
+        "apm_cli.compilation.claude_formatter.portable_link_relpath", lambda *_: None
+    )
+    result = ClaudeFormatter(str(output), str(source)).format_distributed(PrimitiveCollection(), {})
+    assert not result.success
+    message = "\n".join(result.errors)
+    assert str(source / "apm_modules") in message
+    assert str(output) in message
+    assert "selected module store's drive" in message
 
 
 @pytest.mark.parametrize("metadata", ["manifest", "lock"])

@@ -109,8 +109,7 @@ is absent after `apm install --root DIR`, compilation uses `DIR/apm_modules/`
 and its lockfile, including transitive packages. Imports resolve relative to
 the generated file, even when sources and output are in different directories.
 Keep them on the same filesystem drive.
-To replay the redirected installation, `apm install --root DIR --frozen`
-validates `DIR/apm.lock.yaml`, not a lockfile beside the source manifest.
+For frozen replay, see [install's deploy location](../install/#deploy-location).
 
 Project compilation protects root `AGENTS.md` and `CLAUDE.md` files, including
 destinations selected with `--root`. If an existing root file has no

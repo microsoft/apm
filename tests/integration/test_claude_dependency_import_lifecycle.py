@@ -9,6 +9,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -133,6 +134,46 @@ def test_deep_dependency_memory_install_compile_replay_update(
         LifecycleStateSnapshot.capture(output, targets=("claude",)).semantic_bytes
         == initial.semantic_bytes
     )
+
+    if redirect_install:
+        source_lock = consumer.root / "apm.lock.yaml"
+        selected_lock = output / "apm.lock.yaml"
+        source_lock.write_bytes(lock_bytes)
+        assert Path(environment["APM_HOME"]).is_relative_to(Path(environment["HOME"]))
+        roots = {
+            "source": consumer.root,
+            "deploy": output,
+            "home": Path(environment["HOME"]),
+        }
+
+        def reject_without_writes(args: tuple[str, ...], diagnostic: str) -> None:
+            before = ArtifactSnapshotSet.capture(roots)
+            rejected = runner.run(
+                args, scenario_id="deep-claude-rejection", cwd=consumer.root, env=environment
+            )
+            assert rejected.returncode == 1, f"{rejected.stdout}\n{rejected.stderr}"
+            assert diagnostic in rejected.stdout + rejected.stderr
+            assert ArtifactSnapshotSet.capture(roots) == before
+
+        selected_lock.unlink()
+        reject_without_writes((*_INSTALL, "--frozen", *root_args), "requires apm.lock.yaml")
+        selected_lock.write_text("[unclosed", encoding="utf-8")
+        reject_without_writes(compile_args, "Invalid lockfile")
+        selected_lock.unlink()
+        for filename in ("apm.lock.yaml", "apm.lock"):
+            link = output / filename
+            link.symlink_to(output / "missing-lock-target")
+            reject_without_writes(compile_args, filename)
+            link.unlink()
+        selected_lock.write_bytes(lock_bytes)
+        memory = output / "apm_modules/contoso/platform/parent/CLAUDE.md"
+        memory_bytes = memory.read_bytes()
+        memory.unlink()
+        memory.symlink_to(global_memory)
+        reject_without_writes(compile_args, "outside")
+        memory.unlink()
+        memory.write_bytes(memory_bytes)
+        source_lock.unlink()
 
     (leaf_repo.worktree / "CLAUDE.md").write_text("# Leaf v2\n", encoding="utf-8")
     leaf_v2 = repositories.commit(leaf_repo, message="advance deep leaf")

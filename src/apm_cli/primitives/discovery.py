@@ -342,9 +342,10 @@ def get_dependency_declaration_order(
     installed_root = installation_root if installation_root is not None else project_root
     modules_root = installed_root / "apm_modules"
     ensure_path_within(modules_root, installed_root)
-    apm_yml_path = ensure_path_within(project_root / "apm.yml", project_root)
+    apm_yml_path = project_root / "apm.yml"
+    ensure_path_within(apm_yml_path, project_root)
     dependency_names: list[str] = []
-    if apm_yml_path.exists():
+    if apm_yml_path.exists() or apm_yml_path.is_symlink():
         package = APMPackage.from_apm_yml(apm_yml_path)
         for dep in package.get_apm_dependencies():
             # Marketplace references acquire their source coordinates at install;
@@ -356,7 +357,7 @@ def get_dependency_declaration_order(
 
     lockfile_path = resolve_lockfile_path_for_read(installed_root, read_only=True)
     ensure_path_within(lockfile_path, installed_root)
-    lock = LockFile.read(lockfile_path) if lockfile_path.exists() else None
+    lock = LockFile.read(lockfile_path)
     if lock is not None:
         dependency_names.extend(lock.get_installed_paths(modules_root))
         # Local bundles stage primitives without adding a manifest dependency.
@@ -365,9 +366,10 @@ def get_dependency_declaration_order(
         for deployed in lock.local_deployed_files:
             parts = Path(deployed).parts
             if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
-                ensure_path_within(modules_root / parts[1], modules_root)
                 local_slugs.add(parts[1])
-        dependency_names.extend(sorted(local_slugs))
+        for slug in sorted(local_slugs):
+            ensure_path_within(modules_root / slug, modules_root)
+            dependency_names.append(slug)
 
     return list(dict.fromkeys(dependency_names))
 

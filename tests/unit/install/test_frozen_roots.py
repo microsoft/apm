@@ -6,7 +6,7 @@ import pytest
 
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install.errors import FrozenInstallError
+from apm_cli.install.errors import FrozenInstallError, frozen_install_tip
 from apm_cli.install.request import InstallRequest
 from apm_cli.install.service import InstallService
 from apm_cli.models.apm_package import APMPackage
@@ -70,3 +70,26 @@ def test_frozen_scoped_lockfile_selection_is_read_only(
         with pytest.raises(FrozenInstallError, match=message.replace(".", r"\.")):
             InstallService.enforce_frozen(request)
     assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize(
+    ("reasons", "lock_state"),
+    [
+        ([], "package lock state"),
+        (["Missing dependency owner/package"], "package lock state"),
+        (["MCP server example changed"], "MCP lock state"),
+        (
+            ["MCP server example changed", "Missing dependency owner/package"],
+            "package and MCP lock state",
+        ),
+    ],
+)
+def test_frozen_recovery_preserves_selected_install_scope(
+    reasons: list[str], lock_state: str
+) -> None:
+    tip = frozen_install_tip(FrozenInstallError("Cannot replay", reasons=reasons))
+    assert "rerun 'apm install' without --frozen" in tip
+    assert lock_state in tip
+    assert "--root DIR or --global" in tip
+    assert "apm update" not in tip
+    assert "apm outdated" not in tip

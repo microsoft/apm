@@ -278,12 +278,14 @@ class InstallService:
         else:
             project_dir = Path(manifest_path)
         lockfile_path = project_dir / "apm.lock.yaml"
+        missing_message = (
+            f"--frozen requires apm.lock.yaml to exist at {lockfile_path}. "
+            "Rerun the same install command without --frozen, retaining "
+            "--root DIR or --global if specified."
+        )
 
         if not lockfile_path.exists():
-            raise FrozenInstallError(
-                "--frozen requires apm.lock.yaml to exist. "
-                "Run 'apm install' (without --frozen) or 'apm update' first.",
-            )
+            raise FrozenInstallError(missing_message)
 
         try:
             lockfile = LockFile.read(lockfile_path)
@@ -293,10 +295,7 @@ class InstallService:
             ) from e
 
         if lockfile is None:
-            raise FrozenInstallError(
-                "--frozen requires apm.lock.yaml to exist. "
-                "Run 'apm install' (without --frozen) or 'apm update' first.",
-            )
+            raise FrozenInstallError(missing_message)
 
         manifest_deps = list(request.apm_package.get_apm_dependencies())
         manifest_deps.extend(request.apm_package.get_dev_apm_dependencies())

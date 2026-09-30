@@ -288,8 +288,9 @@ class ClaudeFormatter:
                 relative = portable_link_relpath(claude_path, self.base_dir)
                 if relative is None:
                     raise ValueError(
-                        "Cannot link dependency CLAUDE.md across filesystem drives. "
-                        "Install dependencies under the compile output root with apm install --root."
+                        f"Cannot link dependency CLAUDE.md from {modules_root} to "
+                        f"{self.base_dir} across filesystem drives. "
+                        "Compile to an output directory on the selected module store's drive."
                     )
                 dependencies.add(f"@{relative}")
         return sorted(dependencies)
