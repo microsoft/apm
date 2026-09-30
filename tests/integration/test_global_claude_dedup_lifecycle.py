@@ -270,11 +270,24 @@ def test_canonical_native_content_accepts_platform_newlines(
     assert style.read_bytes() == native_before
 
 
-@pytest.mark.parametrize("flags", [(), ("--clean",), ("--clean", "--dry-run")])
+@pytest.mark.parametrize(
+    ("flags", "hidden", "expected_returncode"),
+    [
+        ((), "\u202e", 1),
+        (("--clean",), "\u202e", 1),
+        (("--clean", "--dry-run"), "\u202e", 1),
+        ((), "\u200b", 0),
+    ],
+    ids=["critical", "critical-clean", "critical-preview", "warning-only"],
+)
 def test_matching_native_rules_cannot_bypass_compiled_output_policy(
-    tmp_path: Path, apm_binary_path: Path, flags: tuple[str, ...]
+    tmp_path: Path,
+    apm_binary_path: Path,
+    flags: tuple[str, ...],
+    hidden: str,
+    expected_returncode: int,
 ) -> None:
-    """Native coverage cannot authorize unsafe content or cleanup before policy."""
+    """Native coverage preserves blocking errors and actionable noncritical warnings."""
     lifecycle = _create_lifecycle(tmp_path, apm_binary_path)
     lifecycle.stale_memory()
     manifest_path = lifecycle.isolated.home / ".apm" / "apm.yml"
@@ -290,15 +303,20 @@ def test_matching_native_rules_cannot_bypass_compiled_output_policy(
     native = lifecycle.rules / "style.md"
     for path in (sources[0], native):
         path.write_text(
-            path.read_text(encoding="utf-8").replace(_STYLE, f"{_STYLE}\u202e"),
+            path.read_text(encoding="utf-8").replace(_STYLE, f"{_STYLE}{hidden}"),
             encoding="utf-8",
         )
     roots = {"claude": lifecycle.claude_root, "codex": lifecycle.codex.parent}
     before = ArtifactSnapshotSet.capture(roots)
 
-    result = lifecycle.run("compile", "-g", *flags, expected_returncode=1)
+    result = lifecycle.run("compile", "-g", *flags, expected_returncode=expected_returncode)
 
-    assert "critical hidden characters" in result.stdout
+    message = " ".join((result.stdout + result.stderr).split())
+    if expected_returncode:
+        assert "critical hidden characters" in message
+    else:
+        assert "hidden characters" in message
+        assert "apm audit" in message
     assert ArtifactSnapshotSet.capture(roots) == before
 
 
