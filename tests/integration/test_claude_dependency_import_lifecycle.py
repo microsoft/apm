@@ -152,7 +152,7 @@ def test_deep_dependency_memory_install_compile_replay_update(
                 args, scenario_id="deep-claude-rejection", cwd=consumer.root, env=environment
             )
             assert rejected.returncode == 1, f"{rejected.stdout}\n{rejected.stderr}"
-            assert diagnostic in rejected.stdout + rejected.stderr
+            assert diagnostic in (rejected.stdout + rejected.stderr).replace("\n", "")
             assert ArtifactSnapshotSet.capture(roots) == before
 
         selected_lock.unlink()
