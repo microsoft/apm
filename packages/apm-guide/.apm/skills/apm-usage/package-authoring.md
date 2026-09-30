@@ -347,15 +347,21 @@ tags: [security, validation]
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
 (`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
-way to specify multiple patterns, as it is portably expanded into target-specific
-YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
-Claude, Cursor, Windsurf, Kiro, and Antigravity.
+way to specify multiple patterns, as it is portably expanded into
+target-specific YAML arrays/lists (under `paths:` / `globs:` /
+`fileMatchPattern:`) across Claude, Windsurf, Kiro, and Antigravity.
+For Cursor, APM emits one comma-joined scalar rather than a YAML list
+(`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
+characters are escaped. Descriptions keep printable non-ASCII text readable
+and are quoted when needed to preserve their value.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed
 placement and target-native installation. Use a sequence when its source
 readability matters. To match a literal comma in a filename, escape it as
-`\,`.
+`\,`. APM preserves pattern boundaries when re-joining, including the
+escape in Cursor's scalar. Cursor's documentation does not specify
+literal-comma matching; verify such patterns in your Cursor version.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
