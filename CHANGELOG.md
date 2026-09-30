@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm compile -g` omits instructions already delivered by matching Claude user rules while retaining uncovered instructions and existing fully covered roots for manual review. By @cmyui; addresses #2792. (#2793)
+- Cursor rules now use comma-joined `globs` and readable descriptions, while retaining safe escaping for control characters. (by @YGuyomar, #3011)
 
 ## [0.32.0] - 2026-09-25
 
