@@ -398,6 +398,16 @@ and a collection timeout fails the check rather than skipping it.
 Collection proves a test is selected; a successful Windows job provides
 Windows execution evidence. The existing job timeout bounds runtime.
 
+The `trusted_executable` scheduling marker selects Git/GitHub CLI discovery
+contracts and real install/reinstall/update scenarios for additional Windows
+Python 3.10 and 3.11 jobs. These versions need explicit `PATHEXT` candidates
+for directory-qualified executable lookup. The same tests also carry
+`windows_compat`, so the existing Python 3.12 gate checks compatibility.
+Run the focused contracts locally with
+`uv run --frozen --extra dev pytest -m trusted_executable tests/unit tests/integration`.
+Only a native Windows run demonstrates Windows behavior; passing mocks or
+collection alone do not.
+
 Plugin sequential-install coverage checks deployed-file removal and lockfile
 ownership after uninstall, plus unchanged files and ownership for the retained
 skill. The local fixture covers both an independent skill and a separately
