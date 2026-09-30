@@ -1022,6 +1022,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Host-qualified reference parsing loses its canonical coordinate owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-marketplace-package-remote",
+        rule_id="transport-platform-marketplace-package-remote",
+        path="src/apm_cli/marketplace/resolver.py",
+        old="            dep_ref = lookup",
+        new="            dep_ref = None",
+        intent="Marketplace version resolution drops the canonical package-remote handoff.",
+    ),
+    MutationCase(
         guard_id="transport-platform-network-host-parsing",
         rule_id="transport-platform-network-host-parsing",
         path="src/apm_cli/install/mcp/warnings.py",
