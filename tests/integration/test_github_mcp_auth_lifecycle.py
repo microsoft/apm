@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.adapters.client.cursor import CursorClientAdapter
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -381,18 +380,14 @@ def test_dictionary_registry_headers_install_and_repeat(
         _run(apm_binary_path, project.root, env, *args)
         assert registry.request_paths
         config = json.loads(path.read_text(encoding="utf-8"))
-        native = runtime == "copilot" or CursorClientAdapter._supports_runtime_env_substitution
         explicit = next(iter(manifest_headers.values()), None)
         variable = "USER_PAT" if explicit else "GITHUB_TOKEN"
         expected = "registry-default"
         if explicit == "authored-static":
             expected = explicit
         elif explicit or has_token:
-            if native:
-                reference = f"${{{variable}}}" if runtime == "copilot" else f"${{env:{variable}}}"
-                expected = f"Bearer {reference}"
-            else:
-                expected = "Bearer authored-sentinel" if explicit else "Bearer ambient-sentinel"
+            reference = f"${{{variable}}}" if runtime == "copilot" else f"${{env:{variable}}}"
+            expected = f"Bearer {reference}"
         headers = config["mcpServers"][SERVER]["headers"]
         assert [value for key, value in headers.items() if key.casefold() == "authorization"] == [
             expected
@@ -400,9 +395,8 @@ def test_dictionary_registry_headers_install_and_repeat(
         assert headers["X-Registry"] == "retained"
         assert config["mcpServers"]["user-owned"] == USER_SERVER
         assert config["user-setting"] is True
-        if native:
-            assert "ambient-sentinel" not in path.read_text(encoding="utf-8")
-            assert "authored-sentinel" not in path.read_text(encoding="utf-8")
+        assert "ambient-sentinel" not in path.read_text(encoding="utf-8")
+        assert "authored-sentinel" not in path.read_text(encoding="utf-8")
         first = LifecycleStateSnapshot.capture(project.root, config_paths=(config_path,))
         _run(apm_binary_path, project.root, {**env, "GITHUB_TOKEN": "changed-ambient"}, *args)
         repeated = LifecycleStateSnapshot.capture(project.root, config_paths=(config_path,))
