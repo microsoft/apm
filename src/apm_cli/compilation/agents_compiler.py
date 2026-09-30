@@ -7,6 +7,7 @@ primitives & constitution are unchanged.
 
 import hashlib
 import logging
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
@@ -68,6 +69,24 @@ _AGENTS_ROOT_GENERATED_MARKERS = (
 )
 # Compatibility alias for callers that imported the former module constant.
 _COPILOT_ROOT_GENERATED_MARKER = AGENTS_MD_GENERATED_MARKER
+_BUILD_ID_LINE_RE = re.compile(r"^<!-- Build ID: ([0-9a-f]{12}) -->$")
+
+
+def _has_valid_build_id(content: str) -> bool:
+    """Return whether content contains one Build ID matching its other lines."""
+    lines = content.splitlines()
+    matches = [
+        (index, match)
+        for index, line in enumerate(lines)
+        if (match := _BUILD_ID_LINE_RE.fullmatch(line)) is not None
+    ]
+    if len(matches) != 1:
+        return False
+
+    index, match = matches[0]
+    hash_input = "\n".join(line for line_index, line in enumerate(lines) if line_index != index)
+    expected = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:12]
+    return match.group(1) == expected
 
 
 def _detect_deployed_instructions(
@@ -97,9 +116,60 @@ def _detect_deployed_instructions(
     return any(rules_dir.glob("*.md"))
 
 
+def _get_deployed_instruction_filenames(
+    rules_dir: Path,
+    base_dir: Path,
+    warn_fn: Callable[[str], None],
+    expected_filenames: set[str] | None = None,
+) -> set[str]:
+    """Return safely contained deployed rule names from a target rules directory."""
+    if not rules_dir.is_dir():
+        return set()
+
+    try:
+        ensure_path_within(rules_dir, base_dir)
+    except PathTraversalError:
+        warn_fn(f"{rules_dir} is a symlink outside the project root -- ignoring")
+        return set()
+
+    candidates = (
+        (rules_dir / name for name in expected_filenames)
+        if expected_filenames is not None
+        else rules_dir.glob("*.md")
+    )
+    deployed: set[str] = set()
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            ensure_path_within(candidate, base_dir)
+        except PathTraversalError:
+            warn_fn(f"{candidate} is a symlink outside the project root -- ignoring")
+            continue
+        deployed.add(candidate.name)
+    return deployed
+
+
+def _instruction_rule_filename(target_key: str, instruction: Instruction) -> str | None:
+    """Return the target-native filename for one instruction, when supported."""
+    # Late import avoids a circular dependency: integration.targets imports
+    # integration helpers that eventually reach the compilation package.
+    from ..integration.targets import KNOWN_TARGETS
+
+    target_profile = KNOWN_TARGETS.get(target_key)
+    if not target_profile or "instructions" not in target_profile.primitives:
+        return None
+
+    stem = instruction.file_path.name
+    if stem.endswith(".instructions.md"):
+        stem = stem[: -len(".instructions.md")]
+    return f"{stem}{target_profile.primitives['instructions'].extension}"
+
+
 def _build_expected_rule_filenames(
     target_key: str,
     primitives: PrimitiveCollection,
+    instructions: list[Instruction] | None = None,
 ) -> set[str]:
     """Return the set of expected rule filenames for *target_key* given *primitives*.
 
@@ -118,21 +188,12 @@ def _build_expected_rule_filenames(
         set if the target profile is unknown or lacks an ``instructions``
         primitive mapping.
     """
-    # Late import avoids a circular dependency: integration.targets imports
-    # integration helpers that eventually reach the compilation package.
-    from ..integration.targets import KNOWN_TARGETS
-
-    expected: set[str] = set()
-    target_profile = KNOWN_TARGETS.get(target_key)
-    if target_profile and "instructions" in target_profile.primitives:
-        mapping = target_profile.primitives["instructions"]
-        extension = mapping.extension
-        for instr in primitives.instructions:
-            stem = instr.file_path.name
-            if stem.endswith(".instructions.md"):
-                stem = stem[: -len(".instructions.md")]
-            expected.add(f"{stem}{extension}")
-    return expected
+    source_instructions = primitives.instructions if instructions is None else instructions
+    return {
+        filename
+        for instruction in source_instructions
+        if (filename := _instruction_rule_filename(target_key, instruction)) is not None
+    }
 
 
 # Compiler families allowed inside a multi-target frozenset (built by
@@ -1535,6 +1596,35 @@ class AgentsCompiler:
             [instruction for instruction in primitives.instructions if not instruction.apply_to],
             key=lambda instruction: portable_relpath(instruction.file_path, self.base_dir),
         )
+        if global_instructions and not config.no_dedup:
+            rules_dir = self.base_dir / ".github" / "instructions"
+            expected_filenames = _build_expected_rule_filenames(
+                "copilot",
+                primitives,
+                instructions=global_instructions,
+            )
+            deployed_filenames = _get_deployed_instruction_filenames(
+                rules_dir,
+                self.base_dir,
+                lambda msg: self._log("warning", msg),
+                expected_filenames=expected_filenames,
+            )
+            if deployed_filenames:
+                remaining_instructions = [
+                    instruction
+                    for instruction in global_instructions
+                    if _instruction_rule_filename("copilot", instruction) not in deployed_filenames
+                ]
+                omitted_count = len(global_instructions) - len(remaining_instructions)
+                if omitted_count:
+                    self._log(
+                        "progress",
+                        f"Omitting {omitted_count} global instruction(s) already deployed "
+                        "to .github/instructions/ from copilot-instructions.md",
+                        symbol="info",
+                    )
+                global_instructions = remaining_instructions
+
         if not global_instructions:
             if not config.dry_run:
                 self._cleanup_copilot_root_instructions(output_path, result)
@@ -1566,7 +1656,10 @@ class AgentsCompiler:
             result.success = False
             return result
 
-        if existing is not None and AGENTS_MD_GENERATED_MARKER not in existing:
+        if existing is not None and not has_generated_marker_header(
+            existing,
+            (AGENTS_MD_GENERATED_MARKER,),
+        ):
             rel_path = portable_relpath(output_path, self.base_dir)
             result.warnings.append(
                 f"Skipped {rel_path}: hand-authored file will not be overwritten. "
@@ -1677,13 +1770,29 @@ class AgentsCompiler:
         result: CompilationResult,
     ) -> CompilationResult:
         """Remove stale generated Copilot root instructions when no longer applicable."""
+        if output_path.is_symlink():
+            result.warnings.append(
+                f"Retained {portable_relpath(output_path, self.base_dir)}: "
+                "symbolic links are not removed during Copilot instruction cleanup."
+            )
+            result.stats.setdefault("copilot_root_instructions_removed", 0)
+            return result
+
         if not output_path.exists():
             result.stats.setdefault("copilot_root_instructions_removed", 0)
             return result
 
         try:
             existing = output_path.read_text(encoding="utf-8")
-            if AGENTS_MD_GENERATED_MARKER not in existing:
+            if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
+                result.stats.setdefault("copilot_root_instructions_removed", 0)
+                return result
+            if not _has_valid_build_id(existing):
+                result.warnings.append(
+                    f"Retained {portable_relpath(output_path, self.base_dir)}: "
+                    "the generated marker is present, but the Build ID does not match "
+                    "the current content."
+                )
                 result.stats.setdefault("copilot_root_instructions_removed", 0)
                 return result
 

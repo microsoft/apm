@@ -164,19 +164,27 @@ when iterating on instructions without install's dependency side effects.
 <a id="copilot-deduplication"></a>
 When `.github/instructions/` is already populated with `.instructions.md` files
 (deployed by `apm install --target copilot`), `apm compile --target copilot`
-omits `AGENTS.md` entirely when the only content it would carry is the
-instructions section -- Copilot already reads `.github/instructions/` directly,
-so an instructions-only `AGENTS.md` would be redundant. `AGENTS.md` is still
+omits each matching global instruction from the generated
+`.github/copilot-instructions.md`; Copilot already reads the deployed rule file,
+so carrying that same content in both files is redundant. Global instructions
+without a matching deployed rule remain in `copilot-instructions.md`. When every
+global instruction is already deployed, compile removes an old generated root
+file only when its APM marker and Build ID still match its content. Hand-authored,
+edited, or linked root files are retained.
+
+The existing `AGENTS.md` deduplication also omits the file entirely when the
+only content it would carry is the instructions section. `AGENTS.md` is still
 written when it carries non-instruction content such as a constitution. If
 `.github/instructions/` is later cleared, re-running `apm compile` restores
-`AGENTS.md` with the full instructions section.
+`AGENTS.md` and `copilot-instructions.md` with the instructions they can carry.
 
 This deduplication is **target-aware**: it only activates when the sole
 AGENTS.md consumer is Copilot. When compiling for targets that do not read
 `.github/instructions/` (Codex, OpenCode, Windsurf, etc.), instructions
 are always included in `AGENTS.md` regardless of whether
 `.github/instructions/` exists. To opt out of deduplication even for
-Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`):
+Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`) to
+include matching global instructions in `copilot-instructions.md` as well:
 
 ```bash
 apm compile --target copilot --force-instructions

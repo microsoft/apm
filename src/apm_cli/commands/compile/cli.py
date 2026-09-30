@@ -1223,7 +1223,9 @@ def _run_compilation(
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
         "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, or .agents/rules/ for Antigravity. Overrides the "
+        "already populated, in .github/copilot-instructions.md even when the "
+        "matching .github/instructions/ file is deployed, or in .agents/rules/ "
+        "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "
         "duplicate context. Affects the Claude, Copilot, and Antigravity "
         "deduplication paths. Alias: --no-dedup."
