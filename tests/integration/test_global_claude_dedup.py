@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize("custom_config", [False, True])
 @pytest.mark.parametrize("linked", [False, True])
@@ -57,10 +59,10 @@ def test_installed_global_rules_are_not_compiled_again(
         clear_discovery_cache()
 
 
-def test_global_clean_previews_then_removes_only_redundant_claude_root(
+def test_global_compile_retains_existing_root_and_rejects_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The CLI supports explicit cleanup and reports removal without contradictory output."""
+    """Deduplication never enables global cleanup or silently deletes an existing root."""
     from apm_cli.commands.compile.cli import compile as compile_cmd
     from apm_cli.primitives.discovery import clear_discovery_cache
 
@@ -93,25 +95,25 @@ def test_global_clean_previews_then_removes_only_redundant_claude_root(
 
         retained = runner.invoke(compile_cmd, ["-g"])
         assert retained.exit_code == 0, retained.output
-        assert "--clean --dry-run" in retained.output
+        assert "Review it manually" in " ".join(retained.output.split())
+        assert "--clean --dry-run" not in retained.output
         assert root.read_bytes() == original
 
-        preview = runner.invoke(compile_cmd, ["-g", "--clean", "--dry-run"])
+        preview = runner.invoke(compile_cmd, ["-g", "--dry-run"])
         assert preview.exit_code == 0, preview.output
-        assert "would remove" in preview.output.lower()
+        assert "retained" in preview.output.lower()
         assert root.read_bytes() == original
 
         cleaned = runner.invoke(compile_cmd, ["-g", "--clean"])
-        assert cleaned.exit_code == 0, cleaned.output
-        assert "removed" in cleaned.output.lower()
-        assert "No user-scope root context files changed" not in cleaned.output
-        assert not root.exists()
+        assert cleaned.exit_code == 2, cleaned.output
+        assert "--global is not valid with --clean" in cleaned.output
+        assert root.read_bytes() == original
         assert codex.read_bytes() == codex_original
         assert rule.read_text(encoding="utf-8") == body
 
-        repeated = runner.invoke(compile_cmd, ["-g", "--clean"])
+        repeated = runner.invoke(compile_cmd, ["-g"])
         assert repeated.exit_code == 0, repeated.output
-        assert not root.exists()
+        assert root.read_bytes() == original
         assert codex.read_bytes() == codex_original
     finally:
         clear_discovery_cache()

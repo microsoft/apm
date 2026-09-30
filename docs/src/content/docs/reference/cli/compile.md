@@ -160,19 +160,9 @@ suppress that instruction. If all instructions are covered, no new `CLAUDE.md`
 is generated. Pass `--force-instructions` with `-g` to create the root fallback
 anyway. Other targets still receive their compiled instructions.
 
-An existing redundant `CLAUDE.md` is retained unless you request cleanup:
-
-```bash
-apm compile -g --clean --dry-run
-apm compile -g --clean
-```
-
-Global `--clean` only removes a fully redundant Claude root that still matches
-the generated output of the current complete global instruction set. Symlinks,
-hand-authored files, and content that differs from that expected output are
-retained for manual review. This conservative check can also retain older or
-partially compiled roots after packages change. It does not clean other
-orphaned target files or modify native rules.
+When native rules cover all instructions, any existing `CLAUDE.md` is retained
+unchanged. Review it manually for duplicate content. Global compilation does
+not remove roots or modify native rules; `--clean` remains project-only.
 
 Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
 `~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target

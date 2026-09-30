@@ -207,12 +207,10 @@ Global Claude compilation omits instructions already delivered by matching
 native rules under `~/.claude/rules/` (or `$CLAUDE_CONFIG_DIR/rules/`). Only
 uncovered instructions remain in `CLAUDE.md`; other targets are unchanged.
 If all instructions are covered, no new Claude root is generated unless
-`--force-instructions` is passed. To remove an existing redundant root, preview
-`apm compile -g --clean --dry-run`, then run `apm compile -g --clean`. Cleanup
-requires an exact match to the generated output of the current complete global
-instruction set. Hand-authored, edited, older, partially compiled, or symlinked
-roots may require manual review; native rules and other orphaned target files
-are not removed.
+`--force-instructions` is passed. Existing roots are retained unchanged when
+native rules cover all instructions; review them manually for duplicate
+content. Global compilation does not remove roots or modify native rules.
+`--clean` remains project-only.
 
 After a project install stages dependency instructions for Gemini, Codex,
 OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint naming

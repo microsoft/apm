@@ -274,7 +274,6 @@ def remove_stale_deployed_files(
     failed_path_retained: bool = True,
     user_scope: bool = False,
     allow_final_symlink: bool = False,
-    allowed_prefixes: tuple[str, ...] | None = None,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -305,11 +304,6 @@ def remove_stale_deployed_files(
             the user to remove the file manually instead.
         user_scope: Include registered user-root prefixes such as
             ``.copilot/`` when validating legacy deployed-file paths.
-        allowed_prefixes: Optional trusted caller override for the path
-            validator's integration prefixes. Compilers can use an exact root
-            filename relative to their configured deploy root. Containment,
-            directory, and provenance checks still apply; callers must provide
-            only the intended stale paths, not discover files by this prefix.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -399,7 +393,6 @@ def remove_stale_deployed_files(
                 targets=targets,
                 user_scope=user_scope,
                 allow_final_symlink=allow_final_symlink,
-                allowed_prefixes=allowed_prefixes,
             ):
                 result.skipped_unmanaged.append(stale_path)
                 continue

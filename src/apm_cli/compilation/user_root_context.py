@@ -18,7 +18,7 @@ Files are ONLY written when:
 
 Hand-authored files (no marker) are left untouched.
 Claude instructions already delivered by equivalent native user rules are
-omitted. Explicit cleanup can remove an unchanged, fully redundant Claude root.
+omitted. Existing roots are retained when native rules cover all instructions.
 """
 
 from __future__ import annotations
@@ -163,71 +163,21 @@ def discover_global_instructions(
     )
 
 
-def _handle_redundant_claude_root(
+def _handle_covered_claude_root(
     target: str,
     path: Path,
     expected_content: str,
     *,
-    clean: bool,
-    dry_run: bool,
     warnings: tuple[str, ...] = (),
 ) -> UserRootCompileResult:
-    """Retain or explicitly clean an unchanged root now covered by native rules.
-
-    Global roots have no deployment hash ledger. Require the exact legacy
-    output of the current instruction set, not merely a generated marker,
-    before removal. Older or edited content is left for manual review.
-    """
-    from ..integration.cleanup import remove_stale_deployed_files
-    from ..utils.diagnostics import DiagnosticCollector
-    from .constants import AGENTS_MD_GENERATED_MARKER, has_generated_marker_header
-
+    """Skip new output without claiming ownership of an existing root."""
     security_error = _validate_compiled_output_policy(target, path, expected_content, warnings)
     if security_error is not None:
         return security_error
-    if path.is_symlink():
-        return UserRootCompileResult(target, path, "skipped-symlink", warnings=warnings)
-    if not path.exists():
-        return UserRootCompileResult(target, path, "skipped-native-rules", warnings=warnings)
-    try:
-        existing = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return UserRootCompileResult(
-            target, path, f"error:cannot read {path}: {exc}", warnings=warnings
-        )
-    if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
-        return UserRootCompileResult(target, path, "skipped-hand-authored", warnings=warnings)
-    if existing != expected_content:
-        return UserRootCompileResult(target, path, "skipped-modified", warnings=warnings)
-    if not clean:
-        return UserRootCompileResult(target, path, "retained-redundant", warnings=warnings)
-    if dry_run:
-        return UserRootCompileResult(target, path, "would-remove", warnings=warnings)
-
-    # Hash the expected generated output, not untrusted on-disk bytes. The
-    # cleanup owner rechecks it and refuses a replacement symlink or user edit.
-    expected_hash = "sha256:" + hashlib.sha256(expected_content.encode("utf-8")).hexdigest()
-    result = remove_stale_deployed_files(
-        [path.name],
-        path.parent,
-        dep_key="global-claude-root",
-        targets=[],
-        diagnostics=DiagnosticCollector(),
-        recorded_hashes={path.name: expected_hash},
-        allowed_prefixes=(path.name,),
-        allow_final_symlink=True,
-        failed_path_retained=False,
+    status = (
+        "retained-native-rules" if path.is_symlink() or path.exists() else "skipped-native-rules"
     )
-    if result.failed or result.skipped_unmanaged:
-        return UserRootCompileResult(
-            target,
-            path,
-            f"error:could not remove {path}; inspect its access and path, then retry",
-            warnings=warnings,
-        )
-    if result.skipped_user_edit:
-        return UserRootCompileResult(target, path, "skipped-modified", warnings=warnings)
-    return UserRootCompileResult(target, path, "removed", warnings=warnings)
+    return UserRootCompileResult(target, path, status, warnings=warnings)
 
 
 def _validate_compiled_output_policy(
@@ -257,7 +207,6 @@ def compile_user_root_contexts(
     source_root: Path,
     *,
     dry_run: bool = False,
-    clean: bool = False,
     force_instructions: bool = False,
     logger: _logging_module.Logger | None = None,
 ) -> list[UserRootCompileResult]:
@@ -277,8 +226,6 @@ def compile_user_root_contexts(
             e.g. ``Path.home() / ".apm"``.
         dry_run: When True, no files are written or directories created.
             The returned status values reflect what *would* happen.
-        clean: Remove an unchanged Claude root fully covered by native rules.
-            Other orphaned output and hand-authored or edited roots are retained.
         force_instructions: Include Claude instructions in the root file even
             when equivalent native rules are already present.
         logger: Optional logger.  Falls back to ``logging.getLogger(__name__)``.
@@ -294,10 +241,7 @@ def compile_user_root_contexts(
         * ``"skipped-no-instructions"`` -- no global instructions found
         * ``"skipped-hand-authored"`` -- existing file has no APM marker
         * ``"skipped-native-rules"`` -- Claude rules already deliver all instructions
-        * ``"retained-redundant"``   -- redundant generated root needs explicit cleanup
-        * ``"skipped-modified"``    -- redundant root differs from expected output
-        * ``"skipped-symlink"``     -- redundant root is a user-owned symlink
-        * ``"removed"`` / ``"would-remove"`` -- explicit redundant-root cleanup
+        * ``"retained-native-rules"`` -- native coverage leaves the existing root untouched
         * ``"error:<msg>"``          -- OS error during read or write
     """
     from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -372,12 +316,10 @@ def compile_user_root_contexts(
                 )
             if not target_instructions:
                 results.append(
-                    _handle_redundant_claude_root(
+                    _handle_covered_claude_root(
                         scoped.name,
                         lexical_output_path,
                         _generate_content(global_instructions),
-                        clean=clean,
-                        dry_run=dry_run,
                         warnings=tuple(native_warnings),
                     )
                 )
@@ -397,7 +339,11 @@ def compile_user_root_contexts(
                 existing = output_path.read_text(encoding="utf-8")
             except OSError as exc:
                 log.warning("user_root_context: cannot read %s: %s", output_path, exc)
-                results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
+                results.append(
+                    UserRootCompileResult(
+                        scoped.name, output_path, f"error:{exc}", warnings=tuple(native_warnings)
+                    )
+                )
                 continue
 
             if not existing.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):
@@ -406,13 +352,22 @@ def compile_user_root_contexts(
                     output_path,
                 )
                 results.append(
-                    UserRootCompileResult(scoped.name, output_path, "skipped-hand-authored")
+                    UserRootCompileResult(
+                        scoped.name,
+                        output_path,
+                        "skipped-hand-authored",
+                        warnings=tuple(native_warnings),
+                    )
                 )
                 continue
 
             if existing == content:
                 log.debug("user_root_context: %s is unchanged", output_path)
-                results.append(UserRootCompileResult(scoped.name, output_path, "unchanged"))
+                results.append(
+                    UserRootCompileResult(
+                        scoped.name, output_path, "unchanged", warnings=tuple(native_warnings)
+                    )
+                )
                 continue
 
         if dry_run:
