@@ -135,7 +135,7 @@ class TestResolveTrustedExecutable:
             result = _resolve_trusted_executable("git")
 
         assert result == str((trusted_bin / "git").resolve())
-        mock_which.assert_called_once_with(str(trusted_bin / "git"))
+        mock_which.assert_called_once_with("git", path=str(trusted_bin))
 
     def test_rejects_candidate_resolving_inside_worktree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -152,6 +152,25 @@ class TestResolveTrustedExecutable:
             pytest.raises(FileNotFoundError),
         ):
             _resolve_trusted_executable("git")
+
+    def test_passes_directory_as_path_to_shutil_which(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify candidate lookup passes directory via path parameter for PATHEXT resolution on Windows."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        monkeypatch.chdir(project)
+
+        with (
+            patch("os.get_exec_path", return_value=[str(trusted_bin)]),
+            patch("shutil.which", return_value=str(trusted_bin / "git.exe")) as mock_which,
+        ):
+            result = _resolve_trusted_executable("git")
+
+        assert result == str((trusted_bin / "git.exe").resolve())
+        mock_which.assert_called_once_with("git", path=str(trusted_bin))
 
 
 class TestGitSubprocessEnv:
