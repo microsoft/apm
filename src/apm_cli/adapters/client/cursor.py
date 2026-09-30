@@ -31,7 +31,7 @@ class CursorClientAdapter(CopilotClientAdapter):
     target_name: str = "cursor"
     mcp_servers_key: str = "mcpServers"
 
-    # Cursor resolves ${env:NAME} in command, args, env, url, and headers.
+    # APM normalizes Cursor env, args, and headers to ${env:NAME}, not command/url.
     # Keep manifest env references native in the project-local config, so
     # those referenced values are not baked into the file. Explicit mcp.env
     # literals remain literal below; shared GitHub token injection is separate.
