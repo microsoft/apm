@@ -13,6 +13,60 @@ pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 RULE_ID = "install-deployment-provenance-state"
 SKILL_INTEGRATOR = "src/apm_cli/integration/skill_integrator.py"
+PIPELINE = "src/apm_cli/install/pipeline.py"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new", "message"),
+    [
+        (
+            SKILL_INTEGRATOR,
+            "finally:\n            self._ownership_snapshots = None",
+            "finally:\n            pass",
+            "snapshots must reuse the canonical builder immutably",
+        ),
+        (
+            SKILL_INTEGRATOR,
+            "MappingProxyType(owned_by)",
+            "owned_by",
+            "snapshots must reuse the canonical builder immutably",
+        ),
+        (
+            SKILL_INTEGRATOR,
+            "self._ownership_maps(lockfile_root or project_root)",
+            "self._build_ownership_maps(lockfile_root or project_root)",
+            "all skill layouts must consume",
+        ),
+        (
+            PIPELINE,
+            'else ctx.integrators["skill"].ownership_snapshot()',
+            "else contextlib.nullcontext()",
+            "snapshot lifetime must enclose only integration",
+        ),
+        (
+            PIPELINE,
+            "if ctx.lockfile_only\n",
+            "if False\n",
+            "snapshot lifetime must enclose only integration",
+        ),
+        (
+            PIPELINE,
+            "        _run_integration_phase(ctx)",
+            "        pass",
+            "snapshot lifetime must enclose only integration",
+        ),
+    ],
+)
+def test_skill_snapshot_guard_rejects_lifetime_and_owner_bypasses(
+    path: str, old: str, new: str, message: str
+) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(old, new, 1)
+    assert mutated != source
+    report = run_selected_rules(ROOT, (RULE_ID,), source_overrides={path: mutated})
+    assert any(
+        finding.rule_id == RULE_ID and message in finding.message for finding in report.violations
+    )
 
 
 def test_user_scope_skill_provenance_guard_is_registered_and_clean() -> None:

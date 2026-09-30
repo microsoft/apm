@@ -6,10 +6,12 @@ import os
 import re
 import shutil
 import stat
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from copy import copy
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from apm_cli.install.deployed_paths import deployed_path_entry
@@ -27,6 +29,7 @@ from apm_cli.integration.skill_package_routing import (
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
+    build_skill_ownership_maps,
     clean_orphaned_skills,
     get_lockfile_owned_agent_skills,
 )
@@ -391,6 +394,33 @@ class SkillIntegrator(BaseIntegrator):
         # Only successful writes establish same-run ownership, keyed by the
         # actual destination rather than a basename shared by several targets.
         self._native_skill_session_owners: dict[Path, str | None] = {}
+        self._ownership_snapshots: (
+            dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
+        ) = None
+
+    @contextmanager
+    def ownership_snapshot(self) -> Iterator[None]:
+        """Reuse immutable durable ownership during one sequential deployment batch."""
+        if self._ownership_snapshots is not None:
+            raise RuntimeError("A skill ownership snapshot is already active")
+        self._ownership_snapshots = {}
+        try:
+            yield
+        finally:
+            self._ownership_snapshots = None
+
+    def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
+        """Read durable ownership once per used root in the current integration phase."""
+        if self._ownership_snapshots is None:
+            return self._build_ownership_maps(lockfile_root)
+        root = lockfile_root.resolve()
+        if root not in self._ownership_snapshots:
+            owned_by, native_owners = self._build_ownership_maps(root)
+            self._ownership_snapshots[root] = (
+                MappingProxyType(owned_by),
+                MappingProxyType(native_owners),
+            )
+        return self._ownership_snapshots[root]
 
     @staticmethod
     def _target_skills_root(target: TargetProfile, project_root: Path) -> Path:
@@ -726,7 +756,7 @@ class SkillIntegrator(BaseIntegrator):
         *,
         warn: bool = True,
         skip_bin: bool = False,
-        owned_by: dict[str, str] | None = None,
+        owned_by: Mapping[str, str] | None = None,
         diagnostics=None,
         managed_files=None,
         force: bool = False,
@@ -863,33 +893,7 @@ class SkillIntegrator(BaseIntegrator):
             deployed.append(target)
         return promoted, deployed
 
-    @staticmethod
-    def _build_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dict[str, str]]:
-        """Read sub-skill name and native-skill destination ownership once.
-
-        Both maps store full dependency identities, never ambiguous basenames.
-        Native ownership includes only ``/skills/`` paths, so unrelated
-        artifacts or another target's same-named skill cannot confer ownership.
-        """
-        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-
-        owned_by: dict[str, str] = {}
-        native_owners: dict[str, str] = {}
-        lockfile = LockFile.read(get_lockfile_path(lockfile_root))
-        if not lockfile:
-            return owned_by, native_owners
-        for dep in lockfile.get_package_dependencies():
-            unique_key = dep.get_unique_key()
-            for deployed_path in dep.deployed_files:
-                normalized = deployed_path.rstrip("/").replace("\\", "/")
-                skill_name = normalized.rsplit("/", 1)[-1]
-                # Both maps cover all paths for sub-skill self-overwrite tracking.
-                owned_by[skill_name] = unique_key
-                # Native-owner map is scoped to skill paths only to avoid false
-                # attribution from prompts/hooks/commands that share a leaf name.
-                if "/skills/" in normalized:
-                    native_owners[normalized] = unique_key
-        return owned_by, native_owners
+    _build_ownership_maps = staticmethod(build_skill_ownership_maps)
 
     @staticmethod
     def _build_skill_ownership_map(lockfile_root: Path) -> dict[str, str]:
@@ -899,10 +903,7 @@ class SkillIntegrator(BaseIntegrator):
 
     @staticmethod
     def _build_native_skill_owner_map(lockfile_root: Path) -> dict[str, str]:
-        """Build a map of skill_name -> dep.get_unique_key() from the lockfile.
-
-        Scoped to ``/skills/`` paths only -- see ``_build_ownership_maps`` for details.
-        """
+        """Project native destination ownership into the legacy skill-name view."""
         _, native_owners = SkillIntegrator._build_ownership_maps(lockfile_root)
         return {path.rsplit("/", 1)[-1]: owner for path, owner in native_owners.items()}
 
@@ -921,21 +922,9 @@ class SkillIntegrator(BaseIntegrator):
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
     ) -> tuple[int, list[Path]]:
-        """Promote sub-skills from a package that is NOT itself a skill.
+        """Promote an instruction package's .apm/skills without a parent skill entry.
 
-        Packages typed as INSTRUCTIONS may still ship sub-skills under
-        ``.apm/skills/``.  This method promotes them to all active targets
-        that support skills, without creating a top-level skill entry for
-        the parent package.
-
-        Args:
-            package_info: PackageInfo object with package metadata.
-            project_root: Root directory of the project.
-            targets: Optional explicit list of TargetProfile objects.
-            skill_subset: Optional tuple of skill names or paths to install (None = all).
-
-        Returns:
-            tuple[int, list[Path]]: (count of promoted sub-skills, list of deployed dirs)
+        Respect explicit targets and skill subsets; return count and deployed paths.
         """
         self.init_link_resolver(package_info, project_root)
         package_path = package_info.install_path
@@ -953,7 +942,7 @@ class SkillIntegrator(BaseIntegrator):
         # _build_ownership_maps).
         _dep_ref = getattr(package_info, "dependency_ref", None)
         parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
-        owned_by = self._build_skill_ownership_map(lockfile_root or project_root)
+        owned_by, _ = self._ownership_maps(lockfile_root or project_root)
         name_filter = (
             source_plan.selected_skill_names
             if source_plan is not None
@@ -1105,8 +1094,7 @@ class SkillIntegrator(BaseIntegrator):
         all_target_paths: list[Path] = []
         primary_skill_md: Path | None = None
 
-        # Read lockfile once and derive both maps in a single pass.
-        owned_by, lockfile_native_owners = self._build_ownership_maps(lockfile_root or project_root)
+        owned_by, lockfile_native_owners = self._ownership_maps(lockfile_root or project_root)
         # Install supplies the pre-normalized set; do not rescan it per package.
         collision_managed = (
             managed_files if managed_files is not None else set(lockfile_native_owners)
@@ -1324,7 +1312,7 @@ class SkillIntegrator(BaseIntegrator):
         parent_name = (
             _dep_ref.get_unique_key() if _dep_ref is not None else package_info.install_path.name
         )
-        owned_by, _ = self._build_ownership_maps(lockfile_root or project_root)
+        owned_by, _ = self._ownership_maps(lockfile_root or project_root)
 
         total_promoted = 0
         all_deployed: list[Path] = []

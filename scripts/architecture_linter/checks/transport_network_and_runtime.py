@@ -142,6 +142,8 @@ def _check_ref_freshness(provider: FactsProvider) -> tuple[Violation, ...]:
             (
                 re.compile(r"^class RefFreshnessPolicy\(Enum\):"),
                 re.compile(r"^def ref_freshness_policy_for_install\("),
+                re.compile(r"^        return cls\.LOCKED_OR_CURRENT$"),
+                re.compile(r"^            dep_ref\.get_unique_key\(\),$"),
                 re.compile(r"^    if freshness_policy\.allows_bare_cache:"),
             ),
             "tiered_ref_resolver must own RefFreshnessPolicy and its install policy",

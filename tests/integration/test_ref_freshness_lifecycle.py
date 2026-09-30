@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -215,6 +215,40 @@ def test_frozen_default_ref_rehydrates_cold_cache_without_ref_drift(
     _assert_same_state(installed, _capture(scenario))
     assert "sha_passthrough=1" in _combined_output(replay)
     _run(scenario, _AUDIT_ARGS, scenario_id="default-ref-audit-a")
+
+
+@pytest.mark.parametrize("unrelated_lock_entry", [False, True])
+def test_reinstall_uses_current_ref_without_a_matching_lock_entry(
+    tmp_path: Path, apm_binary_path: Path, unrelated_lock_entry: bool
+) -> None:
+    """An empty or unrelated lock cannot authorize the removed package's stale cache."""
+    scenario = _new_scenario(tmp_path / "unlocked-ref", apm_binary_path)
+    manifest = scenario.consumer.root / "apm.yml"
+    original_manifest = manifest.read_bytes()
+    sentinel = scenario.consumer.root / "user-owned.txt"
+    sentinel.write_text("preserve\n", encoding="ascii")
+    _run(scenario, _INSTALL_ARGS, scenario_id="unlocked-install-a")
+    commit_b = _advance(scenario, "commit-b")
+    _run(
+        scenario,
+        ("uninstall", "https://github.com/apm-fixture-org/ref-freshness-source"),
+        scenario_id="unlocked-remove-a",
+    )
+    manifest.write_bytes(original_manifest)
+    lock = LockFile()
+    if unrelated_lock_entry:
+        lock.dependencies["unrelated/package"] = LockedDependency(
+            repo_url="unrelated/package", resolved_ref="main", resolved_commit=scenario.commit_a.sha
+        )
+    lock.save(scenario.consumer.root / "apm.lock.yaml")
+    _run(scenario, _INSTALL_ARGS, scenario_id="unlocked-reinstall-b")
+    assert _locked_commit(scenario) == commit_b.sha
+    assert _deployed_bytes(scenario) == _skill_document("commit-b").encode()
+    assert sentinel.read_text(encoding="ascii") == "preserve\n"
+    _run(scenario, _AUDIT_ARGS, scenario_id="unlocked-audit-b")
+    converged = _capture(scenario)
+    _run(scenario, _INSTALL_ARGS, scenario_id="unlocked-repeat-b")
+    _assert_same_state(converged, _capture(scenario))
 
 
 def test_installed_cli_current_state_commands_bypass_stale_bare_cache(

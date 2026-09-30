@@ -612,6 +612,7 @@ contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-native-lifecycle-evidence
 contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation

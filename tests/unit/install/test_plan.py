@@ -768,6 +768,91 @@ class TestLockfileSatisfiesManifest:
         assert bool(reasons) is not satisfied
         assert lock.to_yaml() == before
 
+    def test_frozen_rejects_custom_host_backend_change(self):
+        """The same host/ref cannot reuse a lock from a different backend."""
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package",
+                host="code.example.com",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+            )
+        )
+        manifest = [
+            DependencyReference(
+                repo_url="owner/package",
+                host="code.example.com",
+                host_type="gitlab",
+                reference="main",
+            )
+        ]
+        before = lock.to_yaml()
+        assert lockfile_satisfies_manifest(lock, manifest) == (
+            False,
+            [
+                "  - code.example.com/owner/package: declared source, ref, host provider, "
+                "or transport differs from apm.lock.yaml"
+            ],
+        )
+        assert lock.to_yaml() == before
+
+    @pytest.mark.parametrize("locked_insecure", [False, True])
+    def test_frozen_git_semver_refuses_transport_change_and_recovers(
+        self, locked_insecure: bool
+    ) -> None:
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package",
+                resolved_ref="v1.2.3",
+                constraint="^1.2.0",
+                resolved_commit="a" * 40,
+                is_insecure=locked_insecure,
+            )
+        )
+        manifest = DependencyReference(
+            repo_url="owner/package", reference="^1.2.0", is_insecure=not locked_insecure
+        )
+        before = lock.to_yaml()
+        assert lockfile_satisfies_manifest(lock, [manifest]) == (
+            False,
+            [
+                "  - owner/package: declared source, ref, host provider, "
+                "or transport differs from apm.lock.yaml"
+            ],
+        )
+        assert lock.to_yaml() == before
+        manifest.is_insecure = locked_insecure
+        assert lockfile_satisfies_manifest(lock, [manifest]) == (True, [])
+        assert lock.to_yaml() == before
+
+    @pytest.mark.parametrize(
+        ("manifest_host_type", "locked_host_type"), [(None, "gitlab"), ("gitlab", None)]
+    )
+    def test_frozen_accepts_explicit_and_inferred_equivalent_provider_forms(
+        self, manifest_host_type: str | None, locked_host_type: str | None
+    ) -> None:
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package",
+                host="gitlab.com",
+                host_type=locked_host_type,
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+            )
+        )
+        manifest = [
+            DependencyReference(
+                repo_url="owner/package",
+                host="gitlab.com",
+                host_type=manifest_host_type,
+                reference="main",
+            )
+        ]
+        assert lockfile_satisfies_manifest(lock, manifest) == (True, [])
+
     def test_local_deps_skipped(self):
         """Local file deps have no remote ref, so they're skipped."""
         lock = _new_lockfile()

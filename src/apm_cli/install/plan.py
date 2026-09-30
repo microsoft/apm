@@ -501,7 +501,8 @@ def lockfile_satisfies_manifest(
             continue
         if detect_ref_change(dep, locked_dep):
             reasons.append(
-                f"  - {key}: declared source, ref, or transport differs from apm.lock.yaml"
+                f"  - {key}: declared source, ref, host provider, or transport "
+                "differs from apm.lock.yaml"
             )
 
     return (not reasons, reasons)

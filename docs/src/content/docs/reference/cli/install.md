@@ -116,6 +116,18 @@ in `apm.yml`, then run `apm install` again.
 
 ## Behavior
 
+- **Lock replay and freshness.** A matching dependency, declared ref and host
+  provider reuse the locked commit. A mutable ref without a matching lock entry
+  resolves upstream, even if another package or sibling path is locked.
+  `--frozen` rejects changed refs, full commit pins, host providers and HTTP/HTTPS
+  transport before the pipeline, including transport changes under an unchanged
+  semver range. Review the change and run `apm install --update` to refresh the
+  lock. Unchanged frozen installs do not check whether an upstream branch moved.
+- **Home aliases.** Global skill deployment works when `HOME` or `APM_HOME`
+  names a directory symlink. This does not permit escaping package descendants
+  or symlinked skill destinations. Explicit dependency `alias:` placement is a
+  separate feature; unrelated user files remain protected.
+
 - **Immutable dependency conflicts.** Install fails when two paths require
   different immutable commits for one package identity, showing both paths and
   requested refs as ordered `owner/repo@ref -> owner/repo@ref` chains.

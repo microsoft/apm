@@ -23,7 +23,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
 )
 
-from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_required_lifecycle_state_machine import (
     _INSTALL_ARGS,
@@ -103,6 +103,7 @@ _TRANSITION_PROPERTIES = {
         }
     ),
     "install": frozenset({"routing.authorized_targets_only", "source.ref_cache_coherent"}),
+    "install_unlocked_revision": frozenset({"source.ref_cache_coherent"}),
     "prune_removed": frozenset({"ownership.preserve_unowned"}),
     "readd_declaration": frozenset({"transaction.failed_command_preserves_state"}),
     "reinstall": frozenset({"idempotency.byte_stable"}),
@@ -154,8 +155,13 @@ class _ModelFixture:
         published = _publish(scenario, _PACKAGE_NAME, skill=_SKILL_NAME)
         if variant != "project":
             commit_a = _publish_revision(scenario, published, "a")
-            dependency = {**published.dependency, "ref": "main"}
-            environment = dict(published.environment)
+            remote_url = f"https://code.example.com/apm-fixture-org/{_PACKAGE_NAME}"
+            dependency = {**published.dependency, "git": remote_url, "ref": "main"}
+            environment = scenario.repositories.url_rewrite_subprocess_env(
+                published.repository, remote_url
+            )
+            for setting in ("GITHUB_HOST", "GITLAB_HOST", "APM_GITLAB_HOSTS"):
+                environment.pop(setting, None)
             target_root = scenario.isolated.root / "claude-home"
             target_root.mkdir()
             (target_root / "user-owned.txt").write_bytes(b"user-owned\n")
@@ -182,7 +188,7 @@ class _ModelFixture:
                 published.package,
                 published.repository,
                 commit_a,
-                published.remote_url,
+                remote_url,
                 dependency,
                 environment,
             )
@@ -339,6 +345,37 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         self.locked = True
         self.installed_revision = self.published_revision
         self.installed_commit = self.published_commit
+
+    @rule()
+    @precondition(
+        lambda self: (
+            self.fixture.global_scope
+            and self.declared
+            and not self.materialized
+            and self.published_revision == "b"
+        )
+    )
+    def install_unlocked_revision(self) -> None:
+        """A sibling virtual-package lock cannot authorize the removed revision's cache."""
+        before = self._capture()
+        commit = _publish_revision(self.scenario, self.fixture.source, "c")
+        self.published_revision = "c"
+        self.published_commit = commit.sha
+        assert_snapshot_set_unchanged(before, self._capture())
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url=f"apm-fixture-org/{_PACKAGE_NAME}",
+                host="code.example.com",
+                virtual_path="skills/sibling",
+                is_virtual=True,
+                resolved_ref="main",
+                resolved_commit=self.installed_commit,
+            )
+        )
+        lock.save(self.project.root / "apm.lock.yaml")
+        self.install()
+        assert self._state().deployment_records
 
     @rule()
     @precondition(lambda self: self.declared and self.materialized and self.clean)
@@ -655,6 +692,17 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         _assert_same_state(state, self._state())
         assert_snapshot_set_unchanged(before, self._capture())
         self.project.manifest_path.write_bytes(manifest_bytes)
+        self.fixture.replace_dependencies(({**self.fixture.dependency, "type": "gitlab"},))
+        before, state = self._capture(), self._state()
+        refused = self._run((*self.fixture.install_args, "--frozen"), "frozen-provider-refusal", 1)
+        assert "host provider" in " ".join(refused.stdout.split()), _result_evidence(refused)
+        _assert_same_state(state, self._state())
+        assert_snapshot_set_unchanged(before, self._capture())
+        self.project.manifest_path.write_bytes(manifest_bytes)
+        before, state = self._capture(), self._state()
+        self._run((*self.fixture.install_args, "--frozen"), "frozen-provider-recovery")
+        _assert_same_state(state, self._state())
+        assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
     @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
@@ -709,11 +757,17 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
             dependencies = lock.get_package_dependencies()
             assert len(dependencies) == 1
             assert dependencies[0].resolved_commit == self.installed_commit
+            assert self.fixture.dependency["alias"] == _PACKAGE_NAME
+            assert dependencies[0].alias == _PACKAGE_NAME
+            assert (
+                LockedDependency.from_dict(dependencies[0].to_dict()).to_dependency_ref().alias
+                == _PACKAGE_NAME
+            )
             modules = self.project.root / "apm_modules"
             assert (
-                modules / "apm-fixture-org" / _PACKAGE_NAME / "skills" / _SKILL_NAME / "SKILL.md"
-            ).is_file()
-            assert not (modules / _PACKAGE_NAME).exists()
+                modules / _PACKAGE_NAME / "skills" / _SKILL_NAME / "SKILL.md"
+            ).read_bytes() == _SKILL_BYTES + f"\nrevision-{self.installed_revision}\n".encode()
+            assert not (modules / "apm-fixture-org" / _PACKAGE_NAME).exists()
             assert self._state().deployment_records
             assert (
                 self.fixture.external_roots[0].path / "user-owned.txt"
@@ -807,7 +861,13 @@ def _mandatory_replay(model: _LifecycleReferenceModel) -> None:
         operations.extend([model.uninstall, model.audit_empty])
     else:
         operations.extend([model.remove_declaration, model.prune_removed])
-    operations.extend([model.readd_declaration, model.install, model.audit_clean])
+    operations.extend(
+        [
+            model.readd_declaration,
+            model.install_unlocked_revision if model.fixture.global_scope else model.install,
+            model.audit_clean,
+        ]
+    )
     if model.fixture.global_scope:
         operations.extend([model.uninstall, model.audit_empty])
     else:

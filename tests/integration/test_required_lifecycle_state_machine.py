@@ -18,6 +18,7 @@ from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import (
@@ -28,6 +29,7 @@ from tests.utils.artifact_snapshot import (
     assert_snapshot_set_unchanged,
     assert_unchanged,
 )
+from tests.utils.git_credential_shim import GitCredentialShimFactory
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_git_repository import (
@@ -1858,10 +1860,8 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     prior_deployed_files = list(locked_dependency["deployed_files"])
     prior_deployed_hashes = dict(locked_dependency["deployed_file_hashes"])
 
-    _, installed_dependency = _single_locked_dependency(consumer.root)
-    cached_package = installed_dependency.to_dependency_ref().get_install_path(
-        consumer.root / "apm_modules"
-    )
+    assert source.dependency["alias"] == source.package.name
+    cached_package = consumer.root / "apm_modules" / source.package.name
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
     receipt.unlink()
@@ -1954,10 +1954,8 @@ def test_required_parallel_fresh_fetch_bypasses_legacy_cache_upgrade(
         scenario_id="parallel-fresh-plugin-establish",
     )
 
-    _, installed_dependency = _single_locked_dependency(consumer.root)
-    cached_package = installed_dependency.to_dependency_ref().get_install_path(
-        consumer.root / "apm_modules"
-    )
+    assert source.dependency["alias"] == source.package.name
+    cached_package = consumer.root / "apm_modules" / source.package.name
     lock_path = consumer.root / "apm.lock.yaml"
     lock_document = load_yaml(lock_path)
     locked_dependency = lock_document["dependencies"][0]
@@ -2045,10 +2043,8 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
         scenario_id="invalid-legacy-plugin-establish",
     )
 
-    _, installed_dependency = _single_locked_dependency(consumer.root)
-    cached_package = installed_dependency.to_dependency_ref().get_install_path(
-        consumer.root / "apm_modules"
-    )
+    assert source.dependency["alias"] == source.package.name
+    cached_package = consumer.root / "apm_modules" / source.package.name
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
     receipt.unlink()
@@ -2707,6 +2703,116 @@ def _exercise_global_revision_commands(
     return commit_b
 
 
+def _semver_transport_environment(scenario: _Scenario, source: _PublishedPackage) -> dict[str, str]:
+    """Map real Git operations locally without changing selected transport."""
+    shim = GitCredentialShimFactory(scenario.isolated.root / "semver-git-shim").create(
+        base_env=dict(scenario.environment),
+        real_git=Path(get_git_executable()).resolve(),
+        remote_map={urlparse(source.remote_url).path.lstrip("/"): source.repository.file_url},
+        credential="",
+    )
+    return dict(shim.environment)
+
+
+def _exercise_frozen_semver_transport_commands(
+    run: Callable[..., CommandResult],
+    capture: Callable[[], LifecycleStateSnapshot],
+    manifest_path: Path,
+    lock_path: Path,
+    install_args: tuple[str, ...],
+    artifact_roots: Mapping[str, Path],
+    secure_url: str,
+    expected_commit: GitCommit,
+) -> None:
+    """Refuse both transport flips without conflating a range with its selected tag."""
+    original_manifest = manifest_path.read_bytes()
+    insecure_url = urlparse(secure_url)._replace(scheme="http").geturl()
+    hostname = urlparse(secure_url).hostname
+    assert hostname is not None
+    approved_args = (*install_args, "--allow-insecure", "--allow-insecure-host", hostname)
+    for initial_url, changed_url, direction in (
+        (secure_url, insecure_url, "https-to-http"),
+        (insecure_url, secure_url, "http-to-https"),
+    ):
+        manifest = load_yaml(manifest_path)
+        dependency = manifest["dependencies"]["apm"][0]
+        dependency.update(git=initial_url, ref="^1.0.0", allow_insecure=True)
+        dump_yaml(manifest, manifest_path)
+        run(approved_args, f"semver-{direction}-install")
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        locked = lock.get_package_dependencies()
+        assert len(locked) == 1
+        assert locked[0].constraint == "^1.0.0"
+        assert locked[0].resolved_ref == "v1.0.0"
+        assert locked[0].resolved_commit == expected_commit.sha
+        assert locked[0].is_insecure == (urlparse(initial_url).scheme == "http")
+        accepted_manifest = manifest_path.read_bytes()
+        accepted = capture()
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        run((*approved_args, "--frozen"), f"semver-{direction}-replay")
+        _assert_same_state(accepted, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+        dependency["git"] = changed_url
+        dump_yaml(manifest, manifest_path)
+        refused = capture()
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        result = run(
+            (*approved_args, "--frozen"),
+            f"semver-{direction}-refusal",
+            expected_returncode=1,
+        )
+        assert "transport differs from apm.lock.yaml" in result.stdout + result.stderr
+        _assert_same_state(refused, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+        manifest_path.write_bytes(accepted_manifest)
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        run((*approved_args, "--frozen"), f"semver-{direction}-recovery")
+        _assert_same_state(accepted, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+    manifest_path.write_bytes(original_manifest)
+    run(install_args, "semver-restore-original-declaration")
+
+
+def test_required_frozen_semver_transport_refusal_recovers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _new_scenario(tmp_path / "frozen-semver-transport", apm_binary_path)
+    source = _publish(scenario, "semver-kit", skill="semver-kit")
+    scenario.repositories.tag(source.repository, "v1.0.0", source.commit)
+    environment = _semver_transport_environment(scenario, source)
+    consumer = scenario.consumers.create(
+        "semver-consumer", dependencies=(source.dependency,), targets=("claude",)
+    )
+    user_file = consumer.root / "user-owned.txt"
+    user_file.write_bytes(b"preserve user content\n")
+    roots = {"project": consumer.root, "home": scenario.isolated.home}
+
+    def run(
+        args: tuple[str, ...], scenario_id: str, *, expected_returncode: int = 0
+    ) -> CommandResult:
+        result = scenario.runner.run(
+            args, scenario_id=scenario_id, cwd=consumer.root, env=environment
+        )
+        assert result.returncode == expected_returncode, _result_evidence(result)
+        assert user_file.read_bytes() == b"preserve user content\n"
+        return result
+
+    _exercise_frozen_semver_transport_commands(
+        run,
+        lambda: LifecycleStateSnapshot.capture(consumer.root, targets=("claude",)),
+        consumer.manifest_path,
+        consumer.root / "apm.lock.yaml",
+        _INSTALL_ARGS,
+        roots,
+        source.remote_url,
+        source.commit,
+    )
+
+
 @pytest.mark.parametrize("aliased_home", [False, True])
 def test_required_global_audit_rule_matrix_for_external_roots(
     aliased_home: bool,
@@ -2731,7 +2837,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         sentinel_path.parent.mkdir(parents=True)
         sentinel_path.write_bytes(f"{target}-owned-by-user\n".encode("ascii"))
 
-    environment = dict(source.environment)
+    environment = _semver_transport_environment(scenario, source)
     if aliased_home:
         alias = scenario.isolated.root / "home-alias"
         try:
@@ -2880,6 +2986,18 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         install_args,
         manifest_path,
     )
+    scenario.repositories.tag(source.repository, "v1.0.0", commit_b)
+    _exercise_frozen_semver_transport_commands(
+        run,
+        capture,
+        manifest_path,
+        lock_path,
+        install_args,
+        artifact_roots,
+        source.remote_url,
+        commit_b,
+    )
+    assert_revision(commit_b, "b")
     installed = capture()
 
     def audit_row(

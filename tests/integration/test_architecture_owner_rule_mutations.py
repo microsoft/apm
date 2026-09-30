@@ -182,6 +182,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An Agent Plugin consumer reimplements the reproducible timestamp fallback.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-native-lifecycle-evidence",
+        rule_id="contracts-tooling-native-lifecycle-evidence",
+        path="scripts/check_lifecycle_evidence.py",
+        old="plugins=[plugin]",
+        new="plugins=[]",
+        intent="Native lifecycle execution disconnects pytest from the fresh subprocess observer.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-policy-content-hash",
         rule_id="contracts-tooling-policy-content-hash",
         path="src/apm_cli/policy/discovery.py",

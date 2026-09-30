@@ -86,6 +86,8 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
+_GUARD_NATIVE_LIFECYCLE = "contracts-tooling-native-lifecycle-evidence"
+
 
 _SRC_PREFIX = "src/apm_cli/"
 
@@ -517,6 +519,10 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         "src/apm_cli/install/phases/integrate.py": (
             "install_path = dep_ref.get_install_path(apm_modules_dir)",
         ),
+        "src/apm_cli/commands/deps/cli.py": (
+            "install_path = dep.get_install_path(apm_modules_path)",
+            "install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)",
+        ),
         _RESOLVE_PHASE: (
             "        cache_validation_callback=partial(",
             "validate_cached_legacy_plugin,",
@@ -641,6 +647,7 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         not _body_has(plan_body, "is_full_revision_pin(reference)")
         or not _body_has(plan_body, "detect_ref_change(dep, locked_dep)")
         or not _body_has(plan_body, "locked_dep.resolved_commit")
+        or _body_has(plan_body, "is_insecure")
     ):
         findings.append(_summary(rule_id, _INSTALL_PLAN, frozen_identity_message))
     primitive_dirs = re.compile(r"_APM_PRIMITIVE_DIRS")
@@ -1372,6 +1379,298 @@ def check_project_yaml_write_delegation(provider: FactsProvider) -> tuple[Violat
 
 _LIFECYCLE_CONTRACT = "tests/quality/test_ci_topology.py"
 
+_NATIVE_PROVIDER = "scripts/check_lifecycle_evidence.py"
+_NATIVE_CONTRACTS = "scripts/lifecycle_contracts.py"
+_NATIVE_OBSERVER = "tests/utils/lifecycle_evidence.py"
+_NATIVE_RUNNER = "tests/utils/apm_lifecycle_runner.py"
+
+
+def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Guard delegation and proof wiring, not a second lifecycle selection policy."""
+    rule_id = _GUARD_NATIVE_LIFECYCLE
+    bindings = (
+        (
+            _NATIVE_RUNNER,
+            "ApmLifecycleRunner._run_with_timeout",
+            (
+                "process.communicate(timeout=timeout_seconds)",
+                "CommandResult(command=command, returncode=process.returncode, "
+                "stdout=stdout, stderr=stderr, cwd=cwd)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "candidate",
+            (
+                "git(root, 'for-each-ref', '--format=%(refname)', 'refs/replace')",
+                "resolved_head != git(root, 'rev-parse', 'HEAD')",
+                "git(root, 'status', '--porcelain', '--untracked-files=all')",
+                "git(root, 'rev-parse', 'HEAD^{tree}')",
+                "git(root, 'merge-base', '--is-ancestor', resolved_base, resolved_head)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "source_profile",
+            (
+                "Path(apm_cli.__file__).resolve().parent != source",
+                "interpreter.samefile(sys.executable)",
+                "interpreter.parent.resolve() != Path(sys.executable).parent.resolve()",
+                "fingerprint(source / 'cli.py')",
+                "fingerprint(Path(sys.executable).resolve())",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "execute",
+            (
+                "candidate_contract(ROOT, identity['base'], inventory)",
+                "sorted(REQUIRED_WITNESSES)",
+                "validate_execution(witness, plugin.records[witness['nodeid']])",
+                "candidate(ROOT, args.base, args.head) != identity",
+                "source_profile(ROOT)[1] != report['profile']",
+                "set(plugin.records) != set(REQUIRED_WITNESSES)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "main",
+            (
+                "report = execute(args)",
+                "validate_completion(args.completion, report, args.report)",
+                "completion_summary(report, args.report, raw)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_validate_completion_summary",
+            (
+                "Draft202012Validator(schema).iter_errors(summary)",
+                "set(summary['witnesses']) != set(REQUIRED_WITNESSES)",
+                "(ROOT / 'tests/fixtures/lifecycle_completion.schema.json').read_text(encoding='utf-8')",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_completion_input",
+            ("_validate_completion_summary(summary)", "_same_file(output, driver)"),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "completion_summary",
+            (
+                "_validate_completion_summary(summary)",
+                "report.get('status') != 'passed'",
+                "json.loads(raw) != report",
+                "hashlib.sha256(raw).hexdigest()",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "validate_completion",
+            (
+                "_completion_input(path, output)",
+                "summary[claim] != native.get(field)",
+                "summary['report_sha256'] != hashlib.sha256(raw).hexdigest()",
+                "set(report.get('witnesses', {})) != set(REQUIRED_WITNESSES)",
+                "fields = {'version': 'version', 'contract_id': 'contract_id', "
+                "'base_sha': 'base', 'head_sha': 'head', 'tested_tree': 'tested_tree', "
+                "'lane': 'lane', 'status': 'status'}",
+                "driver['profile'].get('cli_sha256') != native['profile'].get('cli_sha256')",
+            ),
+        ),
+        (
+            _NATIVE_CONTRACTS,
+            "validate_contracts",
+            ("{w['nodeid'] for w in witnesses.values()} == set(REQUIRED_WITNESSES)",),
+        ),
+        (
+            _NATIVE_CONTRACTS,
+            "candidate_contract",
+            ("validate_contracts(current, inventory)",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_sessionstart",
+            (
+                "original = ApmLifecycleRunner._run_with_timeout",
+                "model = stateful.run_state_machine_as_test",
+                "self.patch.setattr(ApmLifecycleRunner, '_run_with_timeout', observe)",
+                "self.patch.setattr(stateful, 'run_state_machine_as_test', observe_model)",
+            ),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_sessionstart.observe",
+            (
+                "self._source_identity(cwd, env, kwargs['timeout_seconds'], command)",
+                "self._domain(cwd, env)",
+                "before = snapshot(roots)",
+                "result = original(runner, args, **kwargs)",
+                "fingerprint(Path(sys.executable).resolve()) != self.python_hash",
+            ),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_sessionstart.observe_model",
+            ("result = model(*args, **kwargs)",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin._source_identity",
+            ("source != expected",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_collection_finish",
+            ("set(actual) != self.nodeids",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_runtest_logreport",
+            (
+                "hasattr(report, 'wasxfail')",
+                "phases[report.when] = 'repeated' if report.when in phases else outcome",
+            ),
+        ),
+    )
+    findings: list[Violation] = []
+    for path, function_name, expressions in bindings:
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        index = facts.tree_index
+        function = index.function(function_name) if index else None
+        if function is None:
+            findings.append(
+                _summary(rule_id, path, f"Missing native evidence seam {function_name}")
+            )
+            continue
+        nodes = index.own_scope(function)
+        observed = {
+            ast.unparse(node)
+            for node in nodes
+            if isinstance(node, (ast.Call, ast.Compare, ast.Assign))
+        }
+        if not set(expressions) <= observed:
+            findings.append(
+                _summary(
+                    rule_id, path, f"{function_name} must retain native evidence owner bindings"
+                )
+            )
+
+    facts, failures = _facts_for(provider, _NATIVE_PROVIDER, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        execute = index.function("execute")
+        nodes = index.own_scope(execute) if execute else ()
+        candidates = _named_calls(nodes, "candidate")
+        profiles = _named_calls(nodes, "source_profile")
+        validations = _named_calls(nodes, "validate_execution")
+        plugins = _named_calls(nodes, "LifecycleEvidencePlugin")
+        pytest_calls = [
+            node
+            for node in nodes
+            if isinstance(node, ast.Call) and ast.unparse(node.func) == "pytest.main"
+        ]
+        final_nodes = {
+            child
+            for node in nodes
+            if isinstance(node, ast.Try)
+            for statement in node.finalbody
+            for child in index.walk(statement)
+        }
+        wired = (
+            len(candidates) == len(profiles) == 2
+            and len(pytest_calls) == len(validations) == len(plugins) == 1
+            and candidates[-1] in final_nodes
+            and profiles[-1] in final_nodes
+        )
+        if wired:
+            run = pytest_calls[0]
+            wired = candidates[0].lineno < profiles[0].lineno < plugins[
+                0
+            ].lineno < run.lineno < validations[0].lineno < candidates[-1].lineno and any(
+                keyword.arg == "plugins" and ast.unparse(keyword.value) == "[plugin]"
+                for keyword in run.keywords
+            )
+        if not wired:
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_PROVIDER,
+                    "Fresh observed pytest must be bracketed by candidate/source checks including finally",
+                )
+            )
+
+    facts, failures = _facts_for(provider, _NATIVE_OBSERVER, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        observe = index.function("LifecycleEvidencePlugin.pytest_sessionstart.observe")
+        nodes = index.own_scope(observe) if observe else ()
+        snapshots = _named_calls(nodes, "snapshot")
+        invocations = [
+            call
+            for call in _named_calls(nodes, "original")
+            if isinstance(index.parent(call), ast.Assign)
+        ]
+        if not (
+            len(snapshots) == 2
+            and len(invocations) == 1
+            and snapshots[0].lineno < invocations[0].lineno < snapshots[1].lineno
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_OBSERVER,
+                    "Runner invocation must connect before/after snapshots",
+                )
+            )
+        probe = index.function("LifecycleEvidencePlugin._source_identity")
+        nodes = index.own_scope(probe) if probe else ()
+        if not any(
+            isinstance(node, ast.Call) and ast.unparse(node.func) == "subprocess.run"
+            for node in nodes
+        ):
+            findings.append(
+                _summary(
+                    rule_id, _NATIVE_OBSERVER, "Source identity must probe the actual child process"
+                )
+            )
+
+    facts, failures = _facts_for(provider, _NATIVE_CONTRACTS, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        pins = [
+            node
+            for node in index.module_children()
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "REQUIRED_WITNESSES"
+                for target in node.targets
+            )
+        ]
+        if len(pins) != 1 or not isinstance(pins[0].value, ast.Tuple):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_CONTRACTS,
+                    "Witness pins must be independent of ledger selection",
+                )
+            )
+    facts, failures = _facts_for(provider, _NATIVE_RUNNER, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        runner = index.function("ApmLifecycleRunner._run_with_timeout")
+        nodes = index.own_scope(runner) if runner else ()
+        if not any(
+            isinstance(node, ast.Call) and ast.unparse(node.func) == "subprocess.Popen"
+            for node in nodes
+        ):
+            findings.append(
+                _summary(
+                    rule_id, _NATIVE_RUNNER, "Canonical lifecycle runner must start a real process"
+                )
+            )
+    return tuple(findings)
+
 
 def check_lifecycle_partition(provider: FactsProvider) -> tuple[Violation, ...]:
     """Lifecycle marker partitions must be collection-derived, never pinned."""
@@ -1445,6 +1744,11 @@ def _structural_rule(rule_id: str, description: str, check) -> Rule:
 
 
 RULES: tuple[Rule, ...] = (
+    _owner_rule(
+        _GUARD_NATIVE_LIFECYCLE,
+        "Bounded native lifecycle proof routes through fresh observation and candidate-bound completion.",
+        check_native_lifecycle_evidence,
+    ),
     _owner_rule(
         _GUARD_TAXONOMY,
         "Behavioral test taxonomy classification stays owned by module-level pytestmark.",

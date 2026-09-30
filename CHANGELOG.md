@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Global skill installs now deploy authorized files when `HOME` or `APM_HOME` uses a directory symlink alias, without changing environment settings or accepting symlinks inside packages. (by @DaveMeadAdjust, #2876)
+- Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing package or destination safety; frozen installs reject ref, pin, provider and transport drift, and unseeded mutable refs resolve upstream. After an intentional declaration change, review it and run `apm install --update`. (by @DaveMeadAdjust, #2876)
 ### Added
 
 - Codex MCP headers now use native runtime environment references instead of literal placeholders; unsupported references are skipped with a warning. Unchanged reinstalls preserve existing entries; switch the affected header between `${VAR}` and `${env:VAR}` and reinstall with the same scope and targets to refresh an older managed entry. -- by @edenfunf (#3042)

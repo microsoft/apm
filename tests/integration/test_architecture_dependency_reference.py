@@ -14,6 +14,7 @@ REFERENCE = "src/apm_cli/models/dependency/reference.py"
 DOWNLOAD = "src/apm_cli/install/phases/download.py"
 INTEGRATE = "src/apm_cli/install/phases/integrate.py"
 PLAN = "src/apm_cli/install/plan.py"
+DEPS_CLI = "src/apm_cli/commands/deps/cli.py"
 
 
 def test_embedded_git_url_subpath_has_one_provider_aware_owner() -> None:
@@ -31,6 +32,7 @@ def test_embedded_git_url_subpath_has_one_provider_aware_owner() -> None:
     assert DOWNLOAD in owner_registry
     assert INTEGRATE in owner_registry
     assert PLAN in owner_registry
+    assert DEPS_CLI in owner_registry
     assert "embedded git URL subpath validation" in owner_registry
     assert rule.guard_ids == (RULE_ID,)
     assert report.failures == ()
@@ -96,6 +98,16 @@ def test_alias_consumers_share_validation_and_materialization() -> None:
             "src/apm_cli/install/phases/integrate.py",
             "install_path = dep_ref.get_install_path(apm_modules_dir)",
             "install_path = apm_modules_dir / dep_ref.alias",
+        ),
+        (
+            DEPS_CLI,
+            "install_path = dep.get_install_path(apm_modules_path)",
+            "install_path = apm_modules_path / dep.alias",
+        ),
+        (
+            DEPS_CLI,
+            "install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)",
+            "install_path = apm_modules_path / dep.alias",
         ),
         (
             "src/apm_cli/install/phases/resolve.py",
@@ -177,6 +189,10 @@ def test_install_phase_materialization_guard_rejects_alias_path_bypass(
     [
         ("is_full_revision_pin(reference)", "False"),
         ("detect_ref_change(dep, locked_dep)", "False"),
+        (
+            "if detect_ref_change(dep, locked_dep):",
+            "if dep.is_insecure != locked_dep.is_insecure or detect_ref_change(dep, locked_dep):",
+        ),
     ],
 )
 def test_frozen_manifest_identity_guard_rejects_helper_bypass(old: str, new: str) -> None:

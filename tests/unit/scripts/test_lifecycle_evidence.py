@@ -1,0 +1,901 @@
+"""Fail-closed native-provider regressions; no full lifecycle campaign runs here.
+
+Observer test mechanics adapted from be73ed139f3a73c19437a895dfd6d68e41df8bfc.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from scripts import check_lifecycle_evidence as gate
+from scripts.lifecycle_contracts import (
+    CONTRACT_ID,
+    LEDGER,
+    REQUIRED_WITNESSES,
+    EvidenceError,
+    candidate_contract,
+    command_inventory,
+    command_path,
+    load_ledger,
+    validate_contracts,
+    validate_execution,
+)
+from tests.utils.isolated_apm_environment import DURABLE_ENVIRONMENT_ROOTS, IsolatedApmEnvironment
+from tests.utils.lifecycle_evidence import LifecycleEvidencePlugin, _physical_roots, snapshot
+
+pytestmark = pytest.mark.component
+pytest_plugins = ["pytester"]
+RATCHET_TEST_SCOPE = "fixture"
+
+
+def _ledger() -> dict[str, Any]:
+    return load_ledger((gate.ROOT / LEDGER).read_text(encoding="utf-8"))
+
+
+def _sample() -> tuple[dict[str, Any], dict[str, Any]]:
+    witness = {
+        "nodeid": "tests/sample.py::test_generated[project]",
+        "kind": "generated",
+        "dimensions": {"variant": "project"},
+        "transitions": [
+            {"command": "install", "argv_contains": [], "returncode": 0, "state": state}
+            for state in ("changed", "unchanged")
+        ],
+    }
+    evidence = {
+        "collected": True,
+        "dimensions": {"variant": "project"},
+        "phases": {"setup": "passed", "call": "passed", "teardown": "passed"},
+        "models": 1,
+        "events": [
+            {
+                "command": "install",
+                "args": ["install"],
+                "returncode": 0,
+                "cwd": "/fixture",
+                "roots": {"workspace": "/fixture", "HOME": "/fixture/home"},
+                "environment": {"HOME": "/fixture/home"},
+                "context": "initial",
+                "model": 1,
+                "before": before,
+                "after": after,
+            }
+            for before, after in (("a", "b"), ("b", "b"))
+        ],
+    }
+    return witness, evidence
+
+
+def test_immutable_witnesses_and_current_inventory() -> None:
+    """Pin obligations independently of both implementation constants and ledger rows."""
+    required = "tests/integration/test_required_lifecycle_state_machine.py::"
+    generated = "tests/integration/test_generated_lifecycle_state_machine.py::"
+    expected = {
+        required + "test_required_global_audit_rule_matrix_for_external_roots[False]",
+        required + "test_required_global_audit_rule_matrix_for_external_roots[True]",
+        required + "test_required_frozen_semver_transport_refusal_recovers",
+        *(
+            generated + function + f"[{variant}]"
+            for function in (
+                "test_generated_lifecycle_mandatory_replay",
+                "test_generated_lifecycle_sequences_preserve_reference_model",
+            )
+            for variant in ("project", "global-canonical", "global-aliased")
+        ),
+    }
+    contract = validate_contracts(_ledger(), command_inventory())[CONTRACT_ID]
+    assert set(REQUIRED_WITNESSES) == expected
+    assert {w["nodeid"] for w in contract["witnesses"]} == expected
+    schema = json.loads((gate.ROOT / "tests/fixtures/lifecycle_completion.schema.json").read_text())
+    assert set(schema["properties"]["witnesses"]["items"]["enum"]) == expected
+    inventory = command_inventory()
+    assert set(contract["commands"]) == set(inventory)
+    assert len(inventory) == 85
+    assert sum(e["disposition"] == "applicable" for e in contract["commands"].values()) == 22
+    assert (
+        command_path(["lock", "--global", "export", "--format", "spdx"], inventory) == "lock export"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "none",
+        "delete",
+        "duplicate",
+        "kind",
+        "dimension",
+        "dimension-type",
+        "command",
+        "reason",
+        "refs",
+        "trajectory",
+    ],
+)
+def test_contract_edits_cannot_vacuously_remove_proof(mutation: str) -> None:
+    ledger = _ledger()
+    contract = ledger["lifecycle_contracts"][0]
+    if mutation == "none":
+        ledger["lifecycle_contracts"] = []
+    elif mutation == "delete":
+        contract["witnesses"].pop()
+    elif mutation == "duplicate":
+        contract["witnesses"][-1] = copy.deepcopy(contract["witnesses"][0])
+    elif mutation == "kind":
+        contract["witnesses"][3]["kind"] = "deterministic"
+    elif mutation == "dimension":
+        contract["witnesses"][0]["dimensions"] = {}
+    elif mutation == "dimension-type":
+        contract["witnesses"][-2]["dimensions"] = {"aliased_home": 1}
+    elif mutation == "command":
+        del contract["commands"]["discover"]
+    elif mutation == "reason":
+        contract["commands"]["discover"]["reason"] = ""
+    elif mutation == "refs":
+        contract["commands"]["install"]["generated"] = []
+    else:
+        contract["witnesses"][0]["transitions"] = []
+    with pytest.raises(EvidenceError):
+        validate_contracts(ledger, command_inventory())
+
+
+@pytest.mark.parametrize("field", ["property_catalog", "bugs", "known_gaps"])
+def test_legacy_records_cannot_disappear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    original = json.loads((gate.ROOT / LEDGER).read_text())
+    current = copy.deepcopy(original)
+    current[field].pop()
+    path = tmp_path / LEDGER
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(current))
+    monkeypatch.setattr("scripts.lifecycle_contracts.git", lambda *_: json.dumps(original))
+    with pytest.raises(EvidenceError, match="legacy"):
+        candidate_contract(tmp_path, "a" * 40, command_inventory())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "collection",
+        "skip",
+        "xfail",
+        "setup",
+        "call",
+        "teardown",
+        "dimension",
+        "generation",
+        "missing-transition",
+        "status",
+        "command",
+        "args",
+        "workspace",
+        "state",
+        "state-missing",
+        "outside-model",
+        "roots",
+        "continuity",
+        "model-splice",
+        "environment",
+        "context",
+    ],
+)
+def test_execution_obligations_fail_closed(mutation: str) -> None:
+    witness, evidence = _sample()
+    validate_execution(witness, evidence)
+    event = evidence["events"][-1]
+    if mutation == "collection":
+        evidence["collected"] = False
+    elif mutation in {"skip", "xfail"}:
+        evidence["phases"]["call"] = mutation
+    elif mutation in {"setup", "call", "teardown"}:
+        evidence["phases"][mutation] = "failed"
+    elif mutation == "dimension":
+        evidence["dimensions"] = {}
+    elif mutation == "generation":
+        evidence["models"] = 0
+    elif mutation == "missing-transition":
+        evidence["events"].pop()
+    elif mutation == "status":
+        event["returncode"] = 1
+    elif mutation == "command":
+        event["command"] = "update"
+    elif mutation == "args":
+        witness["transitions"][-1]["argv_contains"] = ["--global"]
+    elif mutation == "workspace":
+        event["cwd"] = "/elsewhere"
+    elif mutation == "state":
+        event["after"] = "c"
+    elif mutation == "state-missing":
+        del event["before"]
+    elif mutation == "outside-model":
+        event["model"] = None
+    elif mutation == "roots":
+        event["roots"] = {}
+    elif mutation == "continuity":
+        event.update(before="c", after="c")
+    elif mutation == "model-splice":
+        evidence["models"] = 2
+        event["model"] = 2
+    elif mutation == "environment":
+        event["environment"]["HOME"] = "/different/home"
+    else:
+        event["context"] = "other"
+    with pytest.raises(EvidenceError):
+        validate_execution(witness, evidence)
+
+
+def test_preparation_and_reviewed_context_preserve_connected_domain() -> None:
+    witness, evidence = _sample()
+    for event in evidence["events"]:
+        event["roots"]["APM_HOME"] = "/fixture/home/.apm"
+        event["environment"]["APM_HOME"] = "/fixture/home/.apm"
+    event = evidence["events"][-1]
+    event.update(cwd="/fixture/home/.apm", context="APM_HOME", before="prepared", after="prepared")
+    transition = witness["transitions"][-1]
+    transition["context"] = "APM_HOME"
+    with pytest.raises(EvidenceError, match="trajectory"):
+        validate_execution(witness, evidence)
+    transition["preparation"] = "A reviewed fixture mutation changes the declaration."
+    validate_execution(witness, evidence)
+
+
+def test_snapshot_and_isolation_share_the_existing_durable_root_owner(tmp_path: Path) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "domain", base_env={})
+    env = isolated.subprocess_env()
+    assert all(Path(env[key]).is_dir() for key in DURABLE_ENVIRONMENT_ROOTS)
+    domain = {key: env[key] for key in DURABLE_ENVIRONMENT_ROOTS}
+    before = snapshot(domain)
+    user = isolated.home / "unowned"
+    user.write_text("user bytes")
+    assert snapshot(domain) != before
+    assert "APM_TEMP_DIR" not in DURABLE_ENVIRONMENT_ROOTS
+
+
+def test_domains_do_not_splice_roots_models_or_lexical_aliases(tmp_path: Path) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "domain", base_env={})
+    env = isolated.subprocess_env()
+    plugin = LifecycleEvidencePlugin(["node"], None, {"node": {"APM_HOME"}})
+    plugin.active = "node"
+    roots, lexical, context = plugin._domain(isolated.work_root, env)
+    assert context == "initial"
+    assert lexical["HOME"] == str(isolated.home)
+    assert plugin._domain(isolated.config_root, env) == (roots, lexical, "APM_HOME")
+    changed = {**env, "HOME": str(tmp_path / "other-home")}
+    with pytest.raises(EvidenceError, match="durable roots changed"):
+        plugin._domain(isolated.work_root, changed)
+    with pytest.raises(EvidenceError, match="Unreviewed"):
+        plugin._domain(isolated.repository_root, env)
+    plugin.model_run = 2
+    other, _, _ = plugin._domain(isolated.work_root, changed)
+    assert other != roots
+
+
+def test_child_root_and_source_probes_use_actual_child_environment(tmp_path: Path) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "domain", base_env=os.environ)
+    env = isolated.subprocess_env()
+    env["CLAUDE_CONFIG_DIR"] = "~/custom"
+    roots = _physical_roots(isolated.work_root, env)
+    assert roots["CLAUDE_CONFIG_DIR"] == str(isolated.home / "custom")
+    plugin = LifecycleEvidencePlugin([], None)
+    assert plugin._source_identity(isolated.work_root, env, 30)["package"] == str(
+        gate.ROOT / "src/apm_cli"
+    )
+    foreign = tmp_path / "foreign/apm_cli"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("")
+    (foreign / "cli.py").write_text("print('success is not source identity')")
+    env["PYTHONPATH"] = str(foreign.parent)
+    with pytest.raises(EvidenceError, match="candidate checkout"):
+        plugin._source_identity(isolated.work_root, env, 30)
+
+
+@pytest.mark.parametrize("mutation", ["command", "interpreter", "launcher"])
+def test_runner_observer_refuses_unverified_execution(tmp_path: Path, mutation: str) -> None:
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+
+    launcher = tmp_path / "apm"
+    launcher.write_text("fixture launcher")
+    plugin = LifecycleEvidencePlugin(["node"], launcher)
+    plugin.active, plugin.phase = "node", "call"
+    plugin.pytest_sessionstart(SimpleNamespace())
+    try:
+        command = (sys.executable, "-m", "apm_cli.cli")
+        if mutation == "command":
+            command = (sys.executable, "-c", "print('not APM')")
+        elif mutation == "interpreter":
+            plugin.python_hash = "changed"
+        else:
+            command = (str(launcher),)
+            launcher.write_text("changed launcher")
+        with pytest.raises(EvidenceError, match=r"Unverified|Executable changed"):
+            ApmLifecycleRunner(command).run(["--version"], cwd=tmp_path, env={})
+    finally:
+        plugin.patch.undo()
+
+
+@pytest.mark.parametrize("response", ["[]", '{"CLAUDE_CONFIG_DIR":0}', '{"other":"/path"}'])
+def test_root_expansion_rejects_malformed_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, response: str
+) -> None:
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=response)
+    )
+    with pytest.raises(EvidenceError, match="invalid paths"):
+        _physical_roots(tmp_path, {"CLAUDE_CONFIG_DIR": "~/custom"})
+
+
+@pytest.mark.parametrize("mutation", ["head", "tree", "dirty", "untracked", "replace", "abbrev"])
+def test_candidate_identity_refuses_stale_or_dirty_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    base, head = "a" * 40, "b" * 40
+    answers = {
+        ("for-each-ref", "--format=%(refname)", "refs/replace"): "",
+        ("rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"): base,
+        ("rev-parse", "--verify", "--end-of-options", f"{head}^{{commit}}"): head,
+        ("rev-parse", "HEAD"): head,
+        ("merge-base", "--is-ancestor", base, head): "",
+        ("status", "--porcelain", "--untracked-files=all"): "",
+        ("rev-parse", "HEAD^{tree}"): "c" * 40,
+    }
+    monkeypatch.setattr(gate, "git", lambda root, *args: answers[args])
+    initial = gate.candidate(tmp_path, base, head)
+    if mutation == "head":
+        answers[("rev-parse", "HEAD")] = "d" * 40
+    elif mutation == "tree":
+        answers[("rev-parse", "HEAD^{tree}")] = "d" * 40
+        assert gate.candidate(tmp_path, base, head) != initial
+        return
+    elif mutation in {"dirty", "untracked"}:
+        answers[("status", "--porcelain", "--untracked-files=all")] = (
+            " M tracked.py" if mutation == "dirty" else "?? new.py"
+        )
+    elif mutation == "replace":
+        answers[("for-each-ref", "--format=%(refname)", "refs/replace")] = "refs/replace/hash"
+    else:
+        answers[("rev-parse", "--verify", "--end-of-options", "main^{commit}")] = base
+        base = "main"
+    with pytest.raises(EvidenceError):
+        gate.candidate(tmp_path, base, head)
+
+
+def test_source_profile_pins_checkout_launcher_and_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import apm_cli
+
+    source = tmp_path / "src/apm_cli"
+    source.mkdir(parents=True)
+    (source / "cli.py").write_text("fixture")
+    monkeypatch.setattr(apm_cli, "__file__", str(source / "__init__.py"))
+    python = tmp_path / "python"
+    python.write_text("fixture interpreter")
+    monkeypatch.setattr(sys, "executable", str(python))
+    assert gate.source_profile(tmp_path)[0] is None
+    with pytest.raises(EvidenceError, match="candidate checkout"):
+        gate.source_profile(tmp_path / "foreign")
+    if os.name != "nt":
+        launcher = tmp_path / "apm"
+        launcher.write_text("#!/foreign/python\nfrom apm_cli.cli import cli\n")
+        with pytest.raises(EvidenceError, match="this Python environment"):
+            gate.source_profile(tmp_path)
+        launcher.write_text(f"#!{python}\nfrom apm_cli.cli import cli\n")
+        initial = gate.source_profile(tmp_path)[1]
+        launcher.write_text(f"#!{python}\nfrom apm_cli.cli import cli\n# changed\n")
+        assert gate.source_profile(tmp_path)[1] != initial
+
+
+def test_launcher_cannot_borrow_another_environment_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        assert gate.source_profile(gate.ROOT)[0] is None
+        return
+    current, foreign = tmp_path / "current", tmp_path / "foreign"
+    current.mkdir()
+    foreign.mkdir()
+    original_python = Path(sys.executable).resolve()
+    (current / "python").symlink_to(original_python)
+    (foreign / "python").symlink_to(original_python)
+    launcher = current / "apm"
+    launcher.write_text(f"#!{foreign / 'python'}\nfrom apm_cli.cli import cli\n")
+    monkeypatch.setattr(sys, "executable", str(current / "python"))
+    assert (current / "python").samefile(foreign / "python")
+    with pytest.raises(EvidenceError, match="this Python environment"):
+        gate.source_profile(gate.ROOT)
+
+
+def _completion(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    native = {
+        "version": 1,
+        "contract_id": CONTRACT_ID,
+        "base": "a" * 40,
+        "head": "b" * 40,
+        "tested_tree": "c" * 40,
+        "lane": "full",
+        "status": "passed",
+        "witnesses": {nodeid: {} for nodeid in REQUIRED_WITNESSES},
+        "profile": {"kind": "source-python", "cli_sha256": "f" * 64, "source_root": "/driver"},
+    }
+    driver = tmp_path / "driver.json"
+    driver.write_text(json.dumps(native))
+    summary = {
+        "version": 1,
+        "contract_id": CONTRACT_ID,
+        "base_sha": native["base"],
+        "head_sha": native["head"],
+        "tested_tree": native["tested_tree"],
+        "lane": "full",
+        "status": "passed",
+        "report_path": str(driver),
+        "report_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
+        "witnesses": list(REQUIRED_WITNESSES),
+    }
+    path = tmp_path / "completion.json"
+    path.write_text(json.dumps(summary))
+    native["profile"]["source_root"] = "/independent-checkout"
+    return path, summary, native
+
+
+@pytest.fixture
+def external_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep component artifacts in the project while modelling an external checkout."""
+    checkout = tmp_path / "checkout"
+    schema = checkout / "tests/fixtures/lifecycle_completion.schema.json"
+    schema.parent.mkdir(parents=True)
+    schema.write_bytes((gate.ROOT / "tests/fixtures/lifecycle_completion.schema.json").read_bytes())
+    monkeypatch.setattr(gate, "ROOT", checkout)
+    return checkout
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "base_sha",
+        "head_sha",
+        "tested_tree",
+        "lane",
+        "status",
+        "version",
+        "contract_id",
+        "report_sha256",
+        "report_path",
+        "witnesses",
+        "extra-field",
+        "driver-head",
+        "driver-witness",
+        "source",
+        "profile",
+        "schema",
+    ],
+)
+def test_completion_rejects_stale_and_malformed_claims(
+    tmp_path: Path, external_checkout: Path, mutation: str
+) -> None:
+    path, summary, native = _completion(tmp_path)
+    output = tmp_path / "independent.json"
+    gate.validate_completion(path, native, output)
+    if mutation in {"base_sha", "head_sha", "tested_tree", "report_sha256"}:
+        summary[mutation] = "d" * len(summary[mutation])
+    elif mutation == "version":
+        summary["version"] = True
+    elif mutation == "witnesses":
+        summary["witnesses"].pop()
+    elif mutation == "extra-field":
+        summary["lifecycle_evidence"] = {}
+    elif mutation.startswith("driver") or mutation in {"source", "profile"}:
+        driver = Path(summary["report_path"])
+        data = json.loads(driver.read_text())
+        if mutation == "driver-head":
+            data["head"] = "d" * 40
+        elif mutation == "driver-witness":
+            data["witnesses"].pop(REQUIRED_WITNESSES[0])
+        elif mutation == "source":
+            data["profile"]["cli_sha256"] = "e" * 64
+        else:
+            data["profile"]["kind"] = "packaged-binary"
+        driver.write_text(json.dumps(data))
+        summary["report_sha256"] = hashlib.sha256(driver.read_bytes()).hexdigest()
+    elif mutation == "schema":
+        summary = []
+    else:
+        summary[mutation] = ""
+    path.write_text(json.dumps(summary))
+    with pytest.raises(EvidenceError):
+        gate.validate_completion(path, native, output)
+
+
+def test_completion_protects_aliases_and_accepts_independent_source_path(
+    tmp_path: Path, external_checkout: Path
+) -> None:
+    path, summary, native = _completion(tmp_path)
+    summary["report_path"] = "driver.json"
+    path.write_text(json.dumps(summary))
+    gate.validate_completion(path, native, tmp_path / "independent.json")
+    driver = tmp_path / "driver.json"
+    for kind in ("hardlink", "symlink"):
+        alias = tmp_path / kind
+        if kind == "hardlink":
+            alias.hardlink_to(driver)
+        else:
+            alias.symlink_to(driver)
+        with pytest.raises(EvidenceError, match="overwrite"):
+            gate.validate_completion(path, native, alias)
+    with pytest.raises(EvidenceError, match="overwrite"):
+        gate.validate_completion(path, native, path)
+
+
+def test_completion_runs_fresh_and_never_overwrites_previous_reports(
+    tmp_path: Path, external_checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, _, native = _completion(tmp_path)
+    output = tmp_path / "independent.json"
+    calls = []
+
+    def fresh(args: argparse.Namespace) -> dict[str, Any]:
+        calls.append((args.base, args.head, args.lane))
+        return native
+
+    monkeypatch.setattr(gate, "execute", fresh)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gate",
+            "--base",
+            native["base"],
+            "--head",
+            native["head"],
+            "--lane",
+            "full",
+            "--report",
+            str(output),
+            "--completion",
+            str(path),
+        ],
+    )
+    assert gate.main() == 0
+    assert calls == [(native["base"], native["head"], "full")]
+    before = output.read_bytes()
+    assert gate.main() == 1
+    assert output.read_bytes() == before
+    assert len(calls) == 1
+
+
+def test_emitted_sidecar_round_trips_through_fresh_independent_verification(
+    tmp_path: Path, external_checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, native = _completion(tmp_path)
+    report = tmp_path / "fresh-driver.json"
+    sidecar = tmp_path / "fresh-completion.json"
+    independent = tmp_path / "independent.json"
+    calls = []
+
+    def fresh(args: argparse.Namespace) -> dict[str, Any]:
+        calls.append(args.report)
+        result = copy.deepcopy(native)
+        result["profile"]["source_root"] = f"/checkout-{len(calls)}"
+        return result
+
+    monkeypatch.setattr(gate, "execute", fresh)
+    arguments = ["gate", "--base", native["base"], "--head", native["head"], "--lane", "full"]
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [*arguments, "--report", str(report), "--completion-output", str(sidecar)],
+    )
+    assert gate.main() == 0
+    summary = json.loads(sidecar.read_bytes())
+    assert summary["report_path"] == str(report.resolve())
+    assert summary["report_sha256"] == hashlib.sha256(report.read_bytes()).hexdigest()
+    assert summary["witnesses"] == sorted(REQUIRED_WITNESSES)
+    assert sidecar.read_bytes() == gate._json_bytes(summary)
+    assert b"\r" not in sidecar.read_bytes()
+    assert summary == gate.completion_summary(
+        json.loads(report.read_bytes()), report, report.read_bytes()
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [*arguments, "--report", str(independent), "--completion", str(sidecar)],
+    )
+    assert gate.main() == 0
+    assert calls == [report, independent]
+    assert json.loads(independent.read_bytes())["profile"]["source_root"] == "/checkout-2"
+    assert summary["report_sha256"] == hashlib.sha256(report.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("status", ["blocked", "pending", "not_applicable"])
+def test_unsuccessful_execution_never_emits_a_completion(
+    tmp_path: Path, external_checkout: Path, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    _, _, native = _completion(tmp_path)
+    native.update(status=status, error="negative control")
+    report, sidecar = tmp_path / "failed-report.json", tmp_path / "must-not-exist.json"
+    monkeypatch.setattr(gate, "execute", lambda args: native)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gate",
+            "--base",
+            native["base"],
+            "--head",
+            native["head"],
+            "--lane",
+            "full",
+            "--report",
+            str(report),
+            "--completion-output",
+            str(sidecar),
+        ],
+    )
+    assert gate.main() == 1
+    assert json.loads(report.read_bytes())["status"] == status
+    assert not sidecar.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation", ["existing", "same-report", "symlink", "hardlink", "in-checkout", "both-modes"]
+)
+def test_completion_output_refuses_unsafe_paths_before_execution(
+    tmp_path: Path, external_checkout: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    report, sidecar = tmp_path / "new-report.json", tmp_path / "new-completion.json"
+    sentinel = tmp_path / "preserved.json"
+    sentinel.write_bytes(b"preserve these bytes")
+    if mutation == "existing":
+        sidecar = sentinel
+    elif mutation == "same-report":
+        sidecar = report
+    elif mutation == "symlink":
+        sidecar.symlink_to(sentinel)
+    elif mutation == "hardlink":
+        sidecar.hardlink_to(sentinel)
+    elif mutation == "in-checkout":
+        sidecar = external_checkout / "forbidden.json"
+    arguments = [
+        "gate",
+        "--base",
+        "a" * 40,
+        "--head",
+        "b" * 40,
+        "--lane",
+        "full",
+        "--report",
+        str(report),
+        "--completion-output",
+        str(sidecar),
+    ]
+    if mutation == "both-modes":
+        arguments.extend(["--completion", str(sentinel)])
+
+    def unexpected(args: argparse.Namespace) -> dict[str, Any]:
+        raise AssertionError("Unsafe output must be rejected before native execution")
+
+    monkeypatch.setattr(gate, "execute", unexpected)
+    monkeypatch.setattr(sys, "argv", arguments)
+    if mutation in {"in-checkout", "both-modes"}:
+        with pytest.raises(SystemExit) as error:
+            gate.main()
+        assert error.value.code == 2
+    else:
+        assert gate.main() == 1
+    assert sentinel.read_bytes() == b"preserve these bytes"
+    assert not report.exists()
+
+
+@pytest.mark.parametrize("mutation", ["witnesses", "profile", "bytes", "schema"])
+def test_completion_emission_refuses_inconsistent_success_report(
+    tmp_path: Path, external_checkout: Path, mutation: str
+) -> None:
+    _, _, native = _completion(tmp_path)
+    if mutation == "witnesses":
+        native["witnesses"].pop(REQUIRED_WITNESSES[0])
+    elif mutation == "profile":
+        native["profile"]["kind"] = "packaged-binary"
+    elif mutation == "schema":
+        native["head"] = "not-a-sha"
+    raw = gate._json_bytes(native)
+    if mutation == "bytes":
+        raw = b"{}"
+    with pytest.raises(EvidenceError):
+        gate.completion_summary(native, tmp_path / "report.json", raw)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["pass", "pytest-failed", "missing", "dirty-after", "head-after", "tree-after", "source-after"],
+)
+def test_provider_execution_checks_identity_after_its_own_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    """Unit-only fabricated events exercise orchestration, never native acceptance."""
+    contract = _ledger()["lifecycle_contracts"][0]
+    records = {}
+    for witness in contract["witnesses"]:
+        events, state = [], 0
+        for transition in witness["transitions"]:
+            before = str(state)
+            if transition["state"] != "unchanged":
+                state += 1
+            context = transition.get("context", "initial")
+            events.append(
+                {
+                    **transition,
+                    "args": transition["argv_contains"],
+                    "before": before,
+                    "after": str(state),
+                    "context": context,
+                    "cwd": "/fixture" if context == "initial" else "/home/.apm",
+                    "roots": {"workspace": "/fixture", "HOME": "/home", "APM_HOME": "/home/.apm"},
+                    "environment": {"HOME": "/home", "APM_HOME": "/home/.apm"},
+                    "model": 1,
+                }
+            )
+        records[witness["nodeid"]] = {
+            "collected": True,
+            "dimensions": witness["dimensions"],
+            "models": 1,
+            "events": events,
+            "phases": {"setup": "passed", "call": "passed", "teardown": "passed"},
+        }
+    identity = {"base": "a" * 40, "head": "b" * 40, "tested_tree": "c" * 40}
+    profile = {"kind": "source-python", "source_root": str(gate.ROOT / "src/apm_cli")}
+    calls: list[str] = []
+
+    def candidate(*args: Any) -> dict[str, str]:
+        if calls:
+            if mutation == "dirty-after":
+                raise EvidenceError("Candidate dirty after execution")
+            if mutation in {"head-after", "tree-after"}:
+                field = "head" if mutation == "head-after" else "tested_tree"
+                return {**identity, field: "d" * 40}
+        return identity
+
+    def source(*args: Any) -> tuple[None, dict[str, str]]:
+        if calls and mutation == "source-after":
+            return None, {**profile, "python": "changed"}
+        return None, profile
+
+    def fresh_pytest(args: list[str], plugins: list[Any]) -> int:
+        assert args[-9:] == sorted(REQUIRED_WITNESSES)
+        assert plugins[0].records is records
+        calls.append("fresh pytest")
+        if mutation == "missing":
+            records.pop(REQUIRED_WITNESSES[0])
+        return 1 if mutation == "pytest-failed" else 0
+
+    plugin = SimpleNamespace(records=records, patch=SimpleNamespace(undo=lambda: None))
+    monkeypatch.setattr(gate, "candidate", candidate)
+    monkeypatch.setattr(gate, "source_profile", source)
+    monkeypatch.setattr(gate, "candidate_contract", lambda *args: contract)
+    monkeypatch.setattr("tests.utils.lifecycle_evidence.LifecycleEvidencePlugin", lambda *a: plugin)
+    monkeypatch.setattr(pytest, "main", fresh_pytest)
+    result = gate.execute(
+        argparse.Namespace(
+            base=identity["base"],
+            head=identity["head"],
+            lane="full",
+            report=tmp_path / "report.json",
+        )
+    )
+    assert calls == ["fresh pytest"]
+    assert result["status"] == ("passed" if mutation == "pass" else "blocked")
+    if mutation != "pass":
+        assert result["error"]
+
+
+@pytest.mark.parametrize("mode", ["skip", "xfail", "setup", "teardown", "call", "pass"])
+def test_observer_records_real_pytest_phases(pytester: pytest.Pytester, mode: str) -> None:
+    pytester.makeini("[pytest]")
+    module = pytester.makepyfile(f"""
+        import pytest
+        @pytest.fixture
+        def fixture():
+            if {mode!r} == "setup":
+                raise RuntimeError("setup failed")
+            yield
+            if {mode!r} == "teardown":
+                raise RuntimeError("teardown failed")
+        def test_observed(fixture):
+            if {mode!r} == "skip":
+                pytest.skip("negative control")
+            if {mode!r} == "xfail":
+                pytest.xfail("negative control")
+            if {mode!r} == "call":
+                raise RuntimeError("call failed")
+            assert 1 == 1
+    """)
+    nodeid = f"{module.name}::test_observed"
+    plugin = LifecycleEvidencePlugin([nodeid], None)
+    result = pytester.runpytest_inprocess("-q", "-o", "addopts=", nodeid, plugins=[plugin])
+    record = plugin.records[nodeid]
+    phase = mode if mode in {"setup", "teardown"} else "call"
+    expected = {"pass": "passed", "skip": "skipped", "xfail": "xfail"}.get(mode, "failed")
+    assert record["phases"][phase] == expected
+    if mode in {"setup", "teardown", "call"}:
+        assert result.ret != 0
+
+
+def test_repeated_phase_cannot_erase_an_earlier_failure() -> None:
+    plugin = LifecycleEvidencePlugin(["node"], None)
+    plugin.records["node"] = {"phases": {}}
+    for outcome in ("failed", "passed", "passed"):
+        plugin.pytest_runtest_logreport(
+            SimpleNamespace(nodeid="node", when="call", outcome=outcome)
+        )
+    assert plugin.records["node"]["phases"] == {"call": "repeated"}
+
+
+@pytest.mark.parametrize("selection", ["missing", "extra", "deselected", "wrong-param"])
+def test_observer_requires_exact_collection(pytester: pytest.Pytester, selection: str) -> None:
+    pytester.makeini("[pytest]")
+    module = pytester.makepyfile("""
+        import pytest
+        @pytest.mark.parametrize("variant", ["actual"])
+        def test_observed(variant):
+            assert variant == "actual"
+        def test_extra():
+            assert 1 == 1
+    """)
+    nodeid = f"{module.name}::test_observed[actual]"
+    desired = nodeid if selection != "wrong-param" else nodeid.replace("[actual]", "[missing]")
+    plugin = LifecycleEvidencePlugin([desired], None)
+    args = [nodeid]
+    if selection == "missing":
+        args = [f"{module.name}::missing"]
+    elif selection == "extra":
+        args = [module.name]
+    elif selection == "deselected":
+        args += ["-k", "not observed"]
+    result = pytester.runpytest_inprocess("-q", "-o", "addopts=", *args, plugins=[plugin])
+    assert result.ret != 0
+
+
+def test_observer_requires_real_runner_and_hypothesis_execution(pytester: pytest.Pytester) -> None:
+    """A tiny genuine generated run exercises instrumentation without native scenarios."""
+    pytester.makeini("[pytest]")
+    module = pytester.makepyfile("""
+        import os
+        import sys
+        from hypothesis import settings
+        from hypothesis.stateful import RuleBasedStateMachine, initialize, rule, run_state_machine_as_test
+        from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+        from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+        def test_observed(tmp_path):
+            environment = IsolatedApmEnvironment.create(tmp_path / "domain", base_env=os.environ)
+            runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+            class Model(RuleBasedStateMachine):
+                @initialize()
+                def start(self):
+                    result = runner.run(["--version"], cwd=environment.work_root,
+                        env=environment.subprocess_env())
+                    assert result.returncode == 0
+                @rule()
+                def step(self):
+                    assert environment.home.is_dir()
+            run_state_machine_as_test(Model, settings=settings(
+                max_examples=1, stateful_step_count=1, deadline=None, database=None))
+    """)
+    nodeid = f"{module.name}::test_observed"
+    plugin = LifecycleEvidencePlugin([nodeid], None)
+    result = pytester.runpytest_inprocess("-q", "-o", "addopts=", nodeid, plugins=[plugin])
+    assert result.ret == 0
+    record = plugin.records[nodeid]
+    assert record["models"] == 1
+    assert record["events"]
+    assert all(event["model"] == 1 and event["returncode"] == 0 for event in record["events"])
+    assert record["phases"] == {"setup": "passed", "call": "passed", "teardown": "passed"}

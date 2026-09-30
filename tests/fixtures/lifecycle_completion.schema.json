@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bounded #2867 source-Python native lifecycle completion",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "contract_id", "base_sha", "head_sha", "tested_tree", "lane", "status", "report_path", "report_sha256", "witnesses"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "contract_id": {"const": "pr2876-alias-path-complete-lifecycle"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "tested_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "lane": {"const": "full"},
+    "status": {"const": "passed"},
+    "report_path": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "witnesses": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 9,
+      "maxItems": 9,
+      "items": {
+        "enum": [
+          "tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[False]",
+          "tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[True]",
+          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[project]",
+          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-canonical]",
+          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-aliased]",
+          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[project]",
+          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-canonical]",
+          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-aliased]",
+          "tests/integration/test_required_lifecycle_state_machine.py::test_required_frozen_semver_transport_refusal_recovers"
+        ]
+      }
+    }
+  }
+}

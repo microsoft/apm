@@ -32,8 +32,12 @@
     {
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
-      "owner": "deployment_ledger.py",
-      "selectors": ["src/apm_cli/core/deployment_ledger.py"],
+      "owner": "deployment_ledger.py; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
+      "selectors": [
+        "src/apm_cli/core/deployment_ledger.py",
+        "src/apm_cli/integration/skill_support.py",
+        "src/apm_cli/install/pipeline.py"
+      ],
       "guards": ["install-deployment-provenance-state"]
     },
     {

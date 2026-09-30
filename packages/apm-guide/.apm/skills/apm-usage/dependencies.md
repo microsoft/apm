@@ -696,11 +696,22 @@ enterprise security guide for the threat model.
 ## What the lockfile pins
 
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
-of the ref format in apm.yml. Running `apm install` without `--update` always
-uses the locked SHA, ensuring reproducible installs across machines.
+of the ref format in apm.yml. Running `apm install` without `--update` reuses
+the locked SHA when the dependency identity, declared ref and effective host
+provider match. An unseeded mutable ref resolves upstream even when another
+package or sibling path has a lock entry.
 `apm install --update`, `apm install --refresh`, `apm update` (including
 `--force`), `apm lock --update`, and `apm outdated` establish mutable refs from
 upstream instead of using a persistent bare-cache ref as current-state evidence.
+
+`--frozen` checks declared refs, full commit pins, host providers and HTTP/HTTPS
+transport against the lock, including transport changes under an unchanged
+semver range. It does not check whether an upstream branch moved. Review an
+intentional declaration change and run `apm install --update` to refresh the lock.
+
+Directory symlink aliases in `HOME` or `APM_HOME` work for global skill deployment.
+They do not relax package-descendant containment or destination-symlink checks,
+and are unrelated to explicit dependency `alias:` placement.
 
 Lockfile keys keep `github.com` implicit for migration stability while
 non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)

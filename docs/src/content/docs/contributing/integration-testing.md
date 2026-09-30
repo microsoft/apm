@@ -62,6 +62,41 @@ APM uses a tiered approach to integration testing:
 
 ## Running Tests Locally
 
+### Exact-head HOME-alias lifecycle qualification
+
+The #2867 contract uses real CLI subprocesses in isolated project, canonical-home
+and aliased-home fixtures. Its eight required/generated/replay witnesses retain
+the mandatory lifecycle inside Hypothesis execution; an additional project
+scenario checks semver transport refusal and recovery. Ownership snapshot tests
+also enforce one lockfile read per used root and integration phase, zero unused
+reads, and at most 15x record visits when fixture size grows from N to 10N.
+These counts do not claim a wall-clock speedup.
+
+Use a clean committed checkout and put reports outside it:
+
+```bash
+uv run --frozen --extra dev python scripts/check_lifecycle_evidence.py \
+  --base "$BASE_SHA" --head "$(git rev-parse HEAD)" --lane full \
+  --report "$REPORT_PATH" --completion-output "$COMPLETION_PATH"
+```
+
+Both output paths must be new and outside the checkout. The command emits the
+schema-validated native completion sidecar only after fresh success.
+It verifies source/interpreter identity and freshly executes the authored
+contract; a skipped witness or disconnected sequence is not acceptance.
+It is source-Python coverage, not packaged-binary parity. Ordinary hosted
+platform checks remain separate.
+
+For independent acceptance, use another clean checkout of the same head and
+its own interpreter and disposable environment. Pass the driver's native
+completion sidecar with `--completion "$DRIVER_COMPLETION_PATH"` and a different
+`--report` path. Completion mode verifies the driver's report digest and
+reruns the contract; it does not reuse that report as execution. Keep this
+native sidecar separate from the merge-worker completion JSON, whose schema
+is unchanged.
+
+### Selecting integration tests
+
 Integration tests live under `tests/integration/` and run via `pytest`
 directly. Each test module declares the preconditions it needs as
 standard pytest markers; the registry in

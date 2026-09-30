@@ -72,6 +72,7 @@ class RefFreshnessPolicy(Enum):
     """Canonical authority for which resolver caches may establish a ref."""
 
     REPRODUCIBLE = "reproducible"
+    LOCKED_OR_CURRENT = "locked-or-current"
     CURRENT_REMOTE = "current-remote"
 
     @classmethod
@@ -84,12 +85,12 @@ class RefFreshnessPolicy(Enum):
         """Map install command intent to one resolver freshness policy."""
         if update_refs or refresh:
             return cls.CURRENT_REMOTE
-        return cls.REPRODUCIBLE
+        return cls.LOCKED_OR_CURRENT
 
     @property
     def allows_lock_seed(self) -> bool:
-        """Return whether a lockfile SHA may seed the per-run L0 cache."""
-        return self is self.REPRODUCIBLE
+        """Return whether a matching dependency may replay a lockfile SHA."""
+        return self is not self.CURRENT_REMOTE
 
     @property
     def allows_bare_cache(self) -> bool:
@@ -98,7 +99,7 @@ class RefFreshnessPolicy(Enum):
 
     @property
     def requires_remote(self) -> bool:
-        """Return whether the ref must be established from a remote tier."""
+        """Return whether even locked refs must be refreshed from upstream."""
         return self is self.CURRENT_REMOTE
 
 
@@ -419,6 +420,7 @@ class TieredRefResolver:
         self._cache = cache
         self._legacy = legacy
         self.freshness_policy = freshness_policy
+        self._lock_seeds: dict[tuple[str, str, tuple[str, str], str], str] = {}
         self._coalesce: dict[tuple[str, str], threading.Event] = {}
         self._coalesce_lock = threading.Lock()
         self._remote_resolutions: dict[tuple[str, str], str] = {}
@@ -436,7 +438,7 @@ class TieredRefResolver:
             return self._remote_resolutions.get(key) == sha
 
     def seed(self, repo_ref: str | DependencyReference, ref: str, sha: str) -> bool:
-        """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
+        """Record a dependency-scoped lockfile ``ref -> sha``.
 
         Used by the resolve phase to inject a lockfile-recorded commit
         (``resolved_commit``) for a named ``resolved_ref`` -- a branch OR a
@@ -447,15 +449,37 @@ class TieredRefResolver:
         unless ``sha`` is a full 40-char hex commit and ``ref`` is
         non-empty. Returns ``True`` when a value was stored.
 
-        Safe because the seeded SHA is the lockfile's own trust anchor --
-        the same value ``resolve()`` would otherwise fetch from the network
-        and cache. No behavior change beyond eliminating the round-trip.
+        Lock seeds must not enter the repository-wide fresh-result cache:
+        a sibling virtual package without a matching lock entry must still
+        establish the current upstream ref.
         """
-        if not ref or not sha or not _SHA_RE.match(sha):
+        if (
+            not self.freshness_policy.allows_lock_seed
+            or not ref
+            or not sha
+            or not _SHA_RE.match(sha)
+        ):
             return False
         dep_ref = self._normalize(repo_ref)
-        self._cache.put(_repository_cache_identity(dep_ref), ref, sha.lower())
+        key = self._lock_seed_key(dep_ref, ref)
+        with self._coalesce_lock:
+            self._lock_seeds[key] = sha.lower()
         return True
+
+    @staticmethod
+    def _lock_seed_key(
+        dep_ref: DependencyReference, ref: str
+    ) -> tuple[str, str, tuple[str, str], str]:
+        from ..core.host_providers import effective_host_provider_identity
+
+        return (
+            dep_ref.get_unique_key(),
+            _repository_cache_identity(dep_ref),
+            effective_host_provider_identity(
+                dep_ref.host or default_host(), host_type=dep_ref.host_type
+            ),
+            ref,
+        )
 
     def resolve(self, repo_ref: str | DependencyReference) -> ResolvedReference:
         """Resolve a git reference, dispatching through the tier waterfall.
@@ -480,6 +504,14 @@ class TieredRefResolver:
         if _SHA_RE.match(ref):
             self.stats["sha_passthrough"] = self.stats.get("sha_passthrough", 0) + 1
             return self._build_result(dep_ref, ref, ref.lower(), tier_name="sha_passthrough")
+
+        if self._lock_seeds:
+            lock_key = self._lock_seed_key(dep_ref, ref)
+            with self._coalesce_lock:
+                locked = self._lock_seeds.get(lock_key)
+            if locked is not None:
+                self.stats["per_run_cache"] += 1
+                return self._build_result(dep_ref, ref, locked, tier_name="lock_seed")
 
         key = (_repository_cache_identity(dep_ref), ref)
 
@@ -598,9 +630,9 @@ def build_tiered_ref_resolver(
 ) -> TieredRefResolver | None:
     """Construct the production tier stack, or ``None`` if disabled.
 
-    The default is deliberately ``REPRODUCIBLE`` so ordinary installs retain
-    lockfile and local-cache behavior. Callers that report or change current
-    state must opt into ``CURRENT_REMOTE`` explicitly.
+    The compatibility default permits bare-cache answers. Install callers use
+    ``LOCKED_OR_CURRENT`` to replay matching lock seeds while resolving every
+    unseeded ref upstream. Commands changing current state use ``CURRENT_REMOTE``.
 
     Returns ``None`` when ``APM_TIERED_RESOLVER`` is disabled so callers
     can opt out by simply leaving ``downloader._tiered_resolver = None``;
