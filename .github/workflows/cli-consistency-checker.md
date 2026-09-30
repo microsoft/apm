@@ -2,6 +2,8 @@
 name: CLI Consistency Checker
 description: Inspects the APM CLI to identify inconsistencies, typos, bugs, or documentation gaps by running commands and analyzing output
 on:
+  # Keep activation read-only while retaining compiler revocation checks.
+  report-blocked-version: false
   schedule:
     - cron: "0 13 * * 1-5"
   workflow_dispatch:

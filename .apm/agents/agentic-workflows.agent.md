@@ -142,7 +142,7 @@ When a user interacts with you:
 
 ```bash
 # Install the repository's exact compiler version
-gh extension install github/gh-aw --pin v0.87.8 --force
+gh extension install github/gh-aw --pin v0.89.15 --force
 
 # Initialize repository for agentic workflows
 gh aw init
@@ -162,15 +162,23 @@ gh aw fix --write
 gh aw compile --validate
 ```
 
-The repository compiler pin is gh-aw `v0.87.8` at tag commit
-`e973b8cc974ce0b3628a8f9759b40733b4bf146b`. Regenerate committed
+The repository compiler pin is gh-aw `v0.89.15` at tag commit
+`0fac96fb53dc7d2d82cdcc46049383f4a5734f16`. Regenerate committed
 `.lock.yml` files with that exact version. Use `--approve` only after
 reviewing action, container, permission, and secret changes.
 
-`.github/workflows/agentics-maintenance.yml` is compiler-generated but
-committed with its `github/gh-aw-actions/setup-cli` tag refs rewritten to SHA
-`1aa033c7bf25ac9428fe521065b90c30a7070c4e`. Re-apply that rewrite after
-regeneration; `tests/unit/test_shared_apm_workflow_contract.py` fails otherwise.
+`.github/workflows/agentics-maintenance.yml` is compiler-generated. Its
+`github/gh-aw-actions/setup-cli` refs must resolve to SHA
+`045beb2d14bda8d0c1f2e83b41527f63770d2855`; the workflow contract tests reject
+unpinned fallbacks. The three panel workflows declare their Ruby setup action
+in source: compiler-injected runtime steps bypass the action-pin cache.
+The engine-qualified `ruby-3.3` selector preserves Ruby 3.3 while keeping the
+custom action step through compiler runtime deduplication. Keep these source
+pins and `.github/aw/actions-lock.json` synchronized when upgrading Ruby.
+
+Use `on.report-blocked-version: false` to keep activation jobs read-only.
+This suppresses only the compiler's new blocked-version notification issue;
+revocation checks still fail the run, and conclusion failure reports remain.
 
 ## Key Features of gh-aw
 
@@ -190,5 +198,5 @@ regeneration; `tests/unit/test_shared_apm_workflow_contract.py` fails otherwise.
 - Workflows must be compiled to `.lock.yml` files before running in GitHub Actions
 - **Bash tools are enabled by default** - Don't restrict bash commands unnecessarily since workflows are sandboxed by the AWF
 - Follow security best practices: minimal permissions, explicit network access, no template injection
-- gh-aw v0.87.8 exposes `GH_AW_DEFAULT_OTLP_HEADERS` to the agent and MCP telemetry runtime when that enterprise secret is configured. Leave it unset unless agent-visible telemetry credentials are an accepted boundary.
+- gh-aw v0.89.15 exposes `GH_AW_DEFAULT_OTLP_HEADERS` and the optional secret-backed `GH_AW_DEFAULT_OTLP_ENDPOINT` to the agent and MCP telemetry runtime. Leave these secrets unset unless agent-visible telemetry credentials are an accepted boundary.
 - **Single-file output**: When creating a workflow, produce exactly **one** workflow `.md` file. Do not create separate documentation files (architecture docs, runbooks, usage guides, etc.). If documentation is needed, add a brief `## Usage` section inside the workflow file itself.
