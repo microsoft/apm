@@ -18,6 +18,22 @@ RULE = "transport-platform-ref-freshness"
     [
         ("return cls.LOCKED_OR_CURRENT", "return cls.REPRODUCIBLE"),
         ("dep_ref.get_unique_key(),", '"",'),
+        (
+            "        except (ValueError, RuntimeError) as exc:\n",
+            "        except TypeError as exc:\n",
+        ),
+        (
+            "            return False\n        with self._coalesce_lock:\n",
+            "            raise\n        with self._coalesce_lock:\n",
+        ),
+        (
+            "            return False\n        with self._coalesce_lock:\n",
+            "            return True\n        with self._coalesce_lock:\n",
+        ),
+        (
+            "        except (ValueError, RuntimeError) as exc:\n",
+            "        except Exception as exc:\n",
+        ),
     ],
 )
 def test_install_freshness_guard_rejects_blanket_bare_cache_replay(old: str, new: str) -> None:

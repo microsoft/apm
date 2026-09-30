@@ -72,7 +72,9 @@ also enforce one lockfile read per used root and integration phase, zero unused
 reads, and at most 15x record visits when fixture size grows from N to 10N.
 These counts do not claim a wall-clock speedup.
 
-Use a clean committed checkout and put reports outside it:
+Use a clean committed checkout. Set `BASE_SHA` to the full 40-hex commit SHA
+of a locally available, distinct ancestor of the checked-out `HEAD`.
+Set `REPORT_PATH` and `COMPLETION_PATH` to distinct, new paths outside the checkout:
 
 ```bash
 uv run --frozen --extra dev python scripts/check_lifecycle_evidence.py \
@@ -80,20 +82,19 @@ uv run --frozen --extra dev python scripts/check_lifecycle_evidence.py \
   --report "$REPORT_PATH" --completion-output "$COMPLETION_PATH"
 ```
 
-Both output paths must be new and outside the checkout. The command emits the
-schema-validated native completion sidecar only after fresh success.
+The command emits the schema-validated native completion sidecar only after fresh success.
 It verifies source/interpreter identity and freshly executes the authored
 contract; a skipped witness or disconnected sequence is not acceptance.
 It is source-Python coverage, not packaged-binary parity. Ordinary hosted
 platform checks remain separate.
 
-For independent acceptance, use another clean checkout of the same head and
-its own interpreter and disposable environment. Pass the driver's native
-completion sidecar with `--completion "$DRIVER_COMPLETION_PATH"` and a different
-`--report` path. Completion mode verifies the driver's report digest and
-reruns the contract; it does not reuse that report as execution. Keep this
-native sidecar separate from the merge-worker completion JSON, whose schema
-is unchanged.
+For independent acceptance, use another clean checkout with the same base/head,
+its own interpreter and disposable environment. Replace `--completion-output`
+with `--completion "$DRIVER_COMPLETION_PATH"`, pointing to the driver's native
+sidecar, and use a new external `--report` path. Keep the driver's report available
+at the path recorded in that sidecar. Completion mode verifies its digest and
+reruns the contract; it does not reuse the report as execution. Keep this native
+sidecar separate from the unchanged merge-worker completion JSON.
 
 ### Selecting integration tests
 

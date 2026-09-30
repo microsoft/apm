@@ -473,7 +473,11 @@
           {"command":"lock","argv_contains":["--global","--update"],"returncode":0,"state":"observed"},
           {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"observed"},
           {"command":"install","argv_contains":["--global","--frozen"],"returncode":1,"state":"unchanged","preparation":"Declare A while lock records B."},
-          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Restore original main declaration."}
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Restore original main declaration."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Declare full commit A and install its original bytes."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":1,"state":"unchanged","preparation":"Keep manifest ref and locked resolved_ref at A; corrupt only locked resolved_commit to real B."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"unchanged","preparation":"Restore exact matching A lock bytes; replay must preserve pinned deployment."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Restore original main declaration and install B."}
         ],
         "global-clean-audit": [
           {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME"}

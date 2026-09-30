@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,16 +144,53 @@ def _completion_input(path: Path, output: Path) -> tuple[dict[str, Any], Path]:
     return summary, driver
 
 
+def _validate_source_profile(profile: Any) -> None:
+    """Require recorded identities without resolving another checkout's paths."""
+    if not isinstance(profile, dict) or profile.get("kind") != "source-python":
+        raise EvidenceError("Native report requires a source-python profile")
+    for field in ("source_root", "python", "python_environment", "executable"):
+        if field == "executable" and field in profile and profile[field] is None:
+            continue
+        value = profile.get(field)
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or not (Path(value).is_absolute() or PureWindowsPath(value).is_absolute())
+        ):
+            raise EvidenceError(f"Native source profile requires an absolute {field}")
+    for field in ("cli_sha256", "python_sha256", "executable_sha256"):
+        value = profile.get(field)
+        if field == "executable_sha256" and profile["executable"] is None:
+            valid = field in profile and value is None
+        else:
+            valid = isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+        if not valid:
+            raise EvidenceError(f"Native source profile has invalid {field}")
+
+
+def _validate_report_execution(report: dict[str, Any]) -> None:
+    """Delegate report records to the current candidate's sole trajectory owner."""
+    _validate_source_profile(report.get("profile"))
+    records = report.get("witnesses")
+    if not isinstance(records, dict) or set(records) != set(REQUIRED_WITNESSES):
+        raise EvidenceError("Native report requires exact immutable witnesses")
+    contract = candidate_contract(ROOT, report["base"], command_inventory())
+    for witness in contract["witnesses"]:
+        record = records[witness["nodeid"]]
+        if not isinstance(record, dict):
+            raise EvidenceError(f"{witness['nodeid']}: invalid execution record")
+        validate_execution(witness, record)
+
+
 def completion_summary(report: dict[str, Any], report_path: Path, raw: bytes) -> dict[str, Any]:
     """Derive success claims solely from the freshly executed report and its bytes."""
     if (
         report.get("status") != "passed"
         or report.get("lane") != "full"
-        or report.get("profile", {}).get("kind") != "source-python"
-        or set(report.get("witnesses", {})) != set(REQUIRED_WITNESSES)
         or json.loads(raw) != report
     ):
         raise EvidenceError("Completion emission requires the exact successful native report")
+    _validate_report_execution(report)
     summary = {
         "version": report["version"],
         "contract_id": report["contract_id"],
@@ -206,10 +243,9 @@ def validate_completion(path: Path, native: dict[str, Any], output: Path) -> Non
             not isinstance(report, dict)
             or type(report.get("version")) is not int
             or any(report.get(field) != native.get(field) for field in fields.values())
-            or set(report.get("witnesses", {})) != set(REQUIRED_WITNESSES)
-            or report.get("profile", {}).get("kind") != "source-python"
         ):
             raise EvidenceError("Driver report header/witnesses disagree with fresh execution")
+        _validate_report_execution(report)
     if driver["profile"].get("cli_sha256") != native["profile"].get("cli_sha256"):
         raise EvidenceError("Driver source digest disagrees with fresh execution")
 
@@ -230,6 +266,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if args.lane != "full":
         raise EvidenceError("Only the full lifecycle lane is supported")
     plugin = None
+    profile = None
     try:
         import pytest
 
@@ -238,7 +275,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         inventory = command_inventory()
         contract = candidate_contract(ROOT, identity["base"], inventory)
         report["command_inventory"] = sorted(inventory)
-        executable, report["profile"] = source_profile(ROOT)
+        executable, profile = source_profile(ROOT)
+        report["profile"] = profile
         witnesses = contract["witnesses"]
         nodeids = sorted(REQUIRED_WITNESSES)
         contexts = {
@@ -288,11 +326,17 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         try:
             if candidate(ROOT, args.base, args.head) != identity:
                 raise EvidenceError("Candidate identity changed during execution")
-            if source_profile(ROOT)[1] != report["profile"]:
+        except (EvidenceError, OSError, subprocess.CalledProcessError) as exc:
+            report["status"] = "blocked"
+            report.setdefault("error", str(exc))
+            report.setdefault("postflight_errors", []).append(str(exc))
+        try:
+            if profile is not None and source_profile(ROOT)[1] != profile:
                 raise EvidenceError("Source executable identity changed during execution")
         except (EvidenceError, OSError, subprocess.CalledProcessError) as exc:
             report["status"] = "blocked"
-            report["error"] = str(exc)
+            report.setdefault("error", str(exc))
+            report.setdefault("postflight_errors", []).append(str(exc))
     return report
 
 
@@ -330,6 +374,10 @@ def main() -> int:
         if args.completion:
             _completion_input(args.completion, args.report)
         report = execute(args)
+        if report["status"] != "passed":
+            _write_new(args.report, _json_bytes(report))
+            print(f"Lifecycle evidence: {report['status']} ({args.report})")
+            raise EvidenceError(report.get("error", "Lifecycle execution did not pass"))
         if args.completion:
             validate_completion(args.completion, report, args.report)
         raw = _json_bytes(report)
@@ -340,8 +388,6 @@ def main() -> int:
         )
         _write_new(args.report, raw)
         print(f"Lifecycle evidence: {report['status']} ({args.report})")
-        if report["status"] != "passed":
-            raise EvidenceError(report.get("error", "Lifecycle execution did not pass"))
         if summary is not None:
             _write_new(args.completion_output, _json_bytes(summary))
             print(f"Lifecycle completion: {args.completion_output}")

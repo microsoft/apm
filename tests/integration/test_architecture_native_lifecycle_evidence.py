@@ -61,7 +61,17 @@ def test_native_evidence_has_one_registered_owner_and_bounded_guard() -> None:
             "identity = cached_candidate()",
         ),
         (PROVIDER, "if candidate(ROOT, args.base, args.head) != identity:", "if False:"),
-        (PROVIDER, 'if source_profile(ROOT)[1] != report["profile"]:', "if False:"),
+        (
+            PROVIDER,
+            "if profile is not None and source_profile(ROOT)[1] != profile:",
+            "if False:",
+        ),
+        (PROVIDER, "profile is not None and source_profile", "source_profile"),
+        (
+            PROVIDER,
+            'report.setdefault("error", str(exc))',
+            'report["error"] = str(exc)',
+        ),
         (
             PROVIDER,
             "finally:\n        if plugin is not None:",
@@ -91,6 +101,49 @@ def test_native_evidence_has_one_registered_owner_and_bounded_guard() -> None:
         (PROVIDER, 'summary["report_sha256"] != hashlib.sha256(raw).hexdigest()', "False"),
         (PROVIDER, '"tested_tree": "tested_tree"', '"tested_tree": "head"'),
         (PROVIDER, "summary[claim] != native.get(field)", "False"),
+        (
+            PROVIDER,
+            'candidate_contract(ROOT, report["base"], command_inventory())',
+            "cached_contract()",
+        ),
+        (PROVIDER, "validate_execution(witness, record)", "accept_record(witness, record)"),
+        (
+            PROVIDER,
+            '_validate_source_profile(report.get("profile"))',
+            "accept_profile(report)",
+        ),
+        (
+            PROVIDER,
+            '("source_root", "python", "python_environment", "executable")',
+            '("source_root",)',
+        ),
+        (
+            PROVIDER,
+            '("cli_sha256", "python_sha256", "executable_sha256")',
+            '("cli_sha256",)',
+        ),
+        (PROVIDER, 're.fullmatch(r"[0-9a-f]{64}", value)', "True"),
+        (PROVIDER, "valid = field in profile and value is None", "valid = True"),
+        (
+            PROVIDER,
+            "_validate_report_execution(report)\n    summary",
+            "accept_report(report)\n    summary",
+        ),
+        (
+            PROVIDER,
+            "        _validate_report_execution(report)\n    if driver",
+            "        accept_report(report)\n    if driver",
+        ),
+        (
+            PROVIDER,
+            'if report["status"] != "passed":',
+            'if report["status"] == "unused":',
+        ),
+        (
+            PROVIDER,
+            "_write_new(args.report, _json_bytes(report))",
+            "discard_failed_report(report)",
+        ),
         (CONTRACTS, "REQUIRED_WITNESSES = (", "REMOVED_REQUIRED_WITNESSES = ("),
         (CONTRACTS, "== set(REQUIRED_WITNESSES)", "== set()"),
         (CONTRACTS, "validate_contracts(current, inventory)", "unvalidated_contracts(current)"),

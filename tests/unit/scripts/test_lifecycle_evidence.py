@@ -513,6 +513,39 @@ def test_source_profile_accepts_only_canonical_long_path_launchers(
         gate.source_profile(gate.ROOT)
 
 
+def _records(contract: dict[str, Any]) -> dict[str, Any]:
+    """Fabricate connected observations for orchestration tests, not native proof."""
+    records = {}
+    for witness in contract["witnesses"]:
+        events, state = [], 0
+        for transition in witness["transitions"]:
+            before = str(state)
+            if transition["state"] != "unchanged":
+                state += 1
+            context = transition.get("context", "initial")
+            events.append(
+                {
+                    **transition,
+                    "args": transition["argv_contains"],
+                    "before": before,
+                    "after": str(state),
+                    "context": context,
+                    "cwd": "/fixture" if context == "initial" else "/home/.apm",
+                    "roots": {"workspace": "/fixture", "HOME": "/home", "APM_HOME": "/home/.apm"},
+                    "environment": {"HOME": "/home", "APM_HOME": "/home/.apm"},
+                    "model": 1,
+                }
+            )
+        records[witness["nodeid"]] = {
+            "collected": True,
+            "dimensions": witness["dimensions"],
+            "models": 1,
+            "events": events,
+            "phases": {"setup": "passed", "call": "passed", "teardown": "passed"},
+        }
+    return records
+
+
 def _completion(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     native = {
         "version": 1,
@@ -522,8 +555,17 @@ def _completion(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
         "tested_tree": "c" * 40,
         "lane": "full",
         "status": "passed",
-        "witnesses": {nodeid: {} for nodeid in REQUIRED_WITNESSES},
-        "profile": {"kind": "source-python", "cli_sha256": "f" * 64, "source_root": "/driver"},
+        "witnesses": _records(_ledger()["lifecycle_contracts"][0]),
+        "profile": {
+            "kind": "source-python",
+            "cli_sha256": "f" * 64,
+            "source_root": "/driver/src/apm_cli",
+            "python": "/driver/python",
+            "python_environment": "/driver/venv/bin",
+            "python_sha256": "e" * 64,
+            "executable": "/driver/venv/bin/apm",
+            "executable_sha256": "d" * 64,
+        },
     }
     driver = tmp_path / "driver.json"
     driver.write_text(json.dumps(native))
@@ -542,6 +584,13 @@ def _completion(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     path = tmp_path / "completion.json"
     path.write_text(json.dumps(summary))
     native["profile"]["source_root"] = "/independent-checkout"
+    native["profile"].update(
+        python="/independent/python",
+        python_environment="/independent/venv/bin",
+        python_sha256="c" * 64,
+        executable=None,
+        executable_sha256=None,
+    )
     return path, summary, native
 
 
@@ -552,6 +601,9 @@ def external_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     schema = checkout / "tests/fixtures/lifecycle_completion.schema.json"
     schema.parent.mkdir(parents=True)
     schema.write_bytes((gate.ROOT / "tests/fixtures/lifecycle_completion.schema.json").read_bytes())
+    ledger = (gate.ROOT / LEDGER).read_text(encoding="utf-8")
+    (checkout / LEDGER).write_text(ledger, encoding="utf-8")
+    monkeypatch.setattr("scripts.lifecycle_contracts.git", lambda *_: ledger)
     monkeypatch.setattr(gate, "ROOT", checkout)
     return checkout
 
@@ -613,6 +665,99 @@ def test_completion_rejects_stale_and_malformed_claims(
         gate.validate_completion(path, native, output)
 
 
+@pytest.mark.parametrize("mode", ["verify", "emit"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["uncollected", "skipped", "empty-record", "invalid-record", "empty-events", "no-models"],
+)
+def test_completion_rejects_invalid_execution_even_with_recomputed_digest(
+    tmp_path: Path, external_checkout: Path, mode: str, mutation: str
+) -> None:
+    path, summary, native = _completion(tmp_path)
+    driver = Path(summary["report_path"])
+    report = json.loads(driver.read_bytes())
+    nodeid = next(node for node in REQUIRED_WITNESSES if "sequences_preserve" in node)
+    record = report["witnesses"][nodeid]
+    if mutation == "uncollected":
+        record["collected"] = False
+    elif mutation == "skipped":
+        record["phases"]["setup"] = "skipped"
+    elif mutation in {"empty-record", "invalid-record"}:
+        report["witnesses"][nodeid] = {} if mutation == "empty-record" else None
+    elif mutation == "empty-events":
+        record["events"] = []
+    else:
+        record["models"] = 0
+    raw = gate._json_bytes(report)
+    driver.write_bytes(raw)
+    summary["report_sha256"] = hashlib.sha256(raw).hexdigest()
+    path.write_bytes(gate._json_bytes(summary))
+    with pytest.raises(
+        EvidenceError, match=r"not collected|must pass|execution record|trajectory|model"
+    ):
+        if mode == "verify":
+            gate.validate_completion(path, native, tmp_path / "independent.json")
+        else:
+            gate.completion_summary(report, driver, raw)
+
+
+@pytest.mark.parametrize("mode", ["verify", "emit"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing-profile",
+        "null-profile",
+        "list-profile",
+        "missing-source_root",
+        "missing-python",
+        "missing-python_environment",
+        "missing-python_sha256",
+        "missing-cli_sha256",
+        "missing-executable",
+        "missing-executable_sha256",
+        "relative-source_root",
+        "relative-python",
+        "relative-python_environment",
+        "relative-executable",
+        "invalid-python_sha256",
+        "invalid-cli_sha256",
+        "invalid-executable_sha256",
+        "missing-launcher-digest",
+        "orphan-launcher-digest",
+    ],
+)
+def test_completion_rejects_malformed_identity_even_with_recomputed_digest(
+    tmp_path: Path, external_checkout: Path, mode: str, mutation: str
+) -> None:
+    path, summary, native = _completion(tmp_path)
+    driver = Path(summary["report_path"])
+    report = json.loads(driver.read_bytes())
+    profile = report["profile"]
+    if mutation == "missing-profile":
+        del report["profile"]
+    elif mutation in {"null-profile", "list-profile"}:
+        report["profile"] = None if mutation == "null-profile" else []
+    elif mutation == "missing-launcher-digest":
+        profile["executable_sha256"] = None
+    elif mutation == "orphan-launcher-digest":
+        profile["executable"] = None
+    else:
+        operation, field = mutation.split("-", 1)
+        if operation == "missing":
+            del profile[field]
+        else:
+            profile[field] = "relative/path" if operation == "relative" else 64
+    raw = gate._json_bytes(report)
+    driver.write_bytes(raw)
+    summary["report_sha256"] = hashlib.sha256(raw).hexdigest()
+    path.write_bytes(gate._json_bytes(summary))
+    with pytest.raises(EvidenceError, match=r"profile"):
+        if mode == "verify":
+            gate.validate_completion(path, native, tmp_path / "independent.json")
+        else:
+            gate.completion_summary(report, driver, raw)
+
+
 def test_completion_protects_aliases_and_accepts_independent_source_path(
     tmp_path: Path, external_checkout: Path
 ) -> None:
@@ -668,6 +813,45 @@ def test_completion_runs_fresh_and_never_overwrites_previous_reports(
     assert gate.main() == 1
     assert output.read_bytes() == before
     assert len(calls) == 1
+
+
+def test_failed_independent_execution_persists_original_failure_before_completion_comparison(
+    tmp_path: Path,
+    external_checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path, summary, native = _completion(tmp_path)
+    driver = Path(summary["report_path"])
+    preserved = (driver.read_bytes(), path.read_bytes())
+    native.update(status="blocked", error="Fresh witness setup failed")
+    output = tmp_path / "failed-independent.json"
+    monkeypatch.setattr(gate, "execute", lambda args: native)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gate",
+            "--base",
+            native["base"],
+            "--head",
+            native["head"],
+            "--lane",
+            "full",
+            "--report",
+            str(output),
+            "--completion",
+            str(path),
+        ],
+    )
+    assert gate.main() == 1
+    captured = capsys.readouterr()
+    assert json.loads(output.read_bytes()) == native
+    assert str(output) in captured.out
+    assert "Fresh witness setup failed" in captured.err
+    assert "Completion disagrees" not in captured.err
+    assert "Lifecycle completion:" not in captured.out
+    assert (driver.read_bytes(), path.read_bytes()) == preserved
 
 
 def test_emitted_sidecar_round_trips_through_fresh_independent_verification(
@@ -822,6 +1006,9 @@ def test_completion_emission_refuses_inconsistent_success_report(
         "head-after",
         "tree-after",
         "source-after",
+        "pytest-failed-dirty-after",
+        "pytest-failed-source-after",
+        "pytest-failed-both-after",
     ],
 )
 def test_provider_execution_checks_identity_after_its_own_run(
@@ -829,41 +1016,14 @@ def test_provider_execution_checks_identity_after_its_own_run(
 ) -> None:
     """Unit-only fabricated events exercise orchestration, never native acceptance."""
     contract = _ledger()["lifecycle_contracts"][0]
-    records = {}
-    for witness in contract["witnesses"]:
-        events, state = [], 0
-        for transition in witness["transitions"]:
-            before = str(state)
-            if transition["state"] != "unchanged":
-                state += 1
-            context = transition.get("context", "initial")
-            events.append(
-                {
-                    **transition,
-                    "args": transition["argv_contains"],
-                    "before": before,
-                    "after": str(state),
-                    "context": context,
-                    "cwd": "/fixture" if context == "initial" else "/home/.apm",
-                    "roots": {"workspace": "/fixture", "HOME": "/home", "APM_HOME": "/home/.apm"},
-                    "environment": {"HOME": "/home", "APM_HOME": "/home/.apm"},
-                    "model": 1,
-                }
-            )
-        records[witness["nodeid"]] = {
-            "collected": True,
-            "dimensions": witness["dimensions"],
-            "models": 1,
-            "events": events,
-            "phases": {"setup": "passed", "call": "passed", "teardown": "passed"},
-        }
+    records = _records(contract)
     identity = {"base": "a" * 40, "head": "b" * 40, "tested_tree": "c" * 40}
     profile = {"kind": "source-python", "source_root": str(gate.ROOT / "src/apm_cli")}
     calls: list[str] = []
 
     def candidate(*args: Any) -> dict[str, str]:
         if calls:
-            if mutation == "dirty-after":
+            if mutation in {"dirty-after", "pytest-failed-dirty-after", "pytest-failed-both-after"}:
                 raise EvidenceError("Candidate dirty after execution")
             if mutation in {"head-after", "tree-after"}:
                 field = "head" if mutation == "head-after" else "tested_tree"
@@ -871,7 +1031,11 @@ def test_provider_execution_checks_identity_after_its_own_run(
         return identity
 
     def source(*args: Any) -> tuple[None, dict[str, str]]:
-        if calls and mutation == "source-after":
+        if calls and mutation in {
+            "source-after",
+            "pytest-failed-source-after",
+            "pytest-failed-both-after",
+        }:
             return None, {**profile, "python": "changed"}
         return None, profile
 
@@ -883,7 +1047,7 @@ def test_provider_execution_checks_identity_after_its_own_run(
             records.pop(REQUIRED_WITNESSES[0])
         elif mutation == "skipped-call":
             records[REQUIRED_WITNESSES[0]]["phases"]["call"] = "skipped"
-        return 1 if mutation == "pytest-failed" else 0
+        return 1 if mutation.startswith("pytest-failed") else 0
 
     plugin = SimpleNamespace(records=records, patch=SimpleNamespace(undo=lambda: None))
     monkeypatch.setattr(gate, "candidate", candidate)
@@ -906,6 +1070,55 @@ def test_provider_execution_checks_identity_after_its_own_run(
     if mutation == "skipped-call":
         assert set(result["witnesses"]) == set(REQUIRED_WITNESSES)
         assert "setup/call/teardown must pass" in result["error"]
+    if mutation.startswith("pytest-failed"):
+        assert result["error"] == "Lifecycle pytest execution failed with exit code 1"
+    if mutation.startswith("pytest-failed-"):
+        expected = []
+        if mutation in {"pytest-failed-dirty-after", "pytest-failed-both-after"}:
+            expected.append("Candidate dirty after execution")
+        if mutation in {"pytest-failed-source-after", "pytest-failed-both-after"}:
+            expected.append("Source executable identity changed during execution")
+        assert result["postflight_errors"] == expected
+
+
+@pytest.mark.parametrize("postflight_failure", [False, True])
+def test_early_contract_error_preserves_first_cause_without_a_profile_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postflight_failure: bool
+) -> None:
+    identity = {"base": "a" * 40, "head": "b" * 40, "tested_tree": "c" * 40}
+    calls = []
+
+    def candidate(*args: Any) -> dict[str, str]:
+        calls.append("candidate")
+        if len(calls) > 1 and postflight_failure:
+            raise EvidenceError("Candidate genuinely changed after contract failure")
+        return identity
+
+    def contract(*args: Any) -> dict[str, Any]:
+        raise EvidenceError("Missing reviewed assessment")
+
+    def unexpected_profile(*args: Any) -> Any:
+        raise AssertionError("No source baseline was captured")
+
+    monkeypatch.setattr(gate, "candidate", candidate)
+    monkeypatch.setattr(gate, "candidate_contract", contract)
+    monkeypatch.setattr(gate, "source_profile", unexpected_profile)
+    result = gate.execute(
+        argparse.Namespace(
+            base=identity["base"],
+            head=identity["head"],
+            lane="full",
+            report=tmp_path / "report.json",
+        )
+    )
+    assert result["status"] == "blocked"
+    assert result["error"] == "Missing reviewed assessment"
+    assert result["witnesses"] == {}
+    assert calls == ["candidate", "candidate"]
+    assert result.get("postflight_errors", []) == (
+        ["Candidate genuinely changed after contract failure"] if postflight_failure else []
+    )
+    assert not (tmp_path / ".report.json.pytest").exists()
 
 
 @pytest.mark.parametrize("mode", ["skip", "xfail", "setup", "teardown", "call", "pass"])

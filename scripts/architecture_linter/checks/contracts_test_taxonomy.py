@@ -1458,7 +1458,11 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
                 "sorted(REQUIRED_WITNESSES)",
                 "validate_execution(witness, plugin.records[witness['nodeid']])",
                 "candidate(ROOT, args.base, args.head) != identity",
-                "source_profile(ROOT)[1] != report['profile']",
+                "profile is not None",
+                "source_profile(ROOT)[1] != profile",
+                "executable, profile = source_profile(ROOT)",
+                "report.setdefault('error', str(exc))",
+                "report.setdefault('postflight_errors', []).append(str(exc))",
                 "set(plugin.records) != set(REQUIRED_WITNESSES)",
             ),
         ),
@@ -1467,6 +1471,8 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
             "main",
             (
                 "report = execute(args)",
+                "report['status'] != 'passed'",
+                "_write_new(args.report, _json_bytes(report))",
                 "validate_completion(args.completion, report, args.report)",
                 "completion_summary(report, args.report, raw)",
             ),
@@ -1487,9 +1493,35 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
         ),
         (
             _NATIVE_PROVIDER,
+            "_validate_source_profile",
+            (
+                "('source_root', 'python', 'python_environment', 'executable')",
+                "('cli_sha256', 'python_sha256', 'executable_sha256')",
+                "isinstance(profile, dict)",
+                "profile.get('kind') != 'source-python'",
+                "Path(value).is_absolute()",
+                "PureWindowsPath(value).is_absolute()",
+                "re.fullmatch('[0-9a-f]{64}', value)",
+                "valid = field in profile and value is None",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_validate_report_execution",
+            (
+                "_validate_source_profile(report.get('profile'))",
+                "set(records) != set(REQUIRED_WITNESSES)",
+                "candidate_contract(ROOT, report['base'], command_inventory())",
+                "record = records[witness['nodeid']]",
+                "validate_execution(witness, record)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
             "completion_summary",
             (
                 "_validate_completion_summary(summary)",
+                "_validate_report_execution(report)",
                 "report.get('status') != 'passed'",
                 "json.loads(raw) != report",
                 "hashlib.sha256(raw).hexdigest()",
@@ -1502,7 +1534,7 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
                 "_completion_input(path, output)",
                 "summary[claim] != native.get(field)",
                 "summary['report_sha256'] != hashlib.sha256(raw).hexdigest()",
-                "set(report.get('witnesses', {})) != set(REQUIRED_WITNESSES)",
+                "_validate_report_execution(report)",
                 "fields = {'version': 'version', 'contract_id': 'contract_id', "
                 "'base_sha': 'base', 'head_sha': 'head', 'tested_tree': 'tested_tree', "
                 "'lane': 'lane', 'status': 'status'}",
@@ -1581,7 +1613,7 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
         observed = {
             ast.unparse(node)
             for node in nodes
-            if isinstance(node, (ast.Call, ast.Compare, ast.Assign))
+            if isinstance(node, (ast.Call, ast.Compare, ast.Assign, ast.Tuple))
         }
         if not set(expressions) <= observed:
             findings.append(
@@ -1610,11 +1642,21 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
             for statement in node.finalbody
             for child in index.walk(statement)
         }
+        postflight_handlers = [node for node in final_nodes if isinstance(node, ast.ExceptHandler)]
         wired = (
             len(candidates) == len(profiles) == 2
             and len(pytest_calls) == len(validations) == len(plugins) == 1
             and candidates[-1] in final_nodes
             and profiles[-1] in final_nodes
+            and len(postflight_handlers) == 2
+            and all(
+                {
+                    "report.setdefault('error', str(exc))",
+                    "report.setdefault('postflight_errors', []).append(str(exc))",
+                }
+                <= {ast.unparse(node) for node in index.walk(handler)}
+                for handler in postflight_handlers
+            )
         )
         if wired:
             run = pytest_calls[0]
@@ -1630,6 +1672,34 @@ def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation,
                     rule_id,
                     _NATIVE_PROVIDER,
                     "Fresh observed pytest must be bracketed by candidate/source checks including finally",
+                )
+            )
+
+        main = index.function("main")
+        main_nodes = index.own_scope(main) if main else ()
+        fresh_calls = _named_calls(main_nodes, "execute")
+        completion_calls = _named_calls(main_nodes, "validate_completion")
+        blocked = [
+            node
+            for node in main_nodes
+            if isinstance(node, ast.If) and ast.unparse(node.test) == "report['status'] != 'passed'"
+        ]
+        if not (
+            len(fresh_calls) == len(completion_calls) == len(blocked) == 1
+            and fresh_calls[0].lineno < blocked[0].lineno < completion_calls[0].lineno
+            and any(
+                isinstance(node, ast.Call)
+                and ast.unparse(node) == "_write_new(args.report, _json_bytes(report))"
+                for statement in blocked[0].body
+                for node in index.walk(statement)
+            )
+            and isinstance(blocked[0].body[-1], ast.Raise)
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_PROVIDER,
+                    "Failed fresh execution must persist and stop before completion comparison",
                 )
             )
 

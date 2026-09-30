@@ -124,6 +124,8 @@ def downloader() -> GitHubPackageDownloader:
     [
         "locked-match",
         "locked-sibling",
+        "locked-stale-provider",
+        "locked-unrelated-stale-provider",
         "current-api",
         "current-legacy",
         "sha-passthrough",
@@ -145,6 +147,10 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
     old_sha, prior_sha, current_sha = "a" * 40, "b" * 40, "c" * 40
     dependency = _make_dep()
+    stale_provider = case in {"locked-stale-provider", "locked-unrelated-stale-provider"}
+    if stale_provider:
+        monkeypatch.setenv("GITHUB_HOST", "code.example.com")
+        dependency = _make_dep(host="code.example.com")
     cache = GitCache(tmp_path / "cache")
     original_url = dependency.to_github_url()
     cache.remember_resolved_ref(original_url, "main", prior_sha)
@@ -171,7 +177,18 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
     )
     assert resolver is not None
     downloader._tiered_resolver = resolver
-    if case.startswith("locked-"):
+    if stale_provider:
+        seeded = DependencyReference(
+            repo_url=(
+                dependency.repo_url if case == "locked-stale-provider" else "removed/package"
+            ),
+            host="code.example.com",
+            host_type="gitlab",
+            reference="main",
+        )
+        assert resolver.seed(seeded, "main", old_sha) is False
+        assert resolver._lock_seeds == {}
+    elif case.startswith("locked-"):
         seeded = (
             dependency
             if case == "locked-match"
@@ -186,7 +203,7 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
         assert resolver.remotely_resolved(dependency, current_sha) is False
         assert cache.read_resolved_ref(original_url, "main") == (True, prior_sha)
         return
-    resolved = resolver.resolve(dependency)
+    resolved = downloader.resolve_git_reference(dependency)
     expected_sha = old_sha if case in {"locked-match", "sha-passthrough"} else current_sha
     assert resolved.resolved_commit == expected_sha
     if case == "locked-match":
@@ -196,6 +213,9 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
         downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
         assert resolver.resolve(seeded).resolved_commit == old_sha
         assert resolver.remotely_resolved(seeded, old_sha) is False
+    if stale_provider:
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.resolve.assert_not_called()
     if case == "mismatched-repository":
         dependency = _make_dep(repo_url="other/repository")
     elif case == "mismatched-ref":

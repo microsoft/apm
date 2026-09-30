@@ -155,6 +155,28 @@ def _check_ref_freshness(provider: FactsProvider) -> tuple[Violation, ...]:
             inv,
             _RID_FRESHNESS,
             _TIERED,
+            (
+                "        try:\n"
+                "            key = self._lock_seed_key(dep_ref, ref)\n"
+                "        except (ValueError, RuntimeError) as exc:\n"
+                "            _log.debug(\n"
+                '                "Skipping lock seed: historical provider identity is '
+                'unclassifiable (%s)",\n'
+                "                type(exc).__name__,\n"
+                "            )\n"
+                "            return False\n"
+                "        with self._coalesce_lock:\n"
+                "            self._lock_seeds[key] = sha.lower()",
+            ),
+            "unclassifiable historical seeds must be rejected before storage",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FRESHNESS,
+            _TIERED,
             ("def remotely_resolved(", "self.freshness_policy.requires_remote"),
             "persistent ref observations must be authorized by the freshness owner",
         )

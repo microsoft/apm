@@ -470,6 +470,45 @@ def test_current_policy_rejects_lock_seed() -> None:
     assert resolver.resolve(_dep()).resolved_commit == SHA_B
 
 
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
+def test_seed_rejects_unclassifiable_history_without_recording(
+    caplog: pytest.LogCaptureFixture, error_type: type[Exception]
+) -> None:
+    """Historical classification failures reject admission, not current resolution."""
+    cache = PerRunRefCache()
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy], cache=cache, legacy=legacy
+    )
+    with (
+        patch(
+            "apm_cli.core.host_providers.effective_host_provider_identity",
+            side_effect=error_type("untrusted historical metadata"),
+        ),
+        caplog.at_level("DEBUG", logger="apm_cli.deps.tiered_ref_resolver"),
+    ):
+        assert resolver.seed(_dep(), "main", SHA_A) is False
+    assert resolver._lock_seeds == {}
+    assert cache.size() == 0
+    assert resolver.remotely_resolved(_dep(), SHA_A) is False
+    assert caplog.messages == [
+        f"Skipping lock seed: historical provider identity is unclassifiable ({error_type.__name__})"
+    ]
+    assert resolver.resolve(_dep()).resolved_commit == SHA_B
+
+
+def test_seed_rejection_does_not_swallow_unexpected_errors() -> None:
+    """Programming errors are not historical-provider rejection or successful replay."""
+    resolver = TieredRefResolver([], PerRunRefCache(), _make_legacy_with(SHA_B))
+    with patch(
+        "apm_cli.core.host_providers.effective_host_provider_identity",
+        side_effect=TypeError("fixture programming error"),
+    ):
+        with pytest.raises(TypeError, match="fixture programming error"):
+            resolver.seed(_dep(), "main", SHA_A)
+    assert resolver._lock_seeds == {}
+
+
 def test_orchestrator_collapses_concurrent_resolves():
     cache = PerRunRefCache()
     legacy = _make_legacy_with(SHA_A)

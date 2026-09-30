@@ -71,6 +71,8 @@ class TestGitignoreScopeGuard:
             def _resolve_sets_deps(name, phase, ctx):
                 if name == "resolve":
                     ctx.deps_to_install = [MagicMock()]
+                elif name == "targets":
+                    ctx.integrators["skill"] = MagicMock()
 
             mock_run_phase.side_effect = _resolve_sets_deps
 
@@ -102,6 +104,8 @@ class TestGitignoreScopeGuard:
             def _resolve_sets_deps(name, phase, ctx):
                 if name == "resolve":
                     ctx.deps_to_install = [MagicMock()]
+                elif name == "targets":
+                    ctx.integrators["skill"] = MagicMock()
 
             mock_run_phase.side_effect = _resolve_sets_deps
 

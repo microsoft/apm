@@ -451,7 +451,8 @@ class TieredRefResolver:
 
         Lock seeds must not enter the repository-wide fresh-result cache:
         a sibling virtual package without a matching lock entry must still
-        establish the current upstream ref.
+        establish the current upstream ref. Historical provider metadata
+        that can no longer be classified is rejected, not replayed.
         """
         if (
             not self.freshness_policy.allows_lock_seed
@@ -461,7 +462,16 @@ class TieredRefResolver:
         ):
             return False
         dep_ref = self._normalize(repo_ref)
-        key = self._lock_seed_key(dep_ref, ref)
+        # Only historical admission is recoverable; current declarations
+        # still use strict classification during parsing and resolution.
+        try:
+            key = self._lock_seed_key(dep_ref, ref)
+        except (ValueError, RuntimeError) as exc:
+            _log.debug(
+                "Skipping lock seed: historical provider identity is unclassifiable (%s)",
+                type(exc).__name__,
+            )
+            return False
         with self._coalesce_lock:
             self._lock_seeds[key] = sha.lower()
         return True

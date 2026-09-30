@@ -2579,6 +2579,7 @@ def _exercise_global_revision_commands(
     compiled_path: Path,
     install_args: tuple[str, ...],
     manifest_path: Path,
+    lock_path: Path,
 ) -> GitCommit:
     """Advance one installed workspace, retaining byte and ownership oracles."""
     installed = capture()
@@ -2700,7 +2701,69 @@ def _exercise_global_revision_commands(
     run(install_args, "global-reinstall-b")
     _assert_same_state(installed_b, capture())
     assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    _exercise_frozen_full_pin_commands(
+        run,
+        capture,
+        assert_revision,
+        manifest_path,
+        lock_path,
+        install_args,
+        artifact_roots,
+        commit_a,
+        commit_b,
+    )
     return commit_b
+
+
+def _exercise_frozen_full_pin_commands(
+    run: Callable[..., CommandResult],
+    capture: Callable[[], LifecycleStateSnapshot],
+    assert_revision: Callable[[GitCommit, str], None],
+    manifest_path: Path,
+    lock_path: Path,
+    install_args: tuple[str, ...],
+    artifact_roots: Mapping[str, Path],
+    commit_a: GitCommit,
+    commit_b: GitCommit,
+) -> None:
+    """Refuse a corrupt locked commit even when its declared full pin still matches."""
+    original_manifest = manifest_path.read_bytes()
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"][0]["ref"] = commit_a.sha
+    dump_yaml(manifest, manifest_path)
+    run(install_args, "global-full-pin-install-a")
+    assert_revision(commit_a, "a")
+    accepted = capture()
+    pinned_lock = lock_path.read_bytes()
+    lock = load_yaml(lock_path)
+    assert len(lock["dependencies"]) == 1
+    locked = lock["dependencies"][0]
+    assert (locked["resolved_ref"], locked["resolved_commit"]) == (commit_a.sha, commit_a.sha)
+    locked["resolved_commit"] = commit_b.sha
+    dump_yaml(lock, lock_path)
+
+    corrupted = capture()
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    refused = run(
+        (*install_args, "--frozen"),
+        "global-full-pin-commit-refusal",
+        expected_returncode=1,
+    )
+    diagnostic = " ".join((refused.stdout + refused.stderr).split())
+    assert f"manifest commit '{commit_a.sha}'" in diagnostic, _result_evidence(refused)
+    assert f"lockfile resolved_commit '{commit_b.sha}'" in diagnostic, _result_evidence(refused)
+    _assert_same_state(corrupted, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+    lock_path.write_bytes(pinned_lock)
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    run((*install_args, "--frozen"), "global-full-pin-recovery-a")
+    _assert_same_state(accepted, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    assert_revision(commit_a, "a")
+    manifest_path.write_bytes(original_manifest)
+    run(install_args, "global-full-pin-restore-branch-b")
+    assert_revision(commit_b, "b")
 
 
 def _semver_transport_environment(scenario: _Scenario, source: _PublishedPackage) -> dict[str, str]:
@@ -2985,6 +3048,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         external_roots["claude"] / "CLAUDE.md",
         install_args,
         manifest_path,
+        lock_path,
     )
     scenario.repositories.tag(source.repository, "v1.0.0", commit_b)
     _exercise_frozen_semver_transport_commands(
