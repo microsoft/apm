@@ -59,6 +59,8 @@ def resolve_version_constraint(
     git_env: dict[str, str] | None = None,
     port: int | None = None,
     remote_url: str | None = None,
+    transport_scheme: str = "https",
+    ssh_user: str = "git",
 ) -> tuple[str, str]:
     """Resolve a semver range to the highest matching git tag.
 
@@ -80,6 +82,8 @@ def resolve_version_constraint(
             on a different remote than the marketplace catalog, pass the
             package URL so ``git ls-remote`` queries the repo that has
             the tags.
+        transport_scheme: Initial scheme selected by the transport owner.
+        ssh_user: SSH username from the selected package identity.
 
     Returns:
         ``(tag_name, commit_sha)`` of the highest matching version.
@@ -100,6 +104,10 @@ def resolve_version_constraint(
         resolver_kwargs["git_env"] = git_env
     if port is not None:
         resolver_kwargs["port"] = port
+    if transport_scheme != "https":
+        resolver_kwargs["transport_scheme"] = transport_scheme
+    if ssh_user != "git":
+        resolver_kwargs["ssh_user"] = ssh_user
     if auth_resolver is not None:
         resolver_kwargs.update(
             auth_resolver=auth_resolver,

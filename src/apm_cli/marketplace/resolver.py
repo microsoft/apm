@@ -32,9 +32,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner
+from ..deps.transport_selection import initial_transport_scheme
+from ..models.dependency.host_virtual import dependency_repository_owner
 from ..models.dependency.reference import DependencyReference
 from ..utils.github_host import (
+    build_ado_ssh_url,
+    build_https_clone_url,
+    build_ssh_url,
     is_azure_devops_hostname,
     is_github_hostname,
     is_supported_git_host,
@@ -784,14 +788,28 @@ def _extract_auth(
     host: str,
     org: str | None = None,
     port: int | None = None,
+    remote_url: str | None = None,
 ) -> tuple[str | None, str, dict[str, str] | None]:
     """Extract token, scheme, and hardened Git env for one host."""
     if auth_resolver is None:
         return None, "basic", None
     try:
-        ctx = auth_resolver.resolve(host, org=org, port=port)  # type: ignore[union-attr]
+        kwargs = {"org": org, "port": port}
+        if remote_url is not None:
+            kwargs["remote_url"] = remote_url
+        ctx = auth_resolver.resolve(host, **kwargs)  # type: ignore[union-attr]
         if ctx is None:
             return None, "basic", None
+        if remote_url is not None:
+            from ..core.host_providers import git_transport_policy
+
+            policy = git_transport_policy(ctx.host_info.kind, remote_url)
+            token = ctx.token if policy.use_resolved_credentials else None
+            return (
+                token,
+                ctx.auth_scheme if token else "basic",
+                auth_resolver.git_env_for_remote(ctx, remote_url),  # type: ignore[union-attr]
+            )
         if not ctx.token and ctx.host_info.kind != "ado":
             return None, "basic", None
         return (
@@ -814,8 +832,8 @@ def _coords_from_package_locator(
     locator: str,
     source: MarketplaceSource,
     source_kind: str | None = None,
-) -> tuple[str, str | None, str, int | None, str | None] | None:
-    """Parse a plugin source locator into version-tag lookup coordinates.
+) -> DependencyReference:
+    """Parse package identity without borrowing an external package's authority.
 
     URLs, SSH, host-qualified shorthand, and ``type: github`` locators are
     parsed through :meth:`DependencyReference.parse` so the package host
@@ -823,8 +841,7 @@ def _coords_from_package_locator(
     marketplace catalog host. Bare ``owner/repo`` on gitlab/git-subdir (or
     unknown) kinds keep the marketplace host.
 
-    Returns ``(owner_repo, remote_url, host, port, org)`` or ``None`` when
-    *locator* is not a usable package identity.
+    Invalid external coordinates propagate the reference owner's validation error.
     """
     if (
         "://" in locator
@@ -832,54 +849,28 @@ def _coords_from_package_locator(
         or _locator_is_host_qualified(locator)
         or source_kind == "github"
     ):
-        try:
-            dep = DependencyReference.parse(locator)
-        except ValueError:
-            return None
-        if dep.is_local or not dep.repo_url:
-            return None
-        return (
-            dep.repo_url,
-            dep.to_clone_url(),
-            dep.host or source.host,
-            dep.port if dep.port is not None else source.port,
-            repository_owner(dep.repo_url),
-        )
-    owner_repo = locator.rstrip("/")
-    if owner_repo.endswith(".git"):
-        owner_repo = owner_repo[:-4]
-    if "/" not in owner_repo:
-        return None
-    return (
-        owner_repo,
-        None,
-        source.host,
-        source.port,
-        repository_owner(owner_repo),
+        return DependencyReference.parse(locator)
+    remote = build_https_clone_url(
+        source.host, locator.rstrip("/").removesuffix(".git"), port=source.port
     )
+    return DependencyReference.parse(remote)
 
 
 def _package_version_remote(
     plugin: MarketplacePlugin,
     source: MarketplaceSource,
     dep_ref: DependencyReference | None,
-) -> tuple[str, str | None, str, int | None, str | None]:
+) -> DependencyReference:
     """Return the git remote that hosts package version tags.
 
     Packed and cross-repo sources publish tags on the package repository,
     not the marketplace catalog. In-marketplace packages keep the catalog
     ``owner/repo``.
 
-    Returns ``(owner_repo, remote_url, host, port, org)``.
+    The parsed reference owns all coordinates, including an absent custom port.
     """
     if dep_ref is not None:
-        return (
-            dep_ref.repo_url,
-            None if dep_ref.is_local else dep_ref.to_clone_url(),
-            dep_ref.host or source.host,
-            dep_ref.port if dep_ref.port is not None else source.port,
-            dependency_repository_owner(dep_ref) or source.owner,
-        )
+        return dep_ref
 
     src = plugin.source
     if isinstance(src, dict) and not _is_in_marketplace_source(plugin, source):
@@ -887,17 +878,9 @@ def _package_version_remote(
         if kind in {"github", "gitlab", "git-subdir"}:
             locator = src.get("repo") or src.get("repository") or src.get("url")
             if isinstance(locator, str) and locator.strip():
-                coords = _coords_from_package_locator(locator.strip(), source, source_kind=kind)
-                if coords is not None:
-                    return coords
+                return _coords_from_package_locator(locator.strip(), source, source_kind=kind)
 
-    return (
-        f"{source.owner}/{source.repo}",
-        None,
-        source.host,
-        source.port,
-        source.owner,
-    )
+    return DependencyReference.parse(_marketplace_https_git_url(source))
 
 
 def resolve_marketplace_plugin(
@@ -1103,14 +1086,27 @@ def resolve_marketplace_plugin(
         if is_version_constraint(version_spec):
             from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
-            owner_repo, remote_url, lookup_host, lookup_port, lookup_org = _package_version_remote(
-                plugin, source, dep_ref
-            )
+            lookup = _package_version_remote(plugin, source, dep_ref)
+            transport_scheme = initial_transport_scheme(lookup)
+            if transport_scheme == "ssh":
+                remote_url = (
+                    build_ado_ssh_url(lookup.ado_organization, lookup.ado_project, lookup.ado_repo)
+                    if lookup.is_azure_devops()
+                    else build_ssh_url(
+                        lookup.host,
+                        lookup.repo_url,
+                        port=lookup.port,
+                        user=lookup.ssh_user or "git",
+                    )
+                )
+            else:
+                remote_url = lookup.to_clone_url()
             token, auth_scheme, git_env = _extract_auth(
                 auth_resolver,
-                lookup_host,
-                org=lookup_org,
-                port=lookup_port,
+                lookup.host,
+                org=dependency_repository_owner(lookup),
+                port=lookup.port,
+                remote_url=remote_url,
             )
             effective_tag_pattern = plugin.tag_pattern
             if effective_tag_pattern is None:
@@ -1122,21 +1118,22 @@ def resolve_marketplace_plugin(
                 )
                 effective_tag_pattern = DEFAULT_TAG_PATTERN
             version_auth = {
-                "host": lookup_host,
+                "host": lookup.host,
                 "token": token,
                 "auth_scheme": auth_scheme,
                 "auth_resolver": auth_resolver,
                 "tag_pattern": effective_tag_pattern,
+                "transport_scheme": transport_scheme,
+                "ssh_user": lookup.ssh_user or "git",
+                "remote_url": remote_url,
             }
             if git_env is not None:
                 version_auth["git_env"] = git_env
-            if lookup_port is not None:
-                version_auth["port"] = lookup_port
-            if remote_url is not None:
-                version_auth["remote_url"] = remote_url
+            if lookup.port is not None:
+                version_auth["port"] = lookup.port
             tag_name, _sha = resolve_version_constraint(
                 plugin_name,
-                owner_repo,
+                lookup.repo_url,
                 version_spec,
                 **version_auth,
             )

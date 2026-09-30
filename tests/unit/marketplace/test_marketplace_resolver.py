@@ -1,6 +1,7 @@
 """Tests for marketplace resolver -- regex and source type resolution."""
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
 import pytest
@@ -922,6 +923,8 @@ class TestResolveMarketplacePluginGitLabMonorepo:
             auth_scheme="basic",
             auth_resolver=None,
             remote_url=source["url"],
+            transport_scheme="https",
+            ssh_user="git",
         )
 
     @pytest.mark.parametrize(
@@ -1145,6 +1148,114 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         dep = result.dependency_reference
         assert dep.virtual_path == "registry/pkg"
         assert dep.repo_url == "epm-ease/ai-apm-registry"
+
+
+class TestPackageVersionRemoteContract:
+    """Use the actual ref resolver while replacing only catalog and Git I/O."""
+
+    @pytest.mark.parametrize(
+        ("plugin_source", "expected"),
+        [
+            (
+                {"type": "url", "url": "https://git.example.invalid/team/pkg.git"},
+                ("https", "git.example.invalid", None, None, "/team/pkg"),
+            ),
+            (
+                {"type": "github", "repo": "acme/pkg"},
+                ("https", "github.com", None, None, "/acme/pkg"),
+            ),
+            (
+                {"type": "github", "repo": "github.com/acme/pkg"},
+                ("https", "github.com", None, None, "/acme/pkg"),
+            ),
+            (
+                {"type": "url", "url": "ssh://deploy@git.example.invalid:2222/team/pkg.git"},
+                ("ssh", "git.example.invalid", 2222, "deploy", "/team/pkg"),
+            ),
+            (
+                {"type": "url", "url": "https://git.example.invalid:9443/group/subgroup/pkg.git"},
+                ("https", "git.example.invalid", 9443, None, "/group/subgroup/pkg"),
+            ),
+            (
+                {"type": "github", "repo": "catalog/market"},
+                ("https", "catalog.example.invalid", 8443, None, "/catalog/market"),
+            ),
+            ("./plugins/pkg", ("https", "catalog.example.invalid", 8443, None, "/catalog/market")),
+        ],
+        ids=[
+            "packed-default-port",
+            "github-default-port",
+            "qualified-github",
+            "ssh-custom-user-port",
+            "nested-explicit-port",
+            "catalog-dict",
+            "catalog-relative",
+        ],
+    )
+    def test_semver_uses_complete_package_identity(
+        self,
+        plugin_source: dict[str, str] | str,
+        expected: tuple[str, str, int | None, str | None, str],
+    ) -> None:
+        source = MarketplaceSource(
+            name="catalog", url="https://catalog.example.invalid:8443/catalog/market.git"
+        )
+        plugin = MarketplacePlugin(name="pkg", source=plugin_source)
+        auth = Mock()
+        auth.resolve.return_value = SimpleNamespace(
+            token=None, auth_scheme="basic", host_info=SimpleNamespace(kind="github")
+        )
+        auth.git_env_for_remote.return_value = {"GIT_TERMINAL_PROMPT": "0"}
+        result = SimpleNamespace(
+            returncode=0, stdout=f"{'a' * 40}\trefs/tags/pkg--v1.0.0\n", stderr=""
+        )
+        with (
+            patch("apm_cli.marketplace.resolver.get_marketplace_by_name", return_value=source),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=MarketplaceManifest(name="catalog", plugins=(plugin,)),
+            ),
+            patch("apm_cli.utils.git_env.git_remote_refs", return_value=result) as remote,
+        ):
+            resolution = resolve_marketplace_plugin(
+                "pkg", "catalog", version_spec="^1.0.0", auth_resolver=auth
+            )
+        remote.assert_called_once()
+        url = urlparse(remote.call_args.args[0])
+        assert (
+            url.scheme,
+            url.hostname,
+            url.port,
+            url.username,
+            url.path.removesuffix(".git"),
+        ) == expected
+        assert resolution.canonical.endswith("#pkg--v1.0.0")
+        assert auth.resolve.call_args.args == (expected[1],)
+        assert auth.resolve.call_args.kwargs["port"] == expected[2]
+        assert auth.resolve.call_args.kwargs["org"] == expected[4].split("/")[1]
+        assert urlparse(auth.resolve.call_args.kwargs["remote_url"]) == url
+
+    def test_invalid_external_locator_does_not_query_catalog(self) -> None:
+        source = MarketplaceSource(name="catalog", owner="catalog", repo="market")
+        plugin = MarketplacePlugin(
+            name="pkg", source={"type": "github", "repo": "https://git.example.invalid/x/../pkg"}
+        )
+        with (
+            patch("apm_cli.marketplace.resolver.get_marketplace_by_name", return_value=source),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=MarketplaceManifest(name="catalog", plugins=(plugin,)),
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_remote_refs",
+                return_value=SimpleNamespace(
+                    returncode=0, stdout=f"{'a' * 40}\trefs/tags/pkg--v1.0.0\n", stderr=""
+                ),
+            ) as remote,
+            pytest.raises(ValueError),
+        ):
+            resolve_marketplace_plugin("pkg", "catalog", version_spec="^1.0.0")
+        remote.assert_not_called()
 
 
 class TestGithubPackageTagHostOnForeignMarketplace:

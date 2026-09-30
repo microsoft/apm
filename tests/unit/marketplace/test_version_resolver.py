@@ -2,6 +2,7 @@
 
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from apm_cli.marketplace.errors import NoMatchingVersionError
 from apm_cli.marketplace.ref_resolver import RemoteRef
@@ -244,4 +245,12 @@ class TestResolveVersionConstraint(unittest.TestCase):
                 "^1.0.0",
                 remote_url=package_url,
             )
-        assert package_url in str(ctx.exception)
+        printed_url = str(ctx.exception).split("remote_url='", 1)[1].split("'", 1)[0]
+        actual = urlparse(printed_url)
+        expected = urlparse(package_url)
+        assert (actual.scheme, actual.hostname, actual.port, actual.path) == (
+            expected.scheme,
+            expected.hostname,
+            expected.port,
+            expected.path,
+        )

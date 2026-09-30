@@ -257,20 +257,23 @@ that at most one declaration remains.
 
 During resolution, marketplace entries are looked up in the marketplace's
 `marketplace.json` and replaced with concrete git coordinates. When `version`
-is a semver range or bare version number, the resolver lists git tags
+is a semver range or bare version number, the resolver lists the package
+repository's git tags (the catalog's tags only for in-catalog packages)
 using the `source.tag_pattern` emitted by `apm pack`. The package-level
 `tag_pattern` overrides `marketplace.build.tagPattern`. APM filters by the
 constraint and picks the highest matching tag. Old `marketplace.json` files
 that omit `source.tag_pattern` fall back to `{name}--v{version}`. Patterns
 must contain exactly one `{version}` placeholder, and a no-match does not
-silently become a raw ref. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
-resolution. The lockfile records the resolved ref, not the marketplace
+silently become a raw ref or consult a different repository. Use
+`apm install pkg@catalog#v1.0.1` for a literal ref; CLI marketplace suffixes
+do not accept ranges. Raw refs bypass tag resolution. The lockfile records the resolved ref, not the marketplace
 placeholder. Unknown keys in a marketplace entry are rejected.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
-The package URL owns the host; `git-subdir.path` owns the contained package
-path. Both survive into the concrete `git:`, `path:`, and `ref:` manifest
+The package URL owns its host, port, explicit transport, and SSH user during
+tag lookup and installation; none inherit the catalog's authority.
+`git-subdir.path` owns the contained package path. These survive into the concrete `git:`, `path:`, and `ref:` manifest
 entry and the lockfile. Invalid URLs or unsafe paths fail before durable
 project writes.
 
