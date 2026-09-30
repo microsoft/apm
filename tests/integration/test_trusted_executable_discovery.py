@@ -108,6 +108,7 @@ def test_real_tools_resolve_and_execute_with_native_pathext(
     environment = _source_environment(isolated.subprocess_env())
     environment["PATH"] = os.pathsep.join([str(project), str(trusted.parent)])
     environment["PATHEXT"] = ".EXE;.CMD"
+    environment["GH_NO_UPDATE_NOTIFIER"] = "1"
     environment.pop("NoDefaultCurrentDirectoryInExePath", None)
     result = subprocess.run(
         (
@@ -120,7 +121,7 @@ def test_real_tools_resolve_and_execute_with_native_pathext(
             "legacy = shutil.which(str(Path(directory) / name)); "
             "resolved = (get_git_executable if name == 'git' else get_gh_executable)(); "
             "version = subprocess.run([resolved, '--version'], check=True, "
-            "capture_output=True, text=True, timeout=15).stdout; "
+            "capture_output=True, text=True, timeout=60).stdout; "
             "print(json.dumps({'legacy': legacy, 'resolved': resolved, 'version': version}))",
             name,
             str(trusted.parent),
@@ -129,7 +130,7 @@ def test_real_tools_resolve_and_execute_with_native_pathext(
         env=environment,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=90,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr

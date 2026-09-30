@@ -220,7 +220,7 @@ jobs:
 
         source = pathlib.Path("src/apm_cli/utils/git_env.py")
         original = source.read_bytes()
-        guard = b'if candidate is None and os.name == "nt":'
+        guard = b'if candidate is None and os.name == "nt" and sys.version_info < (3, 12):'
         assert original.count(guard) == 1, "PATHEXT mutation guard changed"
         try:
             source.write_bytes(original.replace(guard, b"if False:"))

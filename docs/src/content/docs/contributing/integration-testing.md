@@ -409,6 +409,8 @@ The legacy jobs collect only these files so unrelated tests requiring newer
 interpreters cannot prevent collection. They select the same discovery cases
 as the marker across both test roots. Production imports on this path remain
 compatible with Python 3.10.
+Python 3.12 and later use the standard-library lookup without the legacy
+fallback; a candidate-count regression checks linear extension scanning.
 Only a native Windows run demonstrates Windows behavior; passing mocks or
 collection alone do not.
 

@@ -1,14 +1,17 @@
 """Tests for git subprocess environment sanitization."""
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
 import pytest
 
+from apm_cli.utils import git_env
 from apm_cli.utils.git_env import (
     _STRIP_GIT_VARS,
     GitConfigEntry,
@@ -42,6 +45,40 @@ def _run_real_git_config_and_fake_clone(args, **kwargs):
     if len(args) > 1 and args[1] == "config":
         return _REAL_SUBPROCESS_RUN(args, **kwargs)
     return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Modern qualified PATHEXT lookup")
+@pytest.mark.parametrize("name", ["git", "gh"])
+def test_modern_windows_missing_lookup_scales_linearly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Count real stdlib candidate probes without repeating modern PATHEXT scans."""
+    project = tmp_path / "project"
+    trusted_bin = tmp_path / "tools"
+    project.mkdir()
+    trusted_bin.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(shutil, "sys", SimpleNamespace(platform="win32"))
+    counts = []
+    for size in (20, 200):
+        extensions = [f".EXT{index}" for index in range(size)]
+        monkeypatch.setenv("PATHEXT", os.pathsep.join(extensions))
+        monkeypatch.setattr(
+            git_env,
+            "os",
+            SimpleNamespace(
+                name="nt",
+                pathsep=";",
+                environ={"PATHEXT": ";".join(extensions)},
+                get_exec_path=lambda: [str(trusted_bin)],
+            ),
+        )
+        with patch("shutil._access_check", return_value=False) as access:
+            with pytest.raises(FileNotFoundError, match="trusted PATH"):
+                _resolve_trusted_executable(name)
+            counts.append(access.call_count)
+
+    assert counts == [20, 200]
 
 
 @pytest.mark.trusted_executable
