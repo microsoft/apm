@@ -557,7 +557,9 @@ def test_unrecognized_claude_plugin_schema_falls_back_to_legacy_structure(
     assert skill_path.is_file(), _result_evidence(result)
     assert skill_path.read_bytes() == skill_bytes
     assert result.returncode == 0, _result_evidence(result)
-    assert "Unrecognized plugin manifest $schema" in result.stdout + result.stderr
+    assert "Unrecognized plugin manifest $schema" in " ".join(
+        (result.stdout + result.stderr).split()
+    )
 
 
 @pytest.mark.parametrize(
