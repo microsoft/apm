@@ -257,20 +257,25 @@ that at most one declaration remains.
 
 During resolution, marketplace entries are looked up in the marketplace's
 `marketplace.json` and replaced with concrete git coordinates. When `version`
-is a semver range or bare version number, the resolver lists git tags
+is a semver range or bare version number, the resolver lists the package
+repository's git tags (the catalog's tags only for in-catalog packages)
 using the `source.tag_pattern` emitted by `apm pack`. The package-level
 `tag_pattern` overrides `marketplace.build.tagPattern`. APM filters by the
 constraint and picks the highest matching tag. Old `marketplace.json` files
 that omit `source.tag_pattern` fall back to `{name}--v{version}`. Patterns
 must contain exactly one `{version}` placeholder, and a no-match does not
-silently become a raw ref. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
-resolution. The lockfile records the resolved ref, not the marketplace
+silently become a raw ref or consult a different repository. Use
+`apm install pkg@catalog#v1.0.1` for a literal ref; CLI marketplace suffixes
+do not accept ranges. Raw refs bypass tag resolution. The lockfile records the resolved ref, not the marketplace
 placeholder. Unknown keys in a marketplace entry are rejected.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
-The package URL owns the host; `git-subdir.path` owns the contained package
-path. Both survive into the concrete `git:`, `path:`, and `ref:` manifest
+The package URL owns its host, port, explicit transport, and SSH user during
+tag lookup and installation; none inherit the catalog's authority, even when
+hostname and repository path match. Explicit dictionary `repo` URLs follow
+the same rule; bare external entries keep their normal dependency defaults.
+`git-subdir.path` owns the contained package path. These survive into the concrete `git:`, `path:`, and `ref:` manifest
 entry and the lockfile. Invalid URLs or unsafe paths fail before durable
 project writes.
 
@@ -501,12 +506,14 @@ dependencies:
       registry: false
       transport: http
       url: "https://mcp.internal.example.com"
+      enabled: false  # OpenCode only; other targets ignore this field
 
     # Self-defined remote with harness-specific extra keys
     # Unknown keys (e.g. oauth) are passthrough: preserved and written into
     # the generated config for EVERY installed harness. Keys that collide with
     # a modeled or adapter-owned field
-    # (command/url/headers/env/enabled/environment/http_headers/id/...) are rejected.
+    # (command/url/headers/env/environment/http_headers/id/...) are rejected.
+    # Top-level enabled is modeled for OpenCode; extra.enabled remains reserved.
     - name: slack
       registry: false
       transport: http
@@ -524,6 +531,13 @@ to replace previously written credentials without losing custom fields.
 See the [MCP
 Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md#token-injection-github-mcp-server)
 for token selection details.
+
+For OpenCode, top-level `enabled` passes the supplied value and JSON type
+unchanged, including `false`, `null`, and non-boolean values. Only omission
+defaults to `true`; OpenCode interprets the value, not APM. Reinstall applies
+changes to this field. OpenCode remains project-only. See the
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
+for the dependency contract.
 
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker

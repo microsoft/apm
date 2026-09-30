@@ -42,6 +42,12 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 |---|---|---|
 | `--root DIR` | `$PWD` | Redirect every write -- `apm_modules/`, `apm.lock.yaml`, `.gitignore`, and integrated harness files -- under `DIR`, while `apm.yml`, `.apm/`, and local-path dependencies still resolve from the current working directory. Mirrors `pip install --target` / `npm install --prefix`. `DIR` is created if missing (except under `--dry-run`, which refuses to create it). Not valid with `--global` (user scope), which exits `2`. |
 
+`apm install --root DIR --frozen` checks `DIR/apm.lock.yaml` against the
+source manifest. A source-side lockfile is not a substitute for a missing or
+stale deployment lock. To create or repair it, rerun the same install command
+without `--frozen`, keeping `--root DIR`. User-scope frozen installs likewise
+use the user installation's lockfile; retain `--global` when retrying.
+
 ### Target selection
 
 | Flag | Default | Description |

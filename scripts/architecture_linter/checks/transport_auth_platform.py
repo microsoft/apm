@@ -54,6 +54,7 @@ from scripts.architecture_linter.models import Rule, Violation
 
 _RID_HOST_CRED = "transport-platform-host-credential-resolution"
 _RID_HOST_REFERENCE_COORDINATES = "transport-platform-host-reference-coordinates"
+_RID_MARKETPLACE_REMOTE = "transport-platform-marketplace-package-remote"
 _RID_ADO_VALIDATION = "transport-platform-ado-validation-bearer-fallback"
 _RID_ADO_CALLER_CONFIG = "transport-platform-ado-validation-caller-config"
 _RID_ADO_CLONE_FALLBACK = "transport-platform-ado-validation-clone-bearer-fallback"
@@ -466,6 +467,100 @@ def _check_host_reference_coordinates(provider: FactsProvider) -> tuple[Violatio
                         column=match.start() + 1,
                     )
                 )
+    return tuple(findings)
+
+
+def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep marketplace identity and transport handoffs on their existing owners."""
+    contracts = (
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "_package_version_remote",
+            (
+                "return dep_ref",
+                "return _gitlab_in_marketplace_dependency_reference(source, in_repo_path or '', ref)",
+                "return DependencyReference.parse(canonical)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "_dependency_reference_from_packed_source",
+            (
+                "source_type in {'github', 'git-subdir', 'gitlab'} -> remote = source.get('repo') or source.get('repository')",
+                "dependency = DependencyReference.parse_from_dict(entry)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "resolve_marketplace_plugin",
+            (
+                "lookup = _package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root)",
+                "dep_ref = lookup",
+                "canonical = dep_ref.to_canonical()",
+                "transport_scheme = initial_transport_scheme(lookup)",
+                "version_auth['port'] = lookup.port",
+                "resolve_version_constraint(plugin_name, lookup.repo_url, version_spec, **version_auth)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/version_resolver.py",
+            "resolve_version_constraint",
+            (
+                "resolver_kwargs['transport_scheme'] = transport_scheme",
+                "resolver_kwargs['ssh_user'] = ssh_user",
+                "resolver_kwargs['port'] = port",
+            ),
+        ),
+    )
+    findings: list[Violation] = []
+    for path, function, required in contracts:
+        facts, failures = checked_facts(
+            provider, path, _RID_MARKETPLACE_REMOTE, require_python=True
+        )
+        findings.extend(failures)
+        if failures:
+            continue
+        index = facts.tree_index
+        definition = effective_definition(index, function) if index is not None else None
+        executable = (
+            {
+                ast.unparse(node)
+                for node in index.own_scope(definition)
+                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return, ast.Call, ast.Compare))
+            }
+            if definition is not None
+            else set()
+        )
+        if definition is not None:
+            executable.update(
+                f"{ast.unparse(node.test)} -> {ast.unparse(child)}"
+                for node in index.own_scope(definition)
+                if isinstance(node, ast.If)
+                for child in node.body
+                if isinstance(child, ast.Assign)
+            )
+        mutates_identity = (
+            function == "_package_version_remote"
+            and definition is not None
+            and any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "dep_ref"
+                    for target in node.targets
+                )
+                for node in index.own_scope(definition)
+            )
+        )
+        if mutates_identity or not set(required) <= executable:
+            findings.append(
+                violation(
+                    _RID_MARKETPLACE_REMOTE,
+                    path,
+                    f"{function} must preserve the canonical package identity and transport handoff",
+                )
+            )
     return tuple(findings)
 
 
@@ -1456,6 +1551,13 @@ def _check_windows_stable_path(provider: FactsProvider) -> tuple[Violation, ...]
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_MARKETPLACE_REMOTE,
+        group=GROUP,
+        guard_ids=(_RID_MARKETPLACE_REMOTE,),
+        description="Marketplace version lookup preserves canonical package identity and transport.",
+        check=_check_marketplace_package_remote,
+    ),
     Rule(
         id=_RID_ARTIFACTORY_NETRC,
         group=GROUP,

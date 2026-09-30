@@ -624,6 +624,23 @@ class TestExtraReservedKeyDenylist:
         assert config["oauth"] == {"clientId": "abc"}
 
 
+class TestEnabledReservedInExtra:
+    """Top-level enabled is modeled, while extra cannot inject that value."""
+
+    def test_explicit_extra_enabled_is_stripped(self):
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict({"name": "server", "extra": {"enabled": False}})
+
+        assert dep.has_enabled is False
+        assert dep.extra is None
+        assert "enabled" in mock_warn.call_args[0][0]
+
+    def test_direct_extra_enabled_is_not_serialized(self):
+        dep = MCPDependency(name="server", extra={"enabled": False})
+
+        assert "enabled" not in dep.to_dict()
+
+
 class TestResolvedByKeyReserved:
     """resolved_by is install-time provenance, never a manifest-settable key.
 

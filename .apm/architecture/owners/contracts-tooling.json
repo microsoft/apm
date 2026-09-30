@@ -24,6 +24,7 @@
         "src/apm_cli/models/dependency/materialization.py",
         "src/apm_cli/models/dependency/object_fields.py",
         "src/apm_cli/models/dependency/reference.py",
+        "src/apm_cli/primitives/discovery.py",
         "src/apm_cli/deps/apm_resolver.py"
       ],
       "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity"]

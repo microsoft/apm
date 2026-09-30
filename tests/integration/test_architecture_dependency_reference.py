@@ -53,6 +53,31 @@ def test_alias_consumers_share_validation_and_materialization() -> None:
 
 
 @pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("dep.get_install_path(modules_root)", "modules_root / dep.repo_url"),
+        ("lock.get_installed_paths(modules_root)", "[]"),
+        (
+            "resolve_lockfile_path_for_read(installed_root, read_only=True)",
+            'installed_root / "apm.lock.yaml"',
+        ),
+    ],
+)
+def test_discovery_consumes_materialization_and_lockfile_owners(before: str, after: str) -> None:
+    """Path reconstruction or bypassing locked roots trips the static owner guard."""
+    path = "src/apm_cli/primitives/discovery.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert before in source
+    report = run_selected_rules(
+        ROOT, (RULE_ID,), source_overrides={path: source.replace(before, after, 1)}
+    )
+    assert any(
+        violation.rule_id == RULE_ID and "Dependency discovery" in violation.message
+        for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
     ("path", "before", "after"),
     [
         ("src/apm_cli/deps/lockfile.py", "alias=self.alias", "alias=None"),

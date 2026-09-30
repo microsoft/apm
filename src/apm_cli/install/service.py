@@ -257,30 +257,35 @@ class InstallService:
     def enforce_frozen(request: InstallRequest) -> None:
         """Raise :class:`FrozenInstallError` if lockfile is absent or stale.
 
-        Looks up ``apm.lock.yaml`` next to the manifest's ``apm.yml``,
-        loads it, and checks both package dependencies and the canonical
+        Reads the scoped installation's ``apm.lock.yaml`` (manifest-relative
+        for unscoped API callers) and checks package dependencies and the canonical
         current MCP config view. Any miss raises before install mutation.
         """
         from pathlib import Path
 
+        from apm_cli.core.scope import get_lockfile_dir
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import lockfile_satisfies_manifest
 
         manifest_path = getattr(request.apm_package, "package_path", None)
-        if manifest_path is None:
+        if request.scope is not None:
+            project_dir = get_lockfile_dir(request.scope)
+        elif manifest_path is None:
             project_dir = Path(".")
         elif Path(manifest_path).is_file():
             project_dir = Path(manifest_path).parent
         else:
             project_dir = Path(manifest_path)
         lockfile_path = project_dir / "apm.lock.yaml"
+        missing_message = (
+            f"--frozen requires apm.lock.yaml to exist at {lockfile_path}. "
+            "Rerun the same install command without --frozen, retaining "
+            "--root DIR or --global if specified."
+        )
 
         if not lockfile_path.exists():
-            raise FrozenInstallError(
-                "--frozen requires apm.lock.yaml to exist. "
-                "Run 'apm install' (without --frozen) or 'apm update' first.",
-            )
+            raise FrozenInstallError(missing_message)
 
         try:
             lockfile = LockFile.read(lockfile_path)
@@ -290,10 +295,7 @@ class InstallService:
             ) from e
 
         if lockfile is None:
-            raise FrozenInstallError(
-                "--frozen requires apm.lock.yaml to exist. "
-                "Run 'apm install' (without --frozen) or 'apm update' first.",
-            )
+            raise FrozenInstallError(missing_message)
 
         manifest_deps = list(request.apm_package.get_apm_dependencies())
         manifest_deps.extend(request.apm_package.get_dev_apm_dependencies())

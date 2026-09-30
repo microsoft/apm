@@ -1035,7 +1035,7 @@ class LockFile:
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None if not exists or corrupt."""
-        if not path.exists():
+        if not path.exists() and not path.is_symlink():
             return None
         try:
             return cls.from_yaml(path.read_text(encoding="utf-8"))
@@ -1231,7 +1231,11 @@ def resolve_lockfile_path_for_read(project_root: Path, *, read_only: bool) -> Pa
     if read_only:
         new_path = get_lockfile_path(project_root)
         legacy_path = project_root / LEGACY_LOCKFILE_NAME
-        if not new_path.exists() and legacy_path.exists():
+        if (
+            not new_path.exists()
+            and not new_path.is_symlink()
+            and (legacy_path.exists() or legacy_path.is_symlink())
+        ):
             return legacy_path
         return new_path
 

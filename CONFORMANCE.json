@@ -123,9 +123,13 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-project]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-user]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[missing-pin-project]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[missing-pin-user]"
       ]
     },
     {
@@ -306,8 +310,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 6,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_claude_materialization_links_preserve_locked_source_and_virtual_case[Nested/Rules/Deep/Policy]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_claude_materialization_links_preserve_locked_source_and_virtual_case[Nested/Rules]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_materialization_spelling_is_non_identity_metadata",
         "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_collision_fails_without_deleting_candidates",
         "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_does_not_change_lockfile_sort_order",

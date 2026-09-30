@@ -178,6 +178,19 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
 
     findings: list[Violation] = []
     resolver = owner_index.function("resolve_lockfile_path_for_read")
+    if not all(
+        _present(owner, fragment)
+        for fragment in (
+            "and not new_path.is_symlink()",
+            "legacy_path.exists() or legacy_path.is_symlink()",
+            "not path.exists() and not path.is_symlink()",
+        )
+    ):
+        findings.append(
+            _summary(
+                rule_id, _LOCKFILE_OWNER, "Lockfile reads must retain present symlink metadata"
+            )
+        )
     if resolver is None:
         findings.append(
             _summary(rule_id, _LOCKFILE_OWNER, "Read-only lockfile resolver must have one owner")
@@ -537,6 +550,23 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                     "Dependency aliases must use shared validation and strict materialization ownership",
                 )
             )
+    discovery_path = "src/apm_cli/primitives/discovery.py"
+    discovery, errors = _facts_for(provider, discovery_path, rule_id)
+    findings.extend(errors)
+    if not errors and (
+        not _present(discovery, "dep.get_install_path(modules_root)")
+        or not _present(discovery, "lock.get_installed_paths(modules_root)")
+        or not _present(discovery, "resolve_lockfile_path_for_read(installed_root, read_only=True)")
+        or _present(discovery, 'dep.repo_url.split("/")')
+        or _present(discovery, "dep.get_virtual_package_name()")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                discovery_path,
+                "Dependency discovery must consume canonical materialization and lockfile paths",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )

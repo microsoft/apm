@@ -32,8 +32,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
+from ..deps.transport_selection import initial_transport_scheme
+from ..models.dependency.host_virtual import dependency_repository_owner
 from ..models.dependency.reference import DependencyReference
 from ..utils.github_host import (
+    build_ado_ssh_url,
+    build_ssh_url,
     is_azure_devops_hostname,
     is_github_hostname,
     is_supported_git_host,
@@ -468,7 +472,9 @@ def _gitlab_in_marketplace_dependency_reference(
     ref: str | None,
 ) -> DependencyReference:
     """Build ``DependencyReference`` equivalent to object-form ``git`` + ``path`` (spec)."""
-    entry: dict = {"git": _marketplace_https_git_url(source), "path": in_repo_path}
+    entry: dict = {"git": _marketplace_https_git_url(source)}
+    if in_repo_path:
+        entry["path"] = in_repo_path
     if ref:
         entry["ref"] = ref
     return DependencyReference.parse_from_dict(entry)
@@ -592,7 +598,7 @@ def _resolve_git_subdir_source(source: dict) -> str:
 def _dependency_reference_from_packed_source(
     plugin: MarketplacePlugin,
 ) -> DependencyReference | None:
-    """Parse producer-emitted remote source objects through the reference owner."""
+    """Parse packed or explicitly qualified sources before catalog-local routing."""
     source = plugin.source
     if not isinstance(source, dict):
         return None
@@ -604,13 +610,22 @@ def _dependency_reference_from_packed_source(
         # Pack emits git-subdir repository identity in ``url``. Hand-authored
         # ``repo`` forms retain the existing marketplace-relative routing.
         remote = source.get("url")
+    elif source_type in {"github", "git-subdir", "gitlab"}:
+        remote = source.get("repo") or source.get("repository")
+        if not isinstance(remote, str) or not (
+            "://" in remote or remote.startswith("git@") or _locator_is_host_qualified(remote)
+        ):
+            return None
+        if source_type != "github" and "://" in remote:
+            # Hand-authored repo URLs remain subject to the existing syntax error.
+            return None
     else:
         return None
     if not isinstance(remote, str) or not remote.strip():
         return None
 
     entry: dict[str, object] = {"git": remote.strip()}
-    if source_type == "git-subdir":
+    if source_type in {"github", "git-subdir", "gitlab"}:
         path = source.get("subdir", "") or source.get("path", "")
         if path:
             entry["path"] = path
@@ -783,14 +798,28 @@ def _extract_auth(
     host: str,
     org: str | None = None,
     port: int | None = None,
+    remote_url: str | None = None,
 ) -> tuple[str | None, str, dict[str, str] | None]:
     """Extract token, scheme, and hardened Git env for one host."""
     if auth_resolver is None:
         return None, "basic", None
     try:
-        ctx = auth_resolver.resolve(host, org=org, port=port)  # type: ignore[union-attr]
+        kwargs = {"org": org, "port": port}
+        if remote_url is not None:
+            kwargs["remote_url"] = remote_url
+        ctx = auth_resolver.resolve(host, **kwargs)  # type: ignore[union-attr]
         if ctx is None:
             return None, "basic", None
+        if remote_url is not None:
+            from ..core.host_providers import git_transport_policy
+
+            policy = git_transport_policy(ctx.host_info.kind, remote_url)
+            token = ctx.token if policy.use_resolved_credentials else None
+            return (
+                token,
+                ctx.auth_scheme if token else "basic",
+                auth_resolver.git_env_for_remote(ctx, remote_url),  # type: ignore[union-attr]
+            )
         if not ctx.token and ctx.host_info.kind != "ado":
             return None, "basic", None
         return (
@@ -801,6 +830,36 @@ def _extract_auth(
     except Exception as exc:
         logger.debug("Could not extract auth for host '%s': %s", host, type(exc).__name__)
         return None, "basic", None
+
+
+def _locator_is_host_qualified(locator: str) -> bool:
+    """True when the first path segment looks like a hostname (dot or localhost)."""
+    first_segment = locator.split("/", 1)[0]
+    return "." in first_segment or first_segment.lower() == "localhost"
+
+
+def _package_version_remote(
+    plugin: MarketplacePlugin,
+    source: MarketplaceSource,
+    dep_ref: DependencyReference | None,
+    canonical: str,
+    plugin_root: str,
+) -> DependencyReference:
+    """Return the git remote that hosts package version tags.
+
+    Packed and cross-repo sources publish tags on the package repository,
+    not the marketplace catalog. In-marketplace packages keep the catalog
+    ``owner/repo``.
+
+    The parsed reference owns all coordinates, including an absent custom port.
+    """
+    if dep_ref is not None:
+        return dep_ref
+
+    if _is_in_marketplace_source(plugin, source):
+        in_repo_path, ref = _extract_in_repo_path_and_ref(plugin, plugin_root=plugin_root)
+        return _gitlab_in_marketplace_dependency_reference(source, in_repo_path or "", ref)
+    return DependencyReference.parse(canonical)
 
 
 def resolve_marketplace_plugin(
@@ -995,8 +1054,9 @@ def resolve_marketplace_plugin(
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag
     # resolution (for range expressions like ~2.1.0) or a raw ref override
-    # (for plain tags/branches/SHAs like v2.0.0). The tag lookup uses the
-    # marketplace catalog host; structured package fetches still use dep_ref.host.
+    # (for plain tags/branches/SHAs like v2.0.0). Tags live on the package
+    # repository; when that differs from the marketplace catalog, query the
+    # package remote instead of ``source.owner/source.repo``.
     if version_spec:
         from .version_resolver import is_version_constraint
 
@@ -1005,12 +1065,30 @@ def resolve_marketplace_plugin(
         if is_version_constraint(version_spec):
             from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
-            owner_repo = f"{source.owner}/{source.repo}"
+            lookup = _package_version_remote(
+                plugin, source, dep_ref, canonical, manifest.plugin_root
+            )
+            dep_ref = lookup
+            transport_scheme = initial_transport_scheme(lookup)
+            if transport_scheme == "ssh":
+                remote_url = (
+                    build_ado_ssh_url(lookup.ado_organization, lookup.ado_project, lookup.ado_repo)
+                    if lookup.is_azure_devops()
+                    else build_ssh_url(
+                        lookup.host,
+                        lookup.repo_url,
+                        port=lookup.port,
+                        user=lookup.ssh_user or "git",
+                    )
+                )
+            else:
+                remote_url = lookup.to_clone_url()
             token, auth_scheme, git_env = _extract_auth(
                 auth_resolver,
-                source.host,
-                org=source.owner,
-                port=source.port,
+                lookup.host,
+                org=dependency_repository_owner(lookup),
+                port=lookup.port,
+                remote_url=remote_url,
             )
             effective_tag_pattern = plugin.tag_pattern
             if effective_tag_pattern is None:
@@ -1022,19 +1100,22 @@ def resolve_marketplace_plugin(
                 )
                 effective_tag_pattern = DEFAULT_TAG_PATTERN
             version_auth = {
-                "host": source.host,
+                "host": lookup.host,
                 "token": token,
                 "auth_scheme": auth_scheme,
                 "auth_resolver": auth_resolver,
                 "tag_pattern": effective_tag_pattern,
+                "transport_scheme": transport_scheme,
+                "ssh_user": lookup.ssh_user or "git",
+                "remote_url": remote_url,
             }
             if git_env is not None:
                 version_auth["git_env"] = git_env
-            if source.port is not None:
-                version_auth["port"] = source.port
+            if lookup.port is not None:
+                version_auth["port"] = lookup.port
             tag_name, _sha = resolve_version_constraint(
                 plugin_name,
-                owner_repo,
+                lookup.repo_url,
                 version_spec,
                 **version_auth,
             )
