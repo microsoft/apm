@@ -867,16 +867,17 @@ def test_global_update_preserves_owned_external_skill_targets(
     assert claude_skill.read_bytes() == expected_skill
     assert hermes_skill.read_bytes() == expected_skill
     assert "file skipped (local files exist)" not in (update.stdout + update.stderr)
-    canonical_cache = scenario.isolated.config_root / "apm_modules" / _OWNER / "global-audit-kit"
-    alias_cache = scenario.isolated.config_root / "apm_modules" / "global-audit-kit"
-    assert (canonical_cache / "skills" / "global-audit" / "SKILL.md").read_bytes() == (
+    installed_cache = scenario.isolated.config_root / "apm_modules" / "global-audit-kit"
+    non_alias_cache = scenario.isolated.config_root / "apm_modules" / _OWNER / "global-audit-kit"
+    assert (installed_cache / "skills" / "global-audit" / "SKILL.md").read_bytes() == (
         expected_skill
     )
-    assert not alias_cache.exists()
+    assert not non_alias_cache.exists()
 
     lock = LockFile.read(scenario.isolated.config_root / "apm.lock.yaml")
     assert lock is not None
     dependency_lock = lock.get_package_dependencies()[0]
+    assert dependency_lock.alias == "global-audit-kit"
     assert dependency_lock.resolved_commit == commit_b.sha
     deployed = set(dependency_lock.deployed_files)
     assert str(claude_skill) in deployed

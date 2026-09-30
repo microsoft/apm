@@ -485,8 +485,11 @@ def test_source_profile_accepts_only_canonical_long_path_launchers(
     foreign.mkdir()
     foreign_python = foreign / "python"
     foreign_python.symlink_to(python.resolve())
-    different_python = directory / "different-python"
+    different_python = directory / "python-untrusted"
     different_python.write_text("not this interpreter")
+    assert different_python.parent == python.parent
+    assert str(different_python).startswith(str(python))
+    assert not different_python.samefile(python)
     substitutions = {
         "foreign-environment": (quoted, f"'{foreign_python}'"),
         "different-interpreter": (quoted, f"'{different_python}'"),
@@ -977,13 +980,18 @@ def test_observer_requires_real_runner_and_hypothesis_execution(pytester: pytest
     pytester.makeini("[pytest]")
     module = pytester.makepyfile("""
         import os
+        import subprocess
         import sys
+        from unittest.mock import patch
         from hypothesis import settings
         from hypothesis.stateful import RuleBasedStateMachine, initialize, rule, run_state_machine_as_test
         from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
         from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
         def test_observed(tmp_path):
             environment = IsolatedApmEnvironment.create(tmp_path / "domain", base_env=os.environ)
+            expected_command = (sys.executable, "-m", "apm_cli.cli", "--version")
+            expected_cwd = environment.work_root
+            expected_env = environment.subprocess_env()
             runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
             class Model(RuleBasedStateMachine):
                 @initialize()
@@ -994,8 +1002,17 @@ def test_observer_requires_real_runner_and_hypothesis_execution(pytester: pytest
                 @rule()
                 def step(self):
                     assert environment.home.is_dir()
-            run_state_machine_as_test(Model, settings=settings(
-                max_examples=1, stateful_step_count=1, deadline=None, database=None))
+            with patch("subprocess.Popen", wraps=subprocess.Popen) as popen:
+                run_state_machine_as_test(Model, settings=settings(
+                    max_examples=1, stateful_step_count=1, deadline=None, database=None))
+            apm_calls = [
+                call for call in popen.call_args_list
+                if call.args and tuple(call.args[0]) == expected_command
+            ]
+            assert apm_calls
+            for call in apm_calls:
+                assert call.kwargs["cwd"] == expected_cwd
+                assert call.kwargs["env"] == expected_env
     """)
     nodeid = f"{module.name}::test_observed"
     plugin = LifecycleEvidencePlugin([nodeid], None)
