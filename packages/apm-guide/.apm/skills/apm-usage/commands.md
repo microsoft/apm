@@ -208,6 +208,17 @@ An explicit `apm install -g --target` does not replace the manifest declaration.
 Update `~/.apm/apm.yml` before compiling when the install flag selected a
 different target set.
 
+Global Claude compilation omits only instructions whose expected native user
+rules match the install renderer's output. Missing, unrelated, changed, or
+unsafe rules retain the compiled fallback; project rules and other targets
+are unaffected. This also supports external absolute `CLAUDE_CONFIG_DIR`.
+An existing redundant generated user `CLAUDE.md` requires explicit cleanup:
+preview with `apm compile -g --clean --dry-run`, then run
+`apm compile -g --clean`. Cleanup requires unchanged generated content matching
+the current instructions and complete native coverage. Hand-authored, edited,
+unverifiable, and symlinked roots are retained. Partial coverage preserves
+fallback output. Dry-run never mutates files.
+
 After a project install stages dependency instructions for Gemini, Codex,
 OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint naming
 `apm compile` and the root context files it will update. Targets such as Claude

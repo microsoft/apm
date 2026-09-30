@@ -2,6 +2,15 @@
   "version": 1,
   "owners": [
     {
+      "id": "native-instruction-projection",
+      "decision": "Native instruction filename and rendered content projection shared by installation and per-source user-root coverage",
+      "owner": "integration/instruction_integrator.py (InstructionIntegrator._prepare_rule_plan, deployed_rule_matches)",
+      "selectors": [
+        "src/apm_cli/integration/instruction_integrator.py"
+      ],
+      "guards": ["hooks-integrations-native-instruction-projection"]
+    },
+    {
       "id": "mcp-target-selection-precedence",
       "decision": "MCP target-selection precedence",
       "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes)",
