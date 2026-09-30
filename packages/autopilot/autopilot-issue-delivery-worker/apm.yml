@@ -1,0 +1,12 @@
+name: autopilot-issue-delivery-worker
+version: 0.1.0
+description: Implement ONE accepted issue -- reproduce if a bug, implement if authorized, open or attach a PR. Used only by autopilot-issue-delivery-scheduler, never as a batch entrypoint.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm:
+    - ../../pr-description-skill
+  mcp: []
+
+scripts: {}

@@ -91,6 +91,22 @@ def upgrade_cached_legacy_plugin(
     fetched_this_run: bool,
 ) -> APMPackage | None:
     """Repair receipt-less 0.28 plugin metadata before cached integration."""
+    plugin_json_path = validate_cached_legacy_plugin(
+        package_path, dep_key, lockfile=lockfile, fetched_this_run=fetched_this_run
+    )
+    if plugin_json_path is None:
+        return None
+    return _normalize_legacy_plugin_transactionally(package_path, dep_key, plugin_json_path)
+
+
+def validate_cached_legacy_plugin(
+    package_path: Path,
+    dep_key: str,
+    *,
+    lockfile: LockFile | None,
+    fetched_this_run: bool,
+) -> Path | None:
+    """Check cached legacy metadata before any resolver or integration normalization."""
     locked_dependency = lockfile.get_dependency(dep_key) if lockfile is not None else None
     if (
         fetched_this_run
@@ -137,11 +153,7 @@ def upgrade_cached_legacy_plugin(
             f"content hash mismatch (expected {expected_hash}, got {actual_hash})",
         )
 
-    return _normalize_legacy_plugin_transactionally(
-        package_path,
-        dep_key,
-        evidence.plugin_json_path,
-    )
+    return evidence.plugin_json_path
 
 
 def _normalize_legacy_plugin_transactionally(

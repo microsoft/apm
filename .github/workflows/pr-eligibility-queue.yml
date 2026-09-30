@@ -1,0 +1,15 @@
+# Queue metadata signal only; privileged reporting runs from the default branch.
+name: PR eligibility queue signal
+
+on:
+  merge_group:
+    types: [checks_requested]
+
+permissions: {}
+
+jobs:
+  signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: ":"

@@ -6,6 +6,7 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 # ruff: noqa: E402
 
 import ctypes
+import importlib
 import logging
 import os
 import sys
@@ -25,34 +26,27 @@ from apm_cli.commands._helpers import (
     print_version,
 )
 from apm_cli.commands.approve import approve_cmd, deny_cmd
-from apm_cli.commands.audit import audit
 from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
+from apm_cli.commands.discover import discover
 from apm_cli.commands.doctor import doctor
 from apm_cli.commands.experimental import experimental
 from apm_cli.commands.find import find as find_cmd
 from apm_cli.commands.init import init
-from apm_cli.commands.install import install
 from apm_cli.commands.lifecycle import lifecycle
 from apm_cli.commands.list_cmd import list as list_cmd
 from apm_cli.commands.lock import lock
-from apm_cli.commands.marketplace import marketplace
-from apm_cli.commands.marketplace import search as marketplace_search
 from apm_cli.commands.mcp import mcp
 from apm_cli.commands.outdated import outdated as outdated_cmd
-from apm_cli.commands.pack import pack_cmd, unpack_cmd
 from apm_cli.commands.plugin import plugin as plugin_cmd
 from apm_cli.commands.policy import policy
-from apm_cli.commands.prune import prune
 from apm_cli.commands.publish import publish_cmd
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
 from apm_cli.commands.self_update import self_update
 from apm_cli.commands.targets import targets
-from apm_cli.commands.uninstall import uninstall
-from apm_cli.commands.update import update
 from apm_cli.commands.view import view as view_cmd
 
 _CLI_EPILOG = (
@@ -70,12 +64,129 @@ _CLI_EPILOG = (
 )
 
 
+class _LazyCommand(click.Command):
+    """Stub whose real Click object is imported on first dispatch.
+
+    Root ``apm --help`` only needs name/help/hidden, so heavyweight modules
+    stay unloaded until the matching verb is invoked or its own ``--help``.
+    """
+
+    def __init__(self, name: str, module: str, attr: str, help: str) -> None:
+        super().__init__(name=name, help=help)
+        self._module = module
+        self._attr = attr
+
+    def resolve(self) -> click.Command:
+        """Import and return the real command object."""
+        loaded = getattr(importlib.import_module(self._module), self._attr)
+        if not isinstance(loaded, click.Command):
+            raise TypeError(f"{self._module}.{self._attr} is not a Click command")
+        return loaded
+
+
+# Heavyweight verbs: imported only when the named subcommand is dispatched.
+_LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "audit",
+        "apm_cli.commands.audit",
+        "audit",
+        "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
+    ),
+    (
+        "install",
+        "apm_cli.commands.install",
+        "install",
+        "Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)",
+    ),
+    (
+        "marketplace",
+        "apm_cli.commands.marketplace",
+        "marketplace",
+        "Manage marketplaces for discovery and governance",
+    ),
+    (
+        "pack",
+        "apm_cli.commands.pack",
+        "pack_cmd",
+        "Pack distributable artifacts from your APM project.",
+    ),
+    (
+        "prune",
+        "apm_cli.commands.prune",
+        "prune",
+        "Remove APM packages absent from the resolved dependency graph and repair stale deployment owners",
+    ),
+    (
+        "search",
+        "apm_cli.commands.marketplace",
+        "search",
+        "Search plugins in a marketplace (QUERY@MARKETPLACE)",
+    ),
+    (
+        "uninstall",
+        "apm_cli.commands.uninstall",
+        "uninstall",
+        "Remove packages using manifest entries or direct locked keys from 'apm deps list'",
+    ),
+    (
+        "unpack",
+        "apm_cli.commands.pack",
+        "unpack_cmd",
+        "[Deprecated] Extract an APM bundle into the current project. Use 'apm install <bundle-path>' instead -- this command will be removed in a future release.",
+    ),
+    (
+        "update",
+        "apm_cli.commands.update",
+        "update",
+        "Refresh APM dependencies to the latest matching refs",
+    ),
+)
+
+
 class _OutputModeGroup(click.Group):
     """Capture full argv so root output mode precedes subcommand callbacks."""
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         ctx.meta["apm_raw_args"] = tuple(args)
         return super().parse_args(ctx, args)
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        cmd = super().get_command(ctx, cmd_name)
+        if isinstance(cmd, _LazyCommand):
+            resolved = cmd.resolve()
+            self.commands[cmd_name] = resolved
+            return resolved
+        return cmd
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        """List subcommands from stubs so root --help does not import them."""
+        commands: list[tuple[str, click.Command]] = []
+        for subcommand in self.list_commands(ctx):
+            cmd = self.commands.get(subcommand)
+            if cmd is None or cmd.hidden:
+                continue
+            commands.append((subcommand, cmd))
+
+        if commands:
+            limit = formatter.width - 6 - max(len(name) for name, _cmd in commands)
+            rows = [(subcommand, cmd.get_short_help_str(limit)) for subcommand, cmd in commands]
+            if rows:
+                with formatter.section("Commands"):
+                    formatter.write_dl(rows)
+
+    def shell_complete(self, ctx: click.Context, incomplete: str) -> list:
+        """Complete from stubs so tab-complete does not import lazy verbs."""
+        from click.shell_completion import CompletionItem
+
+        results = [
+            CompletionItem(name, help=command.get_short_help_str())
+            for name in self.list_commands(ctx)
+            if name.startswith(incomplete)
+            for command in (self.commands.get(name),)
+            if command is not None and not command.hidden
+        ]
+        results.extend(click.Command.shell_complete(self, ctx, incomplete))
+        return results
 
 
 def _configure_logging(verbose: bool = False) -> None:
@@ -170,8 +281,14 @@ def cli(ctx, verbose: bool) -> None:
     warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
     # Check for updates only for known commands; skip on invalid input to fail fast.
+    # Discovery must not initialize caches or contact the update service.
+    raw_args = ctx.meta.get("apm_raw_args", sys.argv[1:])
+    discovering = ctx.invoked_subcommand == "discover" or (
+        ctx.invoked_subcommand == "init" and "--discover" in raw_args
+    )
     if (
         not ctx.resilient_parsing
+        and not discovering
         and ctx.invoked_subcommand is not None
         and ctx.command.get_command(ctx, ctx.invoked_subcommand) is not None
     ):
@@ -180,7 +297,6 @@ def cli(ctx, verbose: bool) -> None:
 
 # Register command groups
 cli.add_command(approve_cmd, name="approve")
-cli.add_command(audit)
 cli.add_command(cache)
 cli.add_command(deny_cmd, name="deny")
 cli.add_command(deps)
@@ -195,15 +311,10 @@ cli.add_command(
         hidden=True,
     )
 )
-cli.add_command(pack_cmd, name="pack")
-cli.add_command(unpack_cmd, name="unpack")
 cli.add_command(publish_cmd, name="publish")
 cli.add_command(init)
-cli.add_command(install)
+cli.add_command(discover)
 cli.add_command(lock)
-cli.add_command(uninstall)
-cli.add_command(prune)
-cli.add_command(update)
 cli.add_command(self_update)
 cli.add_command(plugin_cmd, name="plugin")
 cli.add_command(compile_cmd, name="compile")
@@ -219,9 +330,12 @@ cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(doctor)
 cli.add_command(lifecycle)
-cli.add_command(marketplace)
 cli.add_command(find_cmd)
-cli.add_command(marketplace_search, name="search")
+for _lazy_name, _lazy_module, _lazy_attr, _lazy_help in _LAZY_COMMANDS:
+    cli.add_command(
+        _LazyCommand(name=_lazy_name, module=_lazy_module, attr=_lazy_attr, help=_lazy_help),
+        name=_lazy_name,
+    )
 
 
 def _get_current_code_page() -> "Optional[int]":

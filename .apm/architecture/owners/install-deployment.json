@@ -2,6 +2,20 @@
   "version": 1,
   "owners": [
     {
+      "id": "orphan-package-selection",
+      "decision": "Declaration-aware selection of orphaned installed packages",
+      "owner": "commands/_helpers.py (_find_orphaned_packages)",
+      "selectors": ["src/apm_cli/commands/_helpers.py"],
+      "guards": ["install-deployment-orphan-selection"]
+    },
+    {
+      "id": "immutable-dependency-requirements",
+      "decision": "Commit-based compatibility of immutable dependency edges and frozen lock pins before hoisting",
+      "owner": "deps/immutable_requirements.py (ImmutableRequirements)",
+      "selectors": ["src/apm_cli/deps/immutable_requirements.py"],
+      "guards": ["install-deployment-immutable-requirements"]
+    },
+    {
       "id": "effective-package-target-authorization",
       "decision": "Effective package target authorization",
       "owner": "install/target_filter.py (resolve_effective_package_targets)",

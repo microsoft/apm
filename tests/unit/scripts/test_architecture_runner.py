@@ -607,6 +607,7 @@ contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
+contracts-tooling-governance-evidence
 contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
@@ -640,6 +641,7 @@ install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
 install-deployment-mcp-ownership-migration
 install-deployment-mcp-registry-resolution
+install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
@@ -647,6 +649,7 @@ install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
+install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
@@ -691,6 +694,7 @@ mutation_writes.mcp_passthrough_denylist
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.user_root_scope
+onboarding-metadata-only
 contracts-tooling-root-context-write-eligibility
 registry_delegation.agents_source_attribution
 registry_delegation.bootstrap_project_name
@@ -719,6 +723,7 @@ transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-throttle
+transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-network-host-parsing

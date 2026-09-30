@@ -152,9 +152,8 @@ the HTTP file-read path. If a private host fails with 401/403, use a whole-repo
 git dependency for full clone auth support, or choose the supported HTTP backend
 signal (`type: gitlab` for GitLab-compatible hosts, `GITHUB_HOST` for GHES).
 
-**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over
-git transport (not the REST API), so self-hosted instances with the API disabled
-still install. See [Authentication](../authentication/#gitlab-saas-or-self-managed).
+**GitLab `path:` files** use Git first, with
+[restricted REST fallback](../authentication/#gitlab-saas-or-self-managed).
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
@@ -171,10 +170,29 @@ object form instead:
 
 Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
 `@` for git usernames and future package-manager-compatible version syntax.
+
+For reserved aliases `.` and `..`, see [Rejected dependency aliases](../../troubleshooting/migration/#rejected-dependency-aliases).
 :::
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).
+
+## Incompatible immutable requirements
+
+APM installs one version per package identity. If two dependency paths require
+tags or commit SHAs that resolve to different commits, install fails with both
+root-to-package paths and requested refs. Different tag names, or a tag and its
+commit SHA, are compatible when they identify the same commit. Errors show
+ordered `owner/repo@ref -> owner/repo@ref` chains; manifests still use `#ref`.
+Unchanged locked refs use their recorded commits without Git ref discovery.
+New named refs may need a lookup; a failed lookup is not proof of compatibility.
+
+Align the refs in your `apm.yml`, or select a parent package release that requires
+the same commit. Then run `apm install` to regenerate the lockfile. Do not edit
+`apm.lock.yaml` to hide a conflict. `--frozen` also rejects a locked commit that
+drops an immutable requirement discovered in a dependency manifest, including
+on a cold cache after the parent package is fetched. Short SHA pins must match
+the prefix of the recorded full commit. Side-by-side versions are not supported.
 
 ## Add a dependency
 
@@ -209,12 +227,13 @@ Git-hook isolation guarantee.
 
 ## Transport selection
 
-APM selects one initial transport per dependency. Git then applies any matching
-safe `url.<base>.insteadOf` rule to that selected URL.
+APM selects one initial transport per dependency, including GitLab `path:`
+single-file sparse fetches. Git then applies matching safe
+`url.<base>.insteadOf` rules.
 
 | Dependency form | Initial transport |
 |---|---|
-| `ssh://...` or `git@host:...` | SSH |
+| `ssh://...` or `user@host:...` (SCP-style) | SSH |
 | `https://...` or `http://...` | The explicit HTTP(S) scheme |
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Other shorthand | HTTPS |
@@ -231,6 +250,13 @@ Cross-protocol retry is off by default. Use `--allow-protocol-fallback` or
 preference with `apm config set prefer-ssh true`, or save the retry escape hatch
 with `apm config set allow-protocol-fallback true`. See the
 [`apm config` reference](../../reference/cli/config/).
+
+Opt-in SSH/HTTPS fallback warns when a failed attempt switches protocol.
+It reuses the declared custom port and warns about that port once; it does
+not map an SSH alias to a web hostname. If protocols use different endpoints,
+declare the intended URL instead. GitLab REST additionally requires an
+executed same-origin HTTPS attempt; see
+[GitLab authentication](../authentication/#gitlab-saas-or-self-managed).
 
 If Git reports an HTTPS `Failed to connect...` / `Couldn't connect to server`
 error for the requested remote, APM retries that Git action once after 1 second
@@ -352,14 +378,20 @@ apm prune --dry-run   # preview what gets deleted
 apm prune             # delete orphaned packages from apm_modules/
 ```
 
-`apm prune` removes any directory in `apm_modules/` that no longer
-corresponds to a declared dependency or a transitive dependency still
-required by another package. It does not touch your manifest.
+`apm prune` removes unneeded recognized package roots in `apm_modules/`,
+including manifestless `SKILL.md` installs whose lock entries are already gone.
+It preserves declared direct/dev and retained transitive packages, bundled
+skills, and entire roots containing needed nested packages. Personal files
+inside a removable root are also removed; keep personal source outside
+`apm_modules/`. It does not touch your manifest.
 Lockfile entries, deployed harness files (`.github/`, `.claude/`, etc.),
 and merged hook configuration owned by the pruned package are all
 reconciled immediately by `apm prune` itself -- remaining direct and
 transitive packages keep their hooks; no follow-up `apm install` is
 required.
+
+See [`apm prune`](../../reference/cli/prune/) for the managed-root boundary
+and the separate ownership protections for deployed files.
 
 If you also want to refresh remaining deps to their latest versions or refs, see
 [Update and refresh](../update-and-refresh/).

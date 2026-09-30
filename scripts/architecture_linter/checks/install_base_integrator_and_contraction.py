@@ -87,6 +87,25 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
                 + ", ".join(missing),
             ),
         )
+    native_path = "src/apm_cli/integration/skill_integrator.py"
+    native, native_fail = _facts_for(provider, native_path, rule_id)
+    if native_fail:
+        return tuple(native_fail)
+    definition = next(
+        (item for item in native.definitions if item.name == "_integrate_native_skill"), None
+    )
+    if definition is None or not any(
+        call.qualname == "self.check_collision"
+        and definition.line <= call.line <= definition.end_line
+        for call in native.calls
+    ):
+        return (
+            _summary(
+                rule_id,
+                native_path,
+                "Native root skills must route collision protection through BaseIntegrator.check_collision",
+            ),
+        )
     return ()
 
 
@@ -276,6 +295,7 @@ _UNTRUSTED_NAME_PARTS = ("ghost", "invalid", "removed_record", "violation")
 
 
 _REQUIRED_OWNER_CALLS = {
+    "src/apm_cli/install/phases/lockfile.py": ("merge_dependencies",),
     "src/apm_cli/commands/prune.py": ("legacy_value", "reconcile_owner_references"),
     "src/apm_cli/commands/audit.py": ("owner_reference_violations",),
     "src/apm_cli/commands/uninstall/cli.py": ("cleanup_snapshot",),

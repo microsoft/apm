@@ -140,6 +140,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Generated footer owner loses the one canonical builder definition.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-governance-evidence",
+        rule_id="contracts-tooling-governance-evidence",
+        path="scripts/governance/authority.cjs",
+        old="authorizes_implementation: false",
+        new="authorizes_implementation: true",
+        intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-read",
         rule_id="contracts-tooling-lockfile-read",
         path="src/apm_cli/deps/lockfile.py",
@@ -334,6 +342,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="InstallService stops owning the frozen-install mutation preflight.",
     ),
     MutationCase(
+        guard_id="install-deployment-immutable-requirements",
+        rule_id="install-deployment-immutable-requirements",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="requirements.add(node)",
+        new="requirements.add_unchecked(node)",
+        intent="Resolver skips canonical immutable admission before selecting a winner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-install-scope-selection",
         rule_id="install-deployment-install-scope-selection",
         path="src/apm_cli/commands/install.py",
@@ -380,6 +396,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def resolve_mcp_registry_url(",
         new="def resolve_mcp_registry_url_disabled(",
         intent="The registry client loses the canonical MCP registry precedence resolver.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-orphan-selection",
+        rule_id="install-deployment-orphan-selection",
+        path="src/apm_cli/commands/prune.py",
+        old="_find_orphaned_packages(",
+        new="_find_orphaned_packages_disabled(",
+        intent="Prune bypasses the shared declaration-aware orphan selector.",
     ),
     MutationCase(
         guard_id="install-deployment-outcome",
@@ -591,6 +615,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="return _read_plugin_json_version(package_root)",
         new="return (None, 'disabled')",
         intent="Local marketplace version precedence skips the plugin.json fallback read.",
+    ),
+    MutationCase(
+        guard_id="onboarding-metadata-only",
+        rule_id="onboarding-metadata-only",
+        path="src/apm_cli/adopt/discovery.py",
+        old="validate_apm_package(path, read_only=True)",
+        new="validate_apm_package(path, read_only=False)",
+        intent="Discovery allows package admission to mutate the source it is inventorying.",
     ),
     MutationCase(
         guard_id="registry-delegation-bootstrap-project-name",
@@ -954,6 +986,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A parallel throttle classifier appears outside deps/github_rate_limit.py.",
     ),
     MutationCase(
+        guard_id="transport-platform-gitlab-sparse-plan",
+        rule_id="transport-platform-gitlab-sparse-plan",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="        if rest_eligible:",
+        new="        if True:  # bypass rest_eligible",
+        intent="GitLab file downloads bypass the executed HTTPS plan gate before REST.",
+    ),
+    MutationCase(
         guard_id="transport-platform-host-credential-resolution",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/deps/download_strategies.py",
@@ -1153,6 +1193,39 @@ def test_owner_rules_report_nothing_before_mutation(
     assert baseline_violated_rule_ids == frozenset()
 
 
+def test_orphan_selection_guard_rejects_warning_bypass() -> None:
+    """The shared-selector rule protects warnings as well as destructive pruning."""
+    path = "src/apm_cli/commands/_helpers.py"
+    source = _source(path)
+    old = "return _find_orphaned_packages(installed, expected)"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_ref_freshness_guard_rejects_unconditional_cache_publication() -> None:
+    """A checkout must not promote a lock pin into a fresh named observation."""
+    path = "src/apm_cli/deps/github_downloader.py"
+    source = _source(path)
+    old = "resolver.remotely_resolved(dep_ref, locked_sha) is True"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "True", 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(
+        ROOT,
+        ("transport-platform-ref-freshness",),
+        source_overrides={path: mutated},
+    )
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "transport-platform-ref-freshness" for violation in report.violations
+    )
+
+
 def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> None:
     """AC13 must retain the selected transport attempt as the requested-URL owner."""
     path = "src/apm_cli/install/helpers/ref_reuse.py"
@@ -1173,6 +1246,33 @@ def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> 
         violation.rule_id == "transport-platform-git-semver-preflight"
         for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("if host is None and offline:", "if host is None:"),
+        ('resolved_host = host or default_host() or "github.com"', 'resolved_host = "github.com"'),
+        ("key = (resolved_host, org)", "key = (host, org)"),
+        (
+            "resolve_auth_for_host(\n                    resolved_host,",
+            "resolve_auth_for_host(\n                    host,",
+        ),
+        ("host=resolved_host,", "host=host,"),
+        ("auth_target=resolved_host,", "auth_target=host,"),
+    ],
+)
+def test_marketplace_check_guard_rejects_default_host_auth_bypass(old: str, new: str) -> None:
+    """The credential-owner guard must defend shorthand routing, not just ADO."""
+    path = "src/apm_cli/commands/marketplace/check.py"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "transport-platform-host-credential-resolution"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 @pytest.mark.parametrize("case", MUTATIONS, ids=CASE_IDS)

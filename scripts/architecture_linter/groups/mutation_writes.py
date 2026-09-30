@@ -21,8 +21,9 @@ from scripts.architecture_linter.checks.mutation_mcp_target_and_scope import (
 from scripts.architecture_linter.checks.mutation_mcp_target_and_scope import (
     RULES as _MCP_SCOPE_RULES,
 )
+from scripts.architecture_linter.checks.onboarding import RULES as _ONBOARDING_RULES
 
-RULES = _HOOK_CONTRACT_RULES + _MCP_SCOPE_RULES + _HOOK_MEMBERSHIP_RULES
+RULES = _HOOK_CONTRACT_RULES + _MCP_SCOPE_RULES + _HOOK_MEMBERSHIP_RULES + _ONBOARDING_RULES
 COLLECTORS = _HOOK_CONTRACT_COLLECTORS + _MCP_SCOPE_COLLECTORS + _HOOK_MEMBERSHIP_COLLECTORS
 
 __all__ = ["COLLECTORS", "RULES"]

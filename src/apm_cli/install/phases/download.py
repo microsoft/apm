@@ -40,6 +40,8 @@ def run(ctx: InstallContext) -> None:
     update_refs = ctx.update_refs
     parallel_downloads = ctx.parallel_downloads
     apm_modules_dir = ctx.apm_modules_dir
+    if apm_modules_dir is None:
+        raise RuntimeError("Resolution must set apm_modules_dir before download")
     downloader = ctx.downloader
     callback_downloaded = ctx.callback_downloaded
     callback_failures = ctx.callback_failures
@@ -54,11 +56,7 @@ def run(ctx: InstallContext) -> None:
     _need_download = []
     for _pd_ref in deps_to_install:
         _pd_key = _pd_ref.get_unique_key()
-        _pd_path = (
-            (apm_modules_dir / _pd_ref.alias)
-            if _pd_ref.alias
-            else _pd_ref.get_install_path(apm_modules_dir)
-        )
+        _pd_path = _pd_ref.get_install_path(apm_modules_dir)
         # Skip local packages -- they are copied, not downloaded
         if _pd_ref.is_local:
             continue

@@ -19,21 +19,21 @@ targets:
 # issue triage, or an orchestrator entrypoint which transitively
 # pulls its engine + panels).
 #
-# Only the two USER-FACING ORCHESTRATOR ENTRYPOINTS are declared
-# here. Everything else arrives transitively, so declaring it again
-# would be a redundant edge (apm 0.16 flags the double-deploy as
-# "skill replaced -- remove one"):
-#  - batch-bug-shepherd  -> shepherd-driver -> apm-review-panel
-#  - apm-issue-autopilot -> shepherd-driver -> apm-review-panel
-#                        -> apm-triage-panel
-# Net transitive closure deployed = all 5 first-party skills
-# (both orchestrators + shepherd-driver + both panels). shepherd-
-# driver stays transitive-only by design ("used only by a parent
-# orchestrator, never user-facing").
+# User-facing schedulers are declared here. Workers arrive
+# transitively:
+#  - autopilot-issue-triage-scheduler -> autopilot-issue-triage-worker
+#  - autopilot-issue-delivery-scheduler -> autopilot-issue-delivery-worker
+#  - autopilot-pr-triage-scheduler -> autopilot-pr-triage-worker
+#  - autopilot-pr-review-scheduler -> autopilot-pr-review-worker
+#  - autopilot-pr-merge-worker is summoned by name (never by
+#    the PR review scheduler)
 dependencies:
   apm:
-    - ./packages/apm-issue-autopilot
-    - ./packages/batch-bug-shepherd
+    - ./packages/autopilot/autopilot-issue-triage-scheduler
+    - ./packages/autopilot/autopilot-issue-delivery-scheduler
+    - ./packages/autopilot/autopilot-pr-triage-scheduler
+    - ./packages/autopilot/autopilot-pr-review-scheduler
+    - ./packages/autopilot/autopilot-pr-merge-worker
   mcp: []
 
 scripts: {}

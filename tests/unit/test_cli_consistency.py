@@ -11,7 +11,11 @@ from apm_cli.output.script_formatters import ScriptExecutionFormatter
 
 def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):
     """Yield (path_tuple, command) for every command reachable under group."""
-    for name, cmd in group.commands.items():
+    ctx = click.Context(group)
+    for name in group.list_commands(ctx):
+        cmd = group.get_command(ctx, name)
+        if cmd is None:
+            continue
         path = (*prefix, name)
         yield path, cmd
         if isinstance(cmd, click.Group):

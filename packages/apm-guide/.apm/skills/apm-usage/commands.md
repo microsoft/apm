@@ -5,9 +5,19 @@
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm init [NAME]` | Initialize a new APM project; names must be non-empty and must not contain path separators or equal `..`. A derived filesystem-root name falls back to `my-project`. | `-y` skip prompts, `--target` comma-separated targets (CLI aliases such as `agents` and `vscode` are persisted as canonical `copilot`, so the generated manifest is immediately installable), `--plugin` (deprecated, use `apm plugin init` instead) scaffolds `plugin.json` + `apm.yml` using the same no-flag Claude-compatible default as `apm plugin init`, `--marketplace` (deprecated, use `apm marketplace init` instead) seed apm.yml with a `marketplace:` block. After init, Next Steps contextually suggests `agentrc init` (if agentrc is in PATH) or prints a tip link when no agent instruction files exist. |
+| `apm init --discover` | Preview existing agent content without writing or executing it. Apply adds missing local package references to `apm.yml`, leaving source files unchanged; reruns do not duplicate declarations. Unsupported content is reported, not converted. Run `apm install` separately. | `--apply`/`--write` request a manifest merge; `--yes` supplies noninteractive consent (unlike plain `init --yes`, this never overwrites the manifest). `--format text\|json\|yaml`; `-g`/`--global` for user scope with absolute/home-directory references. Select `--target` on install, not discovery. |
 | `apm plugin init [NAME]` | Scaffold a plugin project (`plugin.json` + `apm.yml`). No-flag default scaffolds the legacy Claude-compatible layout (same as `apm init --plugin`). Pass `--format agent-plugin` to explicitly scaffold a portable Agent Plugins v1 project instead; `--claude-plugin` (or `--format plugin\|claude\|claude-plugin`) is the explicit form of the default. `--format` and `--claude-plugin` are mutually exclusive. | `-y` skip prompts, `--target` comma-separated targets, `--format [agent-plugin\|plugin\|claude\|claude-plugin]`, `--claude-plugin`, `-v`/`--verbose` |
 
 ## Dependency management
+
+`apm install` rejects incompatible immutable requirements for one package
+identity and reports both dependency paths and refs. Equivalent tag/SHA
+spellings are accepted. `--frozen` verifies transitive immutable requirements
+as parent manifests become available, including after cold-cache downloads.
+Short pins must match the locked full commit's prefix. Unchanged locked refs
+replay without ref discovery; new names may require a lookup.
+Align manifest refs and regenerate the lockfile with a normal install to repair
+a collapsed graph; `--force` does not bypass this check.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
@@ -21,9 +31,8 @@
 | `apm uninstall PKGS...` | Remove packages and reconcile their tracked files, MCP servers, and LSP servers; identifier selection is atomic. Accepts `owner/repo`, `name@marketplace`, exact declared local paths, or portable `_local/<name>` keys for direct local declarations with matching lock metadata. A missing or ambiguous identifier exits nonzero before scripts or APM writes. If safe LSP cleanup fails after package removal, the command exits nonzero and preserves the conflicting config; repair it, then run `apm install` (or `apm install --global` for user scope). | `--dry-run`, `-g` global |
 | `apm uninstall PKGS...` | Remove packages; identifier selection is atomic. Accepts `owner/repo`, `name@marketplace`, exact declared local paths, or portable `_local/<name>` keys for direct local declarations with matching lock metadata. A missing or ambiguous identifier exits nonzero before scripts or APM writes. A managed hook beneath a symlinked parent is preserved and reported; package removal finishes, but the command exits nonzero because hook cleanup is incomplete. | `--dry-run`, `-g` global |
 | `apm uninstall PKGS...` | Remove packages; identifier selection is atomic. Accepts `owner/repo`, `name@marketplace`, exact declared local paths, or portable `_local/<name>` keys for direct local declarations with matching lock metadata. A missing or ambiguous identifier exits nonzero before scripts or APM writes. A managed hook changed after the initial check or beneath a symlinked parent is preserved and reported; package removal finishes, but the command exits nonzero because hook cleanup is incomplete. | `--dry-run`, `-g` global |
-| `apm prune` | Remove installed packages absent from the manifest and lockfile-resolved graph; reconcile stale dependency/deployment ownership after interrupted runs without deleting files based only on ghost metadata or dropping shared URI deployments. Orphan deletion failures exit 1 after processing remaining packages and report removed/failed counts. Successful deletions are not rolled back; resolve the errors, then rerun `apm prune`. | `--dry-run` previews package removal and ownership repair without mutation |
+| `apm prune` | Remove unneeded recognized roots under `apm_modules/`, including manifestless `SKILL.md` packages after their lock entries disappear. No receipt or `.apm-pin` is required; personal content inside removable roots is also removed. Preserve declared direct/dev and retained transitive packages, bundles, and entire ancestors containing needed children. Outside deployments retain ownership-based protections; stale records never authorize deleting untrusted or shared bytes. Deletion failures exit 1 with removed/failed counts; resolve the errors and rerun to converge. | `--dry-run` previews removal, retention, and ownership repair without mutation |
 | `apm uninstall PKGS...` | Remove packages; reconcile tracked files, hooks, MCP, and LSP. Accepts `owner/repo`, `name@marketplace`, exact declared local paths, or portable `_local/<name>` keys with lock metadata. Selection is atomic: missing or ambiguous identifiers exit before scripts or APM writes. Direct and orphan materialized directories are deleted before target cleanup or manifest and lockfile writes. Deletion failure exits 1 without `Uninstall complete` and retains declarations, the on-disk lockfile, and deployed ownership; earlier deletions are not rolled back. Fix permission or file-lock errors, or the unsafe path after a containment refusal, then retry the same command. Restore with `apm install` (`apm install --global` for user scope). A later target cleanup refusal can leave removed directories with retained metadata; resolve the listed files and retry. MCP cleanup attempts every recorded owner. Safe LSP or managed hook cleanup failure preserves the conflicting configuration and exits nonzero after package removal; repair it, then run the scope-appropriate install command. | `--dry-run`, `-g` global |
-| `apm prune` | Remove installed packages absent from the manifest and lockfile-resolved graph; reconcile stale dependency/deployment ownership after interrupted runs without deleting files based only on ghost metadata or dropping shared URI deployments | `--dry-run` previews package removal and ownership repair without mutation |
 | `apm deps list` | List manifest- and lockfile-resolved packages; ignore parent-owned embedded manifests. Direct locked local packages use actionable `_local/<name>` keys without absolute paths; transitives are removed through their parent. | `-g` global, `--all` both scopes, `--insecure` |
 | `apm deps tree` | Show the complete lockfile-resolved tree at any depth; mark repeated ancestors as circular | -- |
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
@@ -416,6 +425,10 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 
 ## Configuration and updates
 
+Updating selected packages preserves deployment targets in `apm.lock.yaml` for
+refreshed and untouched dependencies, including shared `.agents/skills/` paths.
+No follow-up install is needed to restore those target records.
+
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |
@@ -435,6 +448,8 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 `apm config set target <value>` persists a default install target (single token or comma-separated list) for `apm install` when both `--target` and `apm.yml target(s)` are absent. `apm config unset target` removes this fallback.
 
 Self-update preferences: `self-update.channel` accepts `stable` or `prerelease`; `self-update.install-dir` is optional. On Unix, a set directory must match the existing installation, while leaving it unset preserves the detected installation. Windows keeps its installer destination/default behavior. `VERSION` pins a release; `APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. Both channels pass a normalized `v<version>` to the installer and GitHub/GHES script URL. `APM_INSTALLER_BASE_URL` stays authoritative, receiving only the script name. Config excludes credentials, mirror URLs, commands, and installer arguments.
+
+Linux bootstrap/self-update: prebuilt binaries (x86_64 and ARM64) require glibc 2.38+. On older systems, use pip with a working Python 3.10+; the floor applies only to prebuilt binaries, not to a system Python running pip.
 
 Unix self-update passes the running binary's identity to preserve its launcher/bundle destinations, never invokes `sudo`, and rejects conflicting overrides or switching an existing install to pip. Set or unset install-directory preferences do not migrate it. Follow [Unix ownership and migration](./installation.md#unix-ownership-and-migration) for administrator/package-manager installs.
 

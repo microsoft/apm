@@ -101,6 +101,7 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
 
     kwargs: dict[str, Any] = {"repo_url": _repo_url(draw)}
     kwargs["materialization_repo_url"] = None
+    kwargs["alias"] = maybe(None, st.sampled_from([".safe", "safe.", "foo..bar", "my-skill.v2"]))
     kwargs["host"] = maybe(None, st.sampled_from(["gitlab.example.invalid", "git.example.invalid"]))
     kwargs["host_type"] = maybe(None, st.just("gitlab"))
     kwargs["port"] = maybe(None, st.integers(min_value=1, max_value=65535))
@@ -627,10 +628,12 @@ def test_retired_key_property_breaks_if_transient_guard_is_disabled(
 @seed(PROPERTY_SEED)
 @PROPERTY_PROFILE
 @given(
-    alias=st.text(alphabet=string.ascii_letters + string.digits + "._-", min_size=1, max_size=12)
+    alias=st.text(
+        alphabet=string.ascii_letters + string.digits + "._-", min_size=1, max_size=12
+    ).filter(lambda value: value not in {".", ".."})
 )
-def test_alias_never_persists_into_lock_state(alias: str) -> None:
-    """``alias`` is a declared-manifest concept; it must never reach the lockfile."""
+def test_alias_persists_as_placement_not_identity(alias: str) -> None:
+    """Alias placement survives serialization without changing the source key."""
     dep_ref = DependencyReference(
         repo_url="acme/example", host="gitlab.example.invalid", alias=alias
     )
@@ -640,43 +643,44 @@ def test_alias_never_persists_into_lock_state(alias: str) -> None:
     )
     persisted = locked.to_dict()
 
-    assert "alias" not in persisted
-    assert not any("alias" in key for key in persisted)
-    reconstructed = locked.to_dependency_ref()
-    assert reconstructed.alias is None
+    assert persisted["alias"] == alias
+    reconstructed = LockedDependency.from_dict(persisted).to_dependency_ref()
+    assert reconstructed.alias == alias
+    assert reconstructed.get_unique_key() == dep_ref.get_unique_key()
 
 
 @seed(PROPERTY_SEED)
 @SINGLE_EXAMPLE_PROFILE
 @given(
-    alias=st.text(alphabet=string.ascii_letters + string.digits + "._-", min_size=1, max_size=12)
+    alias=st.text(
+        alphabet=string.ascii_letters + string.digits + "._-", min_size=1, max_size=12
+    ).filter(lambda value: value not in {".", ".."})
 )
-def test_alias_never_persists_property_breaks_if_alias_leaks_into_unknown_fields(
+def test_alias_placement_property_breaks_if_reconstruction_drops_alias(
     alias: str,
 ) -> None:
-    """Negative twin: a leaked alias in ``_unknown_fields`` must break the guard."""
+    """Negative twin: dropping placement during lock assembly breaks replay."""
     dep_ref = DependencyReference(
         repo_url="acme/example", host="gitlab.example.invalid", alias=alias
     )
     original = LockedDependency.from_dependency_ref
 
-    def leaking_from_dependency_ref(*args: Any, **kwargs: Any) -> LockedDependency:
+    def dropping_from_dependency_ref(*args: Any, **kwargs: Any) -> LockedDependency:
         locked = original(*args, **kwargs)
-        locked._unknown_fields = {**locked._unknown_fields, "alias": dep_ref.alias}
+        locked.alias = None
         return locked
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             LockedDependency,
             "from_dependency_ref",
-            classmethod(lambda cls, *a, **k: leaking_from_dependency_ref(*a, **k)),
+            classmethod(lambda cls, *a, **k: dropping_from_dependency_ref(*a, **k)),
         )
         locked = LockedDependency.from_dependency_ref(
             dep_ref, resolved_commit="a" * 40, depth=1, resolved_by=None
         )
-        persisted = locked.to_dict()
         with pytest.raises(AssertionError):
-            assert "alias" not in persisted
+            assert locked.to_dependency_ref().alias == alias
 
 
 # --------------------------------------------------------------------------

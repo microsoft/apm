@@ -105,6 +105,37 @@ An interrupted case-only rename can leave a hidden
 contents before renaming it back or removing it; APM does not delete an
 unverified recovery entry automatically.
 
+### Rejected dependency aliases
+
+This repair changes no CLI commands or flags; it intentionally tightens
+invalid-input handling. After whitespace trimming, exactly the bare tokens
+`.` and `..` are newly rejected aliases. Separators (`/`, `\`) and percent
+escapes were already invalid. `.safe`, `safe.`, `foo..bar`, and `my-skill.v2`
+remain valid; see the
+[alias field reference](../../reference/manifest-schema/#412-object-form).
+
+Alias destinations must resolve strictly beneath `apm_modules/`; symlinks
+resolving to that root or outside it fail.
+
+1. Replace `alias: .` or `alias: ..` in the declaring `apm.yml` with
+   `alias: my-skill.v2`. For unsafe symlink destinations, choose a separate
+   package directory without removing the symlink target. Keep source paths,
+   including local `../` paths, unchanged.
+2. Run `apm install`. Review the lockfile, installed contents, and deployment
+   changes before committing; do not assume prior metadata is repaired.
+
+Never remove or prune a rejected alias path: it can refer to `apm_modules/`
+or its parent.
+
+The optional lock-entry `alias` fixes lost placement during replay and cleanup
+without changing `lockfile_version`. Reinstall older aliased dependencies and
+review this metadata. Older readers may preserve the field without honoring
+placement; an absent alias never uses inventory `name`.
+
+Opting into the [0.1.41 manifest `$schema`](../../reference/manifest-schema/#2-document-structure)
+requires a client supporting that exact identity. Older clients lacking it
+fail closed; this explicit opt-in is not backward-compatible.
+
 ## 4. Compile strategy migration
 
 The compile step writes per-target output (e.g. `.github/copilot-instructions.md`, `.claude/`, `.cursor/rules/`). Some targets support both a single-file (monolithic) layout and a per-primitive (distributed) layout.

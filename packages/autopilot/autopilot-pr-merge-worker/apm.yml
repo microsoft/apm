@@ -1,0 +1,30 @@
+name: autopilot-pr-merge-worker
+version: 0.1.0
+description: Drive-to-merge engine for ONE selected pull request. Summoned by name. Never composed by autopilot-pr-review-scheduler.
+author: Microsoft
+license: MIT
+type: skill
+
+# Composes the autopilot-pr-review-worker skill as its per-PR review primitive,
+# and pr-description-skill to author the body of any superseding PR it
+# opens (Path B).
+#
+# Belt + suspenders (genesis step 3.5 declaration mechanism = BOTH):
+#  - Belt: the manifest deps below declare the edges so the resolver
+#    deploys both alongside this driver. The local-path keys resolve
+#    relative to THIS package's directory (apm-usage dependencies.md
+#    anchor rule), hence `../autopilot-pr-review-worker` and
+#    `../../pr-description-skill`.
+#  - Suspenders: the runtime activate-by-name probe in
+#    `assets/worker-prompt.md` loads each at use time even if
+#    a consumer wired the deploy differently.
+#
+# The <= 0.14.1 orphaned-lockfile bug that forced callers to COMMENT
+# OUT analogous edges is fixed from 0.16 onward, so the real edges
+# are declared here.
+dependencies:
+  apm:
+    - ../autopilot-pr-review-worker
+    - ../autopilot-comment
+    - ../../pr-description-skill
+  mcp: []

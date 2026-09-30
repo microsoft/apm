@@ -20,6 +20,12 @@ issues, pull requests, CI pipelines, and panel reviews in real time.
 - **Session integration** -- start or open Copilot sessions directly from
   issue detail modals
 
+The triage tab reads current recommendations and legacy decision comments as
+**advice only**. It does not present their old status, priority, or milestone
+fields as project decisions. Starting a session does not approve implementation:
+the session must check the issue's human-approved scope and review contact.
+An accepted label alone does not indicate panel approval.
+
 ## Install (end users)
 
 ```bash

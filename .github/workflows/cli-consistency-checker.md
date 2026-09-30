@@ -15,7 +15,7 @@ safe-outputs:
   create-issue:
     expires: 2d
     title-prefix: "[cli-consistency] "
-    labels: [automation, cli, documentation]
+    labels: [type/automation, area/cli]
 
 tools:
   github:

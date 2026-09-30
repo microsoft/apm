@@ -32,41 +32,21 @@ export default function TriageTab() {
     return items().filter(item => {
       for (const [key, val] of Object.entries(f)) {
         if (key === "decision" && !item.decision?.startsWith(val)) return false;
-        if (key === "priority" && item.priority !== val) return false;
         if (key === "type" && item.type !== val) return false;
       }
       return true;
     });
   });
 
-  // Priority rank: lower number = higher priority (P0 first)
-  function prioRank(p) {
-    if (!p) return 99;
-    if (p.includes("critical")) return 0;
-    if (p.includes("high")) return 1;
-    if (p.includes("medium") || p.includes("normal")) return 2;
-    if (p.includes("low")) return 3;
-    return 99;
-  }
-
   const sorted = createMemo(() => {
     const col = sortCol();
     const dir = sortAsc() ? 1 : -1;
     const copy = [...filtered()];
     if (!col) {
-      // Default: priority ascending rank (P0 first), then issue number descending
-      return copy.sort((a, b) => {
-        const pd = prioRank(a.priority) - prioRank(b.priority);
-        if (pd !== 0) return pd;
-        return b.number - a.number;
-      });
+      return copy.sort((a, b) => b.number - a.number);
     }
     return copy.sort((a, b) => {
       if (col === "number") return dir * (a.number - b.number);
-      if (col === "priority") {
-        const pd = dir * (prioRank(a.priority) - prioRank(b.priority));
-        return pd !== 0 ? pd : b.number - a.number;
-      }
       const va = (a[col] || "").toLowerCase();
       const vb = (b[col] || "").toLowerCase();
       return dir * va.localeCompare(vb);
@@ -119,6 +99,7 @@ export default function TriageTab() {
 
   return (
     <>
+      <p>Automated recommendations, not human scope approval. Labels and silence do not authorize implementation.</p>
       <StatsCards id="triageStats" cards={stats} />
       <Show when={Object.keys(filters()).length > 0}>
         <div class="filter-bar">
@@ -144,7 +125,8 @@ export default function TriageTab() {
           <div class="empty">
             <p>No triaged issues found.</p>
             <p style={{ "font-size": "12px", "margin-top": "8px" }}>
-              Triage comments use a <code>triage-decision</code> JSON block posted by the apm-triage-panel agent.
+              Triage comments use a <code>triage-recommendation</code> JSON block.
+              Legacy <code>triage-decision</code> comments remain readable as advice only.
             </p>
           </div>
         }>

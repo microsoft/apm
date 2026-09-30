@@ -36,7 +36,7 @@ edit-in-place), plus optional label sweeps.
 - **Cost ceiling: 15 LLM calls per run.** Hard-wired. The orchestrator refuses to spawn beyond. Header prints `N/15` for observability.
 - **Single-writer interlock.** Only the orchestrator writes. Panelist subagents return JSON; they MUST NOT call any `gh` write command, post comments, or touch PR state.
 - **Idempotent comment.** Exactly one comment per run, with a stable header `## Docs sync advisory`. Re-runs edit-in-place using `gh pr comment --edit-last`.
-- **No fork-write.** Companion docs PRs (only on structural verdict with `docs-sync-confirm` label) open from a bot branch in the BASE repo; never pushed to the contributor's fork.
+- **No fork-write.** Companion docs PRs require Step 7's fresh responsible-human issue-scope checkpoint and open in the BASE repo; never pushed to the contributor's fork. Labels request advice, not implementation.
 - **Index-not-corpus reads.** Every classifier and architect agent reads `.apm/docs-index.yml`, NOT the corpus itself. The corpus is sampled only by the localizer (which reads the specific candidate pages) and by per-page panelists (which read one page each).
 - **S7 deterministic tool bridge.** The python-architect panelist MUST run real `apm --help`, `grep`, and `python -c` commands to verify doc claims, never assert from prose.
 
@@ -88,8 +88,8 @@ edit-in-place), plus optional label sweeps.
         revise (N<=3 redrafts) | agree
                                   |
    Step 6: emit ONE comment via safe-outputs.add-comment
-   Step 7: OPTIONAL companion docs PR (only if structural AND
-           `docs-sync-confirm` label present)
+   Step 7: OPTIONAL companion docs PR (structural AND fresh
+           responsible-human issue-scope checkpoint)
 ```
 
 ## Execution checklist
@@ -186,11 +186,35 @@ Verdict: <verdict>  *  Pages affected: N  *  LLM calls: M/15  *  Took: Xs
 
 ### Step 7 -- Optional companion PR
 
-Only on `structural` verdict AND `docs-sync-confirm` label present
-on the PR (the A9 SUPERVISED EXECUTION boundary; the maintainer
-ratifies the structural proposal before any PR is opened).
+Only on `structural` verdict in a human-supervised follow-up.
+`docs-sync-confirm` is at most a request to discuss the proposal; it
+never ratifies scope or permits companion implementation. This applies
+even when an older workflow prompt calls it confirmation. Unattended
+label/manual-dispatch runs end with advice, not a companion PR.
 
-If both conditions hold:
+Before editing, tie the companion to a real issue and a nominated
+scope-record comment URL. In a trusted default-branch checkout of the
+target repository (not the contributor branch or skill directory), probe:
+
+```bash
+node scripts/governance/eligibility.cjs --help
+node scripts/governance/eligibility.cjs --repo microsoft/apm --issue N --approval-url URL
+```
+
+The target's `authority.cjs` owns record interpretation and the trusted
+GOVERNANCE.md roster. Do not add a package dependency, duplicate parser,
+or label-based roster. Missing tool, incomplete/API-failed reads, or
+unverifiable evidence means STOP and escalate.
+
+The result always has `authorizes_implementation: false`: even an
+unedited scope evidence record cannot reveal deleted withdrawals.
+Obtain a fresh explicit confirmation from a responsible human for this
+issue's bounded scope, done-when, exclusions, and review contact before
+companion implementation. Capture its current confirmation reference;
+neither bot advice, a review, historical acceptance, silence, nor a label
+is consent. A named contact is not proof of review availability.
+
+Only after that checkpoint:
 
 1. Branch name: `docs-sync/companion-<PR_NUMBER>` in the BASE repo.
 2. Apply the doc-writer drafts as a commit on that branch.
@@ -200,9 +224,8 @@ If both conditions hold:
    comment text as the PR body.
 5. Reference the companion PR in the advisory comment.
 
-This step is intentionally GATED. The default behaviour (no
-`docs-sync-confirm` label) is to recommend the patches in the
-comment without opening a PR.
+The default is to recommend patches without opening a PR. Reconfirm on
+resume, changed scope, or uncertain withdrawal; never auto-push or merge.
 
 ## Cost accounting
 
@@ -226,7 +249,7 @@ comment surfaces the truncation.
 - Letting panelists post comments. Single-writer interlock violation.
 - Ignoring `refuted` verify_claims. That's silent drift you're shipping.
 - Skipping the CDO synthesis on "obvious" in-place patches. The bridges still matter.
-- Auto-opening companion PRs without the confirm label. Removes the human ratification.
+- Treating `docs-sync-confirm` or evidence JSON as ratification. Only the fresh responsible-human issue-scope checkpoint permits implementation.
 - Re-running on every push (synchronize). Wasteful. Re-apply the trigger label for re-run.
 
 ## Operating modes

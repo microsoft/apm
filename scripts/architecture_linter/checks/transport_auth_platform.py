@@ -32,6 +32,9 @@ from scripts.architecture_linter.checks.python_semantics import (
     direct_definitions,
     effective_definition,
 )
+from scripts.architecture_linter.checks.transport_gitlab_sparse import (
+    check_gitlab_prepared_remote,
+)
 from scripts.architecture_linter.checks.transport_platform_shared import (
     _SRC_PREFIX,
     GROUP,
@@ -220,7 +223,18 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
         ),
         ("src/apm_cli/marketplace/builder.py", ("hardened_git_env_for_context",)),
         ("src/apm_cli/marketplace/auth_helpers.py", ('ctx.token or ctx.host_info.kind == "ado"',)),
-        ("src/apm_cli/commands/marketplace/check.py", ("hardened_git_env_for_context",)),
+        (
+            "src/apm_cli/commands/marketplace/check.py",
+            (
+                "hardened_git_env_for_context",
+                'resolved_host = host or default_host() or "github.com"',
+                "key = (resolved_host, org)",
+                "if host is None and offline:",
+                "resolve_auth_for_host(\n                    resolved_host,",
+                "host=resolved_host,",
+                "auth_target=resolved_host,",
+            ),
+        ),
         ("src/apm_cli/policy/discovery.py", ("auth_resolver.try_with_fallback(",)),
         (
             "src/apm_cli/install/validation.py",
@@ -1031,20 +1045,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
             exempt=False,
         )
     )
-    findings.extend(
-        _require_subs(
-            provider,
-            inv,
-            _RID_GIT_CHILD_ENV,
-            "src/apm_cli/deps/download_strategies.py",
-            (
-                "tokenless_url_builder = partial(",
-                'token="",',
-                "build_repo_url_fn=tokenless_url_builder",
-            ),
-            "Git file transport must keep managed credentials out of remote URLs",
-        )
-    )
+    findings.extend(check_gitlab_prepared_remote(provider, _RID_GIT_CHILD_ENV))
     findings.extend(
         _require_subs(
             provider,

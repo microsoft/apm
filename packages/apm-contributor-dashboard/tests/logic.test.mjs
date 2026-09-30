@@ -14,6 +14,7 @@ import {
     parsePanelCounts,
     parsePanelReview,
     extractFollowUpItems,
+    parseTriageAdvice,
 } from "../.apm/extensions/issue-monitor/logic.mjs";
 
 // -- classifyIssue --
@@ -599,9 +600,9 @@ describe("classifyPanel", () => {
         assert.deepEqual(classifyPanel([{ name: "panel-review" }]), { status: "yellow", label: "Requested" });
     });
 
-    it("returns green when both panel-review and status/accepted", () => {
+    it("does not turn an accepted label into panel approval", () => {
         const labels = [{ name: "panel-review" }, { name: "status/accepted" }];
-        assert.deepEqual(classifyPanel(labels), { status: "green", label: "Accepted" });
+        assert.deepEqual(classifyPanel(labels), { status: "yellow", label: "Requested" });
     });
 
     it("handles string labels", () => {
@@ -610,7 +611,49 @@ describe("classifyPanel", () => {
 
     it("handles mixed label formats", () => {
         assert.deepEqual(classifyPanel(["panel-review", { name: "status/accepted" }]),
-            { status: "green", label: "Accepted" });
+            { status: "yellow", label: "Requested" });
+    });
+
+    it("legacy acceptance alone is not a review result", () => {
+        assert.deepEqual(classifyPanel(["accepted", "status/accepted"]),
+            { status: "none", label: "Not requested" });
+    });
+});
+
+describe("parseTriageAdvice", () => {
+    const brief = { scope: "Bounded change", done_when: "Regression passes", exclusions: "No redesign", review_needs: "Core review capacity" };
+    const v2 = { schema_version: 2, advisory_only: true, recommendation: "defer-later",
+        classification: { type: "type/bug", areas: ["area/cli"], theme: null }, proposed_brief: brief };
+    const block = (data, kind = "triage-recommendation") => `\`\`\`json ${kind}\n${JSON.stringify(data)}\n\`\`\``;
+
+    it("reads deferral and a proposed brief without authorizing implementation", () => {
+        const result = parseTriageAdvice(block(v2));
+        assert.equal(result.advisoryOnly, true);
+        assert.equal(result.legacy, false);
+        assert.equal(result.decision, "defer-later");
+        assert.deepEqual(result.proposedBrief, brief);
+        assert.equal(result.type, "type/bug");
+        assert.equal(result.status, undefined);
+    });
+
+    it("never promotes legacy status, priority or milestone fields to decisions", () => {
+        const result = parseTriageAdvice(block({ decision: "defer-later", status: "status/accepted",
+            priority: "priority/high", milestone: "v1", preserved_labels: ["help wanted"] }, "triage-decision"));
+        assert.equal(result.legacy, true);
+        assert.equal(result.advisoryOnly, true);
+        assert.equal(result.decision, "defer-later");
+        for (const field of ["status", "priority", "milestone", "preservedLabels"]) {
+            assert.equal(result[field], undefined);
+        }
+    });
+
+    it("reports malformed or unsupported payloads instead of claiming approval", () => {
+        assert.equal(parseTriageAdvice("No structured advice"), null);
+        assert.equal(parseTriageAdvice("```json triage-recommendation\n{\n```").error, "Malformed triage JSON");
+        for (const invalid of [null, [], { ...v2, advisory_only: false }, { ...v2, schema_version: 3 },
+            { ...v2, proposed_brief: {} }, { ...v2, recommendation: {} }, { ...v2, classification: { areas: [42] } }]) {
+            assert.ok(parseTriageAdvice(block(invalid)).error);
+        }
     });
 });
 
