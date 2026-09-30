@@ -9,7 +9,7 @@ post-merge in build-release.yml. These tests pin the focused Windows
 job that closes that gap.
 
 Selection is declarative: the job runs `pytest -m windows_compat`
-over the narrowest maintainable root (`tests/unit`) rather than
+over `tests/unit` and `tests/integration` rather than
 enumerating test files in this workflow. Adding a new Windows-relevant
 regression test therefore only requires applying the `windows_compat`
 marker (see pyproject.toml `[tool.pytest.ini_options].markers`) to the
@@ -115,14 +115,16 @@ def _positional_test_paths(args: list[str]) -> list[str]:
 
 
 def _collect_gate_family(args: list[str]) -> subprocess.CompletedProcess[str]:
-    """Collect the declared gate family without loading unrelated plugins."""
+    """Collect the gate family without plugins or Unix-only standard modules."""
     collection_env = _COLLECTION_ENV_BASELINE.copy()
     collection_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     return subprocess.run(
         [
             sys.executable,
-            "-m",
-            "pytest",
+            "-c",
+            "import sys, pytest; "
+            "sys.modules.update(dict.fromkeys(('pwd', 'fcntl', 'pty', 'termios'))); "
+            "raise SystemExit(pytest.main(sys.argv[1:]))",
             "-p",
             "no:cacheprovider",
             "--collect-only",
@@ -134,7 +136,9 @@ def _collect_gate_family(args: list[str]) -> subprocess.CompletedProcess[str]:
         env=collection_env,
         capture_output=True,
         text=True,
-        timeout=120,
+        # Marker deselection follows full-root collection; allow for slow,
+        # contended release runners, as the repository taxonomy guard does.
+        timeout=300,
         check=False,
     )
 
@@ -151,7 +155,7 @@ def test_windows_compat_gate_runs_on_windows_with_bounded_timeout() -> None:
 
 def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:
     """The gate must select tests declaratively via `-m windows_compat`,
-    with one explicit integration contract outside the unit-test root.
+    across unit and integration collection roots.
 
     This is the core anti-pattern guard: a future edit that reverts to
     a hardcoded file list (functionally equivalent to the old
@@ -172,16 +176,16 @@ def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:
 
 
 def test_windows_compat_gate_runs_over_narrowest_maintainable_root() -> None:
-    """Run the unit root plus the one load-bearing subprocess integration contract."""
+    """Discover marked contracts without a per-file integration allowlist."""
     job = workflow_job(_ci_workflow(), GATE_JOB)
     step = workflow_step(job, GATE_STEP)
     args = _gate_pytest_args(step)
     positional = _positional_test_paths(args)
-    expected = ["tests/unit", "tests/integration/test_lifecycle_workspace_lock.py"]
+    expected = ["tests/unit", "tests/integration"]
     assert positional == expected, (
-        f"{GATE_STEP!r} must scope to the unit contracts and lifecycle subprocess "
-        f"contract {expected!r}, got: {positional!r}"
+        f"{GATE_STEP!r} must collect marked contracts from {expected!r}, got: {positional!r}"
     )
+    assert step["env"]["APM_E2E_TESTS"] == "1"
 
 
 def test_windows_compat_gate_does_not_duplicate_full_suite() -> None:
@@ -229,6 +233,7 @@ def test_windows_compat_gate_marker_selects_nonempty_subset() -> None:
 
     The workflow's root and timeout guards bound scope and runtime, not an
     arbitrary test-count ceiling that breaks when legitimate coverage grows.
+    Unix-only imports must not fail collection before marker deselection.
     """
     job = workflow_job(_ci_workflow(), GATE_JOB)
     step = workflow_step(job, GATE_STEP)
@@ -278,10 +283,10 @@ def test_gate_collection_rejects_invalid_selections(
         _assert_gate_family_collection(subprocess.CompletedProcess([], returncode, summary, ""))
 
 
-def test_nested_collection_disables_plugin_autoload(
+def test_nested_collection_preserves_environment_and_bounded_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Nested collection must not import unrelated third-party plugins."""
+    """Keep baseline environment isolation and a finite full-root collection budget."""
     expected_path = os.environ.get("PATH")
     captured_env: dict[str, str] | None = None
 
@@ -292,6 +297,12 @@ def test_nested_collection_disables_plugin_autoload(
         nonlocal captured_env
         env = kwargs.get("env")
         captured_env = env if isinstance(env, dict) else None
+        assert kwargs["timeout"] == 300
+        assert kwargs["cwd"] == ROOT
+        assert kwargs["capture_output"] is True
+        assert kwargs["check"] is False
+        assert command[0] == sys.executable
+        assert command[-3:] == ["-m", GATE_MARKER, "tests/unit"]
         return subprocess.CompletedProcess(
             command,
             returncode=0,
@@ -301,12 +312,26 @@ def test_nested_collection_disables_plugin_autoload(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.delenv("PATH", raising=False)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "0")
 
     _collect_gate_family(["-m", GATE_MARKER, "tests/unit"])
 
     assert captured_env is not None
     assert captured_env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") == "1"
     assert captured_env.get("PATH") == expected_path
+
+
+def test_nested_collection_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung collector must still fail rather than skip or synthesize a passing result."""
+    failure = subprocess.TimeoutExpired("pytest", 300, output="partial collection")
+
+    def timed_out(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", timed_out)
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        _collect_gate_family(["-m", GATE_MARKER, "tests/unit", "tests/integration"])
+    assert exc.value is failure
 
 
 @pytest.mark.parametrize(

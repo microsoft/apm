@@ -1297,6 +1297,66 @@ def test_authorized_source_plan_fixture_oracle_covers_symlinked_content(tmp_path
 
 
 @pytest.mark.req("req-sc-015")
+@pytest.mark.parametrize("directory_link", [False, True])
+def test_agent_skip_diagnostic_preserves_authorized_scan_and_materialization(
+    tmp_path: Path, directory_link: bool
+) -> None:
+    """req-sc-015 owns exclusion; the paired warning is APM UX, not a spec mandate."""
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.models.apm_package import PackageInfo, PackageType
+    from apm_cli.security.gate import BLOCK_POLICY
+
+    source = tmp_path / "source"
+    (source / ".apm").mkdir(parents=True)
+    (source / "safe.agent.md").write_text(
+        "---\nname: safe\ndescription: Safe agent.\n---\nBody.\n", encoding="utf-8"
+    )
+    hidden = source / "unselected"
+    hidden.mkdir()
+    (hidden / "hidden.agent.md").write_text("not scanned\u202e\n", encoding="utf-8")
+    link = source / (".apm/agents" if directory_link else "linked.agent.md")
+    link.symlink_to(
+        hidden if directory_link else hidden / "hidden.agent.md",
+        target_is_directory=directory_link,
+    )
+    package = PackageInfo(
+        package=APMPackage(name="source", version="1.0.0"),
+        install_path=source,
+        package_type=PackageType.APM_PACKAGE,
+    )
+    diagnostics = DiagnosticCollector()
+    target = KNOWN_TARGETS["claude"]
+    plan = DeployableSourcePlan.create(
+        package,
+        [target],
+        skill_subset=None,
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+        diagnostics=diagnostics,
+        package_name="source",
+    )
+    scan = plan.scan_security(policy=BLOCK_POLICY)
+    assert plan.paths == scan.scanned_files == frozenset({"safe.agent.md"})
+    assert not scan.has_findings
+
+    destination = tmp_path / "destination"
+    (destination / ".claude").mkdir(parents=True)
+    result = AgentIntegrator().integrate_agents_for_target(
+        target, package, destination, source_plan=plan, diagnostics=diagnostics
+    )
+    expected = destination / ".claude" / "agents" / "safe.md"
+    assert result.files_integrated == 1
+    assert result.target_paths == [expected]
+    assert list((destination / ".claude" / "agents").iterdir()) == [expected]
+    warnings = diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].message.startswith(
+        f"Skipped symlinked agent source: {link.relative_to(source).as_posix()}."
+    )
+
+
+@pytest.mark.req("req-sc-015")
 def test_authorized_source_plan_requirement_covers_reintegration_and_symlinks() -> None:
     """The citation names every lifecycle and excludes symlink source entries."""
     assert_spec_contains(

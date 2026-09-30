@@ -18,6 +18,7 @@ from apm_cli.core.deployment_state import (
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -149,6 +150,13 @@ def test_prune_cascades_dependency_state_and_audit_sees_no_ghost(
         env=environment,
     )
     _assert_exit(install)
+    installed = LockFile.read(consumer.root / "apm.lock.yaml")
+    modules = consumer.root / "apm_modules"
+    alpha_root = installed.dependencies[_ALPHA_KEY].to_dependency_ref().get_install_path(modules)
+    beta_root = installed.dependencies[_BETA_KEY].to_dependency_ref().get_install_path(modules)
+    assert alpha_root.is_dir()
+    assert beta_root.is_dir()
+    retained_source = ArtifactSnapshot.capture(alpha_root)
 
     manifest = load_yaml(consumer.manifest_path)
     manifest["dependencies"]["apm"] = [
@@ -213,8 +221,9 @@ def test_prune_cascades_dependency_state_and_audit_sees_no_ghost(
 
     assert _BETA_KEY not in owners
     assert _ALPHA_KEY in owners
-    assert not (consumer.root / "apm_modules" / "apm-fixture-org" / "beta-kit").exists()
-    assert (consumer.root / "apm_modules" / "apm-fixture-org" / "alpha-kit").is_dir()
+    assert not beta_root.exists()
+    assert alpha_root.is_dir()
+    assert_unchanged(retained_source, ArtifactSnapshot.capture(alpha_root))
     assert not (consumer.root / ".claude/rules/beta.md").exists()
     assert not (consumer.root / ".claude/skills/beta").exists()
     assert (consumer.root / ".claude/rules/alpha.md").is_file()

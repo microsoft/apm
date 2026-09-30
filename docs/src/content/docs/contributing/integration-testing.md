@@ -383,9 +383,31 @@ environment end-to-end; for local iteration prefer the direct
 **On PR and merge queue:**
 1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
-The required Windows compatibility gate selects `windows_compat` tests. Its collection guard requires a non-empty subset, not a fixed test count, so adding marked regressions does not require raising a ceiling. The workflow's test roots and timeout bound scope and runtime.
+The required Windows compatibility gate selects `windows_compat` tests within
+`tests/unit` and `tests/integration`, with `APM_E2E_TESTS=1` for marked real-CLI
+contracts. It runs only that marker subset, not the full integration suite.
+Its collection guard requires a non-empty subset, not a fixed test count.
+Every module under those roots must import on Windows before marker deselection.
+Import Unix-only modules such as `pwd` or `fcntl` inside the helpers that need
+them, not at module scope. The collection guard checks this with Unix-only
+standard modules unavailable, even on Linux and macOS.
+The nested collection subprocess has a 300-second hard timeout: pytest must
+import and collect both roots before applying the marker, including on release
+runners sharing CPU with other test workers. Plugin autoload remains disabled,
+and a collection timeout fails the check rather than skipping it.
+Collection proves a test is selected; a successful Windows job provides
+Windows execution evidence. The existing job timeout bounds runtime.
+
+Plugin sequential-install coverage checks deployed-file removal and lockfile
+ownership after uninstall, plus unchanged files and ownership for the retained
+skill. The local fixture covers both an independent skill and a separately
+installed skill from the plugin; the network-backed case uses the same assertions.
+Cleanup wording is not the lifecycle contract.
 
 Linux Lifecycle Smoke runs the required marker subset with `-n 2 --dist loadgroup`. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
+Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
+lifecycle coverage: also run affected generated state machines, deployment
+ledger, and failure/retry contracts when changing those behaviors.
 
 **On pushed version tag releases:**
 1. Unit tests + Smoke tests

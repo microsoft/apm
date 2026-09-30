@@ -86,6 +86,14 @@ def _to_claude_hook_entries(entries: list) -> list:
     )
 
 
+def _to_codex_hook_entries(entries: list) -> list:
+    """Render portable bindings in Codex's nested hook schema."""
+    return _render_nested_document(
+        _entries_to_ir(entries),
+        timeout_milliseconds=False,
+    )
+
+
 def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
     """Render portable bindings in Antigravity's event-dependent schema."""
     document = _entries_to_ir(entries, event_name)

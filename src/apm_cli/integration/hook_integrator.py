@@ -78,6 +78,7 @@ from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.integration.hook_native_formats import (
     _to_antigravity_hook_entries,
     _to_claude_hook_entries,
+    _to_codex_hook_entries,
     _to_gemini_hook_entries,
 )
 from apm_cli.integration.hook_ownership import (
@@ -1358,7 +1359,6 @@ class HookIntegrator(BaseIntegrator):
             reverse_map: dict[str, set[str]] = {}
             for source_name, norm_name in event_map.items():
                 reverse_map.setdefault(norm_name, set()).add(source_name)
-
             entries_appended_for_file = False
             file_event_entries: dict = {}
             for raw_event_name, entries in hooks.items():
@@ -1367,11 +1367,17 @@ class HookIntegrator(BaseIntegrator):
                 event_name = event_map.get(raw_event_name, raw_event_name)
                 if event_name not in json_config[container]:
                     json_config[container][event_name] = []
-
-                # Transform flat Copilot entries to the target's nested /
-                # native hook shape.
+                legacy_content_keys: set[str] = set()
                 if config.target_key == "claude":
                     entries = _to_claude_hook_entries(entries)
+                elif config.target_key == "codex":
+                    # Match owned flat entries from installs before Codex nesting.
+                    legacy_content_keys = {
+                        self._hook_entry_content_key(entry)
+                        for entry in entries
+                        if isinstance(entry, dict)
+                    }
+                    entries = _to_codex_hook_entries(entries)
                 elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
                 elif config.target_key == "antigravity":
@@ -1381,20 +1387,14 @@ class HookIntegrator(BaseIntegrator):
                 for entry in entries:
                     if isinstance(entry, dict):
                         entry["_apm_source"] = source_marker
-                fresh_content_keys = {
+                fresh_content_keys = legacy_content_keys | {
                     self._hook_entry_content_key(entry)
                     for entry in entries
                     if isinstance(entry, dict)
                 }
 
-                # Idempotent upsert: drop any prior entries owned by this
-                # package before appending fresh ones. Without this, every
-                # `apm install` re-run duplicates the package's hooks
-                # because `.extend()` is unconditional. See microsoft/apm#708.
-                # Only strip once per event per install run -- a package
-                # with multiple hook files targeting the same event
-                # contributes each file's entries in turn, and stripping
-                # on every iteration would erase earlier files' work.
+                # Replace owned entries once per event to prevent reinstall duplicates
+                # without erasing earlier hook files' contributions (#708).
                 remove_current_source = event_name not in cleared_events
                 if remove_current_source or heal_stale_root_source:
                     # Clear from the normalised event

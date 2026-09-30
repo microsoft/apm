@@ -30,7 +30,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 | Flag | Default | Description |
 |---|---|---|
 | `--update` | off | Re-resolve dependencies to the latest version or Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutable Git refs must resolve against upstream; APM does not fall back to stale refs from the local bare Git cache. Mutually exclusive with `--frozen`. For interactive use with a confirmation prompt, use [`apm update`](../update/) instead. |
-| `--frozen` | off | Lockfile-only install: refuse to resolve anything new and fail before any project, config, deployment, or cache write if `apm.lock.yaml` is missing or out of sync with `apm.yml`, including MCP state. Mirrors `npm ci`. Mutually exclusive with `--update`, positional package additions, and `--mcp`. |
+| `--frozen` | off | Require `apm.lock.yaml` and reject manifest or MCP state drift before the install pipeline. Verify transitive immutable requirements as locked package manifests become available, before deployment and lockfile commit. A cold cache may need locked-parent downloads for that check. Mutually exclusive with `--update`, positional package additions, and `--mcp`. |
 | `--dry-run` | off | Print the install plan without deployment writes. Positional packages and ref changes appear in the preview after validation but do not change an existing `apm.yml`. Project auto-bootstrap still keeps its new manifest and any explicit `--target` selection for the next run; global dry-run bootstrap uses temporary preview state and does not create `~/.apm`. The `-g --mcp` path creates no user manifest, lockfile, or runtime configuration. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo) or select ref freshness. Add `--update` or `--refresh` to resolve mutable refs upstream; [`apm update`](../update/) does so with or without `--force`. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
@@ -115,6 +115,18 @@ in `apm.yml`, then run `apm install` again.
 | `--registry URL` | resolved | Custom MCP registry URL for resolving `--mcp NAME`. Persisted to `apm.yml`. Resolution order: this flag, `MCP_REGISTRY_URL`, `apm config set mcp-registry-url`, then the public default. Not valid with `--url` or a stdio command. |
 
 ## Behavior
+
+- **Immutable dependency conflicts.** Install fails when two paths require
+  different immutable commits for one package identity, showing both paths and
+  requested refs as ordered `owner/repo@ref -> owner/repo@ref` chains.
+  Equivalent tag/SHA spellings remain valid. Unchanged locked refs reuse their
+  recorded commits without ref discovery. `--frozen` also
+  checks transitive immutable requirements against locked commits as package
+  manifests become available; a cold cache may need parent-package downloads
+  before a conflict is discoverable. Short SHA pins must match the recorded
+  full commit's prefix. Align the root/parent refs and run a normal
+  install to regenerate the lockfile. See
+  [Manage dependencies](../../../consumer/manage-dependencies/#incompatible-immutable-requirements).
 
 - **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Its name comes from the current directory (or home directory for global installs) and falls back to `my-project` if that derived name is invalid. `apm install --dry-run -g <pkg>` validates through a temporary manifest when `~/.apm/apm.yml` is absent, reports the real user manifest path, and leaves `~/.apm` uncreated. If `~/.apm/apm.yml` already exists, global dry-run reads it in place without writing changes. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
 - **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`. For absent user manifests, `apm install --dry-run -g --target ... <pkg>` previews that target field but does not write it.

@@ -23,7 +23,14 @@ from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.patterns import normalize_apply_to, parse_apply_to, yaml_double_quote
+from apm_cli.utils.patterns import (
+    escape_apply_to_segment,
+    normalize_apply_to,
+    parse_apply_to,
+    yaml_double_quote,
+    yaml_globs_scalar,
+    yaml_plain_scalar,
+)
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
@@ -720,9 +727,10 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_cursor_rules(content: str) -> str:
         """Convert APM instruction content to Cursor Rules ``.mdc`` format.
 
-        Parses existing YAML frontmatter, maps ``applyTo`` → ``globs``,
-        extracts or generates a ``description``, and rewrites the
-        frontmatter in Cursor's expected format.
+        Map ``applyTo`` to one comma-joined ``globs`` scalar and preserve
+        or derive the description. Ordinary globs stay bare; unsafe
+        characters are escaped. Re-escape each segment before joining
+        to preserve APM's literal-comma and backslash boundaries.
         """
         metadata, body = InstructionIntegrator._parse_frontmatter(content)
         apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
@@ -739,13 +747,11 @@ class InstructionIntegrator(BaseIntegrator):
         # Build Cursor Rules frontmatter
         parts = ["---"]
         if description:
-            parts.append(f"description: {yaml_double_quote(description)}")
+            parts.append(f"description: {yaml_plain_scalar(description)}")
         globs = parse_apply_to(apply_to)
-        if len(globs) == 1:
-            parts.append(f"globs: {yaml_double_quote(globs[0])}")
-        elif globs:
-            parts.append("globs:")
-            parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+        if globs:
+            joined = ", ".join(escape_apply_to_segment(g) for g in globs)
+            parts.append(f"globs: {yaml_globs_scalar(joined)}")
         parts.append("---")
 
         return "\n".join(parts) + "\n\n" + body.lstrip("\n")

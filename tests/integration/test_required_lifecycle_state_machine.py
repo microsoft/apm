@@ -147,6 +147,7 @@ def _publish(
     *,
     skill: str | None = None,
     instruction: str | None = None,
+    instruction_content: str | None = None,
     agent: str | None = None,
     hook_command: str | None = None,
     mcp: bool = False,
@@ -169,7 +170,9 @@ def _publish(
     if skill is not None:
         scenario.sources.add_skill(package, skill, _skill(skill))
     if instruction is not None:
-        scenario.sources.add_instruction(package, instruction, _instruction(instruction))
+        scenario.sources.add_instruction(
+            package, instruction, instruction_content or _instruction(instruction)
+        )
     if agent is not None:
         scenario.sources.add_agent(package, agent, _agent(agent))
     if hook_command is not None:
@@ -1361,6 +1364,94 @@ def test_required_lock_preserves_user_edited_dropped_file_and_row(
     assert locked_dep.deployed_file_hashes[dropped_skill] == recorded_hash
     assert _record_by_value(locked, dropped_skill).content_hash == dropped_record.content_hash
     assert _record_by_value(locked, dropped_skill).owners == dropped_record.owners
+
+
+@pytest.mark.parametrize(
+    "apply_to",
+    ["'**/*.py, src/**/*.{ts,tsx}'", "['**/*.py', 'src/**/*.{ts,tsx}']"],
+    ids=["scalar", "sequence"],
+)
+def test_required_cursor_metadata_survives_install_compile_update(
+    tmp_path: Path, apm_binary_path: Path, apply_to: str
+) -> None:
+    scenario = _new_scenario(tmp_path / "cursor-metadata", apm_binary_path)
+    description = "Readable caf\u00e9 \u2014 Python and TypeScript"
+    content = f"---\napplyTo: {apply_to}\ndescription: {description}\n---\n# Stable body\n"
+    source = _publish(scenario, "cursor-kit", instruction="stable", instruction_content=content)
+    targets = ("cursor", "claude", "copilot", "windsurf", "kiro", "antigravity")
+    consumer = scenario.consumers.create(
+        "cursor-consumer", dependencies=(source.dependency,), targets=targets
+    )
+    rule_path = consumer.root / ".cursor/rules/stable.mdc"
+    sentinels = {
+        ".cursor/rules/personal.mdc": b"---\nalwaysApply: true\n---\n# Personal rule\n",
+        ".claude/rules/personal.md": b"# Personal Claude rule\n",
+        ".cursor/mcp.json": b'{"mcpServers": {}}\n',
+    }
+    for relative, data in sentinels.items():
+        path = consumer.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    expected = (
+        f"---\ndescription: {description}\n"
+        "globs: **/*.py, src/**/*.{ts,tsx}\n---\n\n# Stable body\n"
+    ).encode()
+    baseline = None
+    for cycle in range(2):
+        for command, args in (
+            ("install", _INSTALL_ARGS),
+            ("compile", ("compile", "--target", "cursor")),
+        ):
+            _run_success(
+                scenario,
+                consumer,
+                args,
+                environment=source.environment,
+                scenario_id=f"cursor-{command}-{cycle}",
+            )
+            assert rule_path.read_bytes() == expected
+            for relative, data in sentinels.items():
+                assert (consumer.root / relative).read_bytes() == data
+        snapshot = LifecycleStateSnapshot.capture(consumer.root, targets=targets)
+        if baseline is not None:
+            _assert_same_state(baseline, snapshot)
+        baseline = snapshot
+
+    for relative, marker in (
+        (".claude/rules/stable.md", 'paths:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
+        (".windsurf/rules/stable.md", 'globs:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
+        (".kiro/steering/stable.md", 'fileMatchPattern:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
+        (".agents/rules/stable.md", 'globs:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
+    ):
+        assert marker in (consumer.root / relative).read_text(encoding="utf-8")
+    assert (consumer.root / ".github/instructions/stable.instructions.md").read_text(
+        encoding="utf-8"
+    ) == content
+
+    updated = content.replace(description, "Updated readable description")
+    (source.repository.worktree / ".apm/instructions/stable.instructions.md").write_text(
+        updated, encoding="utf-8"
+    )
+    commit = scenario.repositories.commit(source.repository, message="update Cursor metadata")
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"][0]["ref"] = commit.sha
+    dump_yaml(manifest, consumer.manifest_path)
+    for command, args in (
+        ("install", _INSTALL_ARGS),
+        ("compile", ("compile", "--target", "cursor")),
+    ):
+        _run_success(
+            scenario,
+            consumer,
+            args,
+            environment=source.environment,
+            scenario_id=f"cursor-update-{command}",
+        )
+        assert rule_path.read_bytes() == expected.replace(
+            description.encode("utf-8"), b"Updated readable description"
+        )
+        for relative, data in sentinels.items():
+            assert (consumer.root / relative).read_bytes() == data
 
 
 @pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
