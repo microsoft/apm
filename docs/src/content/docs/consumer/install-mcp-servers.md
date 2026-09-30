@@ -131,6 +131,17 @@ never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
 
+Claude Code is the one target whose entries are merged key by key rather
+than replaced, so keys APM does not manage (a hand-authored OAuth block, for
+example) survive a reinstall. The keys describing a transport are not among
+them: an entry is rewritten to carry only the transport its declaration names,
+so redeclaring a server from `http` to `stdio` drops the previous `url` and
+`headers` instead of leaving both transports on one entry. This cleanup also
+repairs older mixed entries, but only when APM writes that server. An unchanged
+self-defined declaration with matching lock state can skip the write; repeating
+that install does not automatically repair a mixed entry. Rewriting an unchanged,
+valid entry preserves its field order.
+
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
