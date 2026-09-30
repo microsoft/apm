@@ -1424,7 +1424,7 @@ class MCPClientAdapter(ABC):
 
         Args:
             config: Mutable config dict updated in place.
-            remote: Registry remote entry (may contain a ``"headers"`` list).
+            remote: Registry remote entry (headers may be records or a mapping).
             server_info: Registry server metadata used for name / URL lookup.
             env_overrides: Caller-supplied env-var override mapping.
             runtime_label: Label for diagnostic messages.
@@ -1439,6 +1439,8 @@ class MCPClientAdapter(ABC):
         is_github_server = self._is_github_server(server_name, remote.get("url", ""))
         local_token_injected = False
         headers = remote.get("headers", []) or []
+        if isinstance(headers, dict):
+            headers = [{"name": name, "value": value} for name, value in headers.items()]
         explicit_authorization = any(
             isinstance(header, dict)
             and isinstance(header.get("name"), str)

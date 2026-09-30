@@ -333,6 +333,10 @@ The token is selected from this chain (first non-empty wins):
 If the manifest declares a nonempty string `Authorization` value (case-insensitive header name),
 that explicit value takes precedence over automatic GitHub authentication.
 Registry-provided headers alone do not disable automatic authentication.
+For Copilot and Cursor, this also applies to dictionary-shaped headers
+accepted from a custom registry: manifest overrides retain their priority.
+This compatibility does not certify the custom response against an upstream
+registry schema.
 Environment references are translated according to the target's interpolation
 rules. This MCP selection is environment-only: it does not use repository
 authentication's per-org variables or credential helpers.

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
+from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.intellij import IntelliJClientAdapter
 from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
 from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -106,6 +108,82 @@ def test_dictionary_overlay_tags_strings_without_coercing_values(
     assert headers["Authorization"] == value
     assert isinstance(headers["Authorization"], ManifestHeaderValue) == isinstance(value, str)
     assert headers["X-Other"] == "preserved"
+
+
+@pytest.mark.parametrize("adapter_class", [CopilotClientAdapter, CursorClientAdapter])
+@pytest.mark.parametrize("header_shape", ["list", "dict"])
+@pytest.mark.parametrize(
+    "manifest_headers",
+    [
+        {},
+        {"authorization": None},
+        {"authorization": False},
+        {"authorization": 0},
+        {"authorization": ""},
+        {"AUTHORIZATION": "authored-static"},
+        {"authorization": "${env:USER_PAT}"},
+    ],
+)
+@pytest.mark.parametrize("ambient_token", ["", "ambient-sentinel"])
+def test_registry_header_shapes_reach_shared_formatter(
+    tmp_path: Path,
+    adapter_class: type[CopilotClientAdapter],
+    header_shape: str,
+    manifest_headers: dict[str, str | bool | int | None],
+    ambient_token: str,
+) -> None:
+    """Accepted registry mappings retain provenance through real rendering."""
+    registry_headers = {"Authorization": "registry-default", "X-Other": "preserved"}
+    remote = {
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": registry_headers
+        if header_shape == "dict"
+        else [{"name": name, "value": value} for name, value in registry_headers.items()],
+    }
+    dep = MCPDependency.from_dict({"name": "github-mcp-server", "headers": manifest_headers})
+    info = {"name": dep.name, "remotes": [remote]}
+    MCPIntegrator._apply_overlay({dep.name: info}, dep)
+    before = deepcopy(info)
+    with patch.dict(
+        os.environ,
+        {
+            "HOME": str(tmp_path),
+            "GITHUB_TOKEN": ambient_token,
+            "USER_PAT": "authored-token-sentinel",
+        },
+        clear=True,
+    ):
+        config = adapter_class()._format_server_config(info)
+    native = adapter_class._supports_runtime_env_substitution
+    explicit = next(iter(manifest_headers.values()), None)
+    if explicit == "authored-static":
+        expected = explicit
+    elif explicit:
+        expected = (
+            ("${USER_PAT}" if adapter_class is CopilotClientAdapter else "${env:USER_PAT}")
+            if native
+            else "authored-token-sentinel"
+        )
+    elif ambient_token:
+        expected = (
+            (
+                "Bearer ${GITHUB_TOKEN}"
+                if adapter_class is CopilotClientAdapter
+                else "Bearer ${env:GITHUB_TOKEN}"
+            )
+            if native
+            else f"Bearer {ambient_token}"
+        )
+    else:
+        expected = "registry-default"
+    assert [
+        value for name, value in config["headers"].items() if name.casefold() == "authorization"
+    ] == [expected]
+    assert config["headers"]["X-Other"] == "preserved"
+    assert info == before
+    if header_shape == "dict":
+        for name, value in remote["headers"].items():
+            assert type(value) is type(before["remotes"][0]["headers"][name])
 
 
 @pytest.mark.parametrize(

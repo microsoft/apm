@@ -526,7 +526,10 @@ dependencies:
 For a recognized GitHub MCP server, automatic auth follows the target's
 runtime support and uses the selected token environment variable name on
 runtime-capable targets. A nonempty string manifest `Authorization` value takes
-precedence. Follow [Repairing existing credentials](https://microsoft.github.io/apm/consumer/install-mcp-servers/#repairing-existing-credentials)
+precedence, including with dictionary-shaped headers accepted from custom
+registries on Copilot and Cursor. Registry values do not gain manifest
+provenance; this compatibility is not upstream registry schema certification.
+Follow [Repairing existing credentials](https://microsoft.github.io/apm/consumer/install-mcp-servers/#repairing-existing-credentials)
 to replace previously written credentials without losing custom fields.
 See the [MCP
 Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md#token-injection-github-mcp-server)
