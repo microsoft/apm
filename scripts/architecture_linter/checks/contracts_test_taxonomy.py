@@ -86,6 +86,8 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
+_GUARD_NATIVE_LIFECYCLE = "contracts-tooling-native-lifecycle-evidence"
+
 
 _SRC_PREFIX = "src/apm_cli/"
 
@@ -470,6 +472,15 @@ _REFERENCE_OWNER = "src/apm_cli/models/dependency/reference.py"
 _RESOLVE_PHASE = "src/apm_cli/install/phases/resolve.py"
 
 
+_DOWNLOAD_PHASE = "src/apm_cli/install/phases/download.py"
+
+
+_INTEGRATE_PHASE = "src/apm_cli/install/phases/integrate.py"
+
+
+_INSTALL_PLAN = "src/apm_cli/install/plan.py"
+
+
 def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     """Guard dependency identity, materialization, and embedded-subpath ownership."""
     rule_id = _GUARD_DEPENDENCY_IDENTITY
@@ -477,7 +488,18 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     materialization, mat_fail = _facts_for(provider, _MATERIALIZATION_OWNER, rule_id)
     reference, ref_fail = _facts_for(provider, _REFERENCE_OWNER, rule_id)
     resolve, resolve_fail = _facts_for(provider, _RESOLVE_PHASE, rule_id)
-    failures = list(identity_fail) + list(mat_fail) + list(ref_fail) + list(resolve_fail)
+    download, download_fail = _facts_for(provider, _DOWNLOAD_PHASE, rule_id)
+    integrate, integrate_fail = _facts_for(provider, _INTEGRATE_PHASE, rule_id)
+    plan, plan_fail = _facts_for(provider, _INSTALL_PLAN, rule_id)
+    failures = (
+        list(identity_fail)
+        + list(mat_fail)
+        + list(ref_fail)
+        + list(resolve_fail)
+        + list(download_fail)
+        + list(integrate_fail)
+        + list(plan_fail)
+    )
     if failures:
         return tuple(failures)
 
@@ -509,6 +531,10 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         ),
         "src/apm_cli/install/phases/integrate.py": (
             "install_path = dep_ref.get_install_path(apm_modules_dir)",
+        ),
+        "src/apm_cli/commands/deps/cli.py": (
+            "install_path = dep.get_install_path(apm_modules_path)",
+            "install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)",
         ),
         _RESOLVE_PHASE: (
             "        cache_validation_callback=partial(",
@@ -626,6 +652,34 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 embedded_subpath_message,
             )
         )
+    install_path_message = "Install phase materialization paths must route through DependencyReference.get_install_path"
+    download_body = _awk_body(download, re.compile(r"^def run\("), re.compile(r"^def "))
+    if not _body_has(download_body, "_pd_path = _pd_ref.get_install_path(apm_modules_dir)") or (
+        _body_has(download_body, "apm_modules_dir / _pd_ref.alias")
+        or _body_has(download_body, "if _pd_ref.alias")
+    ):
+        findings.append(_summary(rule_id, _DOWNLOAD_PHASE, install_path_message))
+
+    integrate_body = _awk_body(integrate, re.compile(r"^def run\("), re.compile(r"^def "))
+    if not _body_has(
+        integrate_body, "install_path = dep_ref.get_install_path(apm_modules_dir)"
+    ) or (
+        _body_has(integrate_body, "apm_modules_dir / dep_ref.alias")
+        or _body_has(integrate_body, "if dep_ref.alias")
+    ):
+        findings.append(_summary(rule_id, _INTEGRATE_PHASE, install_path_message))
+
+    frozen_identity_message = "Frozen manifest drift checks must route through full-SHA comparison and drift.detect_ref_change"
+    plan_body = _awk_body(
+        plan, re.compile(r"^def lockfile_satisfies_manifest\("), re.compile(r"^def ")
+    )
+    if (
+        not _body_has(plan_body, "is_full_revision_pin(reference)")
+        or not _body_has(plan_body, "detect_ref_change(dep, locked_dep)")
+        or not _body_has(plan_body, "locked_dep.resolved_commit")
+        or _body_has(plan_body, "is_insecure")
+    ):
+        findings.append(_summary(rule_id, _INSTALL_PLAN, frozen_identity_message))
     primitive_dirs = re.compile(r"_APM_PRIMITIVE_DIRS")
     for path in _python_paths(provider, _SRC_PREFIX):
         if path == _REFERENCE_OWNER:
@@ -1355,6 +1409,368 @@ def check_project_yaml_write_delegation(provider: FactsProvider) -> tuple[Violat
 
 _LIFECYCLE_CONTRACT = "tests/quality/test_ci_topology.py"
 
+_NATIVE_PROVIDER = "scripts/check_lifecycle_evidence.py"
+_NATIVE_CONTRACTS = "scripts/lifecycle_contracts.py"
+_NATIVE_OBSERVER = "tests/utils/lifecycle_evidence.py"
+_NATIVE_RUNNER = "tests/utils/apm_lifecycle_runner.py"
+
+
+def check_native_lifecycle_evidence(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Guard delegation and proof wiring, not a second lifecycle selection policy."""
+    rule_id = _GUARD_NATIVE_LIFECYCLE
+    bindings = (
+        (
+            _NATIVE_RUNNER,
+            "ApmLifecycleRunner._run_with_timeout",
+            (
+                "process.communicate(timeout=timeout_seconds)",
+                "CommandResult(command=command, returncode=process.returncode, "
+                "stdout=stdout, stderr=stderr, cwd=cwd)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "candidate",
+            (
+                "git(root, 'for-each-ref', '--format=%(refname)', 'refs/replace')",
+                "resolved_head != git(root, 'rev-parse', 'HEAD')",
+                "git(root, 'status', '--porcelain', '--untracked-files=all')",
+                "git(root, 'rev-parse', 'HEAD^{tree}')",
+                "git(root, 'merge-base', '--is-ancestor', resolved_base, resolved_head)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "source_profile",
+            (
+                "Path(apm_cli.__file__).resolve().parent != source",
+                "interpreter.samefile(sys.executable)",
+                "interpreter.parent.resolve() != Path(sys.executable).parent.resolve()",
+                "fingerprint(source / 'cli.py')",
+                "fingerprint(Path(sys.executable).resolve())",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "execute",
+            (
+                "candidate_contract(ROOT, identity['base'], inventory)",
+                "sorted(REQUIRED_WITNESSES)",
+                "validate_execution(witness, plugin.records[witness['nodeid']])",
+                "candidate(ROOT, args.base, args.head) != identity",
+                "profile is not None",
+                "source_profile(ROOT)[1] != profile",
+                "executable, profile = source_profile(ROOT)",
+                "report.setdefault('error', str(exc))",
+                "report.setdefault('postflight_errors', []).append(str(exc))",
+                "set(plugin.records) != set(REQUIRED_WITNESSES)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "main",
+            (
+                "report = execute(args)",
+                "report['status'] != 'passed'",
+                "_write_new(args.report, _json_bytes(report))",
+                "validate_completion(args.completion, report, args.report)",
+                "completion_summary(report, args.report, raw)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_validate_completion_summary",
+            (
+                "Draft202012Validator(schema).iter_errors(summary)",
+                "set(summary['witnesses']) != set(REQUIRED_WITNESSES)",
+                "(ROOT / 'tests/fixtures/lifecycle_completion.schema.json').read_text(encoding='utf-8')",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_completion_input",
+            ("_validate_completion_summary(summary)", "_same_file(output, driver)"),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_validate_source_profile",
+            (
+                "('source_root', 'python', 'python_environment', 'executable')",
+                "('cli_sha256', 'python_sha256', 'executable_sha256')",
+                "isinstance(profile, dict)",
+                "profile.get('kind') != 'source-python'",
+                "Path(value).is_absolute()",
+                "PureWindowsPath(value).is_absolute()",
+                "re.fullmatch('[0-9a-f]{64}', value)",
+                "valid = field in profile and value is None",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "_validate_report_execution",
+            (
+                "_validate_source_profile(report.get('profile'))",
+                "set(records) != set(REQUIRED_WITNESSES)",
+                "candidate_contract(ROOT, report['base'], command_inventory())",
+                "record = records[witness['nodeid']]",
+                "validate_execution(witness, record)",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "completion_summary",
+            (
+                "_validate_completion_summary(summary)",
+                "_validate_report_execution(report)",
+                "report.get('status') != 'passed'",
+                "json.loads(raw) != report",
+                "hashlib.sha256(raw).hexdigest()",
+            ),
+        ),
+        (
+            _NATIVE_PROVIDER,
+            "validate_completion",
+            (
+                "_completion_input(path, output)",
+                "summary[claim] != native.get(field)",
+                "summary['report_sha256'] != hashlib.sha256(raw).hexdigest()",
+                "_validate_report_execution(report)",
+                "fields = {'version': 'version', 'contract_id': 'contract_id', "
+                "'base_sha': 'base', 'head_sha': 'head', 'tested_tree': 'tested_tree', "
+                "'lane': 'lane', 'status': 'status'}",
+                "driver['profile'].get('cli_sha256') != native['profile'].get('cli_sha256')",
+            ),
+        ),
+        (
+            _NATIVE_CONTRACTS,
+            "validate_contracts",
+            ("{w['nodeid'] for w in witnesses.values()} == set(REQUIRED_WITNESSES)",),
+        ),
+        (
+            _NATIVE_CONTRACTS,
+            "candidate_contract",
+            ("validate_contracts(current, inventory)",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_sessionstart",
+            (
+                "original = ApmLifecycleRunner._run_with_timeout",
+                "model = stateful.run_state_machine_as_test",
+                "self.patch.setattr(ApmLifecycleRunner, '_run_with_timeout', observe)",
+                "self.patch.setattr(stateful, 'run_state_machine_as_test', observe_model)",
+            ),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_sessionstart.observe",
+            (
+                "self._source_identity(cwd, env, kwargs['timeout_seconds'], command)",
+                "self._domain(cwd, env)",
+                "before = snapshot(roots)",
+                "result = original(runner, args, **kwargs)",
+                "fingerprint(Path(sys.executable).resolve()) != self.python_hash",
+            ),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_sessionstart.observe_model",
+            ("result = model(*args, **kwargs)",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin._source_identity",
+            ("source != expected",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_collection_finish",
+            ("set(actual) != self.nodeids",),
+        ),
+        (
+            _NATIVE_OBSERVER,
+            "LifecycleEvidencePlugin.pytest_runtest_logreport",
+            (
+                "hasattr(report, 'wasxfail')",
+                "phases[report.when] = 'repeated' if report.when in phases else outcome",
+            ),
+        ),
+    )
+    findings: list[Violation] = []
+    for path, function_name, expressions in bindings:
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        index = facts.tree_index
+        function = index.function(function_name) if index else None
+        if function is None:
+            findings.append(
+                _summary(rule_id, path, f"Missing native evidence seam {function_name}")
+            )
+            continue
+        nodes = index.own_scope(function)
+        observed = {
+            ast.unparse(node)
+            for node in nodes
+            if isinstance(node, (ast.Call, ast.Compare, ast.Assign, ast.Tuple))
+        }
+        if not set(expressions) <= observed:
+            findings.append(
+                _summary(
+                    rule_id, path, f"{function_name} must retain native evidence owner bindings"
+                )
+            )
+
+    facts, failures = _facts_for(provider, _NATIVE_PROVIDER, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        execute = index.function("execute")
+        nodes = index.own_scope(execute) if execute else ()
+        candidates = _named_calls(nodes, "candidate")
+        profiles = _named_calls(nodes, "source_profile")
+        validations = _named_calls(nodes, "validate_execution")
+        plugins = _named_calls(nodes, "LifecycleEvidencePlugin")
+        pytest_calls = [
+            node
+            for node in nodes
+            if isinstance(node, ast.Call) and ast.unparse(node.func) == "pytest.main"
+        ]
+        final_nodes = {
+            child
+            for node in nodes
+            if isinstance(node, ast.Try)
+            for statement in node.finalbody
+            for child in index.walk(statement)
+        }
+        postflight_handlers = [node for node in final_nodes if isinstance(node, ast.ExceptHandler)]
+        wired = (
+            len(candidates) == len(profiles) == 2
+            and len(pytest_calls) == len(validations) == len(plugins) == 1
+            and candidates[-1] in final_nodes
+            and profiles[-1] in final_nodes
+            and len(postflight_handlers) == 2
+            and all(
+                {
+                    "report.setdefault('error', str(exc))",
+                    "report.setdefault('postflight_errors', []).append(str(exc))",
+                }
+                <= {ast.unparse(node) for node in index.walk(handler)}
+                for handler in postflight_handlers
+            )
+        )
+        if wired:
+            run = pytest_calls[0]
+            wired = candidates[0].lineno < profiles[0].lineno < plugins[
+                0
+            ].lineno < run.lineno < validations[0].lineno < candidates[-1].lineno and any(
+                keyword.arg == "plugins" and ast.unparse(keyword.value) == "[plugin]"
+                for keyword in run.keywords
+            )
+        if not wired:
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_PROVIDER,
+                    "Fresh observed pytest must be bracketed by candidate/source checks including finally",
+                )
+            )
+
+        main = index.function("main")
+        main_nodes = index.own_scope(main) if main else ()
+        fresh_calls = _named_calls(main_nodes, "execute")
+        completion_calls = _named_calls(main_nodes, "validate_completion")
+        blocked = [
+            node
+            for node in main_nodes
+            if isinstance(node, ast.If) and ast.unparse(node.test) == "report['status'] != 'passed'"
+        ]
+        if not (
+            len(fresh_calls) == len(completion_calls) == len(blocked) == 1
+            and fresh_calls[0].lineno < blocked[0].lineno < completion_calls[0].lineno
+            and any(
+                isinstance(node, ast.Call)
+                and ast.unparse(node) == "_write_new(args.report, _json_bytes(report))"
+                for statement in blocked[0].body
+                for node in index.walk(statement)
+            )
+            and isinstance(blocked[0].body[-1], ast.Raise)
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_PROVIDER,
+                    "Failed fresh execution must persist and stop before completion comparison",
+                )
+            )
+
+    facts, failures = _facts_for(provider, _NATIVE_OBSERVER, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        observe = index.function("LifecycleEvidencePlugin.pytest_sessionstart.observe")
+        nodes = index.own_scope(observe) if observe else ()
+        snapshots = _named_calls(nodes, "snapshot")
+        invocations = [
+            call
+            for call in _named_calls(nodes, "original")
+            if isinstance(index.parent(call), ast.Assign)
+        ]
+        if not (
+            len(snapshots) == 2
+            and len(invocations) == 1
+            and snapshots[0].lineno < invocations[0].lineno < snapshots[1].lineno
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_OBSERVER,
+                    "Runner invocation must connect before/after snapshots",
+                )
+            )
+        probe = index.function("LifecycleEvidencePlugin._source_identity")
+        nodes = index.own_scope(probe) if probe else ()
+        if not any(
+            isinstance(node, ast.Call) and ast.unparse(node.func) == "subprocess.run"
+            for node in nodes
+        ):
+            findings.append(
+                _summary(
+                    rule_id, _NATIVE_OBSERVER, "Source identity must probe the actual child process"
+                )
+            )
+
+    facts, failures = _facts_for(provider, _NATIVE_CONTRACTS, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        pins = [
+            node
+            for node in index.module_children()
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "REQUIRED_WITNESSES"
+                for target in node.targets
+            )
+        ]
+        if len(pins) != 1 or not isinstance(pins[0].value, ast.Tuple):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _NATIVE_CONTRACTS,
+                    "Witness pins must be independent of ledger selection",
+                )
+            )
+    facts, failures = _facts_for(provider, _NATIVE_RUNNER, rule_id)
+    if not failures and (index := facts.tree_index) is not None:
+        runner = index.function("ApmLifecycleRunner._run_with_timeout")
+        nodes = index.own_scope(runner) if runner else ()
+        if not any(
+            isinstance(node, ast.Call) and ast.unparse(node.func) == "subprocess.Popen"
+            for node in nodes
+        ):
+            findings.append(
+                _summary(
+                    rule_id, _NATIVE_RUNNER, "Canonical lifecycle runner must start a real process"
+                )
+            )
+    return tuple(findings)
+
 
 def check_lifecycle_partition(provider: FactsProvider) -> tuple[Violation, ...]:
     """Lifecycle marker partitions must be collection-derived, never pinned."""
@@ -1428,6 +1844,11 @@ def _structural_rule(rule_id: str, description: str, check) -> Rule:
 
 
 RULES: tuple[Rule, ...] = (
+    _owner_rule(
+        _GUARD_NATIVE_LIFECYCLE,
+        "Bounded native lifecycle proof routes through fresh observation and candidate-bound completion.",
+        check_native_lifecycle_evidence,
+    ),
     _owner_rule(
         _GUARD_TAXONOMY,
         "Behavioral test taxonomy classification stays owned by module-level pytestmark.",

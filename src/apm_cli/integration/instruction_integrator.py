@@ -21,7 +21,7 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.integration.targets import RULE_FORMATS
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.patterns import (
     escape_apply_to_segment,
@@ -233,6 +233,29 @@ class InstructionIntegrator(BaseIntegrator):
             )
             plan[source_file] = (target_path, content, links_resolved)
         return plan
+
+    def deployed_rule_matches(self, source: Path, target: TargetProfile, deploy_root: Path) -> bool:
+        """Prove native delivery using the same filename and renderer as install.
+
+        Without a package link resolver, rewritten links conservatively retain
+        the compiled fallback rather than guessing semantic equivalence.
+        Filesystem and parse errors are reported by the compilation caller.
+        """
+        mapping = target.primitives.get("instructions")
+        if mapping is None or not mapping.output_compare:
+            return False
+        rules_dir = deploy_root / mapping.subdir
+        ensure_path_within(rules_dir, deploy_root)
+        if not rules_dir.is_dir():
+            return False
+        plan = self._prepare_rule_plan([source], rules_dir, mapping.extension, mapping.format_id)
+        rule_path, expected, _ = plan[source]
+        ensure_path_within(rule_path, deploy_root)
+        if has_symlink_component(deploy_root, rule_path):
+            return False
+        if not rule_path.is_file():
+            return False
+        return rule_path.read_text(encoding="utf-8") == normalize_crlf_to_lf(expected)
 
     def preflight_instructions_for_targets(
         self,

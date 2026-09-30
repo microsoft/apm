@@ -86,6 +86,9 @@ _RID_ARTIFACTORY_NETRC = "transport-platform-artifactory-netrc-isolation"
 
 
 _AUTH_OWNER = "src/apm_cli/core/auth.py"
+_HOST_PROVIDER_OWNER = "src/apm_cli/core/host_providers.py"
+_HOST_PROVIDER_IDENTITY_CONSUMER = "src/apm_cli/drift.py"
+_HOST_PROVIDER_LOCK_SEED_CONSUMER = "src/apm_cli/deps/tiered_ref_resolver.py"
 _HOST_REFERENCE_OWNER = "src/apm_cli/models/dependency/host_virtual.py"
 _ARTIFACTORY_NETRC_OWNER = "src/apm_cli/deps/artifactory_entry.py"
 _ARTIFACTORY_NETRC_CONSUMER = "src/apm_cli/deps/download_strategies.py"
@@ -149,6 +152,90 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
     findings: list[Violation] = []
 
     findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_OWNER,
+            (("sub", "def effective_host_provider_identity(", 1, "eq"),),
+            "Effective host-provider identity must have one canonical owner",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_OWNER,
+            (
+                "provider = classify_host_provider(host, host_type=host_type)",
+                "return provider.kind, provider.credential_purpose",
+            ),
+            "Effective host-provider identity must derive backend and credential route "
+            "from the canonical registry",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_IDENTITY_CONSUMER,
+            (("sub", "effective_host_provider_identity(", 2, "eq"),),
+            "Dependency drift must compare both effective host-provider identities",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_IDENTITY_CONSUMER,
+            (
+                "from apm_cli.core.host_providers import effective_host_provider_identity",
+                "manifest_provider = effective_host_provider_identity(",
+                "locked_provider = effective_host_provider_identity(",
+                "if manifest_provider != locked_provider:",
+            ),
+            "Dependency drift must route provider comparison through the canonical "
+            "effective identity owner",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_LOCK_SEED_CONSUMER,
+            (("sub", "effective_host_provider_identity(", 1, "eq"),),
+            "Dependency-scoped lock seeds must consume one canonical host-provider identity",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_LOCK_SEED_CONSUMER,
+            (
+                "def _lock_seed_key(",
+                "from ..core.host_providers import effective_host_provider_identity",
+                "dep_ref.get_unique_key()",
+                "_repository_cache_identity(dep_ref)",
+                "effective_host_provider_identity(",
+                "dep_ref.host or default_host(), host_type=dep_ref.host_type",
+            ),
+            "Dependency-scoped lock-seed identity must route provider classification "
+            "through the canonical effective identity owner",
+            parse=True,
+        )
+    )
+    findings.extend(
         _require_subs(
             provider,
             inv,
@@ -202,7 +289,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             provider,
             inv,
             _RID_HOST_CRED,
-            "src/apm_cli/core/host_providers.py",
+            _HOST_PROVIDER_OWNER,
             ('if host_kind == "ado":', "suppress_credential_helpers=True"),
             "ADO transport policy must reject native credential helpers",
         )

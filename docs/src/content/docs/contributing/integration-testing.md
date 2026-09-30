@@ -62,6 +62,42 @@ APM uses a tiered approach to integration testing:
 
 ## Running Tests Locally
 
+### Exact-head HOME-alias lifecycle qualification
+
+The #2867 contract uses real CLI subprocesses in isolated project, canonical-home
+and aliased-home fixtures. Its eight required/generated/replay witnesses retain
+the mandatory lifecycle inside Hypothesis execution; an additional project
+scenario checks semver transport refusal and recovery. Ownership snapshot tests
+also enforce one lockfile read per used root and integration phase, zero unused
+reads, and at most 15x record visits when fixture size grows from N to 10N.
+These counts do not claim a wall-clock speedup.
+
+Use a clean committed checkout. Set `BASE_SHA` to the full 40-hex commit SHA
+of a locally available, distinct ancestor of the checked-out `HEAD`.
+Set `REPORT_PATH` and `COMPLETION_PATH` to distinct, new paths outside the checkout:
+
+```bash
+uv run --frozen --extra dev python scripts/check_lifecycle_evidence.py \
+  --base "$BASE_SHA" --head "$(git rev-parse HEAD)" --lane full \
+  --report "$REPORT_PATH" --completion-output "$COMPLETION_PATH"
+```
+
+The command emits the schema-validated native completion sidecar only after fresh success.
+It verifies source/interpreter identity and freshly executes the authored
+contract; a skipped witness or disconnected sequence is not acceptance.
+It is source-Python coverage, not packaged-binary parity. Ordinary hosted
+platform checks remain separate.
+
+For independent acceptance, use another clean checkout with the same base/head,
+its own interpreter and disposable environment. Replace `--completion-output`
+with `--completion "$DRIVER_COMPLETION_PATH"`, pointing to the driver's native
+sidecar, and use a new external `--report` path. Keep the driver's report available
+at the path recorded in that sidecar. Completion mode verifies its digest and
+reruns the contract; it does not reuse the report as execution. Keep this native
+sidecar separate from the unchanged merge-worker completion JSON.
+
+### Selecting integration tests
+
 Integration tests live under `tests/integration/` and run via `pytest`
 directly. Each test module declares the preconditions it needs as
 standard pytest markers; the registry in
@@ -420,7 +456,7 @@ skill. The local fixture covers both an independent skill and a separately
 installed skill from the plugin; the network-backed case uses the same assertions.
 Cleanup wording is not the lifecycle contract.
 
-Linux Lifecycle Smoke runs the required marker subset with `-n 2 --dist loadgroup`. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
+Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
 Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.

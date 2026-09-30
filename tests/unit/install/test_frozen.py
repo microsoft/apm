@@ -72,7 +72,7 @@ class TestEnforceFrozen:
                 ),
             ],
         )
-        dep = DependencyReference(repo_url="https://github.com/o/r")
+        dep = DependencyReference(repo_url="https://github.com/o/r", reference="main")
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
 
         InstallService.enforce_frozen(req)
@@ -97,7 +97,7 @@ class TestEnforceFrozen:
                 ),
             ],
         )
-        dep = DependencyReference(repo_url="https://github.com/o/r")
+        dep = DependencyReference(repo_url="https://github.com/o/r", reference="main")
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
 
         InstallService.enforce_frozen(req)
@@ -118,7 +118,7 @@ class TestEnforceFrozen:
         lock.mcp_servers = ["stale-mcp"]
         lock.mcp_configs = {"stale-mcp": {"name": "stale-mcp"}}
         lock.save(tmp_path / "apm.lock.yaml")
-        dep = DependencyReference(repo_url="https://github.com/o/r")
+        dep = DependencyReference(repo_url="https://github.com/o/r", reference="main")
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
         req.apm_package.get_all_mcp_dependencies.return_value = []
         current = CurrentMcpConfigView(
@@ -217,7 +217,7 @@ class TestEnforceFrozenColdCache:
         lock.mcp_configs = {"root-mcp": {"name": "root-mcp"}}
         lock.save(tmp_path / "apm.lock.yaml")
 
-        manifest_dep = DependencyReference(repo_url="owner/some-pkg")
+        manifest_dep = DependencyReference(repo_url="owner/some-pkg", reference="v1.0.0")
         req = _make_request(project_dir=tmp_path, manifest_deps=[manifest_dep])
         # Root manifest declares the MCP server directly.
         from apm_cli.models.dependency.mcp import MCPDependency
@@ -246,7 +246,7 @@ class TestEnforceFrozenColdCache:
         lock.mcp_config_provenance = {"pkg-mcp": dep_name}
         lock.save(tmp_path / "apm.lock.yaml")
 
-        manifest_dep = DependencyReference(repo_url="owner/some-pkg")
+        manifest_dep = DependencyReference(repo_url="owner/some-pkg", reference="v1.0.0")
         req = _make_request(project_dir=tmp_path, manifest_deps=[manifest_dep])
         req.apm_package.get_all_mcp_dependencies.return_value = []
 
@@ -275,7 +275,7 @@ class TestEnforceFrozenColdCache:
         lock.mcp_config_provenance = {}
         lock.save(tmp_path / "apm.lock.yaml")
 
-        manifest_dep = DependencyReference(repo_url="owner/some-pkg")
+        manifest_dep = DependencyReference(repo_url="owner/some-pkg", reference="v1.0.0")
         req = _make_request(project_dir=tmp_path, manifest_deps=[manifest_dep])
         req.apm_package.get_all_mcp_dependencies.return_value = []
         current = CurrentMcpConfigView(
@@ -324,7 +324,7 @@ class TestEnforceFrozenColdCache:
         }
         lock.save(tmp_path / "apm.lock.yaml")
 
-        manifest_dep = DependencyReference(repo_url="owner/some-pkg")
+        manifest_dep = DependencyReference(repo_url="owner/some-pkg", reference="v1.0.0")
         req = _make_request(project_dir=tmp_path, manifest_deps=[manifest_dep])
         req.apm_package.get_all_mcp_dependencies.return_value = []
         current = CurrentMcpConfigView(
@@ -374,7 +374,7 @@ class TestEnforceFrozenColdCache:
         lock.mcp_config_provenance = {"pkg-mcp": dep_name}
         lock.save(tmp_path / "apm.lock.yaml")
 
-        manifest_dep = DependencyReference(repo_url="owner/some-pkg")
+        manifest_dep = DependencyReference(repo_url="owner/some-pkg", reference="v1.0.0")
         recording_logger = _RecordingInstallLogger()
         pkg = MagicMock()
         pkg.package_path = tmp_path / "apm.yml"

@@ -10,6 +10,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
+from .build_id import has_valid_build_id
 from .claude_formatter import CLAUDE_HEADER
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
@@ -29,6 +30,41 @@ _ROOT_CONTEXT_BY_COMPILE_FAMILY = {
     "gemini": ("GEMINI.md", (GEMINI_MD_GENERATED_MARKER,)),
     "vscode": ("AGENTS.md", _AGENTS_ROOT_GENERATED_MARKERS),
 }
+
+
+def protected_user_root_status(path: Path, content: str) -> str | None:
+    """Protect user-authored or edited compiled roots before replacement/cleanup."""
+    if path.is_symlink():
+        return "skipped-symlink"
+    if not content.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):
+        return "skipped-hand-authored"
+    if not has_valid_build_id(content):
+        return "skipped-modified"
+    return None
+
+
+def clean_redundant_user_root(
+    path: Path, deploy_root: Path, expected: str, *, dry_run: bool
+) -> str:
+    """Remove only a regular, unchanged, currently redundant compiled user root.
+
+    Compiled roots are not deployed primitives tracked by the install lockfile.
+    The reproducible legacy root is their ownership and native-coverage proof.
+    Recheck it immediately before deletion; never follow a final symlink.
+    """
+    if path.is_symlink():
+        return "skipped-symlink"
+    ensure_path_within(path, deploy_root)
+    existing = path.read_text(encoding="utf-8")
+    protected = protected_user_root_status(path, existing)
+    if protected is not None:
+        return protected
+    if existing != expected:
+        return "skipped-modified"
+    if dry_run:
+        return "would-remove"
+    path.unlink()
+    return "removed"
 
 
 def catalog_root_context_markers() -> dict[str, tuple[str, ...]]:

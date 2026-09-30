@@ -6,7 +6,7 @@ import json
 import os
 import shutil
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -15,9 +15,10 @@ import pytest
 import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
-from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import (
@@ -25,8 +26,10 @@ from tests.utils.artifact_snapshot import (
     ArtifactSnapshotSet,
     assert_only_snapshot_paths_changed,
     assert_snapshot_changes_within,
+    assert_snapshot_set_unchanged,
     assert_unchanged,
 )
+from tests.utils.git_credential_shim import GitCredentialShimFactory
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_git_repository import (
@@ -114,6 +117,24 @@ def _skill(name: str) -> str:
     return (
         f"---\nname: {name}\ndescription: Required lifecycle fixture skill {name}\n---\n# {name}\n"
     )
+
+
+def _revision_instruction(revision: str) -> str:
+    return f"---\ndescription: Global lifecycle revision\n---\n# revision-{revision}\n"
+
+
+def _publish_revision(scenario: _Scenario, source: _PublishedPackage, revision: str) -> GitCommit:
+    """Publish in the Git worktree, not the original package authoring tree."""
+    for skill_path in (source.repository.worktree / "skills").glob("*/SKILL.md"):
+        skill_path.write_text(
+            _skill(skill_path.parent.name) + f"\nrevision-{revision}\n", encoding="ascii"
+        )
+    instruction_path = (
+        source.repository.worktree / ".apm" / "instructions" / "revision.instructions.md"
+    )
+    instruction_path.parent.mkdir(parents=True, exist_ok=True)
+    instruction_path.write_text(_revision_instruction(revision), encoding="ascii")
+    return scenario.repositories.commit(source.repository, message=f"publish revision {revision}")
 
 
 def _instruction(name: str) -> str:
@@ -1807,7 +1828,6 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
         "legacy-hash-kit",
         skill="legacy-hash",
     )
-    package = source.package
     consumer = scenario.consumers.create(
         "legacy-hash-consumer",
         dependencies=(source.dependency,),
@@ -1842,7 +1862,8 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     prior_deployed_files = list(locked_dependency["deployed_files"])
     prior_deployed_hashes = dict(locked_dependency["deployed_file_hashes"])
 
-    cached_package = consumer.root / "apm_modules" / package.name
+    assert source.dependency["alias"] == source.package.name
+    cached_package = consumer.root / "apm_modules" / source.package.name
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
     receipt.unlink()
@@ -1935,6 +1956,7 @@ def test_required_parallel_fresh_fetch_bypasses_legacy_cache_upgrade(
         scenario_id="parallel-fresh-plugin-establish",
     )
 
+    assert source.dependency["alias"] == source.package.name
     cached_package = consumer.root / "apm_modules" / source.package.name
     lock_path = consumer.root / "apm.lock.yaml"
     lock_document = load_yaml(lock_path)
@@ -2023,6 +2045,7 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
         scenario_id="invalid-legacy-plugin-establish",
     )
 
+    assert source.dependency["alias"] == source.package.name
     cached_package = consumer.root / "apm_modules" / source.package.name
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
@@ -2084,11 +2107,13 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
         locked_dependency["content_hash"] = compute_package_hash(cached_package)
     dump_yaml(lock_document, lock_path)
     if replace_ref:
+        scenario.repositories.tag(source.repository, "replacement-ref", source.commit)
         manifest = load_yaml(consumer.manifest_path)
-        manifest["dependencies"]["apm"][0]["ref"] = "HEAD"
+        manifest["dependencies"]["apm"][0]["ref"] = "replacement-ref"
         dump_yaml(manifest, consumer.manifest_path)
 
     before_state = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
+    before_artifacts = ArtifactSnapshotSet.capture({"project": consumer.root})
     before_cache = ArtifactSnapshot.capture(cached_package)
     before_external = ArtifactSnapshot.capture(external_root) if external_root is not None else None
     package_link_target = (
@@ -2116,8 +2141,9 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
         return
 
     assert result.returncode != 0, _result_evidence(result)
-    assert source.package.name in output
-    assert str(cached_package) in "".join(output.split())
+    compact_output = "".join(output.split())
+    assert source.package.name in compact_output, _result_evidence(result)
+    assert str(cached_package) in compact_output
     if invalid_cache == "package-root-symlink":
         assert "unsafe destination" in output
         assert "without removing its target" in output
@@ -2140,10 +2166,42 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
         assert cached_package.is_symlink()
         assert cached_package.readlink() == package_link_target
     assert_unchanged(before_cache, ArtifactSnapshot.capture(cached_package))
+    assert_snapshot_changes_within(
+        before_artifacts,
+        ArtifactSnapshotSet.capture({"project": consumer.root}),
+        exact_paths={},
+        tree_prefixes={"project": {cached_package.relative_to(consumer.root).as_posix()}},
+    )
     if before_external is not None and external_root is not None:
         assert_unchanged(before_external, ArtifactSnapshot.capture(external_root))
     after_state = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
     _assert_same_state(before_state, after_state)
+
+    # Follow targeted-cache-removal guidance without following a bad root link.
+    if package_link_target is not None:
+        cached_package.unlink()
+    elif cached_package.exists():
+        shutil.rmtree(cached_package)
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--update"),
+        environment=source.environment,
+        scenario_id=f"invalid-legacy-plugin-{invalid_cache}-recovery",
+    )
+    assert receipt.is_file()
+    assert (consumer.root / ".claude/skills/legacy-skill/SKILL.md").read_text(
+        encoding="ascii"
+    ) == _skill("legacy-skill")
+    if before_external is not None and external_root is not None:
+        assert_unchanged(before_external, ArtifactSnapshot.capture(external_root))
+    _, recovered_audit = _audit(
+        scenario,
+        consumer,
+        environment=source.environment,
+        scenario_id=f"invalid-legacy-plugin-{invalid_cache}-recovered-audit",
+    )
+    assert recovered_audit["passed"] is True
 
 
 def test_required_dependency_prune_then_uninstall_cascades_owned_state(
@@ -2207,8 +2265,13 @@ def test_required_dependency_prune_then_uninstall_cascades_owned_state(
     )
     after_prune = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
 
+    assert alpha.dependency["alias"] == "alpha-kit"
+    assert beta.dependency["alias"] == "beta-kit"
     assert not (consumer.root / "apm_modules" / "beta-kit").exists()
     assert (consumer.root / "apm_modules" / "alpha-kit").is_dir()
+    _, remaining = _single_locked_dependency(consumer.root)
+    assert remaining.alias == "alpha-kit"
+    assert LockedDependency.from_dict(remaining.to_dict()).to_dependency_ref().alias == "alpha-kit"
     assert "echo beta" not in _hook_commands(settings)
     assert _hook_commands(settings) == ["echo alpha"]
     assert not any(
@@ -2507,12 +2570,324 @@ def test_required_global_lock_ignores_inactive_experimental_resolver(
         assert not (mount / "Documents" / "Cowork" / "skills" / "inactive-resolver").exists()
 
 
+def _exercise_global_revision_commands(
+    scenario: _Scenario,
+    source: _PublishedPackage,
+    commit_a: GitCommit,
+    run: Callable[..., CommandResult],
+    capture: Callable[[], LifecycleStateSnapshot],
+    assert_revision: Callable[[GitCommit, str], None],
+    artifact_roots: Mapping[str, Path],
+    compiled_path: Path,
+    install_args: tuple[str, ...],
+    manifest_path: Path,
+    lock_path: Path,
+) -> GitCommit:
+    """Advance one installed workspace, retaining byte and ownership oracles."""
+    installed = capture()
+    assert_revision(commit_a, "a")
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    run(install_args, "global-reinstall-a")
+    _assert_same_state(installed, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    for args in (
+        ("deps", "list", "--global"),
+        ("deps", "tree", "--global"),
+        ("deps", "why", source.package.name, "--global", "--json"),
+        ("view", source.package.name, "--global"),
+        ("info", source.package.name, "--global"),
+    ):
+        result = run(args, f"global-reader-{'-'.join(args[:2])}")
+        assert source.package.name in result.stdout, _result_evidence(result)
+        _assert_same_state(installed, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+    for args, expected_text in (
+        (("deps", "info", source.package.name), source.package.name),
+        (("cache", "info"), "Git repositories"),
+        (("cache", "prune", "--days", "30"), "Pruned 0 SHA group(s)"),
+    ):
+        result = run(
+            args,
+            f"global-compatible-{'-'.join(args[:2])}",
+            command_cwd=manifest_path.parent,
+        )
+        assert expected_text in result.stdout, _result_evidence(result)
+        _assert_same_state(installed, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    # targets observes project markers, not the user-scope deployment inventory.
+    targets = run(("targets", "--json"), "global-compatible-targets")
+    target_rows = json.loads(targets.stdout)
+    assert target_rows and all(row["status"] == "inactive" for row in target_rows)
+    # find is a project-relative lookup; legacy absolute global records are not supported.
+    found = run(
+        ("find", str(compiled_path.parent / "skills" / "global-audit" / "SKILL.md")),
+        "global-find-absolute-refusal",
+        command_cwd=manifest_path.parent,
+        expected_returncode=1,
+    )
+    assert "is not tracked by any installed package" in " ".join(found.stdout.split()), (
+        _result_evidence(found)
+    )
+    _assert_same_state(installed, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+    run(("compile", "--global"), "global-compile-a")
+    assert "# revision-a" in compiled_path.read_text(encoding="ascii")
+    compiled_a = compiled_path.read_bytes()
+    before_lock = capture()
+    run(("lock", "--global", "--no-policy", "--parallel-downloads", "0"), "global-lock-a")
+    assert capture().deployment_records == before_lock.deployment_records
+    assert capture().files == before_lock.files
+    assert_revision(commit_a, "a")
+    locked_a = capture()
+    export_a = run(("lock", "export", "--global"), "global-lock-export-a")
+    assert json.loads(export_a.stdout)["bomFormat"] == "CycloneDX"
+    assert commit_a.sha in export_a.stdout
+    _assert_same_state(locked_a, capture())
+
+    installed_a = capture()
+    commit_b = _publish_revision(scenario, source, "b")
+    outdated = run(
+        ("outdated", "--global", "--parallel-checks", "0", "--verbose"), "global-outdated-b"
+    )
+    assert commit_b.sha[:7] in outdated.stdout, _result_evidence(outdated)
+    _assert_same_state(installed_a, capture())
+    assert_revision(commit_a, "a")
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    run(
+        ("update", "--global", "--dry-run", "--parallel-downloads", "0"),
+        "global-update-preview-b",
+    )
+    _assert_same_state(installed_a, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    run((*install_args, "--frozen"), "global-frozen-replay-a")
+    _assert_same_state(installed_a, capture())
+    run(("update", "--global", "--yes", "--parallel-downloads", "0"), "global-update-b")
+    assert_revision(commit_b, "b")
+    assert capture().deployment_records != installed_a.deployment_records
+    run(("compile", "--global"), "global-compile-b")
+    assert "# revision-b" in compiled_path.read_text(encoding="ascii")
+    assert "# revision-a" not in compiled_path.read_text(encoding="ascii")
+    assert compiled_path.read_bytes() != compiled_a
+    installed_b = capture()
+    export_b = run(("lock", "export", "--global", "--format", "spdx"), "global-lock-export-b")
+    assert json.loads(export_b.stdout)["spdxVersion"].startswith("SPDX-")
+    assert commit_b.sha in export_b.stdout
+    _assert_same_state(installed_b, capture())
+    for args, scenario_id in (
+        (("compile", "--global", "--dry-run"), "global-compile-preview-b"),
+        (("compile", "--global"), "global-compile-noop-b"),
+        ((*install_args, "--dry-run"), "global-install-preview-b"),
+        ((*install_args, "--update"), "global-install-update-noop-b"),
+        (("deps", "update", "--global", "--parallel-downloads", "0"), "global-deps-update-noop-b"),
+        (
+            ("lock", "--global", "--no-policy", "--parallel-downloads", "0", "--update"),
+            "global-lock-update-b",
+        ),
+    ):
+        run(args, scenario_id)
+        _assert_same_state(installed_b, capture())
+    run((*install_args, "--frozen"), "global-frozen-replay-b")
+    _assert_same_state(installed_b, capture())
+
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"][0]["ref"] = commit_a.sha
+    dump_yaml(manifest, manifest_path)
+    stale = capture()
+    run((*install_args, "--frozen"), "global-frozen-refusal", expected_returncode=1)
+    _assert_same_state(stale, capture())
+    manifest_path.write_bytes(manifest_bytes)
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    run(install_args, "global-reinstall-b")
+    _assert_same_state(installed_b, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    _exercise_frozen_full_pin_commands(
+        run,
+        capture,
+        assert_revision,
+        manifest_path,
+        lock_path,
+        install_args,
+        artifact_roots,
+        commit_a,
+        commit_b,
+    )
+    return commit_b
+
+
+def _exercise_frozen_full_pin_commands(
+    run: Callable[..., CommandResult],
+    capture: Callable[[], LifecycleStateSnapshot],
+    assert_revision: Callable[[GitCommit, str], None],
+    manifest_path: Path,
+    lock_path: Path,
+    install_args: tuple[str, ...],
+    artifact_roots: Mapping[str, Path],
+    commit_a: GitCommit,
+    commit_b: GitCommit,
+) -> None:
+    """Refuse a corrupt locked commit even when its declared full pin still matches."""
+    original_manifest = manifest_path.read_bytes()
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"][0]["ref"] = commit_a.sha
+    dump_yaml(manifest, manifest_path)
+    run(install_args, "global-full-pin-install-a")
+    assert_revision(commit_a, "a")
+    accepted = capture()
+    pinned_lock = lock_path.read_bytes()
+    lock = load_yaml(lock_path)
+    assert len(lock["dependencies"]) == 1
+    locked = lock["dependencies"][0]
+    assert (locked["resolved_ref"], locked["resolved_commit"]) == (commit_a.sha, commit_a.sha)
+    locked["resolved_commit"] = commit_b.sha
+    dump_yaml(lock, lock_path)
+
+    corrupted = capture()
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    refused = run(
+        (*install_args, "--frozen"),
+        "global-full-pin-commit-refusal",
+        expected_returncode=1,
+    )
+    diagnostic = " ".join((refused.stdout + refused.stderr).split())
+    assert f"manifest commit '{commit_a.sha}'" in diagnostic, _result_evidence(refused)
+    assert f"lockfile resolved_commit '{commit_b.sha}'" in diagnostic, _result_evidence(refused)
+    _assert_same_state(corrupted, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+    lock_path.write_bytes(pinned_lock)
+    before = ArtifactSnapshotSet.capture(artifact_roots)
+    run((*install_args, "--frozen"), "global-full-pin-recovery-a")
+    _assert_same_state(accepted, capture())
+    assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+    assert_revision(commit_a, "a")
+    manifest_path.write_bytes(original_manifest)
+    run(install_args, "global-full-pin-restore-branch-b")
+    assert_revision(commit_b, "b")
+
+
+def _semver_transport_environment(scenario: _Scenario, source: _PublishedPackage) -> dict[str, str]:
+    """Map real Git operations locally without changing selected transport."""
+    shim = GitCredentialShimFactory(scenario.isolated.root / "semver-git-shim").create(
+        base_env=dict(scenario.environment),
+        real_git=Path(get_git_executable()).resolve(),
+        remote_map={urlparse(source.remote_url).path.lstrip("/"): source.repository.file_url},
+        credential="",
+    )
+    return dict(shim.environment)
+
+
+def _exercise_frozen_semver_transport_commands(
+    run: Callable[..., CommandResult],
+    capture: Callable[[], LifecycleStateSnapshot],
+    manifest_path: Path,
+    lock_path: Path,
+    install_args: tuple[str, ...],
+    artifact_roots: Mapping[str, Path],
+    secure_url: str,
+    expected_commit: GitCommit,
+) -> None:
+    """Refuse both transport flips without conflating a range with its selected tag."""
+    original_manifest = manifest_path.read_bytes()
+    insecure_url = urlparse(secure_url)._replace(scheme="http").geturl()
+    hostname = urlparse(secure_url).hostname
+    assert hostname is not None
+    approved_args = (*install_args, "--allow-insecure", "--allow-insecure-host", hostname)
+    for initial_url, changed_url, direction in (
+        (secure_url, insecure_url, "https-to-http"),
+        (insecure_url, secure_url, "http-to-https"),
+    ):
+        manifest = load_yaml(manifest_path)
+        dependency = manifest["dependencies"]["apm"][0]
+        dependency.update(git=initial_url, ref="^1.0.0", allow_insecure=True)
+        dump_yaml(manifest, manifest_path)
+        run(approved_args, f"semver-{direction}-install")
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        locked = lock.get_package_dependencies()
+        assert len(locked) == 1
+        assert locked[0].constraint == "^1.0.0"
+        assert locked[0].resolved_ref == "v1.0.0"
+        assert locked[0].resolved_commit == expected_commit.sha
+        assert locked[0].is_insecure == (urlparse(initial_url).scheme == "http")
+        accepted_manifest = manifest_path.read_bytes()
+        accepted = capture()
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        run((*approved_args, "--frozen"), f"semver-{direction}-replay")
+        _assert_same_state(accepted, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+        dependency["git"] = changed_url
+        dump_yaml(manifest, manifest_path)
+        refused = capture()
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        result = run(
+            (*approved_args, "--frozen"),
+            f"semver-{direction}-refusal",
+            expected_returncode=1,
+        )
+        assert "transport differs from apm.lock.yaml" in result.stdout + result.stderr
+        _assert_same_state(refused, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+        manifest_path.write_bytes(accepted_manifest)
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        run((*approved_args, "--frozen"), f"semver-{direction}-recovery")
+        _assert_same_state(accepted, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
+
+    manifest_path.write_bytes(original_manifest)
+    run(install_args, "semver-restore-original-declaration")
+
+
+def test_required_frozen_semver_transport_refusal_recovers(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _new_scenario(tmp_path / "frozen-semver-transport", apm_binary_path)
+    source = _publish(scenario, "semver-kit", skill="semver-kit")
+    scenario.repositories.tag(source.repository, "v1.0.0", source.commit)
+    environment = _semver_transport_environment(scenario, source)
+    consumer = scenario.consumers.create(
+        "semver-consumer", dependencies=(source.dependency,), targets=("claude",)
+    )
+    user_file = consumer.root / "user-owned.txt"
+    user_file.write_bytes(b"preserve user content\n")
+    roots = {"project": consumer.root, "home": scenario.isolated.home}
+
+    def run(
+        args: tuple[str, ...], scenario_id: str, *, expected_returncode: int = 0
+    ) -> CommandResult:
+        result = scenario.runner.run(
+            args, scenario_id=scenario_id, cwd=consumer.root, env=environment
+        )
+        assert result.returncode == expected_returncode, _result_evidence(result)
+        assert user_file.read_bytes() == b"preserve user content\n"
+        return result
+
+    _exercise_frozen_semver_transport_commands(
+        run,
+        lambda: LifecycleStateSnapshot.capture(consumer.root, targets=("claude",)),
+        consumer.manifest_path,
+        consumer.root / "apm.lock.yaml",
+        _INSTALL_ARGS,
+        roots,
+        source.remote_url,
+        source.commit,
+    )
+
+
+@pytest.mark.parametrize("aliased_home", [False, True])
 def test_required_global_audit_rule_matrix_for_external_roots(
+    aliased_home: bool,
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
     scenario = _new_scenario(tmp_path / "global-audit-matrix", apm_binary_path)
     source = _publish(scenario, "global-audit-kit", skill="global-audit")
+    commit_a = _publish_revision(scenario, source, "a")
+    dependency = {**source.dependency, "ref": "main"}
     cwd = scenario.isolated.work_root
     targets = ("claude", "hermes")
     external_roots = {target: scenario.isolated.root / f"{target}-home" for target in targets}
@@ -2527,47 +2902,107 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         sentinel_path.parent.mkdir(parents=True)
         sentinel_path.write_bytes(f"{target}-owned-by-user\n".encode("ascii"))
 
-    environment = dict(source.environment)
+    environment = _semver_transport_environment(scenario, source)
+    if aliased_home:
+        alias = scenario.isolated.root / "home-alias"
+        try:
+            alias.symlink_to(scenario.isolated.home, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("directory symlinks unavailable")
+        environment["HOME"] = str(alias)
+        environment["USERPROFILE"] = str(alias)
+        environment["APM_HOME"] = str(alias / ".apm")
     for target, root in external_roots.items():
         environment[_EXTERNAL_USER_ROOT_ENV[target]] = str(root)
 
     skill_paths = {
         target: PurePosixPath(_skill_deploy_path(target, "global-audit")) for target in targets
     }
-    snapshot_paths = {target: (sentinel_paths[target], skill_paths[target]) for target in targets}
+    snapshot_paths = {
+        target: (sentinel_paths[target], skill_paths[target], PurePosixPath("CLAUDE.md"))
+        for target in targets
+    }
     capture_roots = _external_root_specs(external_roots, config_paths=snapshot_paths)
+    physical_apm_home = scenario.isolated.config_root
+    artifact_roots = {
+        "home": scenario.isolated.home,
+        "caller": cwd,
+        **external_roots,
+    }
+    home_sentinel = scenario.isolated.home / "user-owned.txt"
+    home_sentinel.write_bytes(b"home-user-owned\n")
+    caller_sentinel = cwd / "user-owned.txt"
+    caller_sentinel.write_bytes(b"caller-user-owned\n")
+
+    def capture() -> LifecycleStateSnapshot:
+        return LifecycleStateSnapshot.capture(physical_apm_home, external_roots=capture_roots)
+
+    def run(
+        args: tuple[str, ...],
+        scenario_id: str,
+        *,
+        expected_returncode: int = 0,
+        command_cwd: Path | None = None,
+    ) -> CommandResult:
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        result = scenario.runner.run(
+            args, scenario_id=scenario_id, cwd=command_cwd or cwd, env=environment
+        )
+        assert result.returncode == expected_returncode, _result_evidence(result)
+        assert_snapshot_changes_within(
+            before,
+            ArtifactSnapshotSet.capture(artifact_roots),
+            exact_paths={
+                "home": {".local", ".local/state", ".local/state/gh", ".local/state/gh/device-id"},
+                **{
+                    target: {
+                        "skills",
+                        "rules",
+                        "rules/revision.md",
+                        "CLAUDE.md",
+                        "AGENTS.md",
+                        ".apm",
+                    }
+                    for target in targets
+                },
+            },
+            tree_prefixes={
+                "home": {".apm"},
+                **{target: {"skills/global-audit", ".apm"} for target in targets},
+            },
+        )
+        assert home_sentinel.read_bytes() == b"home-user-owned\n"
+        assert caller_sentinel.read_bytes() == b"caller-user-owned\n"
+        for target in targets:
+            assert (external_roots[target] / sentinel_paths[target]).read_bytes() == (
+                f"{target}-owned-by-user\n".encode("ascii")
+            )
+        if aliased_home:
+            assert alias.is_symlink()
+            assert alias.readlink() == scenario.isolated.home
+        return result
+
     scenario.isolated.config_root.mkdir(parents=True, exist_ok=True)
     dump_yaml(
         {
             "name": "global-audit-consumer",
             "version": "0.1.0",
-            "dependencies": {"apm": [source.dependency]},
+            "dependencies": {"apm": [dependency]},
             "targets": list(targets),
         },
         scenario.isolated.config_root / "apm.yml",
     )
 
-    install = scenario.runner.run(
-        (
-            "install",
-            "--global",
-            "--no-policy",
-            "--parallel-downloads",
-            "0",
-        ),
-        scenario_id="global-audit-install",
-        cwd=cwd,
-        env=environment,
-    )
-    assert install.returncode == 0, _result_evidence(install)
-    installed = LifecycleStateSnapshot.capture(cwd, external_roots=capture_roots)
+    install_args = ("install", "--global", "--no-policy", "--parallel-downloads", "0")
+    run(install_args, "global-audit-install")
+    installed = capture()
     installed_home = LifecycleStateSnapshot.capture(
         cwd,
         external_roots=(_apm_home_root(scenario),),
     )
     assert installed_home.file("apm.lock.yaml", root_id="apm-home").kind == "file"
 
-    source_skill_bytes = _skill("global-audit").encode()
+    source_skill_bytes = (_skill("global-audit") + "\nrevision-a\n").encode()
     for target in targets:
         assert (
             installed.file(skill_paths[target].as_posix(), root_id=f"{target}-home").content
@@ -2577,6 +3012,60 @@ def test_required_global_audit_rule_matrix_for_external_roots(
             sentinel_paths[target].as_posix(), root_id=f"{target}-home"
         ).content == f"{target}-owned-by-user\n".encode("ascii")
 
+    lock_path = physical_apm_home / "apm.lock.yaml"
+
+    def assert_revision(commit: GitCommit, revision: str) -> None:
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        dependencies = lock.get_package_dependencies()
+        assert len(dependencies) == 1
+        assert (
+            dependencies[0].resolved_commit,
+            dependency["alias"],
+            dependencies[0].alias,
+            LockedDependency.from_dict(dependencies[0].to_dict()).to_dependency_ref().alias,
+        ) == (commit.sha, source.package.name, source.package.name, source.package.name)
+        assert dependencies[0].content_hash
+        modules = physical_apm_home / "apm_modules"
+        assert (
+            modules / source.package.name / "skills" / "global-audit" / "SKILL.md"
+        ).read_bytes() == (_skill("global-audit") + f"\nrevision-{revision}\n").encode()
+        assert not (modules / _OWNER / source.package.name).exists()
+        for target in targets:
+            assert (external_roots[target] / skill_paths[target]).read_bytes() == (
+                _skill("global-audit") + f"\nrevision-{revision}\n"
+            ).encode()
+        assert capture().deployment_records
+
+    manifest_path = physical_apm_home / "apm.yml"
+
+    commit_b = _exercise_global_revision_commands(
+        scenario,
+        source,
+        commit_a,
+        run,
+        capture,
+        assert_revision,
+        artifact_roots,
+        external_roots["claude"] / "CLAUDE.md",
+        install_args,
+        manifest_path,
+        lock_path,
+    )
+    scenario.repositories.tag(source.repository, "v1.0.0", commit_b)
+    _exercise_frozen_semver_transport_commands(
+        run,
+        capture,
+        manifest_path,
+        lock_path,
+        install_args,
+        artifact_roots,
+        source.remote_url,
+        commit_b,
+    )
+    assert_revision(commit_b, "b")
+    installed = capture()
+
     def audit_row(
         scenario_id: str,
         *,
@@ -2585,6 +3074,8 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     ) -> dict[str, object]:
         if expected_returncode is None:
             expected_returncode = 1 if failed else 0
+        before = ArtifactSnapshotSet.capture(artifact_roots)
+        state_before = capture()
         _, payload = _audit_at(
             scenario,
             scenario.isolated.config_root,
@@ -2593,6 +3084,8 @@ def test_required_global_audit_rule_matrix_for_external_roots(
             scenario_id=scenario_id,
         )
         _assert_global_audit_rules(payload, failed=failed)
+        _assert_same_state(state_before, capture())
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
         return payload
 
     def assert_clean(scenario_id: str) -> dict[str, object]:
@@ -2604,7 +3097,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     clean_audit = assert_clean("global-audit-clean")
     assert _check(clean_audit, "deployed-files-present")["passed"] is True
     assert _check(clean_audit, "content-integrity")["passed"] is True
-    post_clean_audit = LifecycleStateSnapshot.capture(cwd, external_roots=capture_roots)
+    post_clean_audit = capture()
     _assert_same_state(installed, post_clean_audit)
 
     claude_skill = external_roots["claude"] / skill_paths["claude"]
@@ -2733,13 +3226,23 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     hermes_skill.write_bytes(hermes_skill_bytes)
     assert_clean("global-audit-after-combo-restore")
 
-    uninstall = scenario.runner.run(
+    before_clean = capture()
+    run(("cache", "clean", "--yes"), "global-cache-clean")
+    _assert_same_state(before_clean, capture())
+    run(("deps", "clean", "--dry-run"), "global-deps-clean-preview", command_cwd=physical_apm_home)
+    _assert_same_state(before_clean, capture())
+    run(("deps", "clean", "--yes"), "global-deps-clean", command_cwd=physical_apm_home)
+    assert not modules_dir.exists()
+    assert capture().deployment_records == before_clean.deployment_records
+    audit_row("global-audit-after-deps-clean", failed={"config-consistency", "drift"})
+    run(install_args, "global-rehydrate-after-deps-clean")
+    assert_revision(commit_b, "b")
+    assert_clean("global-audit-after-rehydrate")
+
+    run(
         ("uninstall", "--global", source.remote_url),
-        scenario_id="global-audit-uninstall",
-        cwd=cwd,
-        env=environment,
+        "global-audit-uninstall",
     )
-    assert uninstall.returncode == 0, _result_evidence(uninstall)
     removed = LifecycleStateSnapshot.capture(cwd, external_roots=capture_roots)
     for target in targets:
         assert (
@@ -2762,6 +3265,23 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     )
     assert final_audit["passed"] is True
     assert final_audit["summary"]["failed"] == 0
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"] = [dependency]
+    dump_yaml(manifest, manifest_path)
+    run(install_args, "global-reinstall-after-removal")
+    assert_revision(commit_b, "b")
+    assert_clean("global-audit-reinstalled")
+    run(("uninstall", "--global", source.remote_url), "global-uninstall-closure")
+    _, closure = _audit_at(
+        scenario,
+        physical_apm_home,
+        environment=environment,
+        scenario_id="global-audit-closure",
+    )
+    assert closure["passed"] is True
+    assert not lock_path.exists()
+    for target in targets:
+        assert not (external_roots[target] / skill_paths[target]).exists()
 
 
 def test_required_failed_lock_write_bounds_partial_state_and_recovers(

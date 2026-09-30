@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Cursor MCP configuration now preserves native runtime environment references and authored static values, normalizes scalar environment values, and omits null entries. (by @icecold009, #3070)
+- Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing package or destination safety; frozen installs reject ref, pin, provider and transport drift, and unseeded mutable refs resolve upstream. After an intentional declaration change, review it and run `apm install --update`. (by @DaveMeadAdjust, #2876)
 - GitHub MCP authentication now preserves explicit `Authorization` headers and writes the selected environment-variable reference on runtime-capable targets instead of resolving the credential into generated config. (#3103)
 - OpenCode MCP installs and reinstalls preserve an explicitly supplied `enabled` value and JSON type; omitted values still default to `true` - by @dajiaohuang (#3102).
 - `apm compile --target claude` imports dependency-root `CLAUDE.md` files at any metadata-backed materialization depth, including ADO and nested GitLab paths, and resolves transitive imports with redirected `--root` output. Frozen replay also reads the selected installation's lockfile. (by @vyrnsynx, #2952)

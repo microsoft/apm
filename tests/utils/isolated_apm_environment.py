@@ -262,7 +262,7 @@ _STRIPPED_ENV_NAMES = (
     | _APM_REMOTE_CONTROL_ENV_NAMES
 )
 _STRIPPED_ENV_PREFIXES = _APM_AUTH_ENV_PREFIXES + _GIT_CONFIG_INJECTION_PREFIXES
-_PINNED_ENVIRONMENT_NAMES = (
+DURABLE_ENVIRONMENT_ROOTS = (
     "HOME",
     "USERPROFILE",
     "XDG_CONFIG_HOME",
@@ -271,9 +271,12 @@ _PINNED_ENVIRONMENT_NAMES = (
     "LOCALAPPDATA",
     "APM_HOME",
     "APM_CACHE_DIR",
-    "APM_TEMP_DIR",
     "GH_CONFIG_DIR",
     "AZURE_CONFIG_DIR",
+)
+_PINNED_ENVIRONMENT_NAMES = (
+    *DURABLE_ENVIRONMENT_ROOTS,
+    "APM_TEMP_DIR",
     "TMPDIR",
     "TMP",
     "TEMP",
@@ -426,9 +429,9 @@ class IsolatedApmEnvironment:
             "LOCALAPPDATA": str(local_app_data),
             "APM_HOME": str(config_root),
             "APM_CACHE_DIR": str(cache_root),
-            "APM_TEMP_DIR": str(temp_root),
             "GH_CONFIG_DIR": str(gh_config_root),
             "AZURE_CONFIG_DIR": str(azure_config_root),
+            "APM_TEMP_DIR": str(temp_root),
             "TMPDIR": str(temp_root),
             "TMP": str(temp_root),
             "TEMP": str(temp_root),

@@ -612,6 +612,7 @@ contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-native-lifecycle-evidence
 contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
@@ -697,6 +698,7 @@ mutation_writes.opencode_enabled_intent
 mutation_writes.user_root_scope
 onboarding-metadata-only
 contracts-tooling-root-context-write-eligibility
+hooks-integrations-native-instruction-projection
 registry_delegation.agents_source_attribution
 registry_delegation.bootstrap_project_name
 registry_delegation.command_machine_output

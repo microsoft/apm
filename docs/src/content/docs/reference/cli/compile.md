@@ -167,6 +167,30 @@ one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
 
+For Claude, each unconditional instruction is omitted from the compiled root
+only when its expected native rule matches the install renderer's output.
+Missing, unrelated, changed, or unsafe rules leave that instruction in the
+compiled fallback. This uses the user rules directory, including an absolute
+`CLAUDE_CONFIG_DIR` outside your home, not the current project's rules. Other
+targets retain their existing output.
+
+The complete Claude instruction selection is checked by the compiled-output
+security policy before native-rule suppression or cleanup, including dry-run.
+Critical hidden characters fail compilation without changing the Claude root.
+
+An existing redundant user `CLAUDE.md` is retained until you explicitly clean it:
+
+```bash
+apm compile -g --clean --dry-run
+apm compile -g --clean
+```
+
+Cleanup requires an unchanged generated root matching the current instructions
+and full native-rule coverage. Hand-authored, edited, unverifiable, or symlinked
+roots are retained; review and remove or rename them manually if needed. Partial
+coverage still produces fallback content rather than deleting the root.
+Dry-run never writes or deletes files.
+
 Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
 `~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target
 set, `apm compile -g` writes only those targets. If you install with an explicit

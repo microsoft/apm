@@ -55,7 +55,6 @@ def test_frozen_scoped_lockfile_selection_is_read_only(
             lock.add_dependency(
                 LockedDependency(
                     repo_url="owner/package",
-                    resolved_ref="main",
                     resolved_commit="a" * 40,
                     depth=1,
                 )
