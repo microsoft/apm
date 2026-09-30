@@ -106,7 +106,10 @@ marketplace registration. Version lookup uses the package repository's tags,
 not the catalog's; packages inside the catalog repository use its tags.
 APM preserves the package's host, port, explicit transport, SSH user, path,
 and ref. A catalog on port `8443` does not change a package's default HTTPS
-port, and an explicit SSH source stays SSH. Invalid URLs and unsafe subdirectory
+port, even when both URLs share the same hostname and repository path.
+An explicit SSH source stays SSH. Lookup and installation use the same package
+identity; bare cross-repository entries retain their normal dependency defaults.
+Invalid URLs and unsafe subdirectory
 paths fail before manifest, lockfile, or deployment writes.
 
 Use `apm install pkg@catalog#v1.0.1` for a literal Git tag. For a range, declare

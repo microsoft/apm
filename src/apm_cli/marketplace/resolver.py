@@ -37,7 +37,6 @@ from ..models.dependency.host_virtual import dependency_repository_owner
 from ..models.dependency.reference import DependencyReference
 from ..utils.github_host import (
     build_ado_ssh_url,
-    build_https_clone_url,
     build_ssh_url,
     is_azure_devops_hostname,
     is_github_hostname,
@@ -473,7 +472,9 @@ def _gitlab_in_marketplace_dependency_reference(
     ref: str | None,
 ) -> DependencyReference:
     """Build ``DependencyReference`` equivalent to object-form ``git`` + ``path`` (spec)."""
-    entry: dict = {"git": _marketplace_https_git_url(source), "path": in_repo_path}
+    entry: dict = {"git": _marketplace_https_git_url(source)}
+    if in_repo_path:
+        entry["path"] = in_repo_path
     if ref:
         entry["ref"] = ref
     return DependencyReference.parse_from_dict(entry)
@@ -597,7 +598,7 @@ def _resolve_git_subdir_source(source: dict) -> str:
 def _dependency_reference_from_packed_source(
     plugin: MarketplacePlugin,
 ) -> DependencyReference | None:
-    """Parse producer-emitted remote source objects through the reference owner."""
+    """Parse packed or explicitly qualified sources before catalog-local routing."""
     source = plugin.source
     if not isinstance(source, dict):
         return None
@@ -609,13 +610,22 @@ def _dependency_reference_from_packed_source(
         # Pack emits git-subdir repository identity in ``url``. Hand-authored
         # ``repo`` forms retain the existing marketplace-relative routing.
         remote = source.get("url")
+    elif source_type in {"github", "git-subdir", "gitlab"}:
+        remote = source.get("repo") or source.get("repository")
+        if not isinstance(remote, str) or not (
+            "://" in remote or remote.startswith("git@") or _locator_is_host_qualified(remote)
+        ):
+            return None
+        if source_type != "github" and "://" in remote:
+            # Hand-authored repo URLs remain subject to the existing syntax error.
+            return None
     else:
         return None
     if not isinstance(remote, str) or not remote.strip():
         return None
 
     entry: dict[str, object] = {"git": remote.strip()}
-    if source_type == "git-subdir":
+    if source_type in {"github", "git-subdir", "gitlab"}:
         path = source.get("subdir", "") or source.get("path", "")
         if path:
             entry["path"] = path
@@ -828,38 +838,12 @@ def _locator_is_host_qualified(locator: str) -> bool:
     return "." in first_segment or first_segment.lower() == "localhost"
 
 
-def _coords_from_package_locator(
-    locator: str,
-    source: MarketplaceSource,
-    source_kind: str | None = None,
-) -> DependencyReference:
-    """Parse package identity without borrowing an external package's authority.
-
-    URLs, SSH, host-qualified shorthand, and ``type: github`` locators are
-    parsed through :meth:`DependencyReference.parse` so the package host
-    (typically ``github.com`` via :func:`default_host`) wins over the
-    marketplace catalog host. Bare ``owner/repo`` on gitlab/git-subdir (or
-    unknown) kinds keep the marketplace host.
-
-    Invalid external coordinates propagate the reference owner's validation error.
-    """
-    if (
-        "://" in locator
-        or locator.startswith("git@")
-        or _locator_is_host_qualified(locator)
-        or source_kind == "github"
-    ):
-        return DependencyReference.parse(locator)
-    remote = build_https_clone_url(
-        source.host, locator.rstrip("/").removesuffix(".git"), port=source.port
-    )
-    return DependencyReference.parse(remote)
-
-
 def _package_version_remote(
     plugin: MarketplacePlugin,
     source: MarketplaceSource,
     dep_ref: DependencyReference | None,
+    canonical: str,
+    plugin_root: str,
 ) -> DependencyReference:
     """Return the git remote that hosts package version tags.
 
@@ -872,15 +856,10 @@ def _package_version_remote(
     if dep_ref is not None:
         return dep_ref
 
-    src = plugin.source
-    if isinstance(src, dict) and not _is_in_marketplace_source(plugin, source):
-        kind = _coerce_dict_plugin_type(src)
-        if kind in {"github", "gitlab", "git-subdir"}:
-            locator = src.get("repo") or src.get("repository") or src.get("url")
-            if isinstance(locator, str) and locator.strip():
-                return _coords_from_package_locator(locator.strip(), source, source_kind=kind)
-
-    return DependencyReference.parse(_marketplace_https_git_url(source))
+    if _is_in_marketplace_source(plugin, source):
+        in_repo_path, ref = _extract_in_repo_path_and_ref(plugin, plugin_root=plugin_root)
+        return _gitlab_in_marketplace_dependency_reference(source, in_repo_path or "", ref)
+    return DependencyReference.parse(canonical)
 
 
 def resolve_marketplace_plugin(
@@ -1086,7 +1065,10 @@ def resolve_marketplace_plugin(
         if is_version_constraint(version_spec):
             from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
-            lookup = _package_version_remote(plugin, source, dep_ref)
+            lookup = _package_version_remote(
+                plugin, source, dep_ref, canonical, manifest.plugin_root
+            )
+            dep_ref = lookup
             transport_scheme = initial_transport_scheme(lookup)
             if transport_scheme == "ssh":
                 remote_url = (

@@ -453,19 +453,25 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
             "_package_version_remote",
             (
                 "return dep_ref",
-                "return DependencyReference.parse(_marketplace_https_git_url(source))",
+                "return _gitlab_in_marketplace_dependency_reference(source, in_repo_path or '', ref)",
+                "return DependencyReference.parse(canonical)",
             ),
         ),
         (
             "src/apm_cli/marketplace/resolver.py",
-            "_coords_from_package_locator",
-            ("return DependencyReference.parse(locator)",),
+            "_dependency_reference_from_packed_source",
+            (
+                "source_type in {'github', 'git-subdir', 'gitlab'} -> remote = source.get('repo') or source.get('repository')",
+                "dependency = DependencyReference.parse_from_dict(entry)",
+            ),
         ),
         (
             "src/apm_cli/marketplace/resolver.py",
             "resolve_marketplace_plugin",
             (
-                "lookup = _package_version_remote(plugin, source, dep_ref)",
+                "lookup = _package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root)",
+                "dep_ref = lookup",
+                "canonical = dep_ref.to_canonical()",
                 "transport_scheme = initial_transport_scheme(lookup)",
                 "version_auth['port'] = lookup.port",
                 "resolve_version_constraint(plugin_name, lookup.repo_url, version_spec, **version_auth)",
@@ -495,11 +501,19 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
             {
                 ast.unparse(node)
                 for node in index.own_scope(definition)
-                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return, ast.Call))
+                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return, ast.Call, ast.Compare))
             }
             if definition is not None
             else set()
         )
+        if definition is not None:
+            executable.update(
+                f"{ast.unparse(node.test)} -> {ast.unparse(child)}"
+                for node in index.own_scope(definition)
+                if isinstance(node, ast.If)
+                for child in node.body
+                if isinstance(child, ast.Assign)
+            )
         mutates_identity = (
             function == "_package_version_remote"
             and definition is not None

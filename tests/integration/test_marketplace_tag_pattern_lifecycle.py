@@ -710,3 +710,97 @@ def test_catalog_local_dictionary_semver_lifecycle(tmp_path: Path, apm_binary_pa
     installed = _snapshot(consumer)
     _run_install(scenario, consumer, scenario_id="catalog-local-replay")
     _assert_same_state(installed, _snapshot(consumer))
+
+
+@pytest.mark.parametrize(
+    "source_case",
+    ["same-project-https", "same-project-ssh", "invalid-port", "bare-git-subdir", "bare-gitlab"],
+)
+def test_dictionary_lookup_and_install_share_identity(
+    tmp_path: Path, apm_binary_path: Path, source_case: str
+) -> None:
+    """Explicit authorities and bare-source defaults survive lookup, install and replay."""
+    scenario = _new_scenario(tmp_path / source_case, apm_binary_path, catalog_port=8443)
+    expected_commit = scenario.initial_commit
+    expected_ref = "releases/tagged-skill-v1.0.0"
+    if source_case.startswith("bare-"):
+        nested = scenario.packages.create("nested-pkg", targets=("copilot",))
+        scenario.packages.add_skill(nested, _PACKAGE, _skill_document("1.0.0"))
+        shutil.copytree(nested.root, scenario.package_repository.worktree / "plugin")
+        expected_commit = scenario.repositories.commit(
+            scenario.package_repository, message="publish nested package"
+        )
+        expected_ref = "releases/tagged-skill-v1.0.1"
+        scenario.repositories.tag(scenario.package_repository, expected_ref, expected_commit)
+        locator = f"{_OWNER}/{_PACKAGE}"
+        package_remote = f"https://github.com/{locator}"
+        plugin_source = {
+            "type": source_case.removeprefix("bare-"),
+            "repo": locator,
+            "path": "plugin",
+        }
+    else:
+        authority = f"deploy@{_HOST}:2222" if source_case == "same-project-ssh" else _HOST
+        scheme = "ssh" if source_case == "same-project-ssh" else "https"
+        if source_case == "invalid-port":
+            authority = f"{_HOST}:invalid"
+        package_remote = f"{scheme}://{authority}/{_OWNER}/{_MARKETPLACE}"
+        if scheme == "ssh":
+            package_remote += ".git"
+        plugin_source = {"type": "github", "repo": package_remote}
+    if source_case != "invalid-port":
+        if source_case == "same-project-ssh":
+            subprocess.run(
+                (
+                    "git",
+                    "config",
+                    "--global",
+                    "--add",
+                    f"url.{scenario.package_repository.file_url}/.insteadOf",
+                    package_remote,
+                ),
+                env=scenario.environment,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        else:
+            scenario.repositories.install_url_rewrite(scenario.package_repository, package_remote)
+        (scenario.isolated.home / ".gitconfig").write_bytes(
+            Path(scenario.environment["GIT_CONFIG_GLOBAL"]).read_bytes()
+        )
+    catalog = scenario.marketplace_repository.worktree / ".claude-plugin" / "marketplace.json"
+    manifest = json.loads(catalog.read_text(encoding="utf-8"))
+    manifest["plugins"][0]["source"] = {**plugin_source, "tag_pattern": _CUSTOM_PATTERN}
+    catalog.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    decoy = scenario.repositories.commit(
+        scenario.marketplace_repository, message="dictionary source"
+    )
+    scenario.repositories.tag(
+        scenario.marketplace_repository, "releases/tagged-skill-v2.0.0", decoy
+    )
+    consumer = scenario.consumers.create("dictionary-consumer", targets=("copilot",))
+    _register_marketplace(scenario, consumer)
+    _declare_range(scenario, consumer, "^1.0.0")
+    before = _snapshot(consumer)
+    _run_install(
+        scenario,
+        consumer,
+        scenario_id=source_case,
+        expected_returncode=1 if source_case == "invalid-port" else 0,
+    )
+    if source_case == "invalid-port":
+        _assert_same_state(before, _snapshot(consumer))
+        assert not (consumer.root / _SKILL_PATH).exists()
+        return
+    locked = _locked_dependency(consumer)
+    assert locked["resolved_ref"] == expected_ref
+    assert locked["resolved_commit"] == expected_commit.sha
+    assert (consumer.root / _SKILL_PATH).read_bytes() == _skill_document("1.0.0").encode()
+    installed = _snapshot(consumer)
+    _run_install(scenario, consumer, scenario_id=f"{source_case}-replay")
+    _assert_same_state(installed, _snapshot(consumer))
+    _declare_range(scenario, consumer, "^2.0.0")
+    before_decoy = _snapshot(consumer)
+    _run_install(scenario, consumer, scenario_id=f"{source_case}-decoy", expected_returncode=1)
+    _assert_same_state(before_decoy, _snapshot(consumer))

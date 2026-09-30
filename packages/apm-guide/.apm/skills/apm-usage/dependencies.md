@@ -272,7 +272,9 @@ placeholder. Unknown keys in a marketplace entry are rejected.
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
 The package URL owns its host, port, explicit transport, and SSH user during
-tag lookup and installation; none inherit the catalog's authority.
+tag lookup and installation; none inherit the catalog's authority, even when
+hostname and repository path match. Explicit dictionary `repo` URLs follow
+the same rule; bare external entries keep their normal dependency defaults.
 `git-subdir.path` owns the contained package path. These survive into the concrete `git:`, `path:`, and `ref:` manifest
 entry and the lockfile. Invalid URLs or unsafe paths fail before durable
 project writes.

@@ -24,10 +24,14 @@ def test_marketplace_remote_owner_is_compliant() -> None:
     ("path", "old", "new"),
     [
         (RESOLVER, "return dep_ref", "return DependencyReference.parse(source.url)"),
-        (RESOLVER, "return DependencyReference.parse(locator)", "return None"),
         (
             RESOLVER,
-            "return DependencyReference.parse(_marketplace_https_git_url(source))",
+            "dependency = DependencyReference.parse_from_dict(entry)",
+            "dependency = DependencyReference.parse('github.com/wrong/package')",
+        ),
+        (
+            RESOLVER,
+            'return _gitlab_in_marketplace_dependency_reference(source, in_repo_path or "", ref)',
             "return DependencyReference.parse('github.com/wrong/catalog')",
         ),
         (RESOLVER, "initial_transport_scheme(lookup)", "'https'"),
@@ -38,6 +42,13 @@ def test_marketplace_remote_owner_is_compliant() -> None:
             'resolver_kwargs["transport_scheme"] = "https"',
         ),
         (VERSION, 'resolver_kwargs["ssh_user"] = ssh_user', 'resolver_kwargs["ssh_user"] = "git"'),
+        (RESOLVER, "dep_ref = lookup", "dep_ref = None"),
+        (
+            RESOLVER,
+            "return DependencyReference.parse(canonical)",
+            "return DependencyReference.parse(source.url)",
+        ),
+        (RESOLVER, 'elif source_type in {"github", "git-subdir", "gitlab"}:', "elif False:"),
     ],
     ids=[
         "catalog-instead-of-package",
@@ -47,6 +58,9 @@ def test_marketplace_remote_owner_is_compliant() -> None:
         "foreign-port",
         "scheme-forwarding",
         "ssh-user-forwarding",
+        "lookup-return-handoff",
+        "bare-source-authority",
+        "explicit-source-validation",
     ],
 )
 def test_marketplace_remote_owner_rejects_mutation(path: str, old: str, new: str) -> None:

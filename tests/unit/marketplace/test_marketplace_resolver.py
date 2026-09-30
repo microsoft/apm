@@ -1181,6 +1181,26 @@ class TestPackageVersionRemoteContract:
                 ("https", "catalog.example.invalid", 8443, None, "/catalog/market"),
             ),
             ("./plugins/pkg", ("https", "catalog.example.invalid", 8443, None, "/catalog/market")),
+            (
+                {"type": "github", "repo": "https://catalog.example.invalid/catalog/market"},
+                ("https", "catalog.example.invalid", None, None, "/catalog/market"),
+            ),
+            (
+                {
+                    "type": "github",
+                    "repo": "ssh://deploy@catalog.example.invalid:2222/catalog/market.git",
+                    "path": "plugin",
+                },
+                ("ssh", "catalog.example.invalid", 2222, "deploy", "/catalog/market"),
+            ),
+            (
+                {"type": "git-subdir", "repo": "team/pkg", "path": "plugin"},
+                ("https", "github.com", None, None, "/team/pkg"),
+            ),
+            (
+                {"type": "gitlab", "repo": "team/pkg", "path": "plugin"},
+                ("https", "github.com", None, None, "/team/pkg"),
+            ),
         ],
         ids=[
             "packed-default-port",
@@ -1190,6 +1210,10 @@ class TestPackageVersionRemoteContract:
             "nested-explicit-port",
             "catalog-dict",
             "catalog-relative",
+            "same-project-default-port",
+            "same-project-ssh",
+            "bare-git-subdir",
+            "bare-gitlab",
         ],
     )
     def test_semver_uses_complete_package_identity(
@@ -1234,12 +1258,37 @@ class TestPackageVersionRemoteContract:
         assert auth.resolve.call_args.kwargs["port"] == expected[2]
         assert auth.resolve.call_args.kwargs["org"] == expected[4].split("/")[1]
         assert urlparse(auth.resolve.call_args.kwargs["remote_url"]) == url
+        from apm_cli.deps.transport_selection import initial_transport_scheme
 
-    def test_invalid_external_locator_does_not_query_catalog(self) -> None:
-        source = MarketplaceSource(name="catalog", owner="catalog", repo="market")
-        plugin = MarketplacePlugin(
-            name="pkg", source={"type": "github", "repo": "https://git.example.invalid/x/../pkg"}
+        selected = resolution.dependency_reference or DependencyReference.parse(
+            resolution.canonical
         )
+        scheme = initial_transport_scheme(selected)
+        assert (
+            scheme,
+            selected.host,
+            selected.port,
+            selected.ssh_user if scheme == "ssh" else None,
+            f"/{selected.repo_url}",
+        ) == expected
+        if isinstance(plugin_source, dict) and plugin_source.get("path"):
+            assert selected.virtual_path == plugin_source["path"]
+
+    @pytest.mark.parametrize(
+        "locator",
+        [
+            "https://git.example.invalid/x/../pkg",
+            "https://catalog.example.invalid:invalid/catalog/market",
+        ],
+        ids=["traversal", "same-project-invalid-port"],
+    )
+    def test_invalid_external_locator_does_not_query_catalog(self, locator: str) -> None:
+        source = MarketplaceSource(
+            name="catalog", url="https://catalog.example.invalid:8443/catalog/market.git"
+        )
+        plugin = MarketplacePlugin(name="pkg", source={"type": "github", "repo": locator})
+        auth = Mock()
+        auth.resolve.return_value = None
         with (
             patch("apm_cli.marketplace.resolver.get_marketplace_by_name", return_value=source),
             patch(
@@ -1254,8 +1303,9 @@ class TestPackageVersionRemoteContract:
             ) as remote,
             pytest.raises(ValueError),
         ):
-            resolve_marketplace_plugin("pkg", "catalog", version_spec="^1.0.0")
+            resolve_marketplace_plugin("pkg", "catalog", version_spec="^1.0.0", auth_resolver=auth)
         remote.assert_not_called()
+        auth.resolve.assert_not_called()
 
 
 class TestGithubPackageTagHostOnForeignMarketplace:
@@ -1511,10 +1561,14 @@ class TestResolveMarketplacePluginGHECloud:
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
         result = resolve_marketplace_plugin("url-form", "my-marketplace")
-        assert result.canonical == "https://corp.ghe.com/myorg/my-marketplace/plugins/url-form"
-        # Downstream parse still recovers the GHE host from the URL form natively.
-        dep = DependencyReference.parse(result.canonical)
+        assert result.canonical == "corp.ghe.com/myorg/my-marketplace/plugins/url-form"
+        dep = result.dependency_reference
+        assert dep is not None
         assert dep.host == "corp.ghe.com"
+        assert dep.virtual_path == "plugins/url-form"
+        from apm_cli.deps.transport_selection import initial_transport_scheme
+
+        assert initial_transport_scheme(dep) == "https"
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -1536,9 +1590,15 @@ class TestResolveMarketplacePluginGHECloud:
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
         result = resolve_marketplace_plugin("ssh-form", "my-marketplace")
-        assert result.canonical == "git@corp.ghe.com:myorg/my-marketplace/plugins/ssh-form"
-        dep = DependencyReference.parse(result.canonical)
+        assert result.canonical == "corp.ghe.com/myorg/my-marketplace/plugins/ssh-form"
+        dep = result.dependency_reference
+        assert dep is not None
         assert dep.host == "corp.ghe.com"
+        assert dep.virtual_path == "plugins/ssh-form"
+        from apm_cli.deps.transport_selection import initial_transport_scheme
+
+        assert initial_transport_scheme(dep) == "ssh"
+        assert dep.ssh_user == "git"
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
