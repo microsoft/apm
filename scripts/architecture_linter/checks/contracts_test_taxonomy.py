@@ -96,6 +96,7 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/plugin_exporter.py",
     "src/apm_cli/bundle/agent_plugin_exporter.py",
     "src/apm_cli/commands/outdated.py",
+    "src/apm_cli/commands/lock.py",
 )
 
 
@@ -238,14 +239,18 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
         findings.extend(consumer_failures)
         if consumer_failures or consumer.tree_index is None:
             continue
+        nodes = consumer.tree_index.nodes
+        if consumer_path == "src/apm_cli/commands/lock.py":
+            export = consumer.tree_index.function("lock_export")
+            if export is None:
+                findings.append(_summary(rule_id, consumer_path, "Lockfile export must exist"))
+                continue
+            nodes = consumer.tree_index.own_scope(export)
         imported = {
-            alias.name
-            for node in consumer.tree_index.nodes
-            if isinstance(node, ast.ImportFrom)
-            for alias in node.names
+            alias.name for node in nodes if isinstance(node, ast.ImportFrom) for alias in node.names
         }
         calls = _named_calls(
-            consumer.tree_index.nodes,
+            nodes,
             "resolve_lockfile_path_for_read",
         )
         routes_read_only = len(calls) == 1 and (
@@ -255,7 +260,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 and keyword.value.value is True
                 for keyword in calls[0].keywords
             )
-            if consumer_path == "src/apm_cli/commands/outdated.py"
+            if consumer_path in {"src/apm_cli/commands/outdated.py", "src/apm_cli/commands/lock.py"}
             else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
@@ -269,6 +274,19 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                     consumer_path,
                     "Lockfile reads must route through the read-only owner",
                 )
+            )
+        load_calls = [
+            node.func.attr
+            for node in nodes
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "LockFile"
+            and node.func.attr in {"read", "from_yaml"}
+        ]
+        if load_calls != ["read"]:
+            findings.append(
+                _summary(rule_id, consumer_path, "Lockfile loads must route through LockFile.read")
             )
     return tuple(findings)
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Lockfile conflict diagnostics now name the affected file and direct manual resolution or restoration before retrying the original command, preserving bytes and frozen/preview behavior. The diagnostic contract is recorded in `openapm-v0.1.md` (`req-lk-023`); automatic recovery remains deferred to #2979. -- by @lachieh (#3028)
+
 ## [0.32.0] - 2026-09-25
 
 ### Changed

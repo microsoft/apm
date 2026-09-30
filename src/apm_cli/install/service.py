@@ -263,7 +263,7 @@ class InstallService:
         """
         from pathlib import Path
 
-        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.lockfile import LockFile, LockfileConflictError
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import lockfile_satisfies_manifest
 
@@ -284,9 +284,15 @@ class InstallService:
 
         try:
             lockfile = LockFile.read(lockfile_path)
+        except LockfileConflictError as e:
+            raise FrozenInstallError(
+                f"--frozen cannot read the lockfile. {e}\n"
+                "Commit the resolved lockfile before re-running the frozen install.",
+            ) from e
         except Exception as e:
             raise FrozenInstallError(
-                f"--frozen could not read apm.lock.yaml: {e}",
+                f"--frozen could not read apm.lock.yaml: {e}. Fix the file, or restore "
+                "a known-good lockfile from version control, before retrying.",
             ) from e
 
         if lockfile is None:

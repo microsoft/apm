@@ -175,6 +175,22 @@ apm install
 
 This re-resolves and rewrites `apm.lock.yaml`. Commit the result.
 
+### Merge conflict markers in the lockfile
+
+After a git merge that touched `apm.lock.yaml`, the file may still contain `<<<<<<<` / `>>>>>>>` markers. Commands that require the lockfile then report `apm.lock.yaml contains unresolved git merge conflict markers` instead of a YAML scanner error.
+
+Resolve the conflict in the named file, or restore a known-good lockfile.
+Review the repaired file against the merged `apm.yml`, then retry your original
+command with the same options, including `--global`, `--frozen`, or `--dry-run`.
+This applies even when the markers were copied or committed and no Git merge
+is in progress.
+
+APM leaves the conflicted bytes untouched; it does not discard or regenerate
+the file. Choosing one side during manual repair retains only that side's
+records. Changed or missing dependencies may resolve again on a later install,
+so review the resulting pins before committing. Preview, best-effort readers,
+and lockfiles invalid for other reasons keep their existing behavior.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:

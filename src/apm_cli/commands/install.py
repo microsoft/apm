@@ -1643,7 +1643,8 @@ def install(  # noqa: PLR0913
         logger.error(str(e))
         for reason in e.reasons:
             logger.error_detail(reason)
-        logger.info(_frozen_install_tip(e))
+        if tip := _frozen_install_tip(e):
+            logger.info(tip)
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1928,7 +1929,8 @@ def _install_apm_packages(ctx, outcome):
             logger.error(str(e))
             for reason in e.reasons:
                 logger.error_detail(reason)
-            logger.info(_frozen_install_tip(e))
+            if tip := _frozen_install_tip(e):
+                logger.info(tip)
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise

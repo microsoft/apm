@@ -29,7 +29,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 91 | 1 | 0 | 0 |
+| Consumer | 92 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 18 | 0 | 0 | 0 |
 
@@ -63,6 +63,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 3 | - |
 | [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 2 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 4 | - |
+| [req-lk-023](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-023) | MUST | 5.4 | consumer | active | 3 | - |
 | [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-003](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-003) | MUST | 4.1 | producer | active | 1 | - |

@@ -72,10 +72,11 @@ apm lock --verbose
 - **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Fresh lock-only runs add no deployed files, and existing deployed-file rows, hashes, and deployment-ledger entries stay recorded while those bytes remain on disk.
 - **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
+- **Conflicted lockfiles fail closed.** If `apm.lock.yaml` still contains git merge conflict markers, `apm lock` reports the conflict and exits without modifying the file. See the [lockfile specification](../../lockfile-spec/#versioning).
 
 ## Export (SBOM inventory)
 
-`apm lock export` serializes the existing lockfile into an SBOM document. It is an **inventory** export, not a security attestation: it reads `apm.lock.yaml` only and never re-resolves, re-hashes, or touches the network or filesystem.
+`apm lock export` serializes the existing lockfile into an SBOM document. It is an **inventory** export, not a security attestation: `apm.lock.yaml` takes precedence, with legacy `apm.lock` read in place when the current filename is absent. Export never migrates or rewrites the lockfile, re-resolves dependencies, re-hashes content, or uses the network. `--output` writes only the exported document.
 
 ```bash
 apm lock export [OPTIONS]
