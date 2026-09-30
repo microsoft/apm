@@ -105,21 +105,30 @@ reply unless `debug: on`) plus `triage/recommended` and optional
 classification. May clear `triage/requested`. Never assigns. An
 `accept` recommendation is not acceptance.
 
+### `autopilot-issue-accept`
+
+Accepts one issue. The canvas Accept button starts this skill.
+Drafts from the latest triage proposed scope, posts the scope
+comment only after exact chat approval by a GOVERNANCE roster
+human, then adds `status/accepted`. Does not accept pull requests
+and does not implement.
+
 ### `autopilot-issue-delivery-scheduler`
 
 Selects maintainer-accepted issues (`status/accepted` or a named
 bounded accept), including bot-authored issues once accepted.
 Selector `bugs` also requires `type/bug`. `triage/recommended`
 is not authorization. Workers re-check
-`scripts/governance/eligibility.cjs`. Unattended ORIGIN never
-implements.
+`scripts/governance/eligibility.cjs`. A current `record-present`
+scope comment is the grant, including unattended runs. Other
+eligibility states stop.
 
 ### `autopilot-issue-delivery-worker`
 
 Implements one already-selected issue. Queue signal is not permission.
-Needs fresh human-scope evidence. Actor-session: assign `@me` on the
-issue and any fix PR before edits. Do not steal. Do not request that
-actor as a reviewer.
+A current unedited scope record is the grant. Actor-session: assign
+`@me` on the issue and any fix PR before edits. Do not steal. Do not
+request that actor as a reviewer.
 
 ### `autopilot-pr-triage-scheduler`
 

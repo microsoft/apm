@@ -1,6 +1,20 @@
 lockfile_version: '1'
-apm_version: 0.31.0
+apm_version: 0.32.0
 dependencies:
+- repo_url: _local/autopilot-issue-accept
+  name: autopilot-issue-accept
+  version: 0.1.0
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/autopilot-issue-accept
+  - .agents/skills/autopilot-issue-accept/SKILL.md
+  - .agents/skills/autopilot-issue-accept/apm.yml
+  deployed_file_hashes:
+    .agents/skills/autopilot-issue-accept/SKILL.md: sha256:da46be795e393ed99a2fa9345fb41a4b2f6a7189383ffbadfb0510f2f3760555
+    .agents/skills/autopilot-issue-accept/apm.yml: sha256:f45c6774d80aea8c5f1878cccf4822bfa62648be0726cc20a614976cf6639beb
+  source: local
+  local_path: ./packages/autopilot/autopilot-issue-accept
+  declared_license: MIT
 - repo_url: _local/autopilot-issue-delivery-scheduler
   name: autopilot-issue-delivery-scheduler
   version: 0.1.0
@@ -10,7 +24,7 @@ dependencies:
   - .agents/skills/autopilot-issue-delivery-scheduler/SKILL.md
   - .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-delivery-scheduler/SKILL.md: sha256:7c66ce23e4418a9d40111821779f9c1360d3513f808652159a41719f93c02307
+    .agents/skills/autopilot-issue-delivery-scheduler/SKILL.md: sha256:748259c8df12ca2953ac52c46b24cdfd33e8c6eec3a185c6f9de05d4b1ae4093
     .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
   source: local
   local_path: ./packages/autopilot/autopilot-issue-delivery-scheduler
@@ -151,7 +165,7 @@ dependencies:
   - .agents/skills/autopilot-issue-delivery-worker/assets/wave-gate-rubric.md
   - .agents/skills/autopilot-issue-delivery-worker/references/strategic-alignment-gate.md
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-delivery-worker/SKILL.md: sha256:75609428a685790d9d4420e53fe916798773733ef6ee056febc6813bbb4ded84
+    .agents/skills/autopilot-issue-delivery-worker/SKILL.md: sha256:75e9ed03adf1bc8e8b2bded27ee0d1fc99052ac79f4b58ee73127db47b6b2e58
     .agents/skills/autopilot-issue-delivery-worker/assets/acceptance-observer.md: sha256:6dad4abe396bff62d755322258ac014ff6175768dc91e178348a851cd4e2c3a3
     .agents/skills/autopilot-issue-delivery-worker/assets/autopilot-triage-schema.json: sha256:8b36b127ec4906fac50fedaeeb9fc75106be89cdb73605c39aca08f2366b73ab
     .agents/skills/autopilot-issue-delivery-worker/assets/confidence-gate-rubric.md: sha256:9c33253d0bdc0bef86be54c53cdab566e767b7aca8b3c4ac92a11225a84c755b
@@ -166,7 +180,7 @@ dependencies:
     .agents/skills/autopilot-issue-delivery-worker/assets/model-routing.md: sha256:14c80e3795a387615248b63784997a2fe97948ab0b7a4ae12f02d2142b8cbce6
     .agents/skills/autopilot-issue-delivery-worker/assets/plan-panel-prompt.md: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
     .agents/skills/autopilot-issue-delivery-worker/assets/plan-schema.json: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
-    .agents/skills/autopilot-issue-delivery-worker/assets/solution-pipeline-prompt.md: sha256:756c8068c36ba255ff8fd19015712663ac98a29610c608f16e2646cca5c15e50
+    .agents/skills/autopilot-issue-delivery-worker/assets/solution-pipeline-prompt.md: sha256:6eed42f73b8e44005daa80d631980628c611a08658a00c70e3dfcb58c8713858
     .agents/skills/autopilot-issue-delivery-worker/assets/strategic-alignment-prompt.md: sha256:1c48fa9103d47f3673938acda1988d8c55adc5bb888a74cda8d7a60e69c004f9
     .agents/skills/autopilot-issue-delivery-worker/assets/task-implement-prompt.md: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
     .agents/skills/autopilot-issue-delivery-worker/assets/triage-digest-template.md: sha256:c404d45be5629bf197b1d6ed30fa1224d0b4bc3dd352019e6b27c0bda4fe6d78
@@ -324,33 +338,6 @@ dependencies:
 deployments:
 - kind: project-relative
   target: copilot
-  value: .agents/skills/autopilot-issue-delivery-scheduler
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/autopilot/autopilot-issue-delivery-scheduler
-  active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
-  content_hash: null
-- kind: project-relative
-  target: copilot
-  value: .agents/skills/autopilot-issue-delivery-scheduler/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/autopilot/autopilot-issue-delivery-scheduler
-  active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
-  content_hash: sha256:7c66ce23e4418a9d40111821779f9c1360d3513f808652159a41719f93c02307
-- kind: project-relative
-  target: copilot
-  value: .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/autopilot/autopilot-issue-delivery-scheduler
-  active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
-  content_hash: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
-- kind: project-relative
-  target: copilot
   value: .agents/skills/autopilot-comment
   runtime: null
   scope: project
@@ -378,6 +365,60 @@ deployments:
   content_hash: sha256:4db657c42507061d9bfbd795a498e32f2492817b91343e4ff158886619c17fd0
 - kind: project-relative
   target: copilot
+  value: .agents/skills/autopilot-issue-accept
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/autopilot/autopilot-issue-accept
+  active_owner: ./packages/autopilot/autopilot-issue-accept
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-issue-accept/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/autopilot/autopilot-issue-accept
+  active_owner: ./packages/autopilot/autopilot-issue-accept
+  content_hash: sha256:da46be795e393ed99a2fa9345fb41a4b2f6a7189383ffbadfb0510f2f3760555
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-issue-accept/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/autopilot/autopilot-issue-accept
+  active_owner: ./packages/autopilot/autopilot-issue-accept
+  content_hash: sha256:f45c6774d80aea8c5f1878cccf4822bfa62648be0726cc20a614976cf6639beb
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-issue-delivery-scheduler
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/autopilot/autopilot-issue-delivery-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-issue-delivery-scheduler/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/autopilot/autopilot-issue-delivery-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
+  content_hash: sha256:748259c8df12ca2953ac52c46b24cdfd33e8c6eec3a185c6f9de05d4b1ae4093
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/autopilot/autopilot-issue-delivery-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
+  content_hash: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
+- kind: project-relative
+  target: copilot
   value: .agents/skills/autopilot-issue-delivery-worker
   runtime: null
   scope: project
@@ -393,7 +434,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-delivery-worker
   active_owner: local:packages/autopilot/autopilot-issue-delivery-worker
-  content_hash: sha256:75609428a685790d9d4420e53fe916798773733ef6ee056febc6813bbb4ded84
+  content_hash: sha256:75e9ed03adf1bc8e8b2bded27ee0d1fc99052ac79f4b58ee73127db47b6b2e58
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-worker/assets/acceptance-observer.md
@@ -528,7 +569,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-delivery-worker
   active_owner: local:packages/autopilot/autopilot-issue-delivery-worker
-  content_hash: sha256:756c8068c36ba255ff8fd19015712663ac98a29610c608f16e2646cca5c15e50
+  content_hash: sha256:6eed42f73b8e44005daa80d631980628c611a08658a00c70e3dfcb58c8713858
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-worker/assets/strategic-alignment-prompt.md

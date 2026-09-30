@@ -294,10 +294,10 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "--repo microsoft/apm --issue N --approval-url URL" in worker
     assert "authorizes_implementation: false" in worker
     assert "deleted withdrawals" in worker
-    assert "ORIGIN `unattended` never claims to have obtained it" in worker
+    assert "ORIGIN `unattended` never claims a missing record is approval" in worker
     delivery = _ascii(SCHEDULER_CODE)
     assert "Workers re-check `scripts/governance/eligibility.cjs`" in delivery
-    assert "ORIGIN `unattended` never implements" in delivery
+    assert "ORIGIN `unattended` never implements without that current record" in delivery
     assert "Do not skip bot-authored issues that" in delivery
     assert "Human accept is the gate; author type is not." in delivery
     assert "Do not drop a bot-authored issue that already carries" in delivery

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Maintainer issue Accept drafts a triage-based scope comment, posts it only after chat approval by a GOVERNANCE roster human, and then applies `status/accepted`. A current unedited scope record is enough for issue delivery, including unattended runs. Pull-request Accept is unchanged. (#3105)
+
 ## [0.32.0] - 2026-09-25
 
 ### Changed

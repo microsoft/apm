@@ -579,6 +579,7 @@ export function renderHtml({ csrfToken, repo }) {
     }
     function workerTarget(action, number) {
       if (action === "worker-issue-triage") return "worker:issue-triage:" + number;
+      if (action === "worker-issue-accept") return "worker:issue-accept:" + number;
       if (action === "worker-issue-delivery") return "worker:issue-delivery:" + number;
       if (action === "worker-pr-triage") return "worker:pr-triage:" + number;
       if (action === "worker-pr-review") return "worker:pr-review:" + number;
@@ -696,7 +697,7 @@ export function renderHtml({ csrfToken, repo }) {
         pushButton(btns, "Issue triage", "btn-open-session", { spawn: { action: "worker-issue-triage", number: n } });
       }
       if (lane === "decide") {
-        pushButton(btns, "Accept", "btn-start", { label: { kind: "issue", number: n, action: "accept" } });
+        pushButton(btns, "Accept", "btn-start", { spawn: { action: "worker-issue-accept", number: n } });
         pushButton(btns, "Defer", "btn-sm", { label: { kind: "issue", number: n, action: "defer", confirmClearAccepted: !!item.accepted } });
         pushButton(btns, "Re-triage issue", "btn-open-session", { spawn: { action: "worker-issue-triage", number: n } });
       }
@@ -707,7 +708,7 @@ export function renderHtml({ csrfToken, repo }) {
         pushButton(btns, "Defer", "btn-sm", { label: { kind: "issue", number: n, action: "defer", confirmClearAccepted: true } });
       }
       if (lane === "deferred") {
-        pushButton(btns, "Accept", "btn-start", { label: { kind: "issue", number: n, action: "accept" } });
+        pushButton(btns, "Accept", "btn-start", { spawn: { action: "worker-issue-accept", number: n } });
         pushButton(btns, "Re-triage issue", "btn-open-session", { spawn: { action: "worker-issue-triage", number: n } });
       }
       return btns.join("");

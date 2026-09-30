@@ -141,24 +141,28 @@ describe("server handler", () => {
         });
     });
 
-    it("accepts via gh issue edit labels only", async () => {
+    it("refuses canvas issue accept and still labels a PR", async () => {
         await withServer({}, async ({ baseUrl, ghCalls }) => {
-            const { json } = await postJson(baseUrl, "/label", {
+            const refused = await postJson(baseUrl, "/label", {
                 kind: "issue",
                 number: 12,
                 action: "accept",
             });
+            assert.equal(refused.res.status, 400);
+            assert.equal(refused.json.ok, false);
+            assert.match(refused.json.error, /autopilot-issue-accept/);
+            assert.equal(ghCalls.length, 0);
+            const { json } = await postJson(baseUrl, "/label", {
+                kind: "pr",
+                number: 8,
+                action: "accept",
+            });
             assert.equal(json.ok, true);
-            assert.equal(json.item.accepted, true);
-            assert.deepEqual(json.item.lanes, ["accepted"]);
+            assert.equal(json.add.includes("status/accepted"), true);
             assert.equal(ghCalls.length, 1);
-            assert.deepEqual(ghCalls[0].slice(0, 5), ["issue", "edit", "12", "--repo", "microsoft/apm"]);
+            assert.deepEqual(ghCalls[0].slice(0, 5), ["pr", "edit", "8", "--repo", "microsoft/apm"]);
+            assert.equal(ghCalls[0].includes("--add-label"), true);
             assert.equal(ghCalls[0].includes("--add-assignee"), false);
-            assert.equal(ghCalls[0].includes("merge"), false);
-            const state = await fetch(baseUrl + "/api/state").then((res) => res.json());
-            const issue = state.issues.find((row) => row.number === 12);
-            assert.equal(issue.accepted, true);
-            assert.deepEqual(issue.lanes, ["accepted"]);
         });
     });
 

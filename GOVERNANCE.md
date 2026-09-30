@@ -75,10 +75,11 @@ or removal of an old comment. Earlier approvals require fresh evidence.
 The deterministic PR eligibility report is **always neutral and advisory**.
 It distinguishes a present record, withdrawal, missing evidence, and read
 errors, but never grants implementation permission. GitHub's current comment
-snapshot cannot prove that a withdrawal was not deleted. Fresh human
-confirmation of the bounded issue scope is therefore still required before
-an automation run implements changes. No persistent authorization ledger,
-required check, or automatic closing/acceptance policy is introduced.
+snapshot cannot prove that a withdrawal was not deleted. The issue delivery
+worker may still treat a current unedited roster-authored issue record as
+its grant. That worker policy is not a second authority implementation.
+No persistent authorization ledger, required check, or automatic
+closing/acceptance policy is introduced.
 
 ## Roadmap and release planning
 

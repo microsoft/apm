@@ -112,9 +112,11 @@ That membership is a communication signal, not implementation
 permission. `triage/recommended` and legacy `status/triaged`
 are advisory processing markers and are not authorization.
 Workers re-check `scripts/governance/eligibility.cjs` from the
-trusted default branch and require fresh responsible-human
-confirmation before any mutate. ORIGIN `unattended` never
-implements. Do not dispatch an unaccepted issue. Do not run
+trusted default branch. A current unedited responsible-human
+`record-present` result is the grant, including ORIGIN
+`unattended`. Every other eligibility state stops before mutate.
+ORIGIN `unattended` never implements without that current record.
+Do not dispatch an unaccepted issue. Do not run
 triage-panel to create any marker. Do not write `status/accepted`.
 
 Skip locked and closed issues unless the caller named them.

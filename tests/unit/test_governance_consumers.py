@@ -226,7 +226,7 @@ def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
     assert '--issue "$ISSUE_NUMBER" --approval-url "$APPROVAL_URL"' in gate
     assert "authority.cjs" in gate
     assert "authorizes_implementation: false" in gate
-    assert "fresh explicit responsible-human confirmation for this wave" in gate
+    assert "Do not require a fresh explicit responsible-human confirmation for this wave" in gate
     assert "deleted withdrawals" in gate
     for failure in ("withdrawn", "error", "uncertain confirmation"):
         assert failure in gate

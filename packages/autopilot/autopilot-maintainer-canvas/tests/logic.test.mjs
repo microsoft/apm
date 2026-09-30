@@ -155,9 +155,18 @@ describe("linked open PRs", () => {
 });
 
 describe("label mutations", () => {
-    it("accepts by adding status/accepted and clearing deferred", () => {
+    it("refuses canvas issue accept and still labels a PR", () => {
+        assert.throws(
+            () => planLabelMutation({
+                kind: "issue",
+                number: 9,
+                action: "accept",
+                currentLabels: ["status/deferred", "status/needs-triage"],
+            }),
+            /autopilot-issue-accept/,
+        );
         const plan = planLabelMutation({
-            kind: "issue",
+            kind: "pr",
             number: 9,
             action: "accept",
             currentLabels: ["status/deferred", "status/needs-triage"],
@@ -165,9 +174,7 @@ describe("label mutations", () => {
         assert.deepEqual(plan.add, ["status/accepted"]);
         assert.deepEqual(plan.remove, ["status/deferred", "status/needs-triage"]);
         const args = ghLabelArgs(plan);
-        assert.equal(args[0], "issue");
-        assert.equal(args[1], "edit");
-        assert.ok(args.includes("--add-label"));
+        assert.equal(args[0], "pr");
         assert.equal(args.includes("--add-assignee"), false);
     });
 
@@ -209,12 +216,12 @@ describe("label mutations", () => {
             title: "Bug",
             labels: ["triage/recommended", "status/needs-triage"],
         });
-        const plan = planLabelMutation({
+        const plan = {
             kind: "issue",
             number: 12,
-            action: "accept",
-            currentLabels: item.labels,
-        });
+            add: ["status/accepted"],
+            remove: ["status/needs-triage"],
+        };
         const next = applyLabelPlan(item, plan);
         assert.equal(next.accepted, true);
         assert.deepEqual(next.lanes, ["accepted"]);
@@ -227,6 +234,11 @@ describe("spawn contract", () => {
         const worker = resolveSpawn("worker-issue-delivery", 2902);
         assert.equal(worker.sessionName, "Issue delivery #2902");
         assert.equal(worker.skill, "autopilot-issue-delivery-worker");
+        const accept = resolveSpawn("worker-issue-accept", 2902);
+        assert.equal(accept.sessionName, "Issue accept #2902");
+        assert.equal(accept.skill, "autopilot-issue-accept");
+        assert.equal(accept.target, "worker:issue-accept:2902");
+        assert.match(accept.kickoff, /^chat_approval: exact-text$/m);
         const merge = resolveSpawn("worker-pr-merge", 2741);
         assert.equal(merge.sessionName, "PR merge #2741");
         const occupancy = new Map();
