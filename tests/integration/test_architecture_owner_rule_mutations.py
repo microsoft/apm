@@ -1120,8 +1120,8 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",
         path="src/apm_cli/compilation/user_root_context.py",
-        old="if clean:",
-        new="if True:",
+        old="dry_run=dry_run or not clean",
+        new="dry_run=dry_run",
         intent="User-root cleanup no longer requires explicit clean intent.",
     ),
     MutationCase(

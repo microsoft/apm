@@ -1,6 +1,7 @@
 """Component contracts for native delivery proof and user-root cleanup."""
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,6 +15,26 @@ from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 pytestmark = pytest.mark.component
+
+
+@pytest.mark.parametrize("count", [10, 100])
+def test_absent_native_directory_never_reads_or_renders_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int
+) -> None:
+    """Missing native delivery has constant zero source-content work."""
+    integrator = InstructionIntegrator()
+    render = Mock(side_effect=AssertionError("Unexpected rendering"))
+    read = Mock(side_effect=AssertionError("Unexpected content read"))
+    monkeypatch.setattr(integrator, "_render_instruction", render)
+    monkeypatch.setattr(Path, "read_text", read)
+    for index in range(count):
+        assert not integrator.deployed_rule_matches(
+            tmp_path / f"source-{index}.instructions.md",
+            KNOWN_TARGETS["claude"],
+            tmp_path / "claude",
+        )
+    render.assert_not_called()
+    read.assert_not_called()
 
 
 def _generated(body: str = "Keep this instruction.") -> str:

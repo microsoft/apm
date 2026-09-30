@@ -246,6 +246,8 @@ class InstructionIntegrator(BaseIntegrator):
             return False
         rules_dir = deploy_root / mapping.subdir
         ensure_path_within(rules_dir, deploy_root)
+        if not rules_dir.is_dir():
+            return False
         plan = self._prepare_rule_plan([source], rules_dir, mapping.extension, mapping.format_id)
         rule_path, expected, _ = plan[source]
         ensure_path_within(rule_path, deploy_root)

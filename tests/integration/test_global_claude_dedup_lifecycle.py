@@ -269,7 +269,9 @@ def test_canonical_native_content_accepts_platform_newlines(
     assert style.read_bytes() == native_before
 
 
-@pytest.mark.parametrize("ownership", ["hand-authored", "edited-generated"])
+@pytest.mark.parametrize(
+    "ownership", ["hand-authored", "edited-generated", "valid-prior-generation"]
+)
 def test_clean_preserves_personal_memory_bytes(
     tmp_path: Path, apm_binary_path: Path, ownership: str
 ) -> None:
@@ -278,14 +280,33 @@ def test_clean_preserves_personal_memory_bytes(
     content = b"# Personal memory\nKeep my manual instructions.\n"
     if ownership == "edited-generated":
         content = lifecycle.stale_memory() + b"\n# Personal edit\nNever delete this addition.\n"
+    elif ownership == "valid-prior-generation":
+        content = lifecycle.stale_memory()
+        source = lifecycle.package / ".apm" / "instructions" / "style.instructions.md"
+        source.write_text(
+            source.read_text(encoding="utf-8").replace(_STYLE, "UPDATED-STYLE-SENTINEL"),
+            encoding="utf-8",
+        )
+        lifecycle.install()
+        assert "UPDATED-STYLE-SENTINEL" in (lifecycle.rules / "style.md").read_text(
+            encoding="utf-8"
+        )
     lifecycle.memory.write_bytes(content)
+    native_before = {path.name: path.read_bytes() for path in lifecycle.rules.glob("*.md")}
 
-    lifecycle.run("compile", "-g")
+    result = lifecycle.run("compile", "-g")
     assert lifecycle.memory.read_bytes() == content
+    assert "retained redundant" not in result.stdout
+    assert "--clean --dry-run" not in result.stdout
+    expected = "hand-authored" if ownership == "hand-authored" else "edited or unverifiable"
+    assert expected in result.stdout
+    roots = {"claude": lifecycle.claude_root, "codex": lifecycle.codex.parent}
+    before_preview = ArtifactSnapshotSet.capture(roots)
     lifecycle.run("compile", "-g", "--clean", "--dry-run")
-    assert lifecycle.memory.read_bytes() == content
+    assert ArtifactSnapshotSet.capture(roots) == before_preview
     lifecycle.run("compile", "-g", "--clean")
     assert lifecycle.memory.read_bytes() == content
+    assert {path.name: path.read_bytes() for path in lifecycle.rules.glob("*.md")} == native_before
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")

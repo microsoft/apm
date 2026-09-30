@@ -229,7 +229,7 @@ _USER_ROOT_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "    results.append(UserRootCompileResult(scoped.name, output_path, protected))\n"
             "    continue",
             "status = clean_redundant_user_root(output_path, deploy_root, "
-            "_generate_content(unfiltered_instructions), dry_run=dry_run)",
+            "_generate_content(unfiltered_instructions), dry_run=dry_run or not clean)",
         ),
     ),
 )
@@ -609,33 +609,6 @@ def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[V
         )
     )
     findings.extend(_function_contract_violations(provider, rule_id, _USER_ROOT_CONTRACTS))
-    index = provider.tree_index(_USER_ROOT_CONTEXT)
-    function = index.function("compile_user_root_contexts") if index is not None else None
-    clean_guards = (
-        [
-            node
-            for node in index.own_scope(function)
-            if isinstance(node, ast.If)
-            and isinstance(node.test, ast.Name)
-            and node.test.id == "clean"
-        ]
-        if function is not None and index is not None
-        else []
-    )
-    if len(clean_guards) != 1 or not any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "clean_redundant_user_root"
-        for statement in clean_guards[0].body
-        for node in index.walk(statement)
-    ):
-        findings.append(
-            violation(
-                rule_id,
-                _USER_ROOT_CONTEXT,
-                "Redundant user-root cleanup must require explicit clean intent.",
-            )
-        )
     if defects:
         findings.append(
             violation(

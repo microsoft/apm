@@ -284,18 +284,18 @@ def compile_user_root_contexts(
         if not target_instructions:
             status = "skipped-native-rules"
             if output_path.exists():
-                status = "skipped-redundant"
-                if clean:
-                    try:
-                        status = clean_redundant_user_root(
-                            output_path,
-                            deploy_root,
-                            _generate_content(unfiltered_instructions),
-                            dry_run=dry_run,
-                        )
-                    except (OSError, UnicodeError, PathTraversalError) as exc:
-                        log.warning("Cannot clean %s: %s", output_path, exc)
-                        status = f"error:{exc}"
+                try:
+                    status = clean_redundant_user_root(
+                        output_path,
+                        deploy_root,
+                        _generate_content(unfiltered_instructions),
+                        dry_run=dry_run or not clean,
+                    )
+                    if not clean and status == "would-remove":
+                        status = "skipped-redundant"
+                except (OSError, UnicodeError, PathTraversalError) as exc:
+                    log.warning("Cannot verify or clean %s: %s", output_path, exc)
+                    status = f"error:{exc}"
             results.append(UserRootCompileResult(scoped.name, output_path, status))
             continue
 

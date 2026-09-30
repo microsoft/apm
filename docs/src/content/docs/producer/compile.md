@@ -308,15 +308,9 @@ OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
 retains explicit sections for `applyTo` instructions as well.
 
 Claude omits each unconditional instruction already delivered by an equivalent
-native user rule. Missing or different rules retain their compiled fallback;
-one matching rule cannot suppress another instruction. Project rules do not
-affect global compilation, and other targets keep their existing output.
-
-If all instructions already have matching rules, no new user `CLAUDE.md` is
-created. To remove an existing redundant generated root, preview with
-`apm compile -g --clean --dry-run`, then run `apm compile -g --clean`.
-Only an unchanged generated root matching the current instructions is removed.
-Edited, hand-authored, unverifiable, or symlinked roots are retained.
+native user rule, while preserving unmatched fallback and other targets.
+See the [global compilation reference](../../reference/cli/compile/#global-compilation)
+for matching rules, explicit `--clean` cleanup, and file-preservation conditions.
 
 ### Overwrite protection
 
