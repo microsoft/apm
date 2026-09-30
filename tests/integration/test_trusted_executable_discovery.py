@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 import yaml
@@ -19,6 +20,33 @@ pytestmark = [pytest.mark.windows_compat, pytest.mark.trusted_executable]
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 _CLI = (sys.executable, "-c", "from apm_cli.cli import main; main()")
+
+
+def test_supported_interpreter_imports_preserve_types() -> None:
+    """Legacy interpreter prerequisites retain string and self-type contracts."""
+    from apm_cli.integration.mcp_integrator_install import _TargetSelectionSource
+    from apm_cli.models.dependency.provider_coordinates import ProviderCoordinateMixin
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    for source in _TargetSelectionSource:
+        assert isinstance(source, str)
+        assert source == source.value
+        assert hash(source) == hash(source.value)
+        assert str(source) == source.value
+        assert format(source, ">20") == format(source.value, ">20")
+        assert json.dumps(source) == json.dumps(source.value)
+
+    class DerivedReference(DependencyReference):
+        pass
+
+    original = DerivedReference(repo_url="acme/package")
+    derived = original.with_derived_provider_coordinates()
+    assert type(derived) is DerivedReference
+    assert derived == original
+    assert derived is not original
+    hints = get_type_hints(ProviderCoordinateMixin.with_derived_provider_coordinates)
+    assert hints["self"] is hints["return"]
+    assert hints["return"].__bound__.__forward_arg__ == "ProviderCoordinateMixin"
 
 
 def _source_environment(environment: dict[str, str]) -> dict[str, str]:

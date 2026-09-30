@@ -169,7 +169,10 @@ def test_legacy_windows_git_discovery_runs_real_consumer_contracts() -> None:
     step = workflow_step(job, "Run trusted executable contracts")
     args = _gate_pytest_args(step)
     assert args[args.index("-m") + 1] == "trusted_executable"
-    assert _positional_test_paths(args) == ["tests/unit", "tests/integration"]
+    assert _positional_test_paths(args) == [
+        "tests/unit/cache/test_git_env.py",
+        "tests/integration/test_trusted_executable_discovery.py",
+    ]
     assert "--frozen" in _gate_pytest_command(step)
     assert not job.get("continue-on-error", False)
     assert not step.get("continue-on-error", False)

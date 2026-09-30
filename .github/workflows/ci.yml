@@ -207,8 +207,8 @@ jobs:
       run: >-
         uv run --frozen --extra dev pytest -p no:cacheprovider -v
         -m trusted_executable
-        tests/unit
-        tests/integration
+        tests/unit/cache/test_git_env.py
+        tests/integration/test_trusted_executable_discovery.py
 
     - name: Prove legacy PATHEXT regression
       shell: python
@@ -231,7 +231,8 @@ jobs:
                     "pytest", "-p", "no:cacheprovider", "-q",
                     "-m", "trusted_executable",
                     "-k", "real_tools_resolve or install_reinstall_and_update",
-                    "tests/integration", f"--junitxml={report}",
+                    "tests/integration/test_trusted_executable_discovery.py",
+                    f"--junitxml={report}",
                 ], timeout=300, check=False)
                 assert result.returncode == 1, "Legacy resolver mutation must fail tests"
                 cases = ET.parse(report).getroot().findall(".//testcase")
