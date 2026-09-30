@@ -71,6 +71,7 @@ include = ["apm_cli*"]
 # Delivery no longer depends on this (ensure_child_tls_bootstrap generates the
 # .pth inline), but packaging it keeps the source tree and wheel in sync.
 "apm_cli.core._child_tls" = ["*.pth"]
+"apm_cli.runtime" = ["scripts/github-token-helper.sh", "scripts/runtime/*"]
 
 [tool.ruff]
 line-length = 100

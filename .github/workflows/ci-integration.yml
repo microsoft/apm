@@ -337,7 +337,9 @@ jobs:
       - name: Checkout test scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            src/apm_cli/runtime/scripts
           path: repo
 
       - name: Set up Node.js
@@ -369,6 +371,8 @@ jobs:
       - name: Prepare test scripts
         run: |
           cp -r repo/scripts /tmp/apm-isolated-test/scripts
+          mkdir -p /tmp/apm-isolated-test/src/apm_cli/runtime/scripts
+          cp repo/src/apm_cli/runtime/scripts/github-token-helper.sh /tmp/apm-isolated-test/src/apm_cli/runtime/scripts/
 
       - name: Run release validation tests
         env:

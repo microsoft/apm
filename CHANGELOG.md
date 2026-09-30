@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Wheel installs (`pip install apm-cli`) now ship the runtime setup scripts and Unix token helper, so `apm runtime setup <runtime>` no longer fails with `Script not found`. (by @takeaship, #2764)
+
 ## [0.32.0] - 2026-09-25
 
 ### Changed
