@@ -39,6 +39,18 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
 
+## Git and GitHub CLI discovery
+
+APM resolves `git` and `gh` from explicit `PATH` directories outside the
+current repository or APM project. Project-local executables and symlinks
+resolving back into that project are excluded. On Windows, discovery also
+checks `PATHEXT` extensions such as `.EXE`, including on Python 3.10 and 3.11,
+without adding the current directory to the search.
+
+This check applies to APM's executable selection, not to searches performed
+internally by external tools. Keep project-controlled directories off your
+inherited `PATH`.
+
 ## HTTPS transport trust
 
 APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.

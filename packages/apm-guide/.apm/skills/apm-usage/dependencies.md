@@ -469,7 +469,16 @@ dependencies:
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
-        #                            Codex: resolved at install time.
+        #                            Codex: env resolved at install time; a remote
+        #                            server's headers are written as
+        #                            bearer_token_env_var / env_http_headers and
+        #                            resolved by Codex at server-start.
+        #                            Mixed or malformed references are skipped
+        #                            with a warning. Unchanged reinstall keeps
+        #                            existing config; to refresh an older managed
+        #                            entry, switch between ${VAR} and ${env:VAR}
+        #                            and reinstall with the same scope/targets.
+        #                            Review/back up manual edits to that entry first.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;

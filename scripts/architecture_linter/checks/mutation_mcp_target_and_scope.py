@@ -500,8 +500,16 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
         _require(
             _has_fixed(
                 facts_by_path[_MCP_MODEL],
-                '_HARNESS_EXTRA_ALIASES = frozenset({"enabled", "environment", '
-                '"http_headers", "id"})',
+                "_HARNESS_EXTRA_ALIASES = frozenset(\n"
+                "    {\n"
+                '        "bearer_token_env_var",\n'
+                '        "enabled",\n'
+                '        "env_http_headers",\n'
+                '        "environment",\n'
+                '        "http_headers",\n'
+                '        "id",\n'
+                "    }\n"
+                ")",
             ),
             rule_id,
             _MCP_MODEL,

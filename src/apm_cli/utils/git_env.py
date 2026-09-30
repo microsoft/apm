@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -243,7 +244,19 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
+        # A qualified lookup never searches the implicit Windows cwd. Python
+        # before 3.12 needs explicit PATHEXT candidates for qualified commands.
         candidate = shutil.which(str(directory / name))
+        if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
+            extensions = os.environ.get("PATHEXT") or (
+                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+            )
+            for extension in extensions.split(os.pathsep):
+                if not extension.startswith(".") or any(c in extension for c in "/\\:"):
+                    continue
+                candidate = shutil.which(str(directory / f"{name}{extension}"))
+                if candidate is not None:
+                    break
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()

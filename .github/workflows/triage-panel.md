@@ -6,6 +6,8 @@ engine:
   version: 1.0.80
 
 on:
+  # Keep activation read-only while retaining compiler revocation checks.
+  report-blocked-version: false
   issues:
     types: [labeled]
   schedule:
@@ -42,6 +44,12 @@ imports:
       target: copilot
       packages:
         - microsoft/apm#main
+
+steps:
+  - name: Setup Ruby
+    uses: ruby/setup-ruby@v1.323.0
+    with:
+      ruby-version: 'ruby-3.3'
 
 tools:
   github:

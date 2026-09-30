@@ -9,8 +9,10 @@ import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import pytest
+import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.deps.lockfile import LockFile
@@ -296,6 +298,253 @@ def _run_success(
     )
     assert result.returncode == 0, _result_evidence(result)
     return result
+
+
+def _codex_header_lifecycle(
+    scenario: _Scenario,
+    scope: str,
+) -> tuple[LocalPackage, Path, Path, Path, tuple[str, ...]]:
+    """Author local manifests and config sentinels in the existing scenario."""
+    consumer = scenario.consumers.create(
+        "codex-header-consumer",
+        targets=("codex",),
+        mcp_dependencies=(
+            {
+                "name": "runtime-headers",
+                "registry": False,
+                "transport": "streamable-http",
+                "url": "https://mcp.example.invalid/mcp",
+            },
+        ),
+    )
+    project_config = consumer.root / ".codex" / "config.toml"
+    global_config = scenario.isolated.home / ".codex" / "config.toml"
+    for config_path in (project_config, global_config):
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            '# user configuration\nmodel = "user-selected-model"\n'
+            '[mcp_servers.user-authored]\ncommand = "user-command"\n',
+            encoding="utf-8",
+        )
+    manifest_path = consumer.manifest_path
+    config_path, opposite_path = project_config, global_config
+    args = _INSTALL_ARGS
+    if scope == "global":
+        manifest_path = scenario.isolated.config_root / "apm.yml"
+        manifest_path.write_bytes(consumer.manifest_path.read_bytes())
+        config_path, opposite_path = global_config, project_config
+        args = (*args, "--global")
+    scenario.environment.update(
+        {
+            "APM_TEST_HEADER": "synthetic-header-secret",
+            "APM_TEST_BEARER": "synthetic-bearer-secret",
+            "APM_TEST_MODE": "synthetic-mode-secret",
+            "APM_TEST_AUTHORIZATION": "Basic synthetic-auth-secret",
+        }
+    )
+    return consumer, manifest_path, config_path, opposite_path, args
+
+
+def _rewrite_codex_headers(manifest_path: Path, headers: dict[str, str]) -> None:
+    """Change the actual declaration, not a rendered adapter or lockfile cache."""
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["mcp"][0]["headers"] = headers
+    dump_yaml(manifest, manifest_path)
+
+
+def _codex_header_snapshot(manifest_path: Path, config_path: Path) -> LifecycleStateSnapshot:
+    """Capture lock ownership and the native config for either install scope."""
+    if config_path.parent.parent == manifest_path.parent:
+        return LifecycleStateSnapshot.capture(
+            manifest_path.parent,
+            config_paths=(PurePosixPath(".codex/config.toml"),),
+        )
+    return LifecycleStateSnapshot.capture(
+        manifest_path.parent,
+        external_roots=(
+            LifecycleStateRoot(
+                root_id="codex-user",
+                target="codex",
+                scope="user",
+                path=config_path.parent,
+                config_paths=(PurePosixPath("config.toml"),),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("scope", ["project", "global"])
+def test_required_codex_runtime_headers_follow_declaration_changes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    scope: str,
+) -> None:
+    """Real installs converge native fields without secrets or cross-scope writes."""
+    scenario = _new_scenario(tmp_path / "codex-headers", apm_binary_path)
+    consumer, manifest_path, config_path, opposite_path, args = _codex_header_lifecycle(
+        scenario, scope
+    )
+    opposite_bytes = opposite_path.read_bytes()
+    declarations = (
+        (
+            {
+                "X-Mode": "literal-mode",
+                "X-Runtime": "${APM_TEST_HEADER}",
+                "Authorization": "Bearer ${env:APM_TEST_BEARER}",
+            },
+            {
+                "http_headers": {"X-Mode": "literal-mode"},
+                "env_http_headers": {"X-Runtime": "APM_TEST_HEADER"},
+                "bearer_token_env_var": "APM_TEST_BEARER",
+            },
+        ),
+        (
+            {"X-Mode": "${env:APM_TEST_MODE}", "Authorization": "${APM_TEST_AUTHORIZATION}"},
+            {
+                "env_http_headers": {
+                    "X-Mode": "APM_TEST_MODE",
+                    "Authorization": "APM_TEST_AUTHORIZATION",
+                }
+            },
+        ),
+        (
+            {"X-Mode": "new-literal-mode", "Authorization": "bEaReR ${APM_TEST_BEARER}"},
+            {
+                "http_headers": {"X-Mode": "new-literal-mode"},
+                "bearer_token_env_var": "APM_TEST_BEARER",
+            },
+        ),
+        ({}, {}),
+    )
+    ownership = None
+    for index, (headers, expected_fields) in enumerate(declarations):
+        _rewrite_codex_headers(manifest_path, headers)
+        result = _run_success(
+            scenario,
+            consumer,
+            args,
+            environment=scenario.environment,
+            scenario_id=f"codex-runtime-headers-transition-{index}",
+        )
+        document = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+        rendered = dict(document["mcp_servers"]["runtime-headers"])
+        endpoint = urlparse(rendered.pop("url"))
+        assert (endpoint.scheme, endpoint.hostname, endpoint.path) == (
+            "https",
+            "mcp.example.invalid",
+            "/mcp",
+        )
+        rendered.pop("id")
+        assert rendered == expected_fields
+        assert document["model"] == "user-selected-model"
+        assert document["mcp_servers"]["user-authored"] == {"command": "user-command"}
+        assert opposite_path.read_bytes() == opposite_bytes
+        for name in (
+            "APM_TEST_HEADER",
+            "APM_TEST_BEARER",
+            "APM_TEST_MODE",
+            "APM_TEST_AUTHORIZATION",
+        ):
+            secret = scenario.environment[name]
+            assert secret not in config_path.read_text(encoding="utf-8")
+            assert secret not in result.stdout + result.stderr
+        installed = _codex_header_snapshot(manifest_path, config_path)
+        lockfile = LockFile.read(manifest_path.parent / "apm.lock.yaml")
+        assert lockfile is not None
+        assert lockfile.mcp_target_servers == {"codex": ["runtime-headers"]}
+        records = tuple(
+            (record.locator.key, record.owners, record.active_owner)
+            for record in installed.deployment_records
+            if record.locator.target == "mcp"
+        )
+        assert records
+        if ownership is None:
+            ownership = records
+        assert records == ownership
+        _run_success(
+            scenario,
+            consumer,
+            args,
+            environment=scenario.environment,
+            scenario_id=f"codex-runtime-headers-reinstall-{index}",
+        )
+        repeated = _codex_header_snapshot(manifest_path, config_path)
+        assert repeated.lockfile_bytes == installed.lockfile_bytes
+        assert repeated.semantic_bytes == installed.semantic_bytes
+        assert repeated.files == installed.files
+        assert opposite_path.read_bytes() == opposite_bytes
+
+
+@pytest.mark.parametrize("scope", ["project", "global"])
+def test_required_codex_legacy_header_noop_and_declaration_repair(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    scope: str,
+) -> None:
+    """An unchanged legacy render is not migrated; a source rewrite repairs it."""
+    scenario = _new_scenario(tmp_path / "codex-headers", apm_binary_path)
+    consumer, manifest_path, config_path, opposite_path, args = _codex_header_lifecycle(
+        scenario, scope
+    )
+    opposite_bytes = opposite_path.read_bytes()
+    unrelated_file = config_path.parent / "user-notes.txt"
+    unrelated_bytes = b"Unrelated user file must survive the selected server rewrite.\n"
+    unrelated_file.write_bytes(unrelated_bytes)
+    original_targets = load_yaml(manifest_path)["targets"]
+    _rewrite_codex_headers(manifest_path, {"X-Runtime": "${APM_TEST_HEADER}"})
+    _run_success(
+        scenario,
+        consumer,
+        args,
+        environment=scenario.environment,
+        scenario_id="codex-legacy-header-install",
+    )
+    # Seed the bytes emitted by the old formatter, retaining real install ownership.
+    legacy = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+    server = legacy["mcp_servers"]["runtime-headers"]
+    del server["env_http_headers"]
+    server["http_headers"] = {"X-Runtime": "${APM_TEST_HEADER}"}
+    server["startup_timeout_sec"] = 91
+    config_path.write_text(tomlkit.dumps(legacy), encoding="utf-8")
+    before = _codex_header_snapshot(manifest_path, config_path)
+    _run_success(
+        scenario,
+        consumer,
+        args,
+        environment=scenario.environment,
+        scenario_id="codex-legacy-header-unchanged-noop",
+    )
+    unchanged = _codex_header_snapshot(manifest_path, config_path)
+    assert unchanged.files == before.files
+    assert unchanged.lockfile_bytes == before.lockfile_bytes
+    assert unchanged.semantic_bytes == before.semantic_bytes
+    assert unrelated_file.read_bytes() == unrelated_bytes
+    assert opposite_path.read_bytes() == opposite_bytes
+
+    _rewrite_codex_headers(manifest_path, {"X-Runtime": "${env:APM_TEST_HEADER}"})
+    _run_success(
+        scenario,
+        consumer,
+        args,
+        environment=scenario.environment,
+        scenario_id="codex-legacy-header-declaration-repair",
+    )
+    repaired = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+    server = repaired["mcp_servers"]["runtime-headers"]
+    assert server["env_http_headers"] == {"X-Runtime": "APM_TEST_HEADER"}
+    assert "http_headers" not in server
+    assert "bearer_token_env_var" not in server
+    assert "env" not in server
+    # A changed declaration replaces its selected entry, including manual additions.
+    assert "startup_timeout_sec" not in server
+    assert scenario.environment["APM_TEST_HEADER"] not in config_path.read_text(encoding="utf-8")
+    assert repaired["model"] == "user-selected-model"
+    assert repaired["mcp_servers"]["user-authored"] == {"command": "user-command"}
+    assert opposite_path.read_bytes() == opposite_bytes
+    assert unrelated_file.read_bytes() == unrelated_bytes
+    assert load_yaml(manifest_path)["targets"] == original_targets
+    after = _codex_header_snapshot(manifest_path, config_path)
+    assert after.deployment_records == before.deployment_records
 
 
 def _audit(

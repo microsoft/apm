@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm compile --target claude` imports dependency-root `CLAUDE.md` files at any metadata-backed materialization depth, including ADO and nested GitLab paths, and resolves transitive imports with redirected `--root` output. Frozen replay also reads the selected installation's lockfile. (by @vyrnsynx, #2952)
+- Codex MCP headers now use native runtime environment references instead of literal placeholders; unsupported references are skipped with a warning. Unchanged reinstalls preserve existing entries; switch the affected header between `${VAR}` and `${env:VAR}` and reinstall with the same scope and targets to refresh an older managed entry. -- by @edenfunf (#3042)
+- Claude MCP redeclarations drop stale transport fields and repair mixed entries when rewritten, while preserving partial updates and unmanaged configuration. -- by @edenfunf (#3041)
 - Cursor rules now use comma-joined `globs` and readable descriptions, while retaining safe escaping for control characters. (by @YGuyomar, #3011)
 
 ## [0.32.0] - 2026-09-25

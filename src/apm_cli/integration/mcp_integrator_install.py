@@ -7,7 +7,7 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -125,7 +125,7 @@ def prevalidate_registry_dependencies(
     )
 
 
-class _TargetSelectionSource(StrEnum):
+class _TargetSelectionSource(str, Enum):
     """Source that supplied the MCP target set before compatibility gates."""
 
     RUNTIME = "runtime"
@@ -134,6 +134,9 @@ class _TargetSelectionSource(StrEnum):
     DISCOVERY = "discovery"
     FALLBACK = "fallback"
     INVALID_MANIFEST = "invalid-manifest"
+
+    __str__ = str.__str__
+    __format__ = str.__format__
 
 
 def _announce_registry_endpoint(registry_client: Any, logger: Any) -> None:
