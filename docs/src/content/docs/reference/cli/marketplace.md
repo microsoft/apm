@@ -213,10 +213,13 @@ Fold a legacy `marketplace.yml` into the `marketplace:` block of
 ### `apm marketplace check`
 
 Validate the schema of the authoring config and verify that every package
-entry resolves to a reachable git ref. For an Azure DevOps `sourceBase`
-ending in `/_git`, package names are appended without a `.git` suffix.
-Services uses `ADO_APM_PAT`, then the Azure CLI bearer. Server hosts
-registered through `ADO_HOST` or `APM_ADO_HOSTS` use `ADO_APM_PAT` only.
+entry resolves to a reachable git ref. Bare `owner/repo` entries resolve
+against the configured default host. Private github.com and GHES repos use
+the standard GitHub auth chain during online validation. For an Azure
+DevOps `sourceBase` ending in `/_git`, package names are appended without
+a `.git` suffix. Services uses `ADO_APM_PAT`, then the Azure CLI bearer.
+Server hosts registered through `ADO_HOST` or `APM_ADO_HOSTS` use
+`ADO_APM_PAT` only.
 
 | Flag | Description |
 |---|---|

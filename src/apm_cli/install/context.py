@@ -54,6 +54,7 @@ class InstallContext:
     # ------------------------------------------------------------------
     apm_package: Any = None  # APMPackage
     update_refs: bool = False
+    frozen: bool = False
     scope: Any = None  # InstallScope (defaults to PROJECT)
     auth_resolver: Any = None  # AuthResolver
     marketplace_provenance: dict[str, Any] | None = None

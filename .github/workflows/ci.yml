@@ -149,11 +149,13 @@ jobs:
         where git
 
     - name: Run cross-platform contract family
+      env:
+        APM_E2E_TESTS: '1'
       run: >-
         uv run --extra dev pytest -p no:cacheprovider -v
         -m windows_compat
         tests/unit
-        tests/integration/test_lifecycle_workspace_lock.py
+        tests/integration
 
     - name: Diagnostics on failure
       if: failure()

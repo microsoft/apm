@@ -34,7 +34,6 @@ import hashlib
 import json
 import os
 import platform
-import pwd
 import subprocess
 import tarfile
 import urllib.request
@@ -137,6 +136,8 @@ def _run_copilot(
     with a real ``HOME``, ``COPILOT_HOME`` still points at tmp, so every write
     stays isolated and only the read-only auth lookup sees the real home.
     """
+    import pwd
+
     fake_home = home.parent / (home.name + "-fakehome")
     fake_home.mkdir(parents=True, exist_ok=True)
     login_home = pwd.getpwuid(os.getuid()).pw_dir if use_login else str(fake_home)

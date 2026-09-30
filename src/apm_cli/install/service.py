@@ -120,9 +120,8 @@ class InstallService:
                 runs so no resolve / download work is wasted.
         """
         # Enforce --frozen BEFORE invoking the pipeline.  The check is
-        # purely structural (no network) so it must succeed or fail in
-        # well under a second; running it here keeps the contract simple
-        # for the pipeline (which never sees a `frozen` flag).
+        # structural (no network). The resolver also verifies immutable
+        # transitive requirements as locked package manifests become available.
         if request.frozen:
             self.enforce_frozen(request)
 
@@ -140,6 +139,7 @@ class InstallService:
         result = run_install_pipeline(
             request.apm_package,
             update_refs=request.update_refs,
+            frozen=request.frozen,
             verbose=request.verbose,
             only_packages=request.only_packages,
             force=request.force,

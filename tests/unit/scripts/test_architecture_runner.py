@@ -641,6 +641,7 @@ install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
 install-deployment-mcp-ownership-migration
 install-deployment-mcp-registry-resolution
+install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
@@ -648,6 +649,7 @@ install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
+install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
