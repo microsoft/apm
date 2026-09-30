@@ -382,6 +382,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     lockfile_only: bool = False,
     trust_bin: bool | None = None,
     transaction: InstallTransaction | None = None,
+    frozen: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -505,6 +506,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         source_root=source_root,
         apm_package=apm_package,
         update_refs=update_refs,
+        frozen=frozen,
         verbose=verbose,
         only_packages=only_packages,
         force=force,

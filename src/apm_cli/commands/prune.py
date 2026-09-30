@@ -21,9 +21,8 @@ from ..models.apm_package import APMPackage
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
     _build_expected_install_paths,
-    _expand_with_ancestors,
+    _find_orphaned_packages,
     _scan_installed_packages,
-    _standalone_installed_packages,
 )
 from .uninstall.lockfile_state import lockfile_has_persisted_state
 
@@ -125,15 +124,6 @@ def prune(ctx, dry_run):
         installed_packages = (
             _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
         )
-        standalone_installed = _standalone_installed_packages(
-            installed_packages,
-            apm_modules_dir,
-            lockfile=lockfile,
-        )
-        expected_with_ancestors = _expand_with_ancestors(
-            expected_installed,
-            standalone_installed,
-        )
         expected_lock_keys = {dependency.get_unique_key() for dependency in declared_deps}
         if lockfile is not None:
             expected_lock_keys.update(
@@ -144,14 +134,19 @@ def prune(ctx, dry_run):
         lock_keys_by_path = (
             _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
         )
-        orphaned_packages = sorted(
-            p for p in installed_packages if p not in expected_with_ancestors
+        orphaned_paths = set(
+            _find_orphaned_packages(
+                set(installed_packages) | set(lock_keys_by_path), expected_installed
+            )
         )
+        orphaned_packages = sorted(set(installed_packages) & orphaned_paths)
+        retained_packages = set(installed_packages) - orphaned_paths
+        for package in sorted(retained_packages - expected_installed):
+            logger.progress(f"Retained {package}: required package content.")
         missing_orphaned_keys = sorted(
             dep_key
             for relative_path, dep_keys in lock_keys_by_path.items()
-            if relative_path in expected_with_ancestors
-            or not (apm_modules_dir / relative_path).exists()
+            if relative_path not in orphaned_paths or not (apm_modules_dir / relative_path).exists()
             for dep_key in dep_keys
             if dep_key not in expected_lock_keys
         )
@@ -208,7 +203,7 @@ def prune(ctx, dry_run):
         if missing_orphaned_keys:
             logger.progress(
                 f"Found {len(missing_orphaned_keys)} stale lockfile dependency "
-                "record(s) without installed package content."
+                "record(s) without removable package content."
             )
 
         if dry_run:

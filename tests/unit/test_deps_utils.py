@@ -112,13 +112,14 @@ def test_scan_includes_flattened_alias_without_nested_packages(tmp_path: Path, a
 
 
 @pytest.mark.windows_compat
-def test_scan_excludes_symlink_packages(tmp_path: Path) -> None:
+@pytest.mark.parametrize("marker", [APM_YML_FILENAME, SKILL_MD_FILENAME])
+def test_scan_excludes_symlink_packages(tmp_path: Path, marker: str) -> None:
     """Symlink prerequisites must not skip the independent alias regression."""
     modules = tmp_path / "apm_modules"
     modules.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    _make_apm_yml(outside)
+    (outside / marker).write_text("package marker\n")
     try:
         (modules / "linked").symlink_to(outside, target_is_directory=True)
     except (NotImplementedError, OSError):
@@ -510,6 +511,32 @@ class TestGetDetailedPackageInfo:
 
 class TestScanInstalledPackages:
     """Additional edge cases for _scan_installed_packages."""
+
+    @pytest.mark.parametrize(
+        "relative_path", ["skill-alias", "org/repo", "org/repo/.github/skills/foo"]
+    )
+    def test_skill_only_package(self, tmp_path, relative_path):
+        package = tmp_path / relative_path
+        package.mkdir(parents=True)
+        (package / SKILL_MD_FILENAME).write_text("# Skill\n")
+
+        assert _scan_installed_packages(tmp_path) == [relative_path]
+
+    def test_skill_named_directory_is_not_a_package_marker(self, tmp_path):
+        (tmp_path / "org" / "repo" / SKILL_MD_FILENAME).mkdir(parents=True)
+
+        assert _scan_installed_packages(tmp_path) == []
+
+    @pytest.mark.parametrize("parent_marker", [APM_YML_FILENAME, APM_DIR, SKILL_MD_FILENAME])
+    def test_embedded_skill_is_part_of_parent(self, tmp_path, parent_marker):
+        parent = tmp_path / "org" / "repo"
+        embedded = parent / "skills" / "child"
+        embedded.mkdir(parents=True)
+        (parent / parent_marker).write_text("package marker\n")
+        (embedded / SKILL_MD_FILENAME).write_text("# Embedded skill\n")
+        (embedded / APM_YML_FILENAME).write_text("name: child\n")
+
+        assert _scan_installed_packages(tmp_path) == ["org/repo"]
 
     def test_three_level_ado_packages(self, tmp_path):
         """ADO-style org/project/repo packages are found."""

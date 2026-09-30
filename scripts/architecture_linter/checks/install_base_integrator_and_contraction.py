@@ -295,6 +295,7 @@ _UNTRUSTED_NAME_PARTS = ("ghost", "invalid", "removed_record", "violation")
 
 
 _REQUIRED_OWNER_CALLS = {
+    "src/apm_cli/install/phases/lockfile.py": ("merge_dependencies",),
     "src/apm_cli/commands/prune.py": ("legacy_value", "reconcile_owner_references"),
     "src/apm_cli/commands/audit.py": ("owner_reference_violations",),
     "src/apm_cli/commands/uninstall/cli.py": ("cleanup_snapshot",),

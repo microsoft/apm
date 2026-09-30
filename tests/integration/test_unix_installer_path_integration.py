@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import os
 import platform
-import pty
 import select
 import shlex
 import shutil
 import subprocess
 import sys
-import termios
 from pathlib import Path
 
 import pytest
@@ -191,6 +188,10 @@ def _harnessed_installer_text(tmp_path: Path) -> str:
 
 def _run_pty(command: str, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run a shell command with a controlling pseudo-terminal."""
+    import fcntl
+    import pty
+    import termios
+
     master_fd, slave_fd = pty.openpty()
 
     def _child() -> None:

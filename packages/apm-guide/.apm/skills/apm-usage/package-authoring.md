@@ -99,6 +99,14 @@ Per-primitive scan paths for `apm install`:
 | agent | `.apm/agents/` | Yes: `*.agent.md` at root |
 | skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
+Own-project and Git-backed package installs skip symlinked agent source
+files and directories, including `.apm/agents -> ../agents`.
+`apm install` warns with the skipped source path. Use real files and
+directories under `.apm/agents/` or real `*.agent.md` files at root, then
+rerun `apm install`. Local-path dependencies (`./...` or `../...`) still work:
+contained symlinks are validated and copied as real files into
+`apm_modules/` before agent discovery.
+
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
 `apm pack` and `apm install`.
@@ -173,6 +181,9 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+For Codex, APM wraps flat command entries in hook groups containing a
+nested `hooks` array in `.codex/hooks.json`.
+
 <!-- Keep this table synchronized with docs/src/content/docs/producer/author-primitives/hooks-and-commands.md. -->
 
 ### Session lifecycle event aliases
@@ -181,6 +192,7 @@ hook action under `.kiro/hooks/`.
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
+| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
 Event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
@@ -804,10 +816,12 @@ Schema rules:
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
   `https://host.tld/path/to/repo[.git]` (full URL with two or more path
-  segments). Non-default hosts
-  resolve auth via the standard APM token chain
-  (`docs/getting-started/authentication.md`); the default-host token is
-  never forwarded.
+  segments). APM never embeds tokens in the source URL. During online
+  validation (`apm marketplace check`), source resolution follows the
+  standard auth rules in `docs/getting-started/authentication.md`:
+  default-host shorthand uses the configured default host, and explicit
+  hosts resolve through that host class's auth path. Offline checks
+  resolve no credentials.
 - `versioning.strategy` is optional. When present, it is consumed by
   the `apm pack --check-versions` release gate to enforce alignment
   between each local package's `version:` field and the marketplace

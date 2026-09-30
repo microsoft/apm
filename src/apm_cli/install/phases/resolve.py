@@ -749,6 +749,8 @@ def _resolve_dependencies(
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
         existing_lockfile=existing_lockfile,
+        reference_resolver=downloader,
+        frozen=ctx.frozen,
         cache_validation_callback=partial(
             validate_cached_legacy_plugin,
             lockfile=existing_lockfile,

@@ -196,6 +196,14 @@ dependency `@import` paths. If `.claude/rules/` is later removed,
 re-running `apm compile` restores the instructions section to
 `CLAUDE.md`.
 
+When instructions are folded into `CLAUDE.md`, plain inline Markdown
+links to local or dependency `.context.md` and `.memory.md` files are
+rebased so they resolve from each generated `CLAUDE.md`'s directory
+(for example, to `apm_modules/<pkg>/.apm/context/...`). The referenced
+files are not copied, and other relative links are left as written --
+this is distinct from the install-time rewriting described in
+[Package-relative links](../package-relative-links/).
+
 To opt out of the deduplication and always include the instructions
 section in `CLAUDE.md` (for debugging or when you intentionally want
 both copies), pass `--force-instructions` (alias: `--no-dedup`):
