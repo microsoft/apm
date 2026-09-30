@@ -392,6 +392,12 @@ closed.
 | `apm runtime remove {copilot\|codex\|gemini\|llm}` | Remove a runtime | `-y`, `--yes` |
 | `apm runtime status` | Show active runtime | -- |
 
+On Linux/macOS, Codex archive downloads through curl reject HTTP errors and retry
+transient failures up to three times in a 30-second retry window (10 seconds to
+connect, 120 seconds per transfer; an active transfer may outlast the window).
+Failed downloads are cleaned up without replacing an existing runtime.
+Checksum mismatches fail immediately, without retry or bypass.
+
 Workflow adapters enforce streaming wall-clock deadlines for Copilot (600s)
 and Codex (300s), terminating and reaping the child process on expiry.
 
