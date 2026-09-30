@@ -35,7 +35,7 @@ from apm_cli.integration.mcp_config_view import (
     _get_server_configs,
     _get_server_provenance,
 )
-from apm_cli.models.dependency.mcp import ManifestHeaderValue, opencode_enabled_matches
+from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import (
@@ -638,6 +638,8 @@ class MCPIntegrator:
         previously stored config in the lockfile.  Only dependencies that
         have a stored baseline *and* whose config has changed are returned.
         """
+        from apm_cli.models.dependency.mcp import opencode_enabled_matches
+
         drifted: builtins.set = builtins.set()
         for dep in mcp_deps:
             if not hasattr(dep, "to_dict") or not hasattr(dep, "name"):
