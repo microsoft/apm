@@ -656,8 +656,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="registry-delegation-instruction-deduplication",
         rule_id="registry_delegation.instruction_deduplication",
         path="src/apm_cli/compilation/instruction_dedup.py",
-        old="integrator._render_instruction(source, rule_path, mapping.format_id)",
-        new="_render_native_rule_locally(source, rule_path, mapping.format_id)",
+        old="integrator._render_instruction(",
+        new="_render_native_rule_locally(",
         intent="Native-rule coverage bypasses the canonical install renderer.",
     ),
     MutationCase(

@@ -159,6 +159,8 @@ already matches its native user rule in `~/.claude/rules/` (or
 suppress that instruction. If all instructions are covered, no new `CLAUDE.md`
 is generated. Pass `--force-instructions` with `-g` to create the root fallback
 anyway. Other targets still receive their compiled instructions.
+Verification failures produce one warning per target; use `--verbose` for the
+affected rules. Hidden-character checks still inspect covered instructions.
 
 When native rules cover all instructions, any existing `CLAUDE.md` is retained
 unchanged. Review it manually for duplicate content. Global compilation does

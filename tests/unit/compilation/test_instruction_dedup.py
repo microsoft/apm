@@ -162,3 +162,40 @@ def test_cyclic_native_symlink_keeps_fallback(tmp_path: Path) -> None:
         "claude", [instruction], rules_dir, tmp_path, warnings.append
     ) == [instruction]
     assert len(warnings) == 1
+
+
+@pytest.mark.parametrize("count", [50, 500])
+@pytest.mark.parametrize("linked", [False, True])
+def test_candidate_rendering_only_discovers_linked_packages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, linked: bool
+) -> None:
+    """One candidate never requires discovery of a link-free package."""
+    import apm_cli.integration.base_integrator as base_module
+
+    root = tmp_path / "package"
+    content = "Read [guide](../../guide.md)." if linked else "Use type hints."
+    candidate = _instruction(root, content=content)
+    (root / "guide.md").write_text("Guide", encoding="utf-8")
+    rules_dir = _install(root, tmp_path)
+    instructions = [candidate] + [_instruction(root, f"missing-{i}") for i in range(count - 1)]
+    discovery_calls = []
+    render_calls = []
+    original_discover = base_module.discover_primitives
+    original_render = InstructionIntegrator._render_instruction
+
+    def discover(path, *args, **kwargs):
+        discovery_calls.append(path)
+        return original_discover(path, *args, **kwargs)
+
+    def render(self, *args, **kwargs):
+        render_calls.append(args[0])
+        return original_render(self, *args, **kwargs)
+
+    monkeypatch.setattr(base_module, "discover_primitives", discover)
+    monkeypatch.setattr(InstructionIntegrator, "_render_instruction", render)
+    assert (
+        uncovered_instructions("claude", instructions, rules_dir, tmp_path, pytest.fail)
+        == instructions[1:]
+    )
+    assert render_calls == [candidate.file_path]
+    assert discovery_calls == ([root] if linked else [])

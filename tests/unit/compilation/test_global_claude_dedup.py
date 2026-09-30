@@ -95,8 +95,12 @@ def test_force_instructions_overrides_full_native_coverage(global_tree) -> None:
     assert "Use beta conventions." in body
 
 
-def test_full_native_coverage_still_blocks_critical_hidden_characters(global_tree) -> None:
-    """Security scanning runs even when native coverage suppresses the root write."""
+@pytest.mark.parametrize("coverage", ["none", "partial", "full"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_native_coverage_still_blocks_critical_hidden_characters(
+    global_tree, coverage: str, dry_run: bool
+) -> None:
+    """Covered content cannot disappear from the output-policy decision."""
     source, config, _ = global_tree
     instruction = (
         source / "apm_modules" / "demo" / ".apm" / "instructions" / "alpha.instructions.md"
@@ -105,11 +109,13 @@ def test_full_native_coverage_still_blocks_critical_hidden_characters(global_tre
     instruction.write_text("---\ndescription: alpha guidance\n---\n" + hidden, encoding="utf-8")
     rules = config / "rules"
     rules.mkdir(parents=True, exist_ok=True)
-    (rules / "alpha.md").write_text(hidden, encoding="utf-8")
-    (rules / "beta.md").write_text("Use beta conventions.\n", encoding="utf-8")
+    if coverage != "none":
+        (rules / "alpha.md").write_text(hidden, encoding="utf-8")
+    if coverage == "full":
+        (rules / "beta.md").write_text("Use beta conventions.\n", encoding="utf-8")
     clear_discovery_cache()
 
-    result = compile_user_root_contexts([KNOWN_TARGETS["claude"]], source)[0]
+    result = compile_user_root_contexts([KNOWN_TARGETS["claude"]], source, dry_run=dry_run)[0]
 
     assert result.status == "error:critical hidden characters in compiled output"
     assert result.has_critical_security is True

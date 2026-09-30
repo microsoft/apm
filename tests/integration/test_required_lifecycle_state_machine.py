@@ -23,6 +23,7 @@ from tests.utils.artifact_snapshot import (
     ArtifactSnapshotSet,
     assert_only_snapshot_paths_changed,
     assert_snapshot_changes_within,
+    assert_snapshot_set_unchanged,
     assert_unchanged,
 )
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -1452,6 +1453,145 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
         assert result.returncode != 0, _result_evidence(result)
         assert "reserved directory names" in result.stdout + result.stderr
         assert_unchanged(before_rejection, ArtifactSnapshot.capture(consumer.root))
+
+
+@pytest.mark.parametrize("external_config", [False, True])
+@pytest.mark.parametrize("linked", [False, True])
+def test_required_global_claude_dedup_reinstall_update_and_retention(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    external_config: bool,
+    linked: bool,
+) -> None:
+    """Real global lifecycle transitions preserve native delivery and user roots."""
+    scenario = _new_scenario(tmp_path / "global-claude-dedup", apm_binary_path)
+    source = _publish(scenario, "global-rules", instruction="alpha")
+    source_instructions = source.repository.worktree / ".apm" / "instructions"
+    alpha = source_instructions / "alpha.instructions.md"
+    link = "Read [guide](../../guide.md).\n" if linked else ""
+    alpha.write_text(
+        "---\ndescription: Global alpha\n---\nUse alpha v1.\n" + link,
+        encoding="utf-8",
+    )
+    (source.repository.worktree / "guide.md").write_text("Package guide.\n", encoding="utf-8")
+    (source_instructions / "beta.instructions.md").write_text(
+        "---\ndescription: Global beta\n---\nUse beta guidance.\n", encoding="utf-8"
+    )
+    scenario.repositories.commit(source.repository, message="publish unconditional global rules")
+    consumer = scenario.consumers.create("untouched-project")
+    project_before = ArtifactSnapshot.capture(consumer.root)
+    global_root = scenario.isolated.config_root
+    dump_yaml(
+        {
+            "name": "global-consumer",
+            "version": "1.0.0",
+            "targets": ["claude", "codex"],
+            "dependencies": {"apm": [{"git": source.remote_url, "ref": "main"}]},
+        },
+        global_root / "apm.yml",
+    )
+    claude = (
+        scenario.isolated.root / "external-claude"
+        if external_config
+        else scenario.isolated.home / ".claude"
+    )
+    environment = dict(source.environment)
+    if external_config:
+        environment["CLAUDE_CONFIG_DIR"] = str(claude)
+    codex = scenario.isolated.home / ".codex"
+    (claude / "rules").mkdir(parents=True)
+    personal = claude / "rules" / "personal.md"
+    personal.write_text("Keep personal guidance.\n", encoding="utf-8")
+    specs = (
+        *_external_root_specs(
+            {"claude": claude, "codex": codex},
+            config_paths={
+                "claude": tuple(
+                    PurePosixPath(path)
+                    for path in (
+                        "rules/alpha.md",
+                        "rules/beta.md",
+                        "rules/personal.md",
+                        "CLAUDE.md",
+                    )
+                ),
+                "codex": (PurePosixPath("AGENTS.md"),),
+            },
+        ),
+        _apm_home_root(scenario),
+    )
+    snapshot_roots = {"apm": global_root, "claude": claude, "codex": codex}
+
+    def run(args: tuple[str, ...]) -> CommandResult:
+        return _run_success(
+            scenario, consumer, args, environment=environment, scenario_id="global-claude-dedup"
+        )
+
+    run((*_INSTALL_ARGS, "-g"))
+    run(("compile", "-g"))
+    root = claude / "CLAUDE.md"
+    native = claude / "rules" / "alpha.md"
+    first_native = native.read_bytes()
+    assert b"Use alpha v1." in first_native
+    assert (b"[guide](" in first_native) is linked
+    assert not root.exists()
+    assert "Use beta guidance." in (codex / "AGENTS.md").read_text(encoding="utf-8")
+    before = LifecycleStateSnapshot.capture(consumer.root, external_roots=specs)
+    before_artifacts = ArtifactSnapshotSet.capture(snapshot_roots)
+    run((*_INSTALL_ARGS, "-g"))
+    run(("compile", "-g"))
+    _assert_same_state(before, LifecycleStateSnapshot.capture(consumer.root, external_roots=specs))
+    assert_snapshot_set_unchanged(before_artifacts, ArtifactSnapshotSet.capture(snapshot_roots))
+
+    alpha.write_text(alpha.read_text(encoding="utf-8").replace("v1", "v2"), encoding="utf-8")
+    latest = scenario.repositories.commit(source.repository, message="update alpha guidance")
+    run((*_INSTALL_ARGS, "-g", "--update"))
+    run(("compile", "-g"))
+    assert b"Use alpha v2." in native.read_bytes()
+    assert native.read_bytes() != first_native
+    assert not root.exists()
+    _, dependency = _single_locked_dependency(global_root)
+    assert dependency.resolved_commit == latest.sha
+    if not linked:
+        # Linked global rules already report replay drift after install alone
+        # on main; this lifecycle tests their bytes, not that independent audit bug.
+        _, audit = _audit_at(
+            scenario,
+            global_root,
+            environment=environment,
+            scenario_id="global-claude-updated-audit",
+        )
+        assert audit["passed"] is True
+
+    run(("compile", "-g", "--force-instructions"))
+    retained = root.read_bytes()
+    run(("compile", "-g"))
+    assert root.read_bytes() == retained
+    before = LifecycleStateSnapshot.capture(consumer.root, external_roots=specs)
+    before_artifacts = ArtifactSnapshotSet.capture(snapshot_roots)
+    run(("compile", "-g", "--dry-run"))
+    rejected = scenario.runner.run(
+        ("compile", "-g", "--clean"),
+        cwd=consumer.root,
+        env=environment,
+        scenario_id="global-clean-remains-unavailable",
+    )
+    assert rejected.returncode == 2, _result_evidence(rejected)
+    assert "--global is not valid with --clean" in rejected.stdout + rejected.stderr
+    _assert_same_state(before, LifecycleStateSnapshot.capture(consumer.root, external_roots=specs))
+    assert_snapshot_set_unchanged(before_artifacts, ArtifactSnapshotSet.capture(snapshot_roots))
+
+    native.unlink()
+    run(("compile", "-g"))
+    fallback = root.read_text(encoding="utf-8")
+    assert "Use alpha v2." in fallback
+    assert "Use beta guidance." not in fallback
+    run((*_INSTALL_ARGS, "-g"))
+    run(("compile", "-g"))
+    assert root.read_text(encoding="utf-8") == fallback
+    assert b"Use alpha v2." in native.read_bytes()
+    assert personal.read_text(encoding="utf-8") == "Keep personal guidance.\n"
+    assert_unchanged(project_before, ArtifactSnapshot.capture(consumer.root))
 
 
 def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(

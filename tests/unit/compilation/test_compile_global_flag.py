@@ -294,7 +294,10 @@ class TestHandleGlobalFlag:
                 "claude",
                 str(tmp_path / ".claude/CLAUDE.md"),
                 "written",
-                warnings=("claude native rule could not be verified; retaining fallback",),
+                warnings=(
+                    "claude alpha rule could not be verified; retaining fallback",
+                    "claude beta rule could not be verified; retaining fallback",
+                ),
             )
         ]
 
@@ -306,8 +309,16 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.warning.assert_any_call(
-            "claude native rule could not be verified; retaining fallback"
+        logger.warning.assert_called_once_with(
+            "claude: 2 native-rule verification failure(s); retaining compiled fallback. "
+            "Check rule readability, encoding, and path containment, then rerun "
+            "'apm compile -g'. Use --verbose for details."
+        )
+        logger.verbose_detail.assert_any_call(
+            "claude alpha rule could not be verified; retaining fallback"
+        )
+        logger.verbose_detail.assert_any_call(
+            "claude beta rule could not be verified; retaining fallback"
         )
 
     def test_multiple_results_mixed_status(self, tmp_path):

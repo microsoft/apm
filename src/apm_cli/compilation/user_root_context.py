@@ -166,14 +166,10 @@ def discover_global_instructions(
 def _handle_covered_claude_root(
     target: str,
     path: Path,
-    expected_content: str,
     *,
     warnings: tuple[str, ...] = (),
 ) -> UserRootCompileResult:
     """Skip new output without claiming ownership of an existing root."""
-    security_error = _validate_compiled_output_policy(target, path, expected_content, warnings)
-    if security_error is not None:
-        return security_error
     status = (
         "retained-native-rules" if path.is_symlink() or path.exists() else "skipped-native-rules"
     )
@@ -306,6 +302,12 @@ def compile_user_root_contexts(
             from .instruction_dedup import uncovered_instructions
 
             native_warnings: list[str] = []
+            security_error = _validate_compiled_output_policy(
+                scoped.name, output_path, _generate_content(target_instructions), ()
+            )
+            if security_error is not None:
+                results.append(security_error)
+                continue
             if not force_instructions:
                 target_instructions = uncovered_instructions(
                     "claude",
@@ -319,7 +321,6 @@ def compile_user_root_contexts(
                     _handle_covered_claude_root(
                         scoped.name,
                         lexical_output_path,
-                        _generate_content(global_instructions),
                         warnings=tuple(native_warnings),
                     )
                 )

@@ -79,6 +79,7 @@ def uncovered_instructions(
     converted frontmatter and rewritten package links participate in equality.
     Missing, unreadable, unsafe, or different rules keep the compiled fallback.
     """
+    from apm_cli.compilation.link_resolver import UnifiedLinkResolver
     from apm_cli.integration.instruction_integrator import (
         InstructionIntegrator,
         instruction_rule_filename,
@@ -114,6 +115,12 @@ def uncovered_instructions(
             integrator = integrators.get(package_root)
             if integrator is None:
                 integrator = InstructionIntegrator()
+                integrators[package_root] = integrator
+            prepared = integrator._prepare_instruction(source)
+            if (
+                UnifiedLinkResolver.LINK_PATTERN.search(prepared.content)
+                and integrator.link_resolver is None
+            ):
                 integrator.init_link_resolver(
                     PackageInfo(
                         # Link resolution uses only the package source path;
@@ -123,11 +130,16 @@ def uncovered_instructions(
                     ),
                     base_dir,
                 )
-                integrators[package_root] = integrator
-            if integrator.link_resolver is None:
-                uncovered.append(instruction)
-                continue
-            expected, _ = integrator._render_instruction(source, rule_path, mapping.format_id)
+                if integrator.link_resolver is None:
+                    warn_fn(
+                        f"Cannot verify native rule {rule_path}: link resolver initialization "
+                        "failed; retaining compiled instructions"
+                    )
+                    uncovered.append(instruction)
+                    continue
+            expected, _ = integrator._render_instruction(
+                source, rule_path, mapping.format_id, prepared=prepared
+            )
             if rule_path.read_text(encoding="utf-8").strip() != expected.strip():
                 uncovered.append(instruction)
         except (OSError, RuntimeError, UnicodeError, ValueError, yaml.YAMLError) as exc:

@@ -502,8 +502,15 @@ def _handle_global_flag(
     would_write_count = 0
     unchanged_count = 0
     for entry in results:
-        for warning in getattr(entry, "warnings", ()):
-            logger.warning(warning)
+        warnings = entry.warnings
+        if warnings:
+            logger.warning(
+                f"{entry.target}: {len(warnings)} native-rule verification failure(s); "
+                "retaining compiled fallback. Check rule readability, encoding, and path "
+                "containment, then rerun 'apm compile -g'. Use --verbose for details."
+            )
+            for warning in warnings:
+                logger.verbose_detail(warning)
         status = entry.status
         tname = entry.target
         path = entry.path

@@ -1,24 +1,43 @@
 """Global install/compile must deliver Claude instructions only once."""
 
+import os
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
 pytestmark = pytest.mark.component
+
+
+@pytest.fixture
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> IsolatedApmEnvironment:
+    """Keep in-process CLI calls away from real credentials and configuration."""
+    environment = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    for name in tuple(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in environment.process_environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(environment.work_root)
+    return environment
 
 
 @pytest.mark.parametrize("custom_config", [False, True])
 @pytest.mark.parametrize("linked", [False, True])
 def test_installed_global_rules_are_not_compiled_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custom_config: bool, linked: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated: IsolatedApmEnvironment,
+    custom_config: bool,
+    linked: bool,
 ) -> None:
     """Native Claude rules replace its root output without affecting Codex."""
     from apm_cli.commands.compile.cli import compile as compile_cmd
     from apm_cli.commands.install import install as install_cmd
     from apm_cli.primitives.discovery import clear_discovery_cache
 
-    home = tmp_path / "home"
+    home = isolated.home
     config = tmp_path / "custom-claude" if custom_config else home / ".claude"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
@@ -60,13 +79,13 @@ def test_installed_global_rules_are_not_compiled_again(
 
 
 def test_global_compile_retains_existing_root_and_rejects_cleanup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated: IsolatedApmEnvironment
 ) -> None:
     """Deduplication never enables global cleanup or silently deletes an existing root."""
     from apm_cli.commands.compile.cli import compile as compile_cmd
     from apm_cli.primitives.discovery import clear_discovery_cache
 
-    home = tmp_path / "home"
+    home = isolated.home
     config = tmp_path / "external-claude"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
