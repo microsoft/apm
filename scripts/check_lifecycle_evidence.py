@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +57,18 @@ def source_profile(root: Path) -> tuple[Path | None, dict[str, Any]]:
     if executable:
         script = executable.read_text(encoding="utf-8")
         interpreter = Path(script.splitlines()[0][2:]) if script.startswith("#!") else None
+        if script.startswith("#!/bin/sh\n"):
+            trampoline = re.match(
+                r"\A#!/bin/sh\n'''exec' "
+                r"""(?:'([^'\r\n]+)'|"([^"$`\\\r\n]+)"|([A-Za-z0-9_./:+-]+))"""
+                r""" "\$0" "\$@"\n' '''\n""",
+                script,
+            )
+            interpreter = (
+                Path(next(part for part in trampoline.groups() if part is not None))
+                if trampoline
+                else None
+            )
         if (
             "apm_cli.cli" not in script
             or interpreter is None

@@ -36,7 +36,6 @@ from tests.utils.lifecycle_evidence import LifecycleEvidencePlugin, _physical_ro
 
 pytestmark = pytest.mark.component
 pytest_plugins = ["pytester"]
-RATCHET_TEST_SCOPE = "fixture"
 
 
 def _ledger() -> dict[str, Any]:
@@ -114,6 +113,7 @@ def test_immutable_witnesses_and_current_inventory() -> None:
         "none",
         "delete",
         "duplicate",
+        "nodeid",
         "kind",
         "dimension",
         "dimension-type",
@@ -132,6 +132,10 @@ def test_contract_edits_cannot_vacuously_remove_proof(mutation: str) -> None:
         contract["witnesses"].pop()
     elif mutation == "duplicate":
         contract["witnesses"][-1] = copy.deepcopy(contract["witnesses"][0])
+    elif mutation == "nodeid":
+        contract["witnesses"][-1]["nodeid"] = (
+            "tests/integration/test_required_lifecycle_state_machine.py::test_unreviewed_semver_witness"
+        )
     elif mutation == "kind":
         contract["witnesses"][3]["kind"] = "deterministic"
     elif mutation == "dimension":
@@ -146,7 +150,8 @@ def test_contract_edits_cannot_vacuously_remove_proof(mutation: str) -> None:
         contract["commands"]["install"]["generated"] = []
     else:
         contract["witnesses"][0]["transitions"] = []
-    with pytest.raises(EvidenceError):
+    message = "Exact immutable witness identities required" if mutation == "nodeid" else None
+    with pytest.raises(EvidenceError, match=message):
         validate_contracts(ledger, command_inventory())
 
 
@@ -378,12 +383,18 @@ def test_source_profile_pins_checkout_launcher_and_interpreter(
 
     source = tmp_path / "src/apm_cli"
     source.mkdir(parents=True)
-    (source / "cli.py").write_text("fixture")
+    (source / "cli.py").write_text("def main():\n    return 0\n")
     monkeypatch.setattr(apm_cli, "__file__", str(source / "__init__.py"))
     python = tmp_path / "python"
     python.write_text("fixture interpreter")
     monkeypatch.setattr(sys, "executable", str(python))
     assert gate.source_profile(tmp_path)[0] is None
+    foreign = tmp_path / "foreign/src/apm_cli"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("")
+    (foreign / "cli.py").write_bytes((source / "cli.py").read_bytes())
+    if os.name != "nt":
+        (tmp_path / "apm").write_text(f"#!{python}\nfrom apm_cli.cli import main\nmain()\n")
     with pytest.raises(EvidenceError, match="candidate checkout"):
         gate.source_profile(tmp_path / "foreign")
     if os.name != "nt":
@@ -413,6 +424,88 @@ def test_launcher_cannot_borrow_another_environment_interpreter(
     launcher.write_text(f"#!{foreign / 'python'}\nfrom apm_cli.cli import cli\n")
     monkeypatch.setattr(sys, "executable", str(current / "python"))
     assert (current / "python").samefile(foreign / "python")
+    with pytest.raises(EvidenceError, match="this Python environment"):
+        gate.source_profile(gate.ROOT)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "single-quoted",
+        "double-quoted",
+        "unquoted",
+        "foreign-environment",
+        "different-interpreter",
+        "relative-interpreter",
+        "empty-interpreter",
+        "unterminated-path",
+        "missing-terminator",
+        "extra-shell-line",
+        "extra-shell-command",
+        "extra-python-argument",
+        "command-substitution",
+        "variable-expansion",
+        "wrong-forwarding",
+        "missing-cli",
+    ],
+)
+def test_source_profile_accepts_only_canonical_long_path_launchers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    from pip._vendor.distlib.scripts import ScriptMaker
+
+    if os.name == "nt":
+        assert gate.source_profile(gate.ROOT)[0] is None
+        return
+    directory = tmp_path / ("x" * 170) / ("y" * 170) / ("z" * 170)
+    directory.mkdir(parents=True)
+    python = directory / "python"
+    python.symlink_to(Path(sys.executable).resolve())
+    assert len(str(python)) > 512
+    quoted = {
+        "double-quoted": f'"{python}"',
+        "unquoted": str(python),
+    }.get(variant, f"'{python}'")
+    maker = ScriptMaker(None, str(directory))
+    maker.executable = quoted
+    maker.variants = {""}
+    launcher = directory / "apm"
+    assert maker.make("apm = apm_cli.cli:main") == [str(launcher)]
+    script = launcher.read_text(encoding="utf-8")
+    assert script.startswith("#!/bin/sh\n'''exec' ")
+    monkeypatch.setattr(sys, "executable", str(python))
+    executable, profile = gate.source_profile(gate.ROOT)
+    assert executable == launcher
+    assert profile["python_environment"] == str(directory.resolve())
+    assert profile["executable_sha256"] == hashlib.sha256(launcher.read_bytes()).hexdigest()
+    if variant in {"single-quoted", "double-quoted", "unquoted"}:
+        return
+
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    foreign_python = foreign / "python"
+    foreign_python.symlink_to(python.resolve())
+    different_python = directory / "different-python"
+    different_python.write_text("not this interpreter")
+    substitutions = {
+        "foreign-environment": (quoted, f"'{foreign_python}'"),
+        "different-interpreter": (quoted, f"'{different_python}'"),
+        "relative-interpreter": (quoted, "'python'"),
+        "empty-interpreter": (quoted, "''"),
+        "unterminated-path": (quoted, f"'{python}"),
+        "missing-terminator": ("\n' '''\n", "\n"),
+        "extra-shell-line": ("#!/bin/sh\n", "#!/bin/sh\ntrue\n"),
+        "extra-shell-command": (' "$0" "$@"\n', ' "$0" "$@"; true\n'),
+        "extra-python-argument": (' "$0" "$@"\n', ' -I "$0" "$@"\n'),
+        "command-substitution": (quoted, f'"{python}$(true)"'),
+        "variable-expansion": (quoted, f'"{python}$UNSET"'),
+        "wrong-forwarding": (' "$0" "$@"\n', ' "$@" "$0"\n'),
+        "missing-cli": ("apm_cli.cli", "foreign.cli"),
+    }
+    old, new = substitutions[variant]
+    changed = script.replace(old, new, 1)
+    assert changed != script
+    launcher.write_text(changed, encoding="utf-8")
     with pytest.raises(EvidenceError, match="this Python environment"):
         gate.source_profile(gate.ROOT)
 
@@ -717,7 +810,16 @@ def test_completion_emission_refuses_inconsistent_success_report(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["pass", "pytest-failed", "missing", "dirty-after", "head-after", "tree-after", "source-after"],
+    [
+        "pass",
+        "pytest-failed",
+        "missing",
+        "skipped-call",
+        "dirty-after",
+        "head-after",
+        "tree-after",
+        "source-after",
+    ],
 )
 def test_provider_execution_checks_identity_after_its_own_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
@@ -776,6 +878,8 @@ def test_provider_execution_checks_identity_after_its_own_run(
         calls.append("fresh pytest")
         if mutation == "missing":
             records.pop(REQUIRED_WITNESSES[0])
+        elif mutation == "skipped-call":
+            records[REQUIRED_WITNESSES[0]]["phases"]["call"] = "skipped"
         return 1 if mutation == "pytest-failed" else 0
 
     plugin = SimpleNamespace(records=records, patch=SimpleNamespace(undo=lambda: None))
@@ -796,6 +900,9 @@ def test_provider_execution_checks_identity_after_its_own_run(
     assert result["status"] == ("passed" if mutation == "pass" else "blocked")
     if mutation != "pass":
         assert result["error"]
+    if mutation == "skipped-call":
+        assert set(result["witnesses"]) == set(REQUIRED_WITNESSES)
+        assert "setup/call/teardown must pass" in result["error"]
 
 
 @pytest.mark.parametrize("mode", ["skip", "xfail", "setup", "teardown", "call", "pass"])

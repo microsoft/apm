@@ -83,7 +83,10 @@ def test_alias_reader_uses_only_selected_store(tmp_path: Path) -> None:
     )
 
 
-def test_alias_reader_refuses_escape_without_inspecting_external_package(tmp_path: Path) -> None:
+@pytest.mark.parametrize("declarations", ["manifest", "lock", "both"])
+def test_alias_reader_refuses_escape_without_inspecting_external_package(
+    tmp_path: Path, declarations: str
+) -> None:
     store = tmp_path / "store"
     external = tmp_path / "external"
     external.mkdir()
@@ -91,11 +94,21 @@ def test_alias_reader_refuses_escape_without_inspecting_external_package(tmp_pat
     modules = store / "apm_modules"
     modules.mkdir(parents=True)
     (modules / "escaped").symlink_to(external, target_is_directory=True)
-    lock = LockFile()
-    lock.add_dependency(
-        LockedDependency(repo_url="owner/bundle", alias="escaped", resolved_commit="a" * 40)
-    )
-    lock.save(store / "apm.lock.yaml")
+    if declarations in {"manifest", "both"}:
+        dump_yaml(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": [{"git": "owner/bundle", "alias": "escaped"}]},
+            },
+            store / "apm.yml",
+        )
+    if declarations in {"lock", "both"}:
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(repo_url="owner/bundle", alias="escaped", resolved_commit="a" * 40)
+        )
+        lock.save(store / "apm.lock.yaml")
     before = ArtifactSnapshotSet.capture({"store": store, "external": external})
     with pytest.raises(PathTraversalError):
         _resolve_scope_deps(store, MagicMock())
