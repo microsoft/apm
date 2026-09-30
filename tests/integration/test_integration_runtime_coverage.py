@@ -1848,12 +1848,13 @@ class TestInstructionConverters:
         assert '  - "**/*.pyi"' in result
 
     def test_convert_to_cursor_rules_multiple_globs(self) -> None:
-        """Multiple globs result in a YAML list in cursor rules."""
+        """Multiple globs join into a single comma-separated scalar in cursor rules (#3002)."""
         from apm_cli.integration.instruction_integrator import InstructionIntegrator
 
         content = "---\napplyTo: '**/*.py,**/*.pyi'\n---\n# Body\n"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "globs:" in result
+        assert "globs: **/*.py, **/*.pyi" in result
+        assert "  - " not in result
 
     def test_convert_to_cursor_rules_generates_description(self) -> None:
         """Description is generated from first body line when not in frontmatter."""
