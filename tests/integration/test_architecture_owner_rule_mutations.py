@@ -1224,8 +1224,8 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-native-instruction-projection",
         rule_id="hooks-integrations-native-instruction-projection",
         path="src/apm_cli/compilation/user_root_context.py",
-        old='if family == "claude":\n            target_instructions = []',
-        new='if family != "claude":\n            target_instructions = []',
+        old='if family == "claude":\n            try:',
+        new='if family != "claude":\n            try:',
         intent="Native-rule suppression leaks into non-Claude target families.",
     ),
     MutationCase(
