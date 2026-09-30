@@ -382,7 +382,7 @@ def test_symlinked_native_rules_retain_fallback_and_preserve_destination(
     else:
         link = style
         destination_root = (
-            lifecycle.claude_root if link_kind == "rule-inside" else lifecycle.isolated.work_root
+            lifecycle.rules if link_kind == "rule-inside" else lifecycle.isolated.work_root
         )
         destination = destination_root / "saved-style.md"
         link.rename(destination)
@@ -390,6 +390,7 @@ def test_symlinked_native_rules_retain_fallback_and_preserve_destination(
         link.symlink_to(destination, target_is_directory=link_kind == "rules-directory")
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Symlinks unavailable: {exc}")
+    linked_before = {path.name: path.read_bytes() for path in lifecycle.rules.glob("*.md")}
 
     lifecycle.run("compile", "-g", "--clean")
 
@@ -403,7 +404,7 @@ def test_symlinked_native_rules_retain_fallback_and_preserve_destination(
         assert destination.read_bytes() == native_before["style.md"]
     assert link.is_symlink()
     assert link.readlink() == destination
-    assert {path.name: path.read_bytes() for path in lifecycle.rules.glob("*.md")} == native_before
+    assert {path.name: path.read_bytes() for path in lifecycle.rules.glob("*.md")} == linked_before
 
 
 @pytest.mark.skipif(
