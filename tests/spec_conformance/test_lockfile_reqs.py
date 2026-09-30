@@ -174,6 +174,61 @@ def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
     assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
 
+@pytest.mark.req("req-lk-006")
+@pytest.mark.parametrize("scope_name", ["project", "user"])
+@pytest.mark.parametrize("selected_state", ["absent", "missing-pin"])
+def test_frozen_selected_store_rejects_source_decoy_without_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope_name: str, selected_state: str
+) -> None:
+    """The selected installation must satisfy frozen admission before any write."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.errors import FrozenInstallError
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.models.apm_package import APMPackage
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+    from tests.utils.local_package import LocalPackageFactory
+
+    source = LocalPackageFactory(tmp_path / "sources").create(
+        "consumer", dependencies=("owner/package",), targets=("claude",)
+    )
+    home, deploy = tmp_path / "home", tmp_path / "deploy"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("APM_HOME", str(home / ".apm"))
+    deploy.mkdir()
+    monkeypatch.chdir(deploy)
+    scope = InstallScope.USER if scope_name == "user" else InstallScope.PROJECT
+    selected = home / ".apm" if scope is InstallScope.USER else deploy
+    selected.mkdir(parents=True, exist_ok=True)
+    source_lock = LockFile()
+    source_lock.add_dependency(
+        LockedDependency(repo_url="owner/package", resolved_ref="main", resolved_commit="a" * 40)
+    )
+    source_lock.write(source.root / "apm.lock.yaml")
+    if selected_state == "missing-pin":
+        LockFile().write(selected / "apm.lock.yaml")
+    for path in (
+        selected / "apm_modules/unrelated/CLAUDE.md",
+        deploy / ".claude/settings.json",
+        home / ".cache/apm/sentinel",
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("preserve\n", encoding="ascii")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    diagnostic = "requires apm.lock.yaml" if selected_state == "absent" else "out of sync"
+    with pytest.raises(FrozenInstallError, match=diagnostic.replace(".", r"\.")):
+        InstallService.enforce_frozen(
+            InstallRequest(
+                apm_package=APMPackage.from_apm_yml(source.manifest_path), scope=scope, frozen=True
+            )
+        )
+
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
+
+
 @pytest.mark.req("req-lk-007")
 def test_lockfile_should_record_resolution_metadata():
     schema = load_schema("lockfile-v0.1.41.schema.json")
@@ -385,6 +440,53 @@ def test_lockfile_materialization_spelling_is_non_identity_metadata():
         "an in-repository `virtual_path` and virtual-file leaf\nremain case-sensitive",
         "MUST fail closed without deleting any candidate path",
     )
+
+
+@pytest.mark.req("req-lk-022")
+@pytest.mark.parametrize("virtual_path", ["Nested/Rules", "Nested/Rules/Deep/Policy"])
+def test_claude_materialization_links_preserve_locked_source_and_virtual_case(
+    tmp_path: Path, virtual_path: str
+) -> None:
+    """Generated links use retained spelling, including case-sensitive virtual paths."""
+    from apm_cli.compilation.claude_formatter import ClaudeFormatter
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.primitives.models import PrimitiveCollection
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    source, output = tmp_path / "source", tmp_path / "output"
+    output.mkdir()
+    relative = f"Contoso/Standards/{virtual_path}"
+    memory = source / "apm_modules" / relative / "CLAUDE.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text("# Retained memory\n", encoding="ascii")
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="contoso/standards",
+            materialization_repo_url="Contoso/Standards",
+            host="github.com",
+            virtual_path=virtual_path,
+            is_virtual=True,
+            resolved_ref="main",
+            resolved_commit="b" * 40,
+        )
+    )
+    lock.write(source / "apm.lock.yaml")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    result = ClaudeFormatter(str(output), source_dir=str(source)).format_distributed(
+        PrimitiveCollection(), {}
+    )
+
+    assert result.success, result.errors
+    imports = [
+        line
+        for line in result.content_map[output / "CLAUDE.md"].splitlines()
+        if line.startswith("@")
+    ]
+    assert imports == [f"@../source/apm_modules/{relative}/CLAUDE.md"]
+    assert (output / imports[0][1:]).resolve() == memory.resolve()
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
 
 @pytest.mark.req("req-lk-022")
