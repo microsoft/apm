@@ -49,6 +49,15 @@ class TestToOpencodeFormat(unittest.TestCase):
         result = OpenCodeClientAdapter._to_opencode_format(copilot, enabled=False)
         self.assertFalse(result["enabled"])
 
+    def test_explicit_enabled_values_keep_their_json_type(self):
+        for enabled in (False, "false", None):
+            with self.subTest(enabled=enabled):
+                result = OpenCodeClientAdapter._to_opencode_format(
+                    {"command": "npx", "args": []}, enabled=enabled
+                )
+                self.assertEqual(result["enabled"], enabled)
+                self.assertIs(type(result["enabled"]), type(enabled))
+
     # -- remote entries --
 
     def test_remote_basic(self):
@@ -243,6 +252,33 @@ class TestOpenCodeConfigureMCPServer(unittest.TestCase):
         self.adapter.registry_client = MagicMock()
         self.adapter.registry_client.find_server_by_reference.return_value = None
         self.assertFalse(self.adapter.configure_mcp_server("unknown-server"))
+
+    def test_fetched_marker_cannot_override_caller_intent(self):
+        for enabled in (False, True, None, "false"):
+            with self.subTest(enabled=enabled):
+                self.adapter.registry_client = MagicMock()
+                self.adapter.registry_client.find_server_by_reference.return_value = {
+                    "name": "remote",
+                    "remotes": [
+                        {"transport_type": "streamable-http", "url": "https://example.com/mcp"}
+                    ],
+                    "_apm_opencode_enabled": not enabled,
+                }
+                self.assertTrue(self.adapter.configure_mcp_server("remote", enabled=enabled))
+                rendered = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+                self.assertEqual(rendered["mcp"]["remote"]["enabled"], enabled)
+                self.assertIs(type(rendered["mcp"]["remote"]["enabled"]), type(enabled))
+
+    def test_fetched_marker_cannot_override_omitted_default(self):
+        self.adapter.registry_client = MagicMock()
+        self.adapter.registry_client.find_server_by_reference.return_value = {
+            "name": "remote",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://example.com/mcp"}],
+            "_apm_opencode_enabled": False,
+        }
+        self.assertTrue(self.adapter.configure_mcp_server("remote"))
+        rendered = json.loads(self.opencode_json.read_text(encoding="utf-8"))
+        self.assertIs(rendered["mcp"]["remote"]["enabled"], True)
 
     def test_config_key_uses_server_name_when_provided(self):
         server_info = {

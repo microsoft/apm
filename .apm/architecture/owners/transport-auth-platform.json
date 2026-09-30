@@ -7,9 +7,11 @@
       "owner": "deps/transport_selection.py (initial_transport_scheme, TransportSelector); deps/download_strategies.py (DownloadDelegate.download_gitlab_file)",
       "selectors": [
         "src/apm_cli/deps/transport_selection.py",
-        "src/apm_cli/deps/download_strategies.py"
+        "src/apm_cli/deps/download_strategies.py",
+        "src/apm_cli/marketplace/resolver.py",
+        "src/apm_cli/marketplace/version_resolver.py"
       ],
-      "guards": ["transport-platform-gitlab-sparse-plan"]
+      "guards": ["transport-platform-gitlab-sparse-plan", "transport-platform-marketplace-package-remote"]
     },
     {
       "id": "unix-install-ownership",

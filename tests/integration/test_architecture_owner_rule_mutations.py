@@ -302,6 +302,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="HookIntegrator stops owning the neutral hook rewrite-scope resolver.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-opencode-enabled-intent",
+        rule_id="mutation_writes.opencode_enabled_intent",
+        path="src/apm_cli/models/dependency/mcp.py",
+        old="return self.enabled is not _ENABLED_UNSET",
+        new="return bool(self.enabled)",
+        intent="Explicit false and null become omission instead of manifest intent.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-user-root-scope",
         rule_id="mutation_writes.user_root_scope",
         path="src/apm_cli/integration/targets.py",
@@ -1210,6 +1218,20 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_frozen_preflight_uses_selected_lockfile_store() -> None:
+    """Scoped frozen preflight must not substitute a source-side lockfile."""
+    path = "src/apm_cli/install/service.py"
+    source = _source(path)
+    old = "project_dir = get_lockfile_dir(request.scope)"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "project_dir = Path(manifest_path)", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-frozen-mutation-eligibility"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)

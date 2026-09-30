@@ -98,13 +98,15 @@ def frozen_install_tip(error: FrozenInstallError) -> str:
     has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
     has_package_drift = any("MCP server" not in reason for reason in error.reasons)
     if has_mcp_drift and has_package_drift:
-        return (
-            "Tip: run 'apm outdated' to inspect package drift, then run "
-            "'apm install' without --frozen to repair package and MCP lock state."
-        )
-    if has_mcp_drift:
-        return "Tip: run 'apm install' without --frozen to create or repair MCP lock state."
-    return "Tip: run 'apm outdated' to see what changed, then 'apm update'."
+        lock_state = "package and MCP lock state"
+    elif has_mcp_drift:
+        lock_state = "MCP lock state"
+    else:
+        lock_state = "package lock state"
+    return (
+        f"Tip: rerun 'apm install' without --frozen to create or repair {lock_state}, "
+        "retaining the original options, including --root DIR or --global if specified."
+    )
 
 
 class PolicyViolationError(RuntimeError):

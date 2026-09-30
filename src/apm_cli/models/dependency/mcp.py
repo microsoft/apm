@@ -1,7 +1,9 @@
 """MCP dependency model."""
 
+import json
 import re
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,6 +27,8 @@ _KNOWN_DICT_KEYS = frozenset(
         "command",
         "cwd",
         "extra",  # explicit extra block is also a known key
+        # OpenCode-specific passthrough value. Keep explicit null distinct from omission.
+        "enabled",
         # Install-time provenance field: reserved here so a manifest key named
         # ``resolved_by`` is treated as known (ignored by from_dict, never
         # constructed from user input) instead of passing through ``extra`` into
@@ -65,6 +69,42 @@ _HARNESS_EXTRA_ALIASES = frozenset(
 )
 _EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | _HARNESS_EXTRA_ALIASES
 
+
+class _UnsetEnabled(Enum):
+    """Sentinel stable across copies so omitted values remain omitted."""
+
+    VALUE = "unset"
+
+
+# Distinguish an explicit OpenCode ``enabled: null`` from an omitted key.
+_ENABLED_UNSET = _UnsetEnabled.VALUE
+OPENCODE_ENABLED_KEY = "_apm_opencode_enabled"
+
+
+@dataclass(frozen=True)
+class OpenCodeEnabled:
+    """Manifest intent, distinct from JSON supplied by an MCP registry."""
+
+    value: Any
+
+
+def opencode_enabled_value(server_info: dict, default: Any = True) -> Any:
+    """Read only model-authored enabled metadata; registry JSON is untrusted."""
+    intent = server_info.get(OPENCODE_ENABLED_KEY)
+    return intent.value if isinstance(intent, OpenCodeEnabled) else default
+
+
+def opencode_enabled_matches(current: dict, stored: dict) -> bool:
+    """Compare presence and JSON type, including nested bool/number changes."""
+    if ("enabled" in current) != ("enabled" in stored):
+        return False
+    if "enabled" not in current:
+        return True
+    return json.dumps(current["enabled"], sort_keys=True) == json.dumps(
+        stored["enabled"], sort_keys=True
+    )
+
+
 _NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
@@ -97,6 +137,8 @@ class MCPDependency:
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
     cwd: str | None = None  # Working directory for stdio transports
+    # OpenCode-only value forwarded unchanged; other target adapters ignore it.
+    enabled: Any = _ENABLED_UNSET
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
@@ -173,6 +215,7 @@ class MCPDependency:
             url=d.get("url"),
             command=d.get("command"),
             cwd=d.get("cwd"),
+            enabled=d.get("enabled", _ENABLED_UNSET),
             extra=extra,
         )
 
@@ -193,11 +236,22 @@ class MCPDependency:
         """True when the dependency is self-defined (registry: false)."""
         return self.registry is False
 
+    @property
+    def has_enabled(self) -> bool:
+        """Whether the manifest explicitly supplied OpenCode's ``enabled`` value."""
+        return self.enabled is not _ENABLED_UNSET
+
+    def apply_opencode_enabled(self, server_info: dict) -> None:
+        """Replace registry metadata with optional, trusted manifest intent."""
+        server_info.pop(OPENCODE_ENABLED_KEY, None)
+        if self.has_enabled:
+            server_info[OPENCODE_ENABLED_KEY] = OpenCodeEnabled(self.enabled)
+
     def to_dict(self) -> dict:
-        """Serialize to dict, including only non-None fields.
+        """Serialize non-None fields, preserving an explicitly supplied enabled value.
 
         ``extra`` keys are merged at the top level but cannot shadow
-        known fields (known fields always win).
+        reserved fields. An explicit ``enabled: null`` remains present.
         """
         result: dict[str, Any] = {"name": self.name}
         for field_name in (
@@ -216,9 +270,11 @@ class MCPDependency:
             value = getattr(self, field_name)
             if value is not None or (field_name == "registry" and value is False):
                 result[field_name] = value
+        if self.has_enabled:
+            result["enabled"] = self.enabled
         if self.extra:
             for k, v in self.extra.items():
-                if k not in result:
+                if k not in result and k not in _EXTRA_DENYLIST:
                     result[k] = v
         return result
 
