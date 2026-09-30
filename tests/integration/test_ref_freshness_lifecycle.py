@@ -63,6 +63,7 @@ class _Scenario:
     runner: ApmLifecycleRunner
     skill_path: Path
     commit_a: GitCommit
+    remote_url: str
 
 
 def _skill_document(marker: str) -> str:
@@ -76,7 +77,11 @@ def _skill_document(marker: str) -> str:
 
 
 def _new_scenario(
-    root: Path, apm_binary_path: Path, *, reference: str | None = "main"
+    root: Path,
+    apm_binary_path: Path,
+    *,
+    reference: str | None = "main",
+    host: str = "github.com",
 ) -> _Scenario:
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     environment = isolated.subprocess_env(overrides={"APM_TIERED_RESOLVER": "1"})
@@ -89,13 +94,13 @@ def _new_scenario(
     )
     repository = repositories.create("ref-freshness-source", source_tree=source.root)
     commit_a = repositories.commit(repository, message="publish commit A")
-    remote_url = "https://github.com/apm-fixture-org/ref-freshness-source"
+    remote_url = f"https://{host}/apm-fixture-org/ref-freshness-source"
     environment = repositories.url_rewrite_subprocess_env(repository, remote_url)
     rewrite_index = int(environment["GIT_CONFIG_COUNT"])
     environment["GIT_CONFIG_COUNT"] = str(rewrite_index + 1)
     environment[f"GIT_CONFIG_KEY_{rewrite_index}"] = f"url.{repository.file_url}/.insteadOf"
     environment[f"GIT_CONFIG_VALUE_{rewrite_index}"] = (
-        "git@github.com:apm-fixture-org/ref-freshness-source.git"
+        f"git@{host}:apm-fixture-org/ref-freshness-source.git"
     )
     consumer = LocalPackageFactory(isolated.work_root).create(
         "ref-freshness-consumer",
@@ -121,6 +126,7 @@ def _new_scenario(
         ),
         skill_path=repository.worktree / source_skill.relative_to(source.root),
         commit_a=commit_a,
+        remote_url=remote_url,
     )
 
 
@@ -217,12 +223,24 @@ def test_frozen_default_ref_rehydrates_cold_cache_without_ref_drift(
     _run(scenario, _AUDIT_ARGS, scenario_id="default-ref-audit-a")
 
 
-@pytest.mark.parametrize("unrelated_lock_entry", [False, True])
+@pytest.mark.parametrize(
+    ("unrelated_lock_entry", "historical_provider"),
+    [
+        pytest.param(False, False, id="False"),
+        pytest.param(True, False, id="True"),
+        pytest.param(False, True, id="historical-matching"),
+        pytest.param(True, True, id="historical-unrelated"),
+    ],
+)
 def test_reinstall_uses_current_ref_without_a_matching_lock_entry(
-    tmp_path: Path, apm_binary_path: Path, unrelated_lock_entry: bool
+    tmp_path: Path,
+    apm_binary_path: Path,
+    unrelated_lock_entry: bool,
+    historical_provider: bool,
 ) -> None:
-    """An empty or unrelated lock cannot authorize the removed package's stale cache."""
-    scenario = _new_scenario(tmp_path / "unlocked-ref", apm_binary_path)
+    """Missing or unusable historical identity cannot authorize stale package bytes."""
+    host = "fixture.ghe.com" if historical_provider else "github.com"
+    scenario = _new_scenario(tmp_path / "unlocked-ref", apm_binary_path, host=host)
     manifest = scenario.consumer.root / "apm.yml"
     original_manifest = manifest.read_bytes()
     sentinel = scenario.consumer.root / "user-owned.txt"
@@ -231,19 +249,36 @@ def test_reinstall_uses_current_ref_without_a_matching_lock_entry(
     commit_b = _advance(scenario, "commit-b")
     _run(
         scenario,
-        ("uninstall", "https://github.com/apm-fixture-org/ref-freshness-source"),
+        ("uninstall", scenario.remote_url),
         scenario_id="unlocked-remove-a",
     )
     manifest.write_bytes(original_manifest)
     lock = LockFile()
-    if unrelated_lock_entry:
-        lock.dependencies["unrelated/package"] = LockedDependency(
-            repo_url="unrelated/package", resolved_ref="main", resolved_commit=scenario.commit_a.sha
+    if unrelated_lock_entry or historical_provider:
+        repo_url = (
+            "unrelated/package" if unrelated_lock_entry else "apm-fixture-org/ref-freshness-source"
         )
+        locked = LockedDependency(
+            repo_url=repo_url,
+            host=host,
+            host_type="gitlab" if historical_provider else None,
+            resolved_ref="main",
+            resolved_commit=scenario.commit_a.sha,
+        )
+        lock.dependencies[locked.get_unique_key()] = locked
     lock.save(scenario.consumer.root / "apm.lock.yaml")
     _run(scenario, _INSTALL_ARGS, scenario_id="unlocked-reinstall-b")
     assert _locked_commit(scenario) == commit_b.sha
     assert _deployed_bytes(scenario) == _skill_document("commit-b").encode()
+    assert _module_skill_bytes(scenario) == _skill_document("commit-b").encode()
+    assert manifest.read_bytes() == original_manifest
+    recovered_lock = LockFile.read(scenario.consumer.root / "apm.lock.yaml")
+    assert recovered_lock is not None
+    recovered = recovered_lock.get_package_dependencies()[0]
+    assert recovered.repo_url == "apm-fixture-org/ref-freshness-source"
+    assert recovered.host == host
+    assert recovered.host_type is None
+    assert recovered.resolved_ref == "main"
     assert sentinel.read_text(encoding="ascii") == "preserve\n"
     _run(scenario, _AUDIT_ARGS, scenario_id="unlocked-audit-b")
     converged = _capture(scenario)

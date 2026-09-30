@@ -581,7 +581,8 @@ jobs:
   #
   # Why timeout-minutes: 6
   # ------------------------
-  # Two xdist workers share the required selection without widening the cap.
+  # Four xdist workers use the public Ubuntu runner's four CPUs without
+  # widening the cap or changing the required selection.
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The 6-minute cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
@@ -628,6 +629,8 @@ jobs:
       env:
         APM_E2E_TESTS: "1"
       run: |
+        printf 'Runner logical CPUs: '
+        nproc
         uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
-          -n 2 --dist loadgroup \
+          -n 4 --dist loadgroup \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
