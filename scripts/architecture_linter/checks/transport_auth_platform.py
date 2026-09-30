@@ -148,6 +148,31 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
 
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            "src/apm_cli/adapters/client/base.py",
+            (
+                "resolver.resolve_github_mcp_token(",
+                "source_only=self._supports_runtime_env_substitution",
+                'isinstance(header.get("value"), ManifestHeaderValue)',
+            ),
+            "Shared MCP auth must preserve manifest provenance and use AuthResolver",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _paths_under(provider, "src/apm_cli/adapters/client/", (".py",)),
+            re.compile(r"\.get_token_(?:env_var_)?for_purpose\("),
+            "MCP adapters must select credentials through AuthResolver",
+            exempt=False,
+        )
+    )
     # AC5 -- AuthResolver must scrub inherited Git authorization state.
     findings.extend(
         _require_subs(

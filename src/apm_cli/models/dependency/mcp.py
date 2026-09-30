@@ -113,6 +113,10 @@ class TrustedEnvLiteral(str):
     """Literal environment value introduced by a trusted APM integration."""
 
 
+class ManifestHeaderValue(str):
+    """Header value authored in a manifest, not supplied by registry JSON."""
+
+
 @dataclass
 class MCPDependency:
     """Represents an MCP server dependency with optional overlay configuration.

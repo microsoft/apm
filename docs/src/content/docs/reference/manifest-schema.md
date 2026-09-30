@@ -660,6 +660,15 @@ dependencies:
 
 Values in `headers` and `env` may contain three placeholder syntaxes. APM resolves them per-target so secrets stay out of generated config files where possible.
 
+For recognized GitHub MCP servers, automatic authentication follows the
+same target capability: runtime-capable targets write a native reference
+to the selected token environment variable, while literal-only targets
+retain their existing automatic-token behavior. A manifest-supplied nonempty
+string `Authorization` value takes precedence over automatic authentication.
+See [Token injection: GitHub MCP server](../../consumer/install-mcp-servers/#token-injection-github-mcp-server)
+for the selection order and guidance for repairing existing generated
+configurations.
+
 | Syntax | Source | VS Code | JetBrains Copilot | Copilot CLI / Kiro | Codex / Gemini / Cursor |
 |---|---|---|---|---|---|
 | `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Translated to `${env:VAR}` | Native; passed through verbatim | `env`: resolved at install time from env (or interactive prompt). Codex `headers`: see note below |
