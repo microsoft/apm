@@ -9,6 +9,8 @@ Issue: https://github.com/microsoft/apm/issues/1203
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.plan import (
     PlanEntry,
@@ -684,7 +686,7 @@ class TestLockfileSatisfiesManifest:
                 depth=1,
             )
         )
-        manifest = [DependencyReference.parse("git@git.example.com:org/private-skills.git")]
+        manifest = [DependencyReference.parse("git@git.example.com:org/private-skills.git#main")]
 
         ok, reasons = lockfile_satisfies_manifest(lock, manifest)
 
@@ -720,7 +722,7 @@ class TestLockfileSatisfiesManifest:
                 depth=1,
             )
         )
-        manifest = [DependencyReference.parse("git@github.com:org/public-skills.git")]
+        manifest = [DependencyReference.parse("git@github.com:org/public-skills.git#main")]
 
         ok, reasons = lockfile_satisfies_manifest(lock, manifest)
 
@@ -736,6 +738,35 @@ class TestLockfileSatisfiesManifest:
         assert ok is False
         assert len(reasons) == 1
         assert "missing" in reasons[0]
+
+    @pytest.mark.parametrize(
+        ("manifest_ref", "locked_ref", "commit", "satisfied"),
+        [
+            (None, None, "a" * 40, True),
+            ("main", "main", "a" * 40, True),
+            ("release", "main", "a" * 40, False),
+            (None, "main", "a" * 40, False),
+            ("main", None, "a" * 40, False),
+            ("a" * 40, "a" * 40, "a" * 40, True),
+            ("A" * 40, "A" * 40, "a" * 40, True),
+            ("a" * 40, "a" * 40, "b" * 40, False),
+        ],
+    )
+    def test_frozen_compares_declared_identity_without_resolving_upstream(
+        self, manifest_ref: str | None, locked_ref: str | None, commit: str, satisfied: bool
+    ) -> None:
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package", resolved_ref=locked_ref, resolved_commit=commit
+            )
+        )
+        manifest = [DependencyReference(repo_url="owner/package", reference=manifest_ref)]
+        before = lock.to_yaml()
+        ok, reasons = lockfile_satisfies_manifest(lock, manifest)
+        assert ok is satisfied
+        assert bool(reasons) is not satisfied
+        assert lock.to_yaml() == before
 
     def test_local_deps_skipped(self):
         """Local file deps have no remote ref, so they're skipped."""
