@@ -781,15 +781,34 @@ def test_dictionary_lookup_and_install_share_identity(
     )
     consumer = scenario.consumers.create("dictionary-consumer", targets=("copilot",))
     _register_marketplace(scenario, consumer)
+    trace = scenario.isolated.root / "dictionary-install.trace"
+    trace.write_text("", encoding="utf-8")
+    scenario.environment["GIT_TRACE"] = str(trace)
     _declare_range(scenario, consumer, "^1.0.0")
     before = _snapshot(consumer)
-    _run_install(
+    result = _run_install(
         scenario,
         consumer,
         scenario_id=source_case,
         expected_returncode=1 if source_case == "invalid-port" else 0,
     )
     if source_case == "invalid-port":
+        validation = _run(
+            scenario,
+            consumer.root,
+            ("marketplace", "validate", _MARKETPLACE),
+            "invalid-port-admission",
+            expected_returncode=1,
+        )
+        output = " ".join((validation.stdout + validation.stderr).split())
+        assert "source: github requires a valid non-local owner/repository field" in output
+        assert "Failed to resolve marketplace dependency" in result.stdout + result.stderr
+        version_queries = [
+            line
+            for line in trace.read_text().splitlines()
+            if "ls-remote" in line and "--tags" in line
+        ]
+        assert version_queries == []
         _assert_same_state(before, _snapshot(consumer))
         assert not (consumer.root / _SKILL_PATH).exists()
         return
