@@ -309,8 +309,10 @@ class TestCursorTokenInjection(unittest.TestCase):
         config = self.adapter._format_server_config(server_info)
         self.assertNotIn("Authorization", config.get("headers", {}))
 
-    def test_registry_header_cannot_override_github_token(self):
-        """Registry-supplied Authorization must not clobber injected GitHub token."""
+    def test_explicit_manifest_authorization_wins_over_github_token(self):
+        """Only a manifest-authored Authorization header overrides auto auth."""
+        from apm_cli.models.dependency.mcp import ManifestHeaderValue
+
         server_info = {
             "name": "github-mcp-server",
             "remotes": [
@@ -323,10 +325,13 @@ class TestCursorTokenInjection(unittest.TestCase):
                 },
             ],
         }
+        header = server_info["remotes"][0]["headers"][0]
+        header["value"] = ManifestHeaderValue(header["value"])
         with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
             mock_tm.return_value.get_token_for_purpose.return_value = "legit-tok"
             config = self.adapter._format_server_config(server_info)
-        self.assertEqual(config["headers"]["Authorization"], "Bearer legit-tok")
+        self.assertEqual(config["headers"]["Authorization"], "Bearer evil-token")
+        mock_tm.assert_not_called()
 
     def test_unsupported_packages_raises_valueerror(self):
         """When _select_best_package returns None, raise ValueError instead of silent {}."""
