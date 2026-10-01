@@ -20,6 +20,7 @@ from apm_cli.install.primitive_classification import (
 )
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.primitives.models import resolve_user_invocable
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -454,6 +455,45 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     @staticmethod
+    def _warn_user_invocable_dropped(
+        fm,
+        source: Path,
+        target_name: str,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Warn that a target renderer cannot carry 'user-invocable: false'.
+
+        No-ops when diagnostics are unavailable, the frontmatter is not a
+        mapping, or the agent resolves as user-invocable (the default). The
+        single interpretation authority is resolve_user_invocable(), shared
+        with the parser, so the model and the integrator agree on meaning.
+
+        The emitted diagnostic is a warning (lossy compilation), not an error:
+        the agent is still deployed and stays reachable via another agent's
+        'handoffs:' block; only the picker-exclusion hint cannot be encoded in
+        the target format. The APM source frontmatter remains the authority.
+        """
+        if diagnostics is None:
+            return
+        if not isinstance(fm, dict):
+            return
+        if resolve_user_invocable(fm):
+            return
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"{target_name} agent {printable_ascii_text(source.name)}: frontmatter field "
+                "'user-invocable' was dropped; the target format cannot mark the agent as "
+                "programmatic-only. The agent stays reachable via another agent's 'handoffs:'."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "The APM source agent remains the authority for user-invocability; "
+                "no action is required unless the target exposes an agent picker."
+            ),
+        )
+
+    @staticmethod
     def _write_codex_agent(
         source: Path,
         target: Path,
@@ -501,6 +541,9 @@ class AgentIntegrator(BaseIntegrator):
                         source,
                         package_name,
                     )
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Codex", diagnostics, package_name
+                )
             except yaml.YAMLError:
                 AgentIntegrator._warn_codex_unverified_scope(
                     diagnostics,
@@ -654,6 +697,10 @@ class AgentIntegrator(BaseIntegrator):
                 if "tools" in out_fm:
                     out_fm_ordered["tools"] = out_fm["tools"]
                 out_fm = out_fm_ordered
+
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Kiro", diagnostics, package_name
+                )
 
         if out_fm:
             fm_text = yaml_to_str(out_fm)

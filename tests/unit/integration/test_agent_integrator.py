@@ -1317,6 +1317,193 @@ class TestCodexAgentIntegration:
 
         assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
+    def test_codex_agent_user_invocable_false_emits_lossy_compilation_warning(self, capsys):
+        """Codex cannot encode programmatic-only, so the drop must be announced."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "internal.agent.md").write_text(
+            "---\n"
+            "name: internal\n"
+            "description: Internal agent\n"
+            "user-invocable: false\n"
+            "---\n"
+            "Review changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "user-invocable" in diagnostic.message
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].package == "test-pkg"
+        assert "Codex" in warnings[0].message
+        assert "handoffs:" in warnings[0].message
+        assert "authority" in warnings[0].detail
+
+        diagnostics.render_summary()
+        rendered = capsys.readouterr()
+        output = rendered.out + rendered.err
+        assert "[!]" in output
+        assert "test-pkg" in output
+        assert "internal.agent.md" in output
+
+    def test_codex_agent_visibility_internal_alias_emits_warning(self):
+        """The 'visibility: internal' alias must also trip the drop warning."""
+        source = self.root / "aliased.agent.md"
+        source.write_text(
+            "---\nname: aliased\nvisibility: internal\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "aliased.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "user-invocable" in diagnostic.message
+        ]
+        assert len(warnings) == 1
+        assert "Codex" in warnings[0].message
+
+    def test_codex_agent_user_invocable_true_does_not_warn(self):
+        """A user-invocable agent (the default) must stay silent."""
+        source = self.root / "public.agent.md"
+        source.write_text(
+            "---\nname: public\nuser-invocable: true\n---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "public.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        user_invocable_warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "user-invocable" in diagnostic.message
+        ]
+        assert user_invocable_warnings == []
+
+
+class TestKiroAgentIntegration:
+    """Tests for Kiro agent frontmatter preflight rendering."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+        (self.root / ".kiro").mkdir()
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_kiro_agent_user_invocable_false_emits_lossy_compilation_warning(self):
+        """Kiro cannot encode programmatic-only, so the drop must be announced."""
+        source = self.root / "internal.agent.md"
+        source.write_text(
+            "---\nname: internal\ndescription: Internal agent\nuser-invocable: false\n"
+            "---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        rendered, ok = AgentIntegrator._preflight_render_kiro_agent(
+            source,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        assert ok is True
+        assert rendered is not None
+        warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "user-invocable" in diagnostic.message
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].package == "test-pkg"
+        assert "Kiro" in warnings[0].message
+        assert "handoffs:" in warnings[0].message
+        assert "authority" in warnings[0].detail
+
+    def test_kiro_agent_visibility_internal_alias_emits_warning(self):
+        """The 'visibility: internal' alias must also trip the Kiro drop warning."""
+        source = self.root / "aliased.agent.md"
+        source.write_text(
+            "---\nname: aliased\ndescription: Aliased agent\nvisibility: internal\n"
+            "---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        _, ok = AgentIntegrator._preflight_render_kiro_agent(
+            source,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        assert ok is True
+        warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "user-invocable" in diagnostic.message
+        ]
+        assert len(warnings) == 1
+        assert "Kiro" in warnings[0].message
+
+    def test_kiro_agent_user_invocable_true_does_not_warn(self):
+        """A user-invocable Kiro agent (the default) must stay silent."""
+        source = self.root / "public.agent.md"
+        source.write_text(
+            "---\nname: public\ndescription: Public agent\nuser-invocable: true\n"
+            "---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector()
+
+        _, ok = AgentIntegrator._preflight_render_kiro_agent(
+            source,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        assert ok is True
+        user_invocable_warnings = [
+            diagnostic
+            for diagnostic in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+            if "user-invocable" in diagnostic.message
+        ]
+        assert user_invocable_warnings == []
+
 
 # ==================================================================
 # Windsurf no longer exposes an 'agents' primitive (it deploys SKILL.md

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent primitives (`*.agent.md`) accept an optional `user-invocable: false` frontmatter field (default `true`; `visibility: internal` is an accepted alias) to mark an agent as programmatic-only, reachable via another agent's `handoffs:` but hidden from the user-facing picker. Verbatim-copy targets preserve the field; Codex and Kiro warn instead of silently dropping it. -- by @richard-fowles-epam (#3132)
+
 ### Fixed
 
 - `apm audit` discovers tracked and untracked target-native prompts without treating executable commands as prompt text; unreadable or unsupported recognized formats now fail with incomplete coverage, and shared/user configuration cannot be auto-stripped. Review named incomplete or protected locations manually before re-auditing. Proposed `specs/openapm-v0.1.md` audit contract remains subject to specification adoption. -- by @lkshrk (#2962)

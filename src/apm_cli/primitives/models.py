@@ -5,6 +5,35 @@ from pathlib import Path
 from typing import Union
 
 
+def resolve_user_invocable(metadata: dict) -> bool:
+    """Resolve whether an agent is user-invocable from its frontmatter.
+
+    Canonical field is ``user-invocable`` (boolean, default ``True``). The
+    ``visibility: internal`` token is accepted as an alias for
+    ``user-invocable: false``. The canonical field, when present, always wins
+    over the alias.
+
+    Coercion is defensive: YAML booleans pass through, and string tokens
+    (``"false"``/``"no"``/``"0"``/``"off"``, case-insensitive) resolve to
+    ``False`` so a quoted value does not silently flip the meaning.
+
+    Args:
+        metadata (dict): Parsed frontmatter mapping.
+
+    Returns:
+        bool: ``False`` when the agent is marked programmatic-only, else ``True``.
+    """
+    raw = metadata.get("user-invocable")
+    if raw is not None:
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            return raw.strip().lower() not in ("false", "no", "0", "off")
+        return bool(raw)
+    visibility = metadata.get("visibility")
+    return not (isinstance(visibility, str) and visibility.strip().lower() == "internal")
+
+
 @dataclass
 class Chatmode:
     """Represents a chatmode primitive."""
@@ -18,6 +47,9 @@ class Chatmode:
     version: str | None = None
     source: str | None = None  # Source of primitive: "local" or "dependency:{package_name}"
     handoffs: list[str | dict] | None = None  # Agent handoff targets (optional, for .agent.md)
+    # Programmatic-only agents (user_invocable=False) are reachable only via another
+    # agent's handoffs block and are excluded from the user-facing agent picker.
+    user_invocable: bool = True
 
     def validate(self) -> list[str]:
         """Validate chatmode structure.
