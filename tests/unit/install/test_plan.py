@@ -244,6 +244,63 @@ class TestBuildUpdatePlan:
         }
         assert plan.summary_counts["remove"] == 1
 
+    def test_selective_update_retained_entry_preserves_full_locked_state(self):
+        host = "ghe.example.com"
+        lock = _new_lockfile()
+        retained = LockedDependency(
+            repo_url="owner/retained",
+            host=host,
+            resolved_ref="v1",
+            resolved_commit="r" * 40,
+            depth=1,
+            deployed_files=[".github/skills/retained/SKILL.md"],
+        )
+        retained.content_hash = "sha256:retained"
+        lock.add_dependency(retained)
+        retained_key = retained.get_unique_key()
+        assert retained_key != retained.repo_url
+
+        plan = build_update_plan(lock, [], complete_resolved_dep_keys={retained_key})
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key=retained_key,
+                action="unchanged",
+                display_name="owner/retained",
+                old_resolved_ref="v1",
+                old_resolved_commit="r" * 40,
+                old_content_hash="sha256:retained",
+                new_resolved_ref="v1",
+                new_resolved_commit="r" * 40,
+                deployed_files=(".github/skills/retained/SKILL.md",),
+            ),
+        )
+
+    def test_entries_within_action_sort_by_display_name_not_key(self):
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="a/z",
+                host="ghe.example.com",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        lock.add_dependency(_locked("b/a", "main", "b" * 40))
+        hosted = DependencyReference(repo_url="a/z", host="ghe.example.com", reference="main")
+        hosted.resolved_reference = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            ref_name="main",
+            resolved_commit="a" * 40,
+        )
+
+        plan = build_update_plan(lock, [_resolved_dep("b/a", "main", "b" * 40), hosted])
+
+        assert sorted(entry.dep_key for entry in plan.entries)[0] == "b/a"
+        assert [entry.display_name for entry in plan.entries] == ["a/z", "b/a"]
+
     def test_selective_update_complete_keys_use_canonical_identity_for_all_sources(self):
         lock = _new_lockfile()
         identity_pairs = (

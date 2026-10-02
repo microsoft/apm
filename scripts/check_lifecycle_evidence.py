@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,7 +155,11 @@ def _validate_source_profile(profile: Any) -> None:
         if (
             not isinstance(value, str)
             or not value.strip()
-            or not (Path(value).is_absolute() or PureWindowsPath(value).is_absolute())
+            or not (
+                Path(value).is_absolute()
+                or PureWindowsPath(value).is_absolute()
+                or PurePosixPath(value).is_absolute()
+            )
         ):
             raise EvidenceError(f"Native source profile requires an absolute {field}")
     for field in ("cli_sha256", "python_sha256", "executable_sha256"):
