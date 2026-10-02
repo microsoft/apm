@@ -3162,7 +3162,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     )
     package_removed_audit = audit_row(
         "global-audit-package-dir-removed",
-        failed={"config-consistency", "drift"},
+        failed={"config-consistency", "drift", "skill-subset-consistency"},
     )
     package_removed_after_audit = LifecycleStateSnapshot.capture(
         cwd,
@@ -3171,7 +3171,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     assert _check(package_removed_audit, "no-orphaned-packages")["passed"] is True
     assert _check(package_removed_audit, "deployed-files-present")["passed"] is True
     assert _check(package_removed_audit, "content-integrity")["passed"] is True
-    for check_name in ("config-consistency", "drift"):
+    for check_name in ("config-consistency", "drift", "skill-subset-consistency"):
         message = str(_check(package_removed_audit, check_name)["message"])
         assert "installed package materialization is missing" in message
         assert "apm install --global" in message
@@ -3254,7 +3254,10 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     run(("deps", "clean", "--yes"), "global-deps-clean", command_cwd=physical_apm_home)
     assert not modules_dir.exists()
     assert capture().deployment_records == before_clean.deployment_records
-    audit_row("global-audit-after-deps-clean", failed={"config-consistency", "drift"})
+    audit_row(
+        "global-audit-after-deps-clean",
+        failed={"config-consistency", "drift", "skill-subset-consistency"},
+    )
     run(install_args, "global-rehydrate-after-deps-clean")
     assert_revision(commit_b, "b")
     assert_clean("global-audit-after-rehydrate")

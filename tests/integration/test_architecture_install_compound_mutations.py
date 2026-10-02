@@ -483,10 +483,36 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "audit-replay-subset-checkout-root",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "    modules_root = (\n        prepared_replay.modules_root\n",
+            "    modules_root = (\n        project_root / APM_MODULES_DIR\n",
+        ),
+    ),
+    CompoundMutation(
         "audit-replay-config-root",
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace("prepared_replay.modules_root", "prepared_replay.project_root"),
+    ),
+    CompoundMutation(
+        "audit-replay-subset-error-fail-closed",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "    if prepared_replay_error is not None:\n"
+            "        return CheckResult(\n"
+            '            name="skill-subset-consistency",\n'
+            "            passed=False,\n"
+            '            message=f"skill-subset-consistency replay failed: '
+            '{prepared_replay_error}",\n'
+            "            details=[prepared_replay_error],\n"
+            "        )\n"
+            "    modules_root = (\n",
+            "    modules_root = (\n",
+        ),
     ),
     CompoundMutation(
         "uninstall-select-owner",
