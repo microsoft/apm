@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install --frozen` no longer writes `apm.lock.yaml`, which req-lk-006
+  requires it to leave untouched. It previously deployed files and rewrote the
+  lockfile to claim them, so a committed lockfile that under-recorded the
+  deployed set was silently repaired in CI instead of being reported -- and the
+  files it omitted stayed outside `content-integrity`'s hash and hidden-Unicode
+  scanners. Frozen installs now fail and name the unrecorded paths. The check is
+  one-directional -- claims the install would drop (a `--target` filter,
+  `--only`, a removed dependency) are tolerated, as removed deps already were --
+  and `generated_at` / `apm_version` are excluded, so a newer CLI reading an
+  older lockfile is not treated as a rewrite. (#2379)
+  If CI starts failing on `--frozen` after upgrading, run `apm install`
+  locally and commit the updated `apm.lock.yaml`.
+
 ## [0.33.0] - 2026-10-02
 
 ### Added
