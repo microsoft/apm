@@ -345,10 +345,18 @@ def _check_skill_subset_consistency(
     project_root: Path,
     *,
     prepared_replay: PreparedCiAuditReplay | None = None,
+    prepared_replay_error: str | None = None,
 ) -> CheckResult:
     """Verify skill subsets match the lockfile and real package tree."""
     from ..constants import APM_MODULES_DIR
 
+    if prepared_replay_error is not None:
+        return CheckResult(
+            name="skill-subset-consistency",
+            passed=False,
+            message=f"skill-subset-consistency replay failed: {prepared_replay_error}",
+            details=[prepared_replay_error],
+        )
     modules_root = (
         prepared_replay.modules_root
         if prepared_replay is not None
@@ -1016,7 +1024,11 @@ def run_baseline_checks(
     # Check 6: Skill subset consistency (manifest vs lockfile)
     if _run(
         _check_skill_subset_consistency(
-            manifest, lock, project_root, prepared_replay=prepared_replay
+            manifest,
+            lock,
+            project_root,
+            prepared_replay=prepared_replay,
+            prepared_replay_error=prepared_replay_error,
         )
     ):
         return result

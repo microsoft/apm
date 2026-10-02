@@ -498,6 +498,23 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         _replace("prepared_replay.modules_root", "prepared_replay.project_root"),
     ),
     CompoundMutation(
+        "audit-replay-subset-error-fail-closed",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "    if prepared_replay_error is not None:\n"
+            "        return CheckResult(\n"
+            '            name="skill-subset-consistency",\n'
+            "            passed=False,\n"
+            '            message=f"skill-subset-consistency replay failed: '
+            '{prepared_replay_error}",\n'
+            "            details=[prepared_replay_error],\n"
+            "        )\n"
+            "    modules_root = (\n",
+            "    modules_root = (\n",
+        ),
+    ),
+    CompoundMutation(
         "uninstall-select-owner",
         UNINSTALL_RULE,
         "src/apm_cli/models/dependency/selection.py",

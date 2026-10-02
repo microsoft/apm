@@ -292,6 +292,7 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")
+        or not _body_has(subset_body, "prepared_replay_error is not None")
     ):
         findings.append(
             _summary(

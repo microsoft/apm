@@ -131,6 +131,25 @@ def test_subset_without_prepared_replay_checks_checkout(
     assert check.passed is (checkout_skills == ("alpha",))
 
 
+@pytest.mark.parametrize("checkout_skills", [None, ("alpha",)])
+def test_subset_fails_closed_on_prepared_replay_error(
+    subset_project: Path, checkout_skills: tuple[str, ...] | None
+) -> None:
+    """A failed replay preparation must fail the check, not fall back to checkout state."""
+    if checkout_skills is not None:
+        _write_skills(subset_project / "apm_modules", checkout_skills)
+
+    result = run_baseline_checks(
+        subset_project,
+        fail_fast=False,
+        prepared_replay_error="scratch materialization failed: disk quota exceeded",
+    )
+
+    check = next(check for check in result.checks if check.name == "skill-subset-consistency")
+    assert check.passed is False
+    assert check.details == ["scratch materialization failed: disk quota exceeded"]
+
+
 def test_prepared_tree_does_not_override_manifest_lock_subset_mismatch(
     subset_project: Path, tmp_path: Path
 ) -> None:

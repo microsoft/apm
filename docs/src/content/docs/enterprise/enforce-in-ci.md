@@ -94,7 +94,8 @@ check then compares the freshly restored file against a hash that matches,
 and the tampering goes undetected.
 
 For repos that **commit** their deployed files, the CI gate can now run in
-setup-only mode and still execute drift plus `config-consistency` from a cold
+setup-only mode and still execute drift plus `config-consistency` and
+`skill-subset-consistency` from a cold
 cache. `apm audit --ci` self-hydrates a lock-pinned scratch install, compares
 the tracked checkout against that replay, and never rewrites the working tree
 or live `apm_modules/`.
