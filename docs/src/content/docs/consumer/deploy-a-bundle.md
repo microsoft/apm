@@ -10,6 +10,8 @@ project with one command:
 ```bash
 apm install ./path/to/bundle
 apm install ./dist/my-pkg-1.0.0.zip
+# Deploy a packed skill + MCP bundle into user-level Cursor and OpenCode config
+apm install --global ./dist/my-pkg-1.0.0.zip --target cursor,opencode
 ```
 
 This is a sibling flow to [Install packages](../install-packages/). Instead

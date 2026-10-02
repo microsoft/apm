@@ -1385,6 +1385,37 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "rule_id", "old", "new"),
+    [
+        (
+            "src/apm_cli/install/mcp/ownership.py",
+            "mutation_writes.opencode_enabled_intent",
+            "opencode_enabled_matches(existing[name], expected)",
+            "True",
+        ),
+        (
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "mutation_writes.mcp_target_selection",
+            "_raise_strict_config_failures(unsafe_runtimes, console=console, logger=logger)",
+            "_raise_strict_config_failures([], console=console, logger=logger)",
+        ),
+    ],
+)
+def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str) -> None:
+    """Global consumers cannot bypass native type or selected-target safety owners."""
+    baseline = run_selected_rules(ROOT, (rule_id,))
+    assert baseline.failures == ()
+    assert baseline.violations == ()
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 def test_frozen_preflight_uses_selected_lockfile_store() -> None:
     """Scoped frozen preflight must not substitute a source-side lockfile."""
     path = "src/apm_cli/install/service.py"

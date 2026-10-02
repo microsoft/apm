@@ -5,7 +5,12 @@ global-capable runtimes (Copilot CLI, Codex CLI, JetBrains Copilot)
 instead of blanket-skipping all MCP installation at user scope.
 """
 
+import json
+import os
+import stat
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.base import MCPClientAdapter
@@ -50,30 +55,20 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
         adapter = VSCodeClientAdapter()
         self.assertFalse(adapter.supports_user_scope)
 
-    def test_cursor_does_not_support_user_scope(self):
-        """Cursor writes to .cursor/ (workspace) and should NOT support user scope."""
+    def test_cursor_supports_user_scope(self):
+        """Cursor has both project and ~/.cursor/mcp.json config paths."""
         adapter = CursorClientAdapter()
-        self.assertFalse(adapter.supports_user_scope)
+        self.assertTrue(adapter.supports_user_scope)
 
-    def test_opencode_does_not_support_user_scope(self):
-        """OpenCode writes to opencode.json (workspace) and should NOT support user scope."""
+    def test_opencode_supports_user_scope(self):
+        """OpenCode has both project and ~/.config/opencode config paths."""
         adapter = OpenCodeClientAdapter()
-        self.assertFalse(adapter.supports_user_scope)
-
-    def test_cursor_does_not_inherit_copilot_true(self):
-        """Cursor overrides the Copilot default for its workspace-only scope."""
-        self.assertTrue(issubclass(CursorClientAdapter, CopilotClientAdapter))
-        self.assertFalse(CursorClientAdapter.supports_user_scope)
-
-    def test_opencode_does_not_inherit_copilot_true(self):
-        """OpenCodeClientAdapter inherits CopilotClientAdapter but overrides to False."""
-        self.assertTrue(issubclass(OpenCodeClientAdapter, CopilotClientAdapter))
-        self.assertFalse(OpenCodeClientAdapter.supports_user_scope)
+        self.assertTrue(adapter.supports_user_scope)
 
     def test_factory_created_adapters_scope(self):
         """ClientFactory-created adapters report the correct scope support."""
-        global_runtimes = {"copilot", "codex", "intellij"}
-        workspace_runtimes = {"vscode", "cursor", "opencode"}
+        global_runtimes = {"copilot", "codex", "intellij", "cursor", "opencode"}
+        workspace_runtimes = {"vscode"}
 
         for rt in global_runtimes:
             adapter = ClientFactory.create_client(rt)
@@ -89,6 +84,81 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
                 f"{rt} adapter should NOT support user scope",
             )
 
+    def test_global_paths_create_config_and_preserve_existing_servers(self):
+        """Both adapters write global configs without a project signal."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_home = root / "home"
+            project = root / "unmarked-project"
+            project.mkdir()
+            cases = (
+                (
+                    CursorClientAdapter(project_root=project, user_scope=True),
+                    fake_home / ".cursor" / "mcp.json",
+                    "mcpServers",
+                    {"command": "npx", "args": ["--yes", "example"]},
+                ),
+                (
+                    OpenCodeClientAdapter(project_root=project, user_scope=True),
+                    fake_home / ".config" / "opencode" / "opencode.json",
+                    "mcp",
+                    {"command": "npx", "args": ["--yes", "example"]},
+                ),
+            )
+            with patch.object(Path, "home", return_value=fake_home):
+                for adapter, config_path, key, server in cases:
+                    self.assertEqual(Path(adapter.get_config_path()), config_path)
+                    self.assertTrue(adapter.update_config({"managed": server}))
+                    self.assertTrue(config_path.is_file())
+                    if os.name != "nt":
+                        # Entries can carry resolved secrets.
+                        self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
+                    config_path.write_text(
+                        json.dumps({"unrelated": 1, key: {"foreign": {}}}),
+                        encoding="utf-8",
+                    )
+                    adapter.update_config({"managed": server})
+                    contents = json.loads(config_path.read_text(encoding="utf-8"))
+                    self.assertEqual(contents["unrelated"], 1)
+                    self.assertEqual(set(contents[key]), {"foreign", "managed"})
+            self.assertFalse((project / ".cursor").exists())
+            self.assertFalse((project / "opencode.json").exists())
+
+    def test_unparseable_global_config_is_not_overwritten(self):
+        """A JSONC or corrupt user config is left intact instead of replaced."""
+        jsonc = '{\n  // user settings\n  "model": "x",\n  "mcp": {"mine": {}},\n}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            fake_home = Path(directory)
+            configs = (
+                (CursorClientAdapter, fake_home / ".cursor" / "mcp.json"),
+                (OpenCodeClientAdapter, fake_home / ".config" / "opencode" / "opencode.json"),
+            )
+            with patch.object(Path, "home", return_value=fake_home):
+                for adapter_cls, config_path in configs:
+                    config_path.parent.mkdir(parents=True)
+                    config_path.write_text(jsonc, encoding="utf-8")
+                    adapter = adapter_cls(project_root=fake_home, user_scope=True)
+                    self.assertFalse(adapter.update_config({"managed": {"command": "npx"}}))
+                    self.assertEqual(config_path.read_text(encoding="utf-8"), jsonc)
+
+    @unittest.skipIf(os.name == "nt", "symlink creation requires elevated Windows rights")
+    def test_symlinked_global_config_dir_is_not_written(self):
+        """User-scope writes refuse the symlinks that stale cleanup refuses."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_home = root / "home"
+            dotfiles = root / "dotfiles"
+            (dotfiles / "cursor").mkdir(parents=True)
+            (dotfiles / "config").mkdir()
+            fake_home.mkdir()
+            (fake_home / ".cursor").symlink_to(dotfiles / "cursor", target_is_directory=True)
+            (fake_home / ".config").symlink_to(dotfiles / "config", target_is_directory=True)
+            with patch.object(Path, "home", return_value=fake_home):
+                for adapter_cls in (CursorClientAdapter, OpenCodeClientAdapter):
+                    adapter = adapter_cls(project_root=fake_home, user_scope=True)
+                    self.assertFalse(adapter.update_config({"managed": {"command": "npx"}}))
+            self.assertEqual(list(dotfiles.rglob("*.json")), [])
+
 
 # ---------------------------------------------------------------------------
 # 2. MCPIntegrator scope filtering
@@ -102,7 +172,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
     @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
-    def test_user_scope_skips_workspace_runtimes(
+    def test_user_scope_skips_workspace_only_runtimes(
         self, mock_which, mock_vscode, mock_install_rt, mock_ops_cls
     ):
         """At USER scope, workspace-only runtimes are not targeted."""
@@ -131,10 +201,10 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
                 scope=InstallScope.USER,
             )
 
-        # Only copilot/codex should have been called (global-capable),
-        # not vscode/cursor/opencode
+        # VS Code remains workspace-only. Cursor and OpenCode are eligible
+        # when their user-scope presence signals exist.
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        workspace_only = {"vscode", "cursor", "opencode"}
+        workspace_only = {"vscode"}
         self.assertFalse(
             called_runtimes & workspace_only,
             f"Workspace-only runtimes should not be called at USER scope, "
@@ -210,6 +280,30 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         self.assertTrue(mock_install.called)
         self.assertEqual(mock_install.call_args_list[0].args[0], "copilot")
 
+    def test_user_scope_explicit_cursor_and_opencode_proceed(self):
+        """Both runtimes remain selected for a user-scope MCP install."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        for runtime in ("cursor", "opencode"):
+            with (
+                self.subTest(runtime=runtime),
+                patch.object(MCPIntegrator, "_install_for_runtime", return_value=True) as install,
+                patch("apm_cli.registry.operations.MCPServerOperations") as operations_cls,
+            ):
+                operations = operations_cls.return_value
+                operations.validate_servers_exist.return_value = (["test/server"], [])
+                operations.check_servers_needing_installation.return_value = ["test/server"]
+
+                MCPIntegrator.install(
+                    mcp_deps=["test/server"],
+                    runtime=runtime,
+                    scope=InstallScope.USER,
+                )
+
+                self.assertTrue(install.called)
+                self.assertEqual(install.call_args.args[0], runtime)
+                self.assertTrue(install.call_args.kwargs["user_scope"])
+
     def test_scope_user_overrides_false_user_scope_flag(self):
         """USER scope should force user-scope path resolution even if the boolean disagrees."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -272,25 +366,88 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
 class TestRemoveStaleScopeFiltering(unittest.TestCase):
     """Verify MCPIntegrator.remove_stale() respects scope."""
 
-    @patch("apm_cli.integration.mcp_integrator.Path")
-    def test_user_scope_does_not_touch_workspace_configs(self, mock_path_cls):
-        """At USER scope, .vscode/mcp.json and .cursor/mcp.json are not cleaned."""
+    def test_user_scope_cleans_only_global_cursor_and_opencode_configs(self):
+        """Global cleanup removes managed names without touching project files."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        # Call remove_stale with USER scope
-        MCPIntegrator.remove_stale(
-            stale_names={"test-server"},
-            scope=InstallScope.USER,
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_home = root / "home"
+            project = root / "project"
+            for config in (
+                fake_home / ".cursor" / "mcp.json",
+                fake_home / ".config" / "opencode" / "opencode.json",
+                project / ".cursor" / "mcp.json",
+                project / "opencode.json",
+            ):
+                config.parent.mkdir(parents=True, exist_ok=True)
+                key = "mcpServers" if config.name == "mcp.json" else "mcp"
+                config.write_text(json.dumps({key: {"keep": {}, "stale": {}}}), encoding="utf-8")
+            vscode_config = project / ".vscode" / "mcp.json"
+            vscode_config.parent.mkdir()
+            vscode_config.write_text(json.dumps({"servers": {"stale": {}}}), encoding="utf-8")
+
+            with patch.object(Path, "home", return_value=fake_home):
+                for runtime in ("cursor", "opencode", "vscode"):
+                    MCPIntegrator.remove_stale(
+                        stale_names={"stale"},
+                        runtime=runtime,
+                        project_root=project,
+                        scope=InstallScope.USER,
+                    )
+
+            for config in (
+                fake_home / ".cursor" / "mcp.json",
+                fake_home / ".config" / "opencode" / "opencode.json",
+            ):
+                key = "mcpServers" if config.name == "mcp.json" else "mcp"
+                servers = json.loads(config.read_text(encoding="utf-8"))[key]
+                self.assertEqual(set(servers), {"keep"})
+            for config in (project / ".cursor" / "mcp.json", project / "opencode.json"):
+                key = "mcpServers" if config.name == "mcp.json" else "mcp"
+                servers = json.loads(config.read_text(encoding="utf-8"))[key]
+                self.assertEqual(set(servers), {"keep", "stale"})
+            # VS Code stays workspace-only: USER scope never touches .vscode/.
+            self.assertIn("stale", json.loads(vscode_config.read_text(encoding="utf-8"))["servers"])
+
+
+class TestOpenCodeUserScopeDiscovery(unittest.TestCase):
+    """OpenCode's presence signal follows the scope root of its target profile."""
+
+    def _discover_both_paths(self, root: Path, *, user_scope: bool) -> list:
+        from apm_cli.integration.mcp_integrator import _is_vscode_available
+        from apm_cli.integration.mcp_integrator_install import (
+            _discover_installed_runtimes,
+            _discover_installed_runtimes_fallback,
         )
 
-        # Path.cwd() is used for workspace configs (.vscode, .cursor, opencode)
-        # Path.home() is used for global configs (~/.copilot, ~/.codex)
-        # At USER scope, we should only try to access home-dir configs
-        all_calls_str = str(mock_path_cls.mock_calls)
-        # Workspace paths should NOT appear
-        self.assertNotIn(".vscode", all_calls_str)
-        self.assertNotIn(".cursor", all_calls_str)
-        self.assertNotIn("opencode.json", all_calls_str)
+        return [
+            _discover_installed_runtimes(root, user_scope=user_scope),
+            _discover_installed_runtimes_fallback(
+                root, _is_vscode_available, user_scope=user_scope
+            ),
+        ]
+
+    def test_user_scope_uses_global_config_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_home = Path(directory)
+            # A project-style marker in $HOME is not a user-scope signal.
+            (fake_home / ".opencode").mkdir()
+            for runtimes in self._discover_both_paths(fake_home, user_scope=True):
+                self.assertNotIn("opencode", runtimes)
+            (fake_home / ".config" / "opencode").mkdir(parents=True)
+            for runtimes in self._discover_both_paths(fake_home, user_scope=True):
+                self.assertIn("opencode", runtimes)
+
+    def test_project_scope_still_uses_opencode_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / ".config" / "opencode").mkdir(parents=True)
+            for runtimes in self._discover_both_paths(project, user_scope=False):
+                self.assertNotIn("opencode", runtimes)
+            (project / ".opencode").mkdir()
+            for runtimes in self._discover_both_paths(project, user_scope=False):
+                self.assertIn("opencode", runtimes)
 
 
 # ---------------------------------------------------------------------------

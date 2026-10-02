@@ -1540,8 +1540,9 @@
       "keyword": "MUST",
       "section": "8.5.8",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_declared_user_mcp_targets_install_without_project_signals",
         "tests/spec_conformance/test_manifest_reqs.py::test_user_scoped_mcp_target_selection_ignores_project_signals"
       ]
     }

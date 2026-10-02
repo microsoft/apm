@@ -974,6 +974,24 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
     )
 
 
+@pytest.mark.req("req-tg-014")
+def test_declared_user_mcp_targets_install_without_project_signals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bind declared user capabilities to real global CLI configuration writes."""
+    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from tests.integration.test_global_cursor_opencode_mcp import (
+        test_global_package_install_and_uninstall_preserve_foreign_servers as _run_user_scope_contract,
+    )
+
+    assert partition_user_scope_runtimes(["cursor", "opencode", "vscode"]) == (
+        ["cursor", "opencode"],
+        ["vscode"],
+    )
+    _run_user_scope_contract(tmp_path, monkeypatch)
+
+
 @pytest.mark.req("req-tg-009")
 def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None:
     """Fail-closed evaluation precedes any content-identity adoption fast-path.

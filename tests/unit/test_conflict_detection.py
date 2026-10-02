@@ -258,10 +258,13 @@ class TestMCPConflictDetectionByTargetName(unittest.TestCase):
     def test_opencode_extracts_mcp_servers(self):
         detector = self._make_detector(
             "opencode",
-            "mcpServers",
-            {"mcpServers": {"o": {"command": "x"}}},
+            "mcp",
+            {"mcp": {"o": {"type": "local", "command": ["x"]}}},
         )
-        self.assertEqual(detector.get_existing_server_configs(), {"o": {"command": "x"}})
+        self.assertEqual(
+            detector.get_existing_server_configs(),
+            {"o": {"type": "local", "command": ["x"]}},
+        )
 
     def test_vscode_extracts_servers_key(self):
         detector = self._make_detector(

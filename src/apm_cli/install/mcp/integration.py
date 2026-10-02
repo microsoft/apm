@@ -95,25 +95,6 @@ def run_owned_mcp_integration(
     return count
 
 
-def _cleanup_runtimes(
-    *,
-    runtime: str | None,
-    target_decision: "EffectiveTargetDecision | None",
-    owned_targets: builtins.dict | None,
-    user_scope: bool,
-) -> list[str | None]:
-    """Return only runtimes whose APM-owned MCP state may need cleanup."""
-    if runtime is not None:
-        return [runtime]
-    if owned_targets:
-        return sorted(owned_targets)
-    if target_decision is not None:
-        selected = target_decision.runtime_targets_for_scope(user_scope=user_scope)
-        if selected:
-            return list(selected)
-    return [None]
-
-
 def run_mcp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
@@ -313,14 +294,12 @@ def run_mcp_integration(  # noqa: PLR0913
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
         if stale_servers:
-            for cleanup_runtime in _cleanup_runtimes(
-                runtime=runtime,
-                target_decision=target_decision,
-                owned_targets=managed_target_servers,
-                user_scope=user_scope,
-            ):
+            for cleanup_runtime, owned_servers in sorted(old_mcp_target_servers.items()):
+                scoped_stale = stale_servers.intersection(owned_servers)
+                if not scoped_stale:
+                    continue
                 MCPIntegrator.remove_stale(
-                    stale_servers,
+                    scoped_stale,
                     cleanup_runtime,
                     exclude,
                     project_root=project_root,

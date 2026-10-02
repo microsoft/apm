@@ -123,6 +123,7 @@ class TestRunMcpIntegrationInstallBranch:
                 mcp_deps=[dep],
                 old_mcp_servers={"io.github.acme/orphan-server"},
                 old_mcp_configs={"io.github.acme/orphan-server": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"io.github.acme/orphan-server"}},
                 project_root=tmp_path,
             )
         )
