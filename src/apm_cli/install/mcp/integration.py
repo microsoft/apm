@@ -257,11 +257,16 @@ def run_mcp_integration(  # noqa: PLR0913
     if should_install and mcp_deps:
         from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
 
+        # A fresh lockfile has no stored baseline, so adopt native entries that
+        # exactly match what this install would write instead of dropping them.
+        adopt_configs = old_mcp_configs or (
+            dict(current_view.configs) if current_view is not None else {}
+        )
         old_mcp_target_servers = resolve_mcp_target_servers(
             recorded_target_servers=old_mcp_target_servers or {},
             ownership_present=old_mcp_target_servers_present,
-            server_names=builtins.set(old_mcp_servers),
-            stored_configs=old_mcp_configs,
+            server_names=builtins.set(old_mcp_servers) | builtins.set(adopt_configs),
+            stored_configs=adopt_configs,
             project_root=project_root,
             user_scope=user_scope,
         )

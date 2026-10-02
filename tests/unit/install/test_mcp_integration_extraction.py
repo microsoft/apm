@@ -19,6 +19,7 @@ preserves the original branch-by-branch behaviour:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
@@ -193,6 +194,60 @@ class TestRunMcpIntegrationInstallBranch:
 
         assert exc_info.value.code == 2
         mock_mcp.install.assert_not_called()
+
+
+class TestRunMcpIntegrationFreshLockfileAdoption:
+    """No lockfile on disk: adopt native entries that match exactly (#3090)."""
+
+    @pytest.mark.parametrize(
+        ("native_entry", "expected_owners"),
+        [
+            ({"type": "stdio", "command": "node", "args": ["srv.js"]}, {"claude": {"acme-local"}}),
+            ({"type": "stdio", "command": "user-edited", "args": ["srv.js"]}, {}),
+        ],
+        ids=("exact-match-adopted", "user-edited-left-alone"),
+    )
+    @pytest.mark.parametrize(
+        "old_mcp_servers",
+        [set(), {"legacy-without-config"}],
+        ids=("no-lockfile", "lock-without-mcp-configs"),
+    )
+    def test_restores_target_ownership_after_lockfile_wipe(
+        self, tmp_path: Path, old_mcp_servers, native_entry, expected_owners
+    ):
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"acme-local": native_entry}}), encoding="utf-8"
+        )
+        dep = MCPDependency.from_dict(
+            {
+                "name": "acme-local",
+                "registry": False,
+                "transport": "stdio",
+                "command": "node",
+                "args": ["srv.js"],
+            }
+        )
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        # Stub only the writers: adoption renders through the real integrator.
+        with (
+            patch("apm_cli.factory.ClientFactory.supported_clients", return_value=["claude"]),
+            patch.object(MCPIntegrator, "install", return_value=1) as install,
+            patch.object(MCPIntegrator, "update_lockfile") as update_lockfile,
+            patch.object(MCPIntegrator, "remove_stale"),
+        ):
+            run_mcp_integration(
+                **_base_kwargs(
+                    mcp_deps=[dep],
+                    old_mcp_servers=old_mcp_servers,
+                    old_mcp_target_servers_present=False,
+                    project_root=tmp_path,
+                )
+            )
+
+        assert install.call_args.kwargs["managed_target_servers"] == expected_owners
+        assert update_lockfile.call_args.kwargs["mcp_target_servers"] == expected_owners
 
 
 class TestRunMcpIntegrationEmptyDepsBranch:

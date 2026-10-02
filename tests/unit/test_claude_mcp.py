@@ -487,6 +487,39 @@ def test_partial_updates_preserve_transport(
     assert tuple(document["mcpServers"]["srv"]) == tuple(expected)
 
 
+@pytest.mark.parametrize(
+    "dep_dict",
+    [
+        {
+            "name": "srv",
+            "registry": False,
+            "transport": "stdio",
+            "command": "node",
+            "args": ["s.js"],
+        },
+        {"name": "srv", "registry": False, "transport": "http", "url": "https://example.com/mcp"},
+    ],
+    ids=("stdio", "remote"),
+)
+def test_render_server_config_matches_what_install_writes(tmp_path, dep_dict):
+    """Exact-match adoption compares ``render_server_config`` with ``.mcp.json``.
+
+    Rendering must equal the entry ``configure_mcp_server`` writes, or a
+    committed native entry is never recognised as APM-owned (#3090).
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+    (tmp_path / ".claude").mkdir()
+    adapter = ClaudeClientAdapter(project_root=tmp_path, user_scope=False)
+    info = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(dep_dict))
+
+    adapter.update_config({"srv": adapter._format_server_config(info, {}, {})})
+
+    on_disk = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert adapter.render_server_config(info) == on_disk["mcpServers"]["srv"]
+
+
 class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
     """``MCPIntegrator.remove_stale`` for Claude project / user files."""
 
