@@ -281,6 +281,17 @@
       ]
     },
     {
+      "issue": 2867,
+      "fixed_in": "Unreleased",
+      "summary": "Lexical HOME/APM_HOME aliases must deploy the same authorized bytes as canonical roots.",
+      "failure_modes": ["routing", "ownership", "reference", "transaction"],
+      "properties": ["routing.authorized_targets_only", "ownership.preserve_unowned", "source.ref_cache_coherent", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_frozen_semver_transport_refusal_recovers"
+      ]
+    },
+    {
       "issue": 2888,
       "fixed_in": "Unreleased",
       "summary": "Fresh resolution rejected manifestless nested skill collections accepted by package validation.",
@@ -290,6 +301,243 @@
         "tests/integration/test_package_shape_lifecycle_contract.py::test_manifestless_skill_bundle_subset_lifecycle",
         "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_valid_bundle_activates_and_reloads",
         "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_invalid_bundle_preserves_state"
+      ]
+    }
+  ],
+  "lifecycle_contracts": [
+    {
+      "id": "pr2876-alias-path-complete-lifecycle",
+      "assessment": "Bounded #2867 contract adapted from a42fe808128d5866c17d93fe63ed4b57d0426ea0 and d2f90486e748b21091403c288e2db6457b4ce7c6, not an execution receipt. Real canonical/aliased HOME/APM_HOME and project trajectories observe CLI subprocesses, immutable fixture revisions and user-owned bytes. State observed permits cache effects; scenario assertions independently enforce expected bytes, identities and write bounds. Project-only find refusal and targets observations do not claim global lookup support. The ninth project witness extends the historical eight with real semver transport refusal/recovery from 60a9a5ca85829d0f83989f5aa5fc5b04cb0ae815.",
+      "properties": ["filesystem.open_world_observation", "transaction.failed_command_preserves_state", "ownership.preserve_unowned", "idempotency.byte_stable", "routing.authorized_targets_only", "source.ref_cache_coherent", "outcome.status_matches_state"],
+      "commands": {
+        "": {"disposition": "semantic_na", "reason": "Root dispatch/help has no standalone dependency transition."},
+        "approve": {"disposition": "semantic_na", "reason": "The passive package has no executable primitive grant to approve; scenario-local hook sentinels are preauthorized controls."},
+        "audit": {"disposition": "applicable", "reason": "Checks damaged, repaired and removed installed state, using physical APM_HOME globally.", "deterministic": ["deterministic-project", "deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-project", "generated-global-canonical", "generated-global-aliased"]},
+        "auth": {"disposition": "semantic_na", "reason": "Sets up git-host credentials; does not transition installed passive dependency state."},
+        "cache": {"disposition": "semantic_na", "reason": "Dispatch only; cache leaves are assessed individually."},
+        "cache clean": {"disposition": "applicable", "reason": "Removes disposable cache without removing installed B; source rehydration proves recovery.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "cache info": {"disposition": "applicable", "reason": "Reads cache bookkeeping without changing installed dependency bytes.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "cache prune": {"disposition": "applicable", "reason": "Fresh entries survive supported no-op pruning.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "compile": {"disposition": "applicable", "reason": "Instruction outputs at A and B must track installed revision changes.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "config": {"disposition": "semantic_na", "reason": "Shows CLI preferences; fixed fixture path/target inputs are not preference resources."},
+        "config get": {"disposition": "semantic_na", "reason": "Reads preference keys, not installed dependency ownership."},
+        "config list": {"disposition": "semantic_na", "reason": "Lists preferences, not deployed package revisions."},
+        "config set": {"disposition": "semantic_na", "reason": "Mutates preference resources outside the fixed-environment lifecycle."},
+        "config unset": {"disposition": "semantic_na", "reason": "Removes preference overrides absent from this fixture."},
+        "deny": {"disposition": "semantic_na", "reason": "Passive package executable grants are absent; hook sentinels are fixed controls, not grant lifecycle subjects."},
+        "deps": {"disposition": "semantic_na", "reason": "Dependency dispatch only; leaves are individually assessed."},
+        "deps clean": {"disposition": "applicable", "reason": "Removes modules but retains deployment/lock, then audit fails and install repairs.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "deps info": {"disposition": "applicable", "reason": "Reads installed metadata from physical APM_HOME without an invented global flag.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "deps list": {"disposition": "applicable", "reason": "Reads supported user-scope installed dependency inventory.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "deps tree": {"disposition": "applicable", "reason": "Reads user-scope dependency graph without changing deployment.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "deps update": {"disposition": "applicable", "reason": "Exercises the legacy update registration on real installed revisions.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "deps why": {"disposition": "applicable", "reason": "Reads dependency provenance from the user lock.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "discover": {"disposition": "semantic_na", "reason": "Inventories existing native/local packages and optionally adopts their references into a consumer manifest; these fixtures install explicitly declared Git dependencies, not undeclared native-package adoption."},
+        "doctor": {"disposition": "semantic_na", "reason": "Diagnoses host tools/network/auth rather than installed passive dependency state."},
+        "experimental": {"disposition": "semantic_na", "reason": "Established Claude/Hermes targets require no feature-toggle resource."},
+        "experimental disable": {"disposition": "semantic_na", "reason": "No experimental feature is enabled to remove."},
+        "experimental enable": {"disposition": "semantic_na", "reason": "Enabling a separate experimental capability is not passive-package materialization."},
+        "experimental list": {"disposition": "semantic_na", "reason": "Lists feature flags, not package ownership."},
+        "experimental reset": {"disposition": "semantic_na", "reason": "Resets feature preferences the fixture does not own."},
+        "find": {"disposition": "applicable", "reason": "Project-relative lookup refuses absolute global records with unchanged state and exit 1; not successful global lookup.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "info": {"disposition": "applicable", "reason": "Hidden installed-metadata alias is actually invoked with supported global scope.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "init": {"disposition": "semantic_na", "reason": "Scaffolds a manifest or discovers/adopts existing native packages; this lifecycle starts from an explicit Git dependency declaration and does not perform native-package adoption."},
+        "install": {"disposition": "applicable", "reason": "Materialization, replay, refusal, repair and reinstall advance one durable trajectory.", "deterministic": ["deterministic-project", "deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true", "deterministic-project-semver"], "generated": ["generated-project", "generated-global-canonical", "generated-global-aliased"]},
+        "lifecycle": {"disposition": "semantic_na", "reason": "Lifecycle-script dispatch is not a dependency materialization command; script sentinels are fixed test controls."},
+        "lifecycle init": {"disposition": "semantic_na", "reason": "Authors lifecycle scripts, not installed skills/instructions."},
+        "lifecycle test": {"disposition": "semantic_na", "reason": "Synthetic script event execution differs from the real install hooks observed here."},
+        "lifecycle trust": {"disposition": "semantic_na", "reason": "Changes script trust; sentinels are preauthorized controls, not changing trust resources."},
+        "lifecycle untrust": {"disposition": "semantic_na", "reason": "Revokes script trust, outside fixed sentinel authorization."},
+        "lifecycle validate": {"disposition": "semantic_na", "reason": "Validates authored script files, not installed primitive revision identity."},
+        "list": {"disposition": "semantic_na", "reason": "Lists project run scripts; none are declared by this passive package."},
+        "lock": {"disposition": "applicable", "reason": "Resolves lock state while preserving deployed files and ownership.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "lock export": {"disposition": "applicable", "reason": "Exports real A/B commit identities as CycloneDX and SPDX.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "marketplace": {"disposition": "semantic_na", "reason": "Marketplace dispatch; no marketplace catalog participates in direct Git dependencies."},
+        "marketplace add": {"disposition": "semantic_na", "reason": "Adds a discovery catalog source, not a direct dependency."},
+        "marketplace audit": {"disposition": "semantic_na", "reason": "Audits against marketplace sources absent from this fixture."},
+        "marketplace browse": {"disposition": "semantic_na", "reason": "Browses catalog entries; no catalog is declared."},
+        "marketplace check": {"disposition": "semantic_na", "reason": "Checks marketplace entries absent from the manifest."},
+        "marketplace init": {"disposition": "semantic_na", "reason": "Authors a catalog rather than a direct Git package."},
+        "marketplace list": {"disposition": "semantic_na", "reason": "Lists configured catalogs, not installed direct dependencies."},
+        "marketplace migrate": {"disposition": "semantic_na", "reason": "Migrates a legacy catalog; no such resource is present."},
+        "marketplace outdated": {"disposition": "semantic_na", "reason": "Checks catalog freshness, not the covered installed dependency freshness."},
+        "marketplace package": {"disposition": "semantic_na", "reason": "Catalog-package editing dispatch; no catalog is authored."},
+        "marketplace package add": {"disposition": "semantic_na", "reason": "Adds producer catalog entries, not consumer dependencies."},
+        "marketplace package remove": {"disposition": "semantic_na", "reason": "Removes producer catalog entries; consumer removal uses uninstall/prune."},
+        "marketplace package set": {"disposition": "semantic_na", "reason": "Edits catalog metadata, absent for direct Git references."},
+        "marketplace remove": {"disposition": "semantic_na", "reason": "Removes discovery catalogs, not installed direct dependencies."},
+        "marketplace update": {"disposition": "semantic_na", "reason": "Refreshes catalog state, distinct from dependency revision update."},
+        "marketplace validate": {"disposition": "semantic_na", "reason": "Validates catalog authoring documents absent here."},
+        "mcp": {"disposition": "semantic_na", "reason": "Service dispatch; package declares no MCP service."},
+        "mcp install": {"disposition": "semantic_na", "reason": "Configures executable MCP servers absent here."},
+        "mcp list": {"disposition": "semantic_na", "reason": "Lists MCP services, not passive skills."},
+        "mcp search": {"disposition": "semantic_na", "reason": "Searches MCP registries, not the explicit Git source."},
+        "mcp show": {"disposition": "semantic_na", "reason": "Reads MCP registry records absent from the fixture."},
+        "outdated": {"disposition": "applicable", "reason": "Observes upstream B while deployment remains A; cache effects are allowed.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "pack": {"disposition": "semantic_na", "reason": "Produces an archive; this lifecycle consumes Git rather than a bundle."},
+        "plugin": {"disposition": "semantic_na", "reason": "Plugin authoring dispatch; the fixture is an existing passive package."},
+        "plugin init": {"disposition": "semantic_na", "reason": "Scaffolds a producer rather than transitioning an installed dependency."},
+        "policy": {"disposition": "semantic_na", "reason": "Policy dispatch; no changing policy document participates."},
+        "policy explain": {"disposition": "semantic_na", "reason": "Explains executable trust, not passive deployment ownership."},
+        "policy status": {"disposition": "semantic_na", "reason": "Inspects policy posture; no policy source changes here."},
+        "preview": {"disposition": "semantic_na", "reason": "Previews run-script prompts; no project run script is declared."},
+        "prune": {"disposition": "applicable", "reason": "Project declaration removal; global removal uses uninstall instead.", "deterministic": ["deterministic-project"], "generated": ["generated-project"]},
+        "publish": {"disposition": "semantic_na", "reason": "Publishes registry artifacts; fixture revisions are local Git commits."},
+        "run": {"disposition": "semantic_na", "reason": "Executes project run scripts, absent from this passive package."},
+        "runtime": {"disposition": "semantic_na", "reason": "AI-runtime dispatch; runtime binaries are not package primitives."},
+        "runtime list": {"disposition": "semantic_na", "reason": "Lists AI runtime binaries, not dependency revisions."},
+        "runtime remove": {"disposition": "semantic_na", "reason": "Removes runtime binaries; dependency removal is separately covered."},
+        "runtime setup": {"disposition": "semantic_na", "reason": "Installs AI runtime binaries outside this passive package lifecycle."},
+        "runtime status": {"disposition": "semantic_na", "reason": "Checks runtime availability rather than installed package state."},
+        "search": {"disposition": "semantic_na", "reason": "Searches marketplace catalogs absent from the direct Git fixture."},
+        "self-update": {"disposition": "semantic_na", "reason": "Replaces APM itself; this verifier holds its source interpreter and launcher fixed."},
+        "targets": {"disposition": "applicable", "reason": "Observes empty caller project markers, not global deployment inventory.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "uninstall": {"disposition": "applicable", "reason": "Removes globally owned bytes, permits clean audit and fresh reinstall.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "unpack": {"disposition": "semantic_na", "reason": "Extracts bundles; none are declared in the Git fixture."},
+        "update": {"disposition": "applicable", "reason": "Advances installed bytes, resolved commit and ownership to B.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]},
+        "view": {"disposition": "applicable", "reason": "Reads installed package metadata, not remote registry discovery.", "deterministic": ["deterministic-global-canonical", "deterministic-global-aliased", "deterministic-external-roots-false", "deterministic-external-roots-true"], "generated": ["generated-global-canonical", "generated-global-aliased"]}
+      },
+      "trajectories": {
+        "project": [
+          {"command":"install","argv_contains":["--dry-run"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":[],"returncode":0,"state":"changed"},
+          {"command":"install","argv_contains":[],"returncode":0,"state":"observed"},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","preparation":"Replace the owned project skill with tampered user bytes."},
+          {"command":"install","argv_contains":[],"returncode":0,"state":"observed"},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged"},
+          {"command":"prune","argv_contains":[],"returncode":0,"state":"observed","preparation":"Remove the dependency declaration from this manifest."},
+          {"command":"install","argv_contains":[],"returncode":0,"state":"observed","preparation":"Restore the pinned dependency declaration."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged"},
+          {"command":"prune","argv_contains":[],"returncode":0,"state":"observed","preparation":"Tamper with the skill and remove its declaration; preserve user bytes."},
+          {"command":"install","argv_contains":[],"returncode":0,"state":"observed","preparation":"Restore the declaration, retaining collision bytes."},
+          {"command":"install","argv_contains":["--force"],"returncode":0,"state":"observed"},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged"}
+        ],
+        "model-global-start": [
+          {"command":"install","argv_contains":["--global","--dry-run"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"compile","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"lock","argv_contains":["--global"],"returncode":0,"state":"observed"}
+        ],
+        "required-global-start": [
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed"}
+        ],
+        "global-readers": [
+          {"command":"deps list","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"deps tree","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"deps why","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"view","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"info","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"deps info","argv_contains":[],"returncode":0,"state":"observed","context":"APM_HOME"}
+        ],
+        "model-cache-readers": [
+          {"command":"cache info","argv_contains":[],"returncode":0,"state":"observed"},
+          {"command":"cache prune","argv_contains":["--days","30"],"returncode":0,"state":"observed"}
+        ],
+        "required-cache-readers": [
+          {"command":"cache info","argv_contains":[],"returncode":0,"state":"observed","context":"APM_HOME"},
+          {"command":"cache prune","argv_contains":["--days","30"],"returncode":0,"state":"observed","context":"APM_HOME"}
+        ],
+        "project-only-readers": [
+          {"command":"targets","argv_contains":["--json"],"returncode":0,"state":"unchanged"},
+          {"command":"find","argv_contains":[],"returncode":1,"state":"unchanged","context":"APM_HOME"}
+        ],
+        "model-global-update": [
+          {"command":"lock export","argv_contains":["--global","--format","cyclonedx"],"returncode":0,"state":"unchanged"},
+          {"command":"lock export","argv_contains":["--global","--format","spdx"],"returncode":0,"state":"unchanged"},
+          {"command":"outdated","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Publish B outside observed roots while installed A remains intact."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"observed"},
+          {"command":"update","argv_contains":["--global","--yes"],"returncode":0,"state":"changed"},
+          {"command":"compile","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"lock export","argv_contains":["--global","--format","cyclonedx"],"returncode":0,"state":"unchanged"},
+          {"command":"lock export","argv_contains":["--global","--format","spdx"],"returncode":0,"state":"unchanged"},
+          {"command":"deps update","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":1,"state":"unchanged","preparation":"Declare a missing ref to require frozen refusal."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":1,"state":"unchanged","preparation":"Restore ref then explicitly select GitLab for the same custom host."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"observed","preparation":"Restore exact generic-provider manifest bytes."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed"}
+        ],
+        "required-global-update": [
+          {"command":"compile","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"lock","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"lock export","argv_contains":["--global"],"returncode":0,"state":"unchanged"},
+          {"command":"outdated","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Publish B outside observed roots while installed A remains intact."},
+          {"command":"update","argv_contains":["--global","--dry-run"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"observed"},
+          {"command":"update","argv_contains":["--global","--yes"],"returncode":0,"state":"changed"},
+          {"command":"compile","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"lock export","argv_contains":["--global","--format","spdx"],"returncode":0,"state":"unchanged"},
+          {"command":"deps update","argv_contains":["--global"],"returncode":0,"state":"observed"},
+          {"command":"lock","argv_contains":["--global","--update"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"observed"},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":1,"state":"unchanged","preparation":"Declare A while lock records B."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Restore original main declaration."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Declare full commit A and install its original bytes."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":1,"state":"unchanged","preparation":"Keep manifest ref and locked resolved_ref at A; corrupt only locked resolved_commit to real B."},
+          {"command":"install","argv_contains":["--global","--frozen"],"returncode":0,"state":"unchanged","preparation":"Restore exact matching A lock bytes; replay must preserve pinned deployment."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Restore original main declaration and install B."}
+        ],
+        "global-clean-audit": [
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME"}
+        ],
+        "required-audit-matrix": [
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Delete an owned skill."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME","preparation":"Restore exact B bytes after deletion."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Edit an owned skill."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME","preparation":"Restore exact B bytes after modification."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Move source modules outside state root."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME","preparation":"Restore source modules."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Replace ledger ownership with unknown owner."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME","preparation":"Restore exact ownership metadata."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Replace skill with escaping symlink."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME","preparation":"Restore skill bytes after symlink control."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Delete Claude skill and modify Hermes skill together."},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME","preparation":"Restore both target deployments."}
+        ],
+        "global-clean-repair": [
+          {"command":"cache clean","argv_contains":["--yes"],"returncode":0,"state":"observed"},
+          {"command":"deps clean","argv_contains":["--dry-run"],"returncode":0,"state":"unchanged","context":"APM_HOME"},
+          {"command":"deps clean","argv_contains":["--yes"],"returncode":0,"state":"changed","context":"APM_HOME"},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME"},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed"}
+        ],
+        "model-tamper-repair": [
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":1,"state":"unchanged","context":"APM_HOME","preparation":"Tamper with deployed skill bytes."},
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed"}
+        ],
+        "global-remove": [
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME"},
+          {"command":"uninstall","argv_contains":["--global"],"returncode":0,"state":"changed"},
+          {"command":"audit","argv_contains":["--ci","--no-policy"],"returncode":0,"state":"unchanged","context":"APM_HOME"}
+        ],
+        "global-reinstall": [
+          {"command":"install","argv_contains":["--global"],"returncode":0,"state":"observed","preparation":"Restore removed declaration in the same user manifest; model variants publish C and seed only a sibling virtual-package lock entry, requiring current upstream rather than cached B."}
+        ],
+        "semver": [
+          {"command":"install","argv_contains":["--allow-insecure"],"returncode":0,"state":"observed","preparation":"Declare real tagged semver range with initial transport."},
+          {"command":"install","argv_contains":["--allow-insecure","--frozen"],"returncode":0,"state":"unchanged"},
+          {"command":"install","argv_contains":["--allow-insecure","--frozen"],"returncode":1,"state":"unchanged","preparation":"Flip transport while retaining semver range."},
+          {"command":"install","argv_contains":["--allow-insecure","--frozen"],"returncode":0,"state":"unchanged","preparation":"Restore accepted manifest bytes."},
+          {"command":"install","argv_contains":["--allow-insecure"],"returncode":0,"state":"observed","preparation":"Declare inverse initial transport with same real tagged semver range."},
+          {"command":"install","argv_contains":["--allow-insecure","--frozen"],"returncode":0,"state":"unchanged"},
+          {"command":"install","argv_contains":["--allow-insecure","--frozen"],"returncode":1,"state":"unchanged","preparation":"Flip inverse transport while retaining semver range."},
+          {"command":"install","argv_contains":["--allow-insecure","--frozen"],"returncode":0,"state":"unchanged","preparation":"Restore accepted manifest bytes."},
+          {"command":"install","argv_contains":[],"returncode":0,"state":"observed","preparation":"Restore original dependency declaration."}
+        ]
+      },
+      "witnesses": [
+        {"id":"deterministic-project","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[project]","kind":"deterministic","dimensions":{"variant":"project"},"trajectory":["project"]},
+        {"id":"deterministic-global-canonical","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-canonical]","kind":"deterministic","dimensions":{"variant":"global-canonical"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"deterministic-global-aliased","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-aliased]","kind":"deterministic","dimensions":{"variant":"global-aliased"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"generated-project","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[project]","kind":"generated","dimensions":{"variant":"project"},"trajectory":["project"]},
+        {"id":"generated-global-canonical","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-canonical]","kind":"generated","dimensions":{"variant":"global-canonical"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"generated-global-aliased","nodeid":"tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-aliased]","kind":"generated","dimensions":{"variant":"global-aliased"},"trajectory":["model-global-start","global-readers","model-cache-readers","project-only-readers","model-global-update","global-clean-repair","model-tamper-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"deterministic-external-roots-false","nodeid":"tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[False]","kind":"deterministic","dimensions":{"aliased_home":false},"trajectory":["required-global-start","global-readers","required-cache-readers","project-only-readers","required-global-update","semver","global-clean-audit","required-audit-matrix","global-clean-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"deterministic-external-roots-true","nodeid":"tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[True]","kind":"deterministic","dimensions":{"aliased_home":true},"trajectory":["required-global-start","global-readers","required-cache-readers","project-only-readers","required-global-update","semver","global-clean-audit","required-audit-matrix","global-clean-repair","global-remove","global-reinstall","global-remove"]},
+        {"id":"deterministic-project-semver","nodeid":"tests/integration/test_required_lifecycle_state_machine.py::test_required_frozen_semver_transport_refusal_recovers","kind":"deterministic","dimensions":{},"trajectory":["semver"]}
       ]
     }
   ],

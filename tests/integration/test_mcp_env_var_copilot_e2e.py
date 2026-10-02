@@ -9,23 +9,29 @@ The unit tests in tests/unit/test_copilot_adapter.py cover translation in
 isolation; this test pins the integration boundary so plaintext secrets
 cannot regress back onto disk.
 
-Also includes a Cursor regression trap: Cursor's adapter is pinned to
-the legacy install-time resolution behaviour (per the design contract
-in copilot.py) until its config format is individually audited. That
-adapter MUST keep producing literal values; this test fails loudly if
-the Copilot translation accidentally bleeds into Cursor.
+Also covers Cursor's native ``${env:NAME}`` syntax and guards against
+writing resolved secret values to its project-local configuration.
 """
 
 import json
 import os
 import subprocess
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import pytest
 import yaml
 
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_mcp_registry import LocalMcpRegistryFactory
+
+CursorScenario = tuple[Path, dict[str, str], IsolatedApmEnvironment]
+
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
-    pytest.mark.requires_runtime_copilot,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
     # Requires --dist loadgroup in the xdist invocation (the only
     # scheduler that honors xdist_group); without it the marker is
@@ -50,6 +56,8 @@ class TestMcpEnvVarHeadersCopilot:
     runtime placeholders for env-var references in apm.yml. The literal
     values from the installer's environment must NEVER appear on disk.
     """
+
+    pytestmark = pytest.mark.requires_runtime_copilot
 
     def test_self_defined_http_server_translates_env_vars_not_resolves(
         self, tmp_path, apm_binary_path
@@ -239,24 +247,29 @@ class TestMcpEnvVarHeadersCopilot:
         )
 
 
+@pytest.fixture
+def cursor_scenario(tmp_path: Path) -> CursorScenario:
+    """Bound every Cursor install to a scrubbed environment and local project."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "cursor", base_env=dict(os.environ))
+    project = isolated.work_root / "project"
+    project.mkdir()
+    (project / ".cursor").mkdir()
+    return (
+        project,
+        isolated.subprocess_env(),
+        isolated,
+    )
+
+
 class TestMcpEnvVarHeadersCursor:
-    """Sibling-adapter regression trap for #1152.
+    """Cursor's native runtime references keep secrets out of project config."""
 
-    Cursor's mcp.json runtime-substitution support has not yet been
-    individually audited, so its adapter is pinned to the legacy
-    install-time resolution behaviour. This test fails if that pin
-    accidentally lifts -- either by removing the
-    ``_supports_runtime_env_substitution = False`` override on
-    ``CursorClientAdapter`` or by changing the base class default in
-    a way that breaks Cursor.
-    """
-
-    def test_cursor_still_resolves_env_vars_to_literal(self, tmp_path, apm_binary_path):
-        project_dir = tmp_path / "project"
-        project_dir.mkdir()
-        # Cursor target signal.
-        (project_dir / ".cursor").mkdir()
-
+    @pytest.mark.parametrize("secret_value", [None, "literal-cursor-value"])
+    def test_cursor_preserves_runtime_references_without_writing_secret(
+        self, cursor_scenario: CursorScenario, apm_binary_path: Path, secret_value: str | None
+    ) -> None:
+        project_dir, env, _isolated = cursor_scenario
+        runner = ApmLifecycleRunner((str(apm_binary_path),))
         _write_apm_yml(
             project_dir,
             [
@@ -267,22 +280,19 @@ class TestMcpEnvVarHeadersCursor:
                     "url": "https://example.com/mcp",
                     "headers": {
                         "Authorization": "Bearer ${MY_BEARER_TOKEN}",
+                        "x-mixed": "a=${env:MY_BEARER_TOKEN};b=<MY_BEARER_TOKEN>",
+                        "x-static": "authored-header",
                     },
                 }
             ],
         )
 
-        env = os.environ.copy()
-        env["MY_BEARER_TOKEN"] = "literal-cursor-value"
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env["APM_NON_INTERACTIVE"] = "1"
-
-        result = subprocess.run(
-            [apm_binary_path, "install", "--target", "cursor"],
+        env.pop("MY_BEARER_TOKEN", None)
+        if secret_value is not None:
+            env["MY_BEARER_TOKEN"] = secret_value
+        result = runner.run(
+            ("install", "--target", "cursor", "--no-policy"),
             cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=120,
             env=env,
         )
 
@@ -305,12 +315,290 @@ class TestMcpEnvVarHeadersCursor:
         server = next(iter(servers.values()))
         headers = server.get("headers") or {}
 
-        # Cursor MUST keep the legacy resolve-to-literal behaviour
-        # until a per-adapter audit lifts the pin. This guard fires
-        # if the Copilot fix accidentally bleeds into Cursor.
-        assert headers.get("Authorization") == "Bearer literal-cursor-value", (
-            f"Cursor adapter unexpectedly stopped resolving env vars at "
-            f"install time. If this is intentional, update the design "
-            f"contract in copilot.py and remove this regression trap.\n"
-            f"Got: {headers!r}"
+        assert headers.get("Authorization") == "Bearer ${env:MY_BEARER_TOKEN}", (
+            f"Cursor did not preserve its native runtime reference.\nGot: {headers!r}"
         )
+        assert headers["x-mixed"] == "a=${env:MY_BEARER_TOKEN};b=${env:MY_BEARER_TOKEN}"
+        assert headers["x-static"] == "authored-header"
+        full_text = cursor_config.read_text(encoding="utf-8")
+        assert "literal-cursor-value" not in full_text
+        assert "literal-cursor-value" not in result.stdout + result.stderr
+
+    def test_cursor_stdio_env_normalization_and_reinstall(
+        self, cursor_scenario: CursorScenario, apm_binary_path: Path
+    ) -> None:
+        project, env, _isolated = cursor_scenario
+        runner = ApmLifecycleRunner((str(apm_binary_path),))
+        cursor_config = project / ".cursor" / "mcp.json"
+        user_server = {"command": "printf", "args": ["user-owned"]}
+        cursor_config.write_text(
+            json.dumps({"mcpServers": {"user-kept": user_server}, "user-setting": True}),
+            encoding="utf-8",
+        )
+        _write_apm_yml(
+            project,
+            [
+                {
+                    "name": "stdio-probe",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "printf",
+                    "args": ["--token=${CURSOR_TOKEN}", "--native=${env:CURSOR_TOKEN}"],
+                    "env": {
+                        "STATIC": "authored-value",
+                        "EMPTY": "",
+                        "PORT": 3000,
+                        "DEBUG": False,
+                        "RATE": 0.5,
+                        "OPTIONAL": None,
+                        "REFERENCE": "${CURSOR_TOKEN}",
+                        "ENVPREFIX": "${env:CURSOR_TOKEN}",
+                        "ANGLE": "<CURSOR_TOKEN>",
+                    },
+                }
+            ],
+        )
+        env["CURSOR_TOKEN"] = "cursor-first-sentinel"
+        env["STATIC"] = "not-the-authored-value"
+        first = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
+        assert first.returncode == 0, first.stdout + first.stderr
+        document = json.loads(cursor_config.read_text(encoding="utf-8"))
+        assert document["mcpServers"]["stdio-probe"]["env"] == {
+            "STATIC": "authored-value",
+            "EMPTY": "",
+            "PORT": "3000",
+            "DEBUG": "false",
+            "RATE": "0.5",
+            "REFERENCE": "${env:CURSOR_TOKEN}",
+            "ENVPREFIX": "${env:CURSOR_TOKEN}",
+            "ANGLE": "${env:CURSOR_TOKEN}",
+        }
+        assert document["mcpServers"]["stdio-probe"]["args"] == [
+            "--token=${env:CURSOR_TOKEN}",
+            "--native=${env:CURSOR_TOKEN}",
+        ]
+        assert document["mcpServers"]["user-kept"] == user_server
+        assert document["user-setting"] is True
+        capture = {"config_paths": (PurePosixPath(".cursor/mcp.json"),)}
+        before = LifecycleStateSnapshot.capture(project, **capture)
+        env["CURSOR_TOKEN"] = "cursor-second-sentinel"
+        results = runner.run_sequence(
+            (
+                ("install", "--target", "cursor", "--no-policy"),
+                ("install", "--target", "cursor", "--force", "--only", "mcp", "--no-policy"),
+            ),
+            expected_returncodes=(0, 0),
+            scenario_id="cursor-repeat",
+            cwd=project,
+            env=env,
+        )
+        after = LifecycleStateSnapshot.capture(project, **capture)
+        assert before.file(".cursor/mcp.json").content == after.file(".cursor/mcp.json").content
+        assert before.mcp_state_bytes == after.mcp_state_bytes
+        manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+        manifest["dependencies"]["mcp"][0]["env"]["STATIC"] = "changed-manifest-value"
+        _write_apm_yml(project, manifest["dependencies"]["mcp"])
+        changed = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
+        assert changed.returncode == 0, changed.stdout + changed.stderr
+        document["mcpServers"]["stdio-probe"]["env"]["STATIC"] = "changed-manifest-value"
+        assert json.loads(cursor_config.read_text(encoding="utf-8")) == document
+        output = first.stdout + first.stderr + "".join(r.stdout + r.stderr for r in results)
+        output += changed.stdout + changed.stderr
+        stored = cursor_config.read_text(encoding="utf-8")
+        for sentinel in ("cursor-first-sentinel", "cursor-second-sentinel"):
+            assert sentinel not in stored
+            assert sentinel not in output
+
+    def test_cursor_targeted_repair_preserves_unrelated_configuration(
+        self, cursor_scenario: CursorScenario, apm_binary_path: Path
+    ) -> None:
+        project, env, _isolated = cursor_scenario
+        runner = ApmLifecycleRunner((str(apm_binary_path),))
+        _write_apm_yml(
+            project,
+            [
+                {
+                    "name": "repair-probe",
+                    "registry": False,
+                    "transport": "http",
+                    "url": "https://example.invalid/mcp",
+                    "headers": {
+                        "x-probe": "${CURSOR_TOKEN}",
+                        "Authorization": "Bearer ${CURSOR_TOKEN}",
+                    },
+                }
+            ],
+        )
+        cursor_config = project / ".cursor" / "mcp.json"
+        unrelated = {"command": "printf", "args": ["user-owned"]}
+        document = {
+            "mcpServers": {
+                "repair-probe": {
+                    "type": "http",
+                    "url": "https://example.invalid/mcp",
+                    "headers": {
+                        "x-probe": "old-baked-sentinel",
+                        "Authorization": "Bearer old-baked-sentinel",
+                    },
+                    "user-setting": "retain",
+                },
+                "unrelated": unrelated,
+            },
+            "user-setting": {"keep": True},
+        }
+        cursor_config.write_text(json.dumps(document), encoding="utf-8")
+        before = cursor_config.read_bytes()
+        env["CURSOR_TOKEN"] = "current-cursor-sentinel"
+        result = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert cursor_config.read_bytes() == before
+        document["mcpServers"]["repair-probe"]["headers"]["x-probe"] = "${env:CURSOR_TOKEN}"
+        document["mcpServers"]["repair-probe"]["headers"]["Authorization"] = (
+            "Bearer ${env:CURSOR_TOKEN}"
+        )
+        cursor_config.write_text(json.dumps(document), encoding="utf-8")
+        repaired = cursor_config.read_bytes()
+        repeated = runner.run(
+            ("install", "--target", "cursor", "--no-policy"), cwd=project, env=env
+        )
+        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+        assert cursor_config.read_bytes() == repaired
+        stored = json.loads(repaired)
+        assert stored["mcpServers"]["unrelated"] == unrelated
+        assert stored["mcpServers"]["repair-probe"]["user-setting"] == "retain"
+        assert stored["user-setting"] == {"keep": True}
+        assert b"old-baked-sentinel" not in repaired
+        assert b"current-cursor-sentinel" not in repaired
+        assert "current-cursor-sentinel" not in repeated.stdout + repeated.stderr
+
+        del document["mcpServers"]["repair-probe"]
+        cursor_config.write_text(json.dumps(document), encoding="utf-8")
+        recreated = runner.run(
+            ("install", "--target", "cursor", "--no-policy"), cwd=project, env=env
+        )
+        assert recreated.returncode == 0, recreated.stdout + recreated.stderr
+        regenerated = cursor_config.read_text(encoding="utf-8")
+        stored = json.loads(regenerated)
+        assert stored["mcpServers"]["repair-probe"]["headers"] == {
+            "x-probe": "${env:CURSOR_TOKEN}",
+            "Authorization": "Bearer ${env:CURSOR_TOKEN}",
+        }
+        assert stored["mcpServers"]["unrelated"] == unrelated
+        assert stored["user-setting"] == {"keep": True}
+        for sentinel in ("old-baked-sentinel", "current-cursor-sentinel"):
+            assert sentinel not in regenerated
+            assert sentinel not in recreated.stdout + recreated.stderr
+        stored["mcpServers"]["repair-probe"]["user-setting"] = "retain"
+        cursor_config.write_text(json.dumps(stored), encoding="utf-8")
+        restored = cursor_config.read_bytes()
+        final = runner.run(("install", "--target", "cursor", "--no-policy"), cwd=project, env=env)
+        assert final.returncode == 0, final.stdout + final.stderr
+        assert cursor_config.read_bytes() == restored
+        assert "current-cursor-sentinel" not in final.stdout + final.stderr
+
+    @pytest.mark.parametrize(
+        ("required_value", "optional_value"),
+        [
+            (None, None),
+            ("required-registry-sentinel", None),
+            ("required-registry-sentinel", ""),
+            ("required-registry-sentinel", "optional-registry-sentinel"),
+        ],
+    )
+    def test_cursor_registry_env_references_keep_optional_semantics(
+        self,
+        cursor_scenario: CursorScenario,
+        apm_binary_path: Path,
+        required_value: str | None,
+        optional_value: str | None,
+    ) -> None:
+        project, env, isolated = cursor_scenario
+        runner = ApmLifecycleRunner((str(apm_binary_path),))
+        document = {
+            "name": "io.github.apm/cursor-env-probe",
+            "description": "Cursor environment fixture",
+            "version": "1.0.0",
+            "packages": [
+                {
+                    "registryType": "npm",
+                    "identifier": "@apm/cursor-env-probe",
+                    "transport": {"type": "stdio"},
+                    "environmentVariables": [
+                        {"name": "CURSOR_REQUIRED", "required": True},
+                        {"name": "CURSOR_OPTIONAL", "required": False},
+                    ],
+                }
+            ],
+        }
+        env.pop("CURSOR_REQUIRED", None)
+        if required_value is not None:
+            env["CURSOR_REQUIRED"] = required_value
+        env.pop("CURSOR_OPTIONAL", None)
+        if optional_value is not None:
+            env["CURSOR_OPTIONAL"] = optional_value
+        factory = LocalMcpRegistryFactory(isolated.root / "registries")
+        with factory.start(document) as registry:
+            port = urlparse(registry.url).port
+            assert port is not None
+            env["APM_TEST_LOOPBACK_PORTS"] = str(port)
+            env["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+            _write_apm_yml(project, [{"name": document["name"], "registry": registry.url}])
+            result = runner.run(
+                ("install", "--target", "cursor", "--no-policy"), cwd=project, env=env
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert registry.request_paths
+        stored = (project / ".cursor" / "mcp.json").read_text(encoding="utf-8")
+        server = json.loads(stored)["mcpServers"]["cursor-env-probe"]
+        expected = {"CURSOR_REQUIRED": "${env:CURSOR_REQUIRED}"}
+        if optional_value:
+            expected["CURSOR_OPTIONAL"] = "${env:CURSOR_OPTIONAL}"
+        assert server["env"] == expected
+        for sentinel in ("required-registry-sentinel", "optional-registry-sentinel"):
+            assert sentinel not in stored
+            assert sentinel not in result.stdout + result.stderr
+
+    def test_other_target_does_not_opt_into_cursor(
+        self, cursor_scenario: CursorScenario, apm_binary_path: Path
+    ) -> None:
+        project, env, _isolated = cursor_scenario
+        runner = ApmLifecycleRunner((str(apm_binary_path),))
+        (project / ".cursor").rmdir()
+        _write_apm_yml(
+            project,
+            [{"name": "probe", "registry": False, "transport": "stdio", "command": "printf"}],
+        )
+        result = runner.run(("install", "--target", "claude", "--no-policy"), cwd=project, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (project / ".cursor").exists()
+
+    def test_global_cursor_install_does_not_write_workspace_config(
+        self, cursor_scenario: CursorScenario, apm_binary_path: Path
+    ) -> None:
+        project, env, isolated = cursor_scenario
+        runner = ApmLifecycleRunner((str(apm_binary_path),))
+        cursor_config = project / ".cursor" / "mcp.json"
+        cursor_config.write_text('{"mcpServers":{"user-kept":{"command":"printf"}}}\n')
+        before = cursor_config.read_bytes()
+        _write_apm_yml(
+            isolated.config_root,
+            [
+                {
+                    "name": "global-probe",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "printf",
+                }
+            ],
+        )
+        result = runner.run(
+            ("install", "--global", "--target", "cursor", "--no-policy"),
+            cwd=project,
+            env=env,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert cursor_config.read_bytes() == before
+        assert not (isolated.home / ".cursor" / "mcp.json").exists()
+        assert not (isolated.config_root / ".cursor" / "mcp.json").exists()
+        assert "workspace-only" in result.stdout + result.stderr
+        assert "no effective target can accept" in result.stdout + result.stderr

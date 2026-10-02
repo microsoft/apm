@@ -257,20 +257,25 @@ that at most one declaration remains.
 
 During resolution, marketplace entries are looked up in the marketplace's
 `marketplace.json` and replaced with concrete git coordinates. When `version`
-is a semver range or bare version number, the resolver lists git tags
+is a semver range or bare version number, the resolver lists the package
+repository's git tags (the catalog's tags only for in-catalog packages)
 using the `source.tag_pattern` emitted by `apm pack`. The package-level
 `tag_pattern` overrides `marketplace.build.tagPattern`. APM filters by the
 constraint and picks the highest matching tag. Old `marketplace.json` files
 that omit `source.tag_pattern` fall back to `{name}--v{version}`. Patterns
 must contain exactly one `{version}` placeholder, and a no-match does not
-silently become a raw ref. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
-resolution. The lockfile records the resolved ref, not the marketplace
+silently become a raw ref or consult a different repository. Use
+`apm install pkg@catalog#v1.0.1` for a literal ref; CLI marketplace suffixes
+do not accept ranges. Raw refs bypass tag resolution. The lockfile records the resolved ref, not the marketplace
 placeholder. Unknown keys in a marketplace entry are rejected.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
-The package URL owns the host; `git-subdir.path` owns the contained package
-path. Both survive into the concrete `git:`, `path:`, and `ref:` manifest
+The package URL owns its host, port, explicit transport, and SSH user during
+tag lookup and installation; none inherit the catalog's authority, even when
+hostname and repository path match. Explicit dictionary `repo` URLs follow
+the same rule; bare external entries keep their normal dependency defaults.
+`git-subdir.path` owns the contained package path. These survive into the concrete `git:`, `path:`, and `ref:` manifest
 entry and the lockfile. Invalid URLs or unsafe paths fail before durable
 project writes.
 
@@ -468,8 +473,18 @@ dependencies:
         #                            VS Code and JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
-        #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
-        #                            Codex: resolved at install time.
+        #                            Cursor: translated to ${env:VAR} and resolved at runtime.
+        #                            Windsurf/OpenCode/Claude/Gemini: resolved at install time.
+        #                            Codex: env resolved at install time; a remote
+        #                            server's headers are written as
+        #                            bearer_token_env_var / env_http_headers and
+        #                            resolved by Codex at server-start.
+        #                            Mixed or malformed references are skipped
+        #                            with a warning. Unchanged reinstall keeps
+        #                            existing config; to refresh an older managed
+        #                            entry, switch between ${VAR} and ${env:VAR}
+        #                            and reinstall with the same scope/targets.
+        #                            Review/back up manual edits to that entry first.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
@@ -491,12 +506,14 @@ dependencies:
       registry: false
       transport: http
       url: "https://mcp.internal.example.com"
+      enabled: false  # OpenCode only; other targets ignore this field
 
     # Self-defined remote with harness-specific extra keys
     # Unknown keys (e.g. oauth) are passthrough: preserved and written into
     # the generated config for EVERY installed harness. Keys that collide with
     # a modeled or adapter-owned field
-    # (command/url/headers/env/enabled/environment/http_headers/id/...) are rejected.
+    # (command/url/headers/env/environment/http_headers/id/...) are rejected.
+    # Top-level enabled is modeled for OpenCode; extra.enabled remains reserved.
     - name: slack
       registry: false
       transport: http
@@ -505,6 +522,25 @@ dependencies:
         clientId: "<pre-registered-client-id>"
         callbackPort: 3118
 ```
+
+For a recognized GitHub MCP server, automatic auth follows the target's
+runtime support and uses the selected token environment variable name on
+runtime-capable targets. A nonempty string manifest `Authorization` value takes
+precedence, including with dictionary-shaped headers accepted from custom
+registries on Copilot and Cursor. Registry values do not gain manifest
+provenance; this compatibility is not upstream registry schema certification.
+Follow [Repairing existing credentials](https://microsoft.github.io/apm/consumer/install-mcp-servers/#repairing-existing-credentials)
+to replace previously written credentials without losing custom fields.
+See the [MCP
+Servers guide](../../../../../docs/src/content/docs/consumer/install-mcp-servers.md#token-injection-github-mcp-server)
+for token selection details.
+
+For OpenCode, top-level `enabled` passes the supplied value and JSON type
+unchanged, including `false`, `null`, and non-boolean values. Only omission
+defaults to `true`; OpenCode interprets the value, not APM. Reinstall applies
+changes to this field. OpenCode remains project-only. See the
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
+for the dependency contract.
 
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker
@@ -687,11 +723,22 @@ enterprise security guide for the threat model.
 ## What the lockfile pins
 
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
-of the ref format in apm.yml. Running `apm install` without `--update` always
-uses the locked SHA, ensuring reproducible installs across machines.
+of the ref format in apm.yml. Running `apm install` without `--update` reuses
+the locked SHA when the dependency identity, declared ref and effective host
+provider match. An unseeded mutable ref resolves upstream even when another
+package or sibling path has a lock entry.
 `apm install --update`, `apm install --refresh`, `apm update` (including
 `--force`), `apm lock --update`, and `apm outdated` establish mutable refs from
 upstream instead of using a persistent bare-cache ref as current-state evidence.
+
+`--frozen` checks declared refs, full commit pins, host providers and HTTP/HTTPS
+transport against the lock, including transport changes under an unchanged
+semver range. It does not check whether an upstream branch moved. Review an
+intentional declaration change and run `apm install --update` to refresh the lock.
+
+Directory symlink aliases in `HOME` or `APM_HOME` work for global skill deployment.
+They do not relax package-descendant containment or destination-symlink checks,
+and are unrelated to explicit dependency `alias:` placement.
 
 Lockfile keys keep `github.com` implicit for migration stability while
 non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)

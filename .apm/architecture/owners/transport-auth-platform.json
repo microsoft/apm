@@ -7,9 +7,11 @@
       "owner": "deps/transport_selection.py (initial_transport_scheme, TransportSelector); deps/download_strategies.py (DownloadDelegate.download_gitlab_file)",
       "selectors": [
         "src/apm_cli/deps/transport_selection.py",
-        "src/apm_cli/deps/download_strategies.py"
+        "src/apm_cli/deps/download_strategies.py",
+        "src/apm_cli/marketplace/resolver.py",
+        "src/apm_cli/marketplace/version_resolver.py"
       ],
-      "guards": ["transport-platform-gitlab-sparse-plan"]
+      "guards": ["transport-platform-gitlab-sparse-plan", "transport-platform-marketplace-package-remote"]
     },
     {
       "id": "unix-install-ownership",
@@ -27,11 +29,12 @@
     },
     {
       "id": "host-credential-resolution",
-      "decision": "Host + credential resolution",
-      "owner": "core/auth.py (AuthResolver), core/host_providers.py",
+      "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds",
+      "owner": "core/auth.py (AuthResolver), core/host_providers.py (effective_host_provider_identity); consumers: drift.py and tiered_ref_resolver.py",
       "selectors": [
         "src/apm_cli/core/auth.py",
-        "src/apm_cli/core/host_providers.py"
+        "src/apm_cli/core/host_providers.py",
+        "src/apm_cli/drift.py"
       ],
       "guards": [
         "transport-platform-ado-validation-bearer-fallback",
@@ -135,8 +138,8 @@
     },
     {
       "id": "git-ref-freshness",
-      "decision": "Git ref freshness and cache eligibility",
-      "owner": "deps/tiered_ref_resolver.py (RefFreshnessPolicy)",
+      "decision": "Git ref freshness, cache eligibility, and dependency-scoped lock-seed identity",
+      "owner": "deps/tiered_ref_resolver.py (RefFreshnessPolicy, _lock_seed_key consuming effective_host_provider_identity)",
       "selectors": ["src/apm_cli/deps/tiered_ref_resolver.py"],
       "guards": ["transport-platform-ref-freshness"]
     },

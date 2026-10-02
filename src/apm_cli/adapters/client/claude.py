@@ -63,6 +63,14 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     _CONVERGED_SKILL_PREFIX = ".agents/skills/"
     _CLAUDE_SKILL_PREFIX = ".claude/skills/"
 
+    # Entry ``type`` values Claude Code uses for URL-addressed servers.
+    _REMOTE_TYPES = ("http", "sse", "streamable-http")
+
+    # Transport fields are replaced across families; a partial update can
+    # retain an omitted type only when it still belongs to the selected family.
+    _REMOTE_TRANSPORT_KEYS = frozenset({"type", "url", "headers"})
+    _STDIO_TRANSPORT_KEYS = frozenset({"type", "command", "args", "env", "cwd"})
+
     @classmethod
     def _rewrite_self_defined_skill_command(cls, command: str) -> str:
         if isinstance(command, str) and command.startswith(cls._CONVERGED_SKILL_PREFIX):
@@ -75,8 +83,13 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             config["command"] = self._rewrite_self_defined_skill_command(config["command"])
         return config
 
-    @staticmethod
-    def _normalize_mcp_entry_for_claude_code(entry: dict) -> dict:
+    @classmethod
+    def _is_remote_mcp_entry(cls, entry: dict) -> bool:
+        """Return whether *entry* describes a remote (URL-addressed) server."""
+        return bool(entry.get("url")) or entry.get("type") in cls._REMOTE_TYPES
+
+    @classmethod
+    def _normalize_mcp_entry_for_claude_code(cls, entry: dict) -> dict:
         """Normalize a server entry to Claude Code's on-disk shape.
 
         For remote servers, keep ``type``/``url``/``headers`` per Claude
@@ -91,11 +104,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         if not isinstance(entry, dict):
             return entry
         out = dict(entry)
-        url = out.get("url")
-        t = out.get("type")
-        is_remote = bool(url) or t in ("http", "sse", "streamable-http")
 
-        if is_remote:
+        if cls._is_remote_mcp_entry(out):
             if out.get("id") in ("", None):
                 out.pop("id", None)
             if out.get("tools") == ["*"]:
@@ -110,14 +120,43 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             out.pop("id", None)
         return out
 
-    @staticmethod
-    def _merge_mcp_server_dicts(existing_servers: dict, config_updates: dict) -> None:
+    @classmethod
+    def _retained_previous_entry(cls, prev: dict, new_cfg: dict) -> dict:
+        """Return *prev* without the keys of the transport *new_cfg* is not.
+
+        A redeclaration that switches transport must not leave the previous
+        transport's keys behind.  A surviving ``url`` keeps the entry
+        classified as remote, so the stdio shape never wins and a stale
+        ``Authorization`` header stays in the Claude Code config.
+
+        The keys are selected from the update rather than from a comparison
+        of the two entries, so an entry already carrying both transports --
+        written by a release that merged them unconditionally -- is repaired
+        by the next install that writes it instead of matching its own mixed shape and
+        surviving.  Keys APM does not manage (hand-authored OAuth blocks and
+        the like) describe no transport and are retained either way.
+        """
+        declares_transport = any(new_cfg.get(key) for key in ("type", "url", "command"))
+        is_remote = cls._is_remote_mcp_entry(new_cfg if declares_transport else prev)
+        stale = cls._STDIO_TRANSPORT_KEYS if is_remote else cls._REMOTE_TRANSPORT_KEYS
+        compatible_types = cls._REMOTE_TYPES if is_remote else ("local", "stdio")
+        # Keep a compatible type in place so repeated writes retain field order.
+        return {
+            key: value
+            for key, value in prev.items()
+            if key not in stale or (key == "type" and value in compatible_types)
+        }
+
+    @classmethod
+    def _merge_mcp_server_dicts(cls, existing_servers: dict, config_updates: dict) -> None:
         """Merge *config_updates* into *existing_servers* in place.
 
         Per-server entries are shallow-merged: ``{**old, **new}`` so keys present
-        only on plugin- or hand-authored configs (e.g. ``type``, OAuth blocks)
+        only on plugin- or hand-authored configs (e.g. OAuth blocks)
         survive when an update omits them.  Keys in *new* overwrite *old* on
         conflict so APM/registry installs still refresh ``command``/``args``/etc.
+        The previous entry first drops the keys of the transport the update
+        does not declare, so the merged entry describes exactly one.
         """
         for name, new_cfg in config_updates.items():
             if not isinstance(new_cfg, dict):
@@ -125,7 +164,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 continue
             prev = existing_servers.get(name)
             if isinstance(prev, dict):
-                merged = {**prev, **new_cfg}
+                merged = {**cls._retained_previous_entry(prev, new_cfg), **new_cfg}
                 existing_servers[name] = merged
             else:
                 existing_servers[name] = dict(new_cfg)

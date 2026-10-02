@@ -54,6 +54,7 @@ from scripts.architecture_linter.models import Rule, Violation
 
 _RID_HOST_CRED = "transport-platform-host-credential-resolution"
 _RID_HOST_REFERENCE_COORDINATES = "transport-platform-host-reference-coordinates"
+_RID_MARKETPLACE_REMOTE = "transport-platform-marketplace-package-remote"
 _RID_ADO_VALIDATION = "transport-platform-ado-validation-bearer-fallback"
 _RID_ADO_CALLER_CONFIG = "transport-platform-ado-validation-caller-config"
 _RID_ADO_CLONE_FALLBACK = "transport-platform-ado-validation-clone-bearer-fallback"
@@ -85,6 +86,9 @@ _RID_ARTIFACTORY_NETRC = "transport-platform-artifactory-netrc-isolation"
 
 
 _AUTH_OWNER = "src/apm_cli/core/auth.py"
+_HOST_PROVIDER_OWNER = "src/apm_cli/core/host_providers.py"
+_HOST_PROVIDER_IDENTITY_CONSUMER = "src/apm_cli/drift.py"
+_HOST_PROVIDER_LOCK_SEED_CONSUMER = "src/apm_cli/deps/tiered_ref_resolver.py"
 _HOST_REFERENCE_OWNER = "src/apm_cli/models/dependency/host_virtual.py"
 _ARTIFACTORY_NETRC_OWNER = "src/apm_cli/deps/artifactory_entry.py"
 _ARTIFACTORY_NETRC_CONSUMER = "src/apm_cli/deps/download_strategies.py"
@@ -147,6 +151,115 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
 
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_OWNER,
+            (("sub", "def effective_host_provider_identity(", 1, "eq"),),
+            "Effective host-provider identity must have one canonical owner",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_OWNER,
+            (
+                "provider = classify_host_provider(host, host_type=host_type)",
+                "return provider.kind, provider.credential_purpose",
+            ),
+            "Effective host-provider identity must derive backend and credential route "
+            "from the canonical registry",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_IDENTITY_CONSUMER,
+            (("sub", "effective_host_provider_identity(", 2, "eq"),),
+            "Dependency drift must compare both effective host-provider identities",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_IDENTITY_CONSUMER,
+            (
+                "from apm_cli.core.host_providers import effective_host_provider_identity",
+                "manifest_provider = effective_host_provider_identity(",
+                "locked_provider = effective_host_provider_identity(",
+                "if manifest_provider != locked_provider:",
+            ),
+            "Dependency drift must route provider comparison through the canonical "
+            "effective identity owner",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_LOCK_SEED_CONSUMER,
+            (("sub", "effective_host_provider_identity(", 1, "eq"),),
+            "Dependency-scoped lock seeds must consume one canonical host-provider identity",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _HOST_PROVIDER_LOCK_SEED_CONSUMER,
+            (
+                "def _lock_seed_key(",
+                "from ..core.host_providers import effective_host_provider_identity",
+                "dep_ref.get_unique_key()",
+                "_repository_cache_identity(dep_ref)",
+                "effective_host_provider_identity(",
+                "dep_ref.host or default_host(), host_type=dep_ref.host_type",
+            ),
+            "Dependency-scoped lock-seed identity must route provider classification "
+            "through the canonical effective identity owner",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            "src/apm_cli/adapters/client/base.py",
+            (
+                "resolver.resolve_github_mcp_token(",
+                "source_only=self._supports_runtime_env_substitution",
+                'isinstance(header.get("value"), ManifestHeaderValue)',
+            ),
+            "Shared MCP auth must preserve manifest provenance and use AuthResolver",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            _paths_under(provider, "src/apm_cli/adapters/client/", (".py",)),
+            re.compile(r"\.get_token_(?:env_var_)?for_purpose\("),
+            "MCP adapters must select credentials through AuthResolver",
+            exempt=False,
+        )
+    )
     # AC5 -- AuthResolver must scrub inherited Git authorization state.
     findings.extend(
         _require_subs(
@@ -176,7 +289,7 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             provider,
             inv,
             _RID_HOST_CRED,
-            "src/apm_cli/core/host_providers.py",
+            _HOST_PROVIDER_OWNER,
             ('if host_kind == "ado":', "suppress_credential_helpers=True"),
             "ADO transport policy must reject native credential helpers",
         )
@@ -441,6 +554,100 @@ def _check_host_reference_coordinates(provider: FactsProvider) -> tuple[Violatio
                         column=match.start() + 1,
                     )
                 )
+    return tuple(findings)
+
+
+def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep marketplace identity and transport handoffs on their existing owners."""
+    contracts = (
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "_package_version_remote",
+            (
+                "return dep_ref",
+                "return _gitlab_in_marketplace_dependency_reference(source, in_repo_path or '', ref)",
+                "return DependencyReference.parse(canonical)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "_dependency_reference_from_packed_source",
+            (
+                "source_type in {'github', 'git-subdir', 'gitlab'} -> remote = source.get('repo') or source.get('repository')",
+                "dependency = DependencyReference.parse_from_dict(entry)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "resolve_marketplace_plugin",
+            (
+                "lookup = _package_version_remote(plugin, source, dep_ref, canonical, manifest.plugin_root)",
+                "dep_ref = lookup",
+                "canonical = dep_ref.to_canonical()",
+                "transport_scheme = initial_transport_scheme(lookup)",
+                "version_auth['port'] = lookup.port",
+                "resolve_version_constraint(plugin_name, lookup.repo_url, version_spec, **version_auth)",
+            ),
+        ),
+        (
+            "src/apm_cli/marketplace/version_resolver.py",
+            "resolve_version_constraint",
+            (
+                "resolver_kwargs['transport_scheme'] = transport_scheme",
+                "resolver_kwargs['ssh_user'] = ssh_user",
+                "resolver_kwargs['port'] = port",
+            ),
+        ),
+    )
+    findings: list[Violation] = []
+    for path, function, required in contracts:
+        facts, failures = checked_facts(
+            provider, path, _RID_MARKETPLACE_REMOTE, require_python=True
+        )
+        findings.extend(failures)
+        if failures:
+            continue
+        index = facts.tree_index
+        definition = effective_definition(index, function) if index is not None else None
+        executable = (
+            {
+                ast.unparse(node)
+                for node in index.own_scope(definition)
+                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return, ast.Call, ast.Compare))
+            }
+            if definition is not None
+            else set()
+        )
+        if definition is not None:
+            executable.update(
+                f"{ast.unparse(node.test)} -> {ast.unparse(child)}"
+                for node in index.own_scope(definition)
+                if isinstance(node, ast.If)
+                for child in node.body
+                if isinstance(child, ast.Assign)
+            )
+        mutates_identity = (
+            function == "_package_version_remote"
+            and definition is not None
+            and any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "dep_ref"
+                    for target in node.targets
+                )
+                for node in index.own_scope(definition)
+            )
+        )
+        if mutates_identity or not set(required) <= executable:
+            findings.append(
+                violation(
+                    _RID_MARKETPLACE_REMOTE,
+                    path,
+                    f"{function} must preserve the canonical package identity and transport handoff",
+                )
+            )
     return tuple(findings)
 
 
@@ -1431,6 +1638,13 @@ def _check_windows_stable_path(provider: FactsProvider) -> tuple[Violation, ...]
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_MARKETPLACE_REMOTE,
+        group=GROUP,
+        guard_ids=(_RID_MARKETPLACE_REMOTE,),
+        description="Marketplace version lookup preserves canonical package identity and transport.",
+        check=_check_marketplace_package_remote,
+    ),
     Rule(
         id=_RID_ARTIFACTORY_NETRC,
         group=GROUP,

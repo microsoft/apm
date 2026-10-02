@@ -55,11 +55,12 @@ class CopilotClientAdapter(MCPClientAdapter):
     # environment and the literal value is baked into the config file
     # (legacy pre-#1152 behaviour).
     #
-    # Subclasses (Cursor / Windsurf / OpenCode / Claude / Gemini) override
-    # this to ``False`` until their respective config formats are individually
-    # audited for runtime-substitution support. Critically, Claude Desktop's
-    # config format does NOT support runtime substitution -- it MUST keep
-    # resolving at install time.
+    # Subclasses (Windsurf / OpenCode / Claude / Gemini) override this to
+    # ``False`` until their respective config formats are individually audited
+    # for runtime-substitution support. Cursor has audited native
+    # ``${env:VAR}`` support. Critically, Claude Desktop's config format does
+    # NOT support runtime substitution -- it MUST keep resolving at install
+    # time.
     _supports_runtime_env_substitution: bool = True
 
     # Process-wide aggregation of legacy ``<VAR>`` offenders, keyed by

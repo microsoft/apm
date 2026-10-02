@@ -84,6 +84,20 @@ class HookSourceDocument:
     commands: tuple[HookCommandDeclaration, ...]
 
 
+@dataclass(frozen=True)
+class HookHandlerDeclaration:
+    """One handler in the canonical flat or nested hook grammar."""
+
+    event: str
+    value: Mapping[str, Any]
+    json_pointer: str
+
+
+def hook_handlers(document: object) -> tuple[HookHandlerDeclaration, ...]:
+    """Validate the source grammar and expose handlers without executing them."""
+    return _walk_hook_handlers(document, strict=True)
+
+
 def parse_hook_source(document: object) -> HookSourceDocument:
     """Validate wrapped or naked hook event maps and locate command fields."""
     return HookSourceDocument(commands=_walk_hook_commands(document, strict=True))
@@ -100,6 +114,21 @@ def _walk_hook_commands(
     strict: bool,
 ) -> tuple[HookCommandDeclaration, ...]:
     """Walk one hook source through the canonical strict or tolerant grammar."""
+    return tuple(
+        command
+        for handler in _walk_hook_handlers(document, strict=strict)
+        for command in _command_declarations(
+            handler.event, dict(handler.value), handler.json_pointer, strict=strict
+        )
+    )
+
+
+def _walk_hook_handlers(
+    document: object,
+    *,
+    strict: bool,
+) -> tuple[HookHandlerDeclaration, ...]:
+    """Locate handlers once for executable intent and native content readers."""
     if not isinstance(document, dict):
         if strict:
             raise HookContractError("document must be a JSON object")
@@ -119,7 +148,7 @@ def _walk_hook_commands(
             raise HookContractError("hooks must be a JSON object")
         return ()
 
-    commands: list[HookCommandDeclaration] = []
+    handlers: list[HookHandlerDeclaration] = []
     for event, entries in hooks.items():
         if not isinstance(event, str) or not isinstance(entries, list):
             if strict:
@@ -133,7 +162,7 @@ def _walk_hook_commands(
                     raise HookContractError(f"hook event {event!r} entries must be objects")
                 continue
             entry_pointer = f"{event_pointer}/{entry_index}"
-            commands.extend(_command_declarations(event, entry, entry_pointer, strict=strict))
+            handlers.append(HookHandlerDeclaration(event, entry, entry_pointer))
             nested = entry.get("hooks")
             if nested is None:
                 continue
@@ -150,15 +179,10 @@ def _walk_hook_commands(
                             f"hook event {event!r} nested handlers must be objects"
                         )
                     continue
-                commands.extend(
-                    _command_declarations(
-                        event,
-                        handler,
-                        f"{entry_pointer}/hooks/{handler_index}",
-                        strict=strict,
-                    )
+                handlers.append(
+                    HookHandlerDeclaration(event, handler, f"{entry_pointer}/hooks/{handler_index}")
                 )
-    return tuple(commands)
+    return tuple(handlers)
 
 
 def _command_declarations(

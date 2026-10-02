@@ -571,6 +571,7 @@ class TestIntegrateSkillNameNormalization:
         fake_target.root_dir = Path(".github")
         fake_target.resolved_deploy_root = None
         fake_target.auto_create = True
+        fake_target.skills_deploy_path.side_effect = lambda root: root / ".github" / "skills"
 
         with (
             patch(
@@ -609,6 +610,7 @@ class TestIntegrateSkillNameNormalization:
         fake_target.root_dir = Path(".github")
         fake_target.resolved_deploy_root = None
         fake_target.auto_create = True
+        fake_target.skills_deploy_path.side_effect = lambda root: root / ".github" / "skills"
 
         with (
             patch(

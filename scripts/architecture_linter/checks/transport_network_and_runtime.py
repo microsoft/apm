@@ -142,9 +142,33 @@ def _check_ref_freshness(provider: FactsProvider) -> tuple[Violation, ...]:
             (
                 re.compile(r"^class RefFreshnessPolicy\(Enum\):"),
                 re.compile(r"^def ref_freshness_policy_for_install\("),
+                re.compile(r"^        return cls\.LOCKED_OR_CURRENT$"),
+                re.compile(r"^            dep_ref\.get_unique_key\(\),$"),
                 re.compile(r"^    if freshness_policy\.allows_bare_cache:"),
             ),
             "tiered_ref_resolver must own RefFreshnessPolicy and its install policy",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FRESHNESS,
+            _TIERED,
+            (
+                "        try:\n"
+                "            key = self._lock_seed_key(dep_ref, ref)\n"
+                "        except (ValueError, RuntimeError) as exc:\n"
+                "            _log.debug(\n"
+                '                "Skipping lock seed: historical provider identity is '
+                'unclassifiable (%s)",\n'
+                "                type(exc).__name__,\n"
+                "            )\n"
+                "            return False\n"
+                "        with self._coalesce_lock:\n"
+                "            self._lock_seeds[key] = sha.lower()",
+            ),
+            "unclassifiable historical seeds must be rejected before storage",
         )
     )
     findings.extend(

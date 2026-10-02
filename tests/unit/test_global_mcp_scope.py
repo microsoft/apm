@@ -61,7 +61,7 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
         self.assertFalse(adapter.supports_user_scope)
 
     def test_cursor_does_not_inherit_copilot_true(self):
-        """CursorClientAdapter inherits CopilotClientAdapter but overrides to False."""
+        """Cursor overrides the Copilot default for its workspace-only scope."""
         self.assertTrue(issubclass(CursorClientAdapter, CopilotClientAdapter))
         self.assertFalse(CursorClientAdapter.supports_user_scope)
 

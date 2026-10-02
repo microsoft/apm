@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import urllib.parse as _up
 from pathlib import Path
+from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
 
@@ -218,17 +219,25 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     return resolved
 
 
-def has_symlink_component(base_dir: Path, path: Path) -> bool:
-    """Return whether any component of *path* below *base_dir* is a symlink."""
+def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
+    """Reject linked components, optionally preserving access errors for diagnostics."""
     try:
         relative = path.relative_to(base_dir)
         current = base_dir
         for part in relative.parts:
             current /= part
-            if current.is_symlink():
+            try:
+                linked = S_ISLNK(current.lstat().st_mode)
+            except FileNotFoundError:
+                return False
+            if linked:
                 return True
         return False
-    except (OSError, ValueError):
+    except OSError:
+        if raise_on_error:
+            raise
+        return True
+    except ValueError:
         return True
 
 

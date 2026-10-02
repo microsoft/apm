@@ -25,20 +25,25 @@
       "version": "v7",
       "sha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     },
-    "github/gh-aw-actions/setup-cli@v0.87.8": {
+    "github/gh-aw-actions/setup-cli@v0.89.15": {
       "repo": "github/gh-aw-actions/setup-cli",
-      "version": "v0.87.8",
-      "sha": "1aa033c7bf25ac9428fe521065b90c30a7070c4e"
+      "version": "v0.89.15",
+      "sha": "045beb2d14bda8d0c1f2e83b41527f63770d2855"
     },
-    "github/gh-aw-actions/setup@v0.87.8": {
+    "github/gh-aw-actions/setup@v0.89.15": {
       "repo": "github/gh-aw-actions/setup",
-      "version": "v0.87.8",
-      "sha": "1aa033c7bf25ac9428fe521065b90c30a7070c4e"
+      "version": "v0.89.15",
+      "sha": "045beb2d14bda8d0c1f2e83b41527f63770d2855"
     },
     "microsoft/apm-action@v1.10.0": {
       "repo": "microsoft/apm-action",
       "version": "v1.10.0",
       "sha": "d723bb64ed70c135bbaf87d126b721dd2dae0439"
+    },
+    "ruby/setup-ruby@v1.323.0": {
+      "repo": "ruby/setup-ruby",
+      "version": "v1.323.0",
+      "sha": "984c0c890880bbf811283d6f09c4607c62d210a4"
     }
   }
 }

@@ -834,6 +834,7 @@ def _resolve_dependencies(
         deps_to_install,
         downloader,
         update_refs=update_refs,
+        failed_keys=callback_failures,
     )
 
     # ------------------------------------------------------------------

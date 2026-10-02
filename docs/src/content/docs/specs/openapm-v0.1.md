@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **123 normative statements (118 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **125 normative statements (120 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1791,6 +1791,73 @@ malformed-response, or other non-404 failures. When the legacy
 coordinate supplies a policy, the implementation MUST emit one
 actionable migration warning naming `apm/apm-policy`.
 
+#### 6.8.1 Optional deployed-prompt audit
+
+`deployed-prompt-audit` is an OPTIONAL governance capability, distinct
+from policy unmanaged-file evaluation ([req-pl-015](#req-pl-015)),
+source materialization scanning ([req-sc-015](#req-sc-015)), and
+drift checking ([req-pl-014](#req-pl-014)). Concrete paths, native keys, check algorithms
+and output serialization are implementation-defined; the following
+requirements govern the declared scope, not arbitrary filesystem content.
+
+<a id="req-pl-019"></a>
+**[req-pl-019]** A conforming **governance** implementation claiming
+`deployed-prompt-audit` MUST identify its supported targets, project
+or user scopes, recognized primitive locations and native formats,
+prompt checks and intentional exclusions in its conformance statement.
+The declared profile MUST include at least one prompt-bearing location
+or field and one specified content check. A workspace with no matching
+content may nevertheless have complete, empty coverage.
+Within that declared profile, the implementation MUST:
+
+(a) discover recognized deployed primitives independently of ownership
+records, including untracked content and shared native configuration in
+the declared scope, using the same target location and format definitions
+as the Consumer deployment implementation identified by its conformance
+statement. A Governance implementation may consume those definitions
+from another implementation; claiming this capability does not require
+implementing deployment or claiming the Consumer class;
+
+(b) distinguish discovery from prompt-check applicability: check
+prompt-bearing text, including decoded native prompt fields, while
+reporting recognized command-only hooks as not applicable to prompt
+checks, without treating their commands or executable bodies as prompts;
+
+(c) report incomplete coverage, with an affected location and reason,
+when a recognized surface cannot be read or interpreted, including an
+unsupported native format or version; terminate the audit non-zero for
+incomplete coverage in default and CI modes, even without policy; and
+
+(d) distinguish coverage from content findings in its reports, identify
+native prompt findings by field location, distinguish decoded prompt
+coordinates from physical file coordinates, and render untrusted
+locations and diagnostics as literal text rather than active markup
+or display-control characters in human-facing output.
+
+A valid non-prompt entry does not fail this capability by itself.
+Unrelated files outside the declared primitive scope are not incomplete
+coverage merely because they were not inspected. These rules do not
+change hash verification, executable trust or drift policy.
+
+<a id="req-pl-020"></a>
+**[req-pl-020]** A conforming **governance** implementation claiming
+`deployed-prompt-audit` MUST treat discovery as read-only evidence, not
+as ownership, execution approval or permission to remediate. It MUST
+NOT execute hooks, follow symlink files or directories, or widen traversal
+to unrelated transcripts or user configuration to perform that audit.
+If it offers automatic prompt-content remediation, it MUST preserve
+shared native configuration, user-scoped prompt content, and content
+outside the project root rather
+than rewriting or deleting them, report affected protected locations
+for manual review, and fail a remediation request that would touch such
+content before writing any selected content. User-scoped content remains
+protected even when the user's home directory is the deployment traversal
+root. This automatic-discovery capability does not redefine a separately
+documented operation on an explicitly selected individual file.
+Existing ownership and
+integrity checks, including [req-pl-016](#req-pl-016), remain applicable;
+this capability grants no additional mutation authority.
+
 ### 6.9 Conformance requirements (governance)
 
 This section's normative statements are:
@@ -1803,7 +1870,8 @@ This section's normative statements are:
   [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
   [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
-  [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018).
+  [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
+  [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020).
 
 ---
 
@@ -3567,7 +3635,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
 [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
 [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
-[req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018).
+[req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
+[req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3949,6 +4018,8 @@ renumbering of conformance classes.
 | [req-pl-016](#req-pl-016)                | MUST    | 6.8     | governance  |
 | [req-pl-017](#req-pl-017)                | MUST    | 6.8     | governance  |
 | [req-pl-018](#req-pl-018)                | MUST    | 6.3.1   | governance  |
+| [req-pl-019](#req-pl-019)                | MUST    | 6.8.1   | governance  |
+| [req-pl-020](#req-pl-020)                | MUST    | 6.8.1   | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -4006,7 +4077,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 123** (118 MUST, 5 SHOULD).
+**Total normative statements: 125** (120 MUST, 5 SHOULD).
 
 ---
 
@@ -4057,6 +4128,7 @@ renumbering of conformance classes.
 | 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
 | 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
 | 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 10.7, 10.11, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
+| 0.1.42 (proposed) | 2026-09-30 | Optional deployed-prompt audit capability for PR #2962. Added conditional governance [req-pl-019] and [req-pl-020] in Section 6.8.1, both enumerations, Appendix C, requirements manifest and behavioral conformance coverage. Under Section 9.2 this is a new opt-in conformance capability, not behavior-neutral errata or a reinterpretation of an existing obligation: implementations not claiming it acquire no new required feature. APM claims it; newly discovered prompt findings and incomplete native coverage can newly fail default and CI audits, command-only content remains non-failing, and protected remediation is refused before writes. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 123 -> 125 (120 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

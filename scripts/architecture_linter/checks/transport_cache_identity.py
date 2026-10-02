@@ -148,6 +148,24 @@ def _check_git_cache_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         )
     )
     findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CACHE,
+            _TIERED,
+            (
+                "self._lock_seeds[key] = sha.lower()",
+                "locked = self._lock_seeds.get(lock_key)",
+                "key = (_repository_cache_identity(dep_ref), ref)",
+                "cached = self._cache.get(*key)",
+                "existing = self._coalesce.get(key)",
+                "self._cache.put(*key, sha)",
+            ),
+            "Lock seeds must stay dependency-scoped while fresh results retain "
+            "repository-wide cache and coalescing identity",
+        )
+    )
+    findings.extend(
         _forbid_scan(
             provider,
             inv,

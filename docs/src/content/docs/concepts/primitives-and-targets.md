@@ -96,7 +96,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 
 Notes per target:
 
-- **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: prompts and instructions are project-scope only.
+- **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: modular instructions deploy to `~/.copilot/instructions/**/*.instructions.md` (mirroring the project-scope layout); prompts, agents, skills, hooks, and canvas remain project-scope only.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
 - **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).

@@ -2,6 +2,8 @@
 name: Daily Performance Scanner
 description: Scans src/apm_cli/ daily for algorithmic performance anti-patterns and opens a GitHub Issue with findings
 on:
+  # Keep activation read-only while retaining compiler revocation checks.
+  report-blocked-version: false
   schedule:
     - cron: "0 1 * * *"
   workflow_dispatch:

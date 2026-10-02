@@ -161,6 +161,124 @@ def _assert_same_state(
     assert actual.semantic_bytes == expected.semantic_bytes
 
 
+def test_native_hook_discovery_across_reinstall_update_and_user_scope(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The real CLI preserves manual native settings through lifecycle transitions."""
+    lifecycle = _install_lifecycle(tmp_path / "native-hooks", apm_binary_path)
+    settings_path = lifecycle.project.root / ".claude" / "settings.json"
+    settings = {
+        "unrelated": "\u202e",
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "touch NEVER_EXECUTE"},
+                    ]
+                }
+            ]
+        },
+    }
+    settings_bytes = json.dumps(settings).encode()
+    settings_path.write_bytes(settings_bytes)
+    transcript = lifecycle.project.root / ".claude" / "history.jsonl"
+    transcript.write_bytes(_BIDI_BYTES)
+    configs = (
+        PurePosixPath(".claude/settings.json"),
+        PurePosixPath(".claude/history.jsonl"),
+    )
+    for action in (("install",), ("install", "--update")):
+        before_audit = LifecycleStateSnapshot.capture(
+            lifecycle.project.root,
+            targets=("claude",),
+            config_paths=configs,
+        )
+        audit = _run(
+            lifecycle,
+            ("audit", "--no-drift", "--format", "json"),
+            expected=0,
+            scenario_id=f"native-hooks-{action[-1]}-audit",
+        )
+        report = json.loads(audit.stdout)
+        hooks = [entry for entry in report["coverage"]["primitives"] if entry["kind"] == "hooks"]
+        assert hooks and all(entry["status"] == "not-applicable" for entry in hooks)
+        assert all(entry["tracked"] is False for entry in hooks)
+        _assert_same_state(
+            before_audit,
+            LifecycleStateSnapshot.capture(
+                lifecycle.project.root,
+                targets=("claude",),
+                config_paths=configs,
+            ),
+        )
+        _run(
+            lifecycle,
+            (*action, "--no-policy", "--parallel-downloads", "0"),
+            expected=0,
+            scenario_id=f"native-hooks-{action[-1]}",
+        )
+        assert settings_path.read_bytes() == settings_bytes
+        assert transcript.read_bytes() == _BIDI_BYTES
+
+    global_install = lifecycle.runner.run(
+        (
+            "install",
+            "--global",
+            str(lifecycle.project.root),
+            "--target",
+            "copilot",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+        ),
+        scenario_id="native-hooks-user-transition",
+        cwd=lifecycle.isolated.work_root,
+        env=lifecycle.environment,
+    )
+    assert global_install.returncode == 0, _result_evidence(global_install)
+    user_instructions = (
+        lifecycle.isolated.home / ".copilot" / "instructions" / "user-owned.instructions.md"
+    )
+    user_instructions.parent.mkdir(parents=True, exist_ok=True)
+    user_instructions.write_bytes(_BIDI_BYTES)
+    global_lock = lifecycle.isolated.config_root / "apm.lock.yaml"
+    before_lock = global_lock.read_bytes()
+    global_audit = lifecycle.runner.run(
+        ("audit", "--ci", "--no-policy", "--no-drift", "--no-fail-fast", "--format", "json"),
+        scenario_id="native-hooks-global-untracked-prompt",
+        cwd=lifecycle.isolated.config_root,
+        env=lifecycle.environment,
+    )
+    assert global_audit.returncode == 1, _result_evidence(global_audit)
+    report = json.loads(global_audit.stdout)
+    check = next(check for check in report["checks"] if check["name"] == "content-integrity")
+    assert "unicode: .copilot/instructions/user-owned.instructions.md" in check["details"]
+    assert global_lock.read_bytes() == before_lock
+    assert settings_path.read_bytes() == settings_bytes
+    assert user_instructions.read_bytes() == _BIDI_BYTES
+    assert not (lifecycle.project.root / "NEVER_EXECUTE").exists()
+
+    dirty_skill = lifecycle.project.root / ".claude/skills/manual/SKILL.md"
+    dirty_skill.parent.mkdir(parents=True, exist_ok=True)
+    dirty_skill.write_bytes(_BIDI_BYTES)
+    settings["hooks"]["Stop"][0]["hooks"].append({"type": "prompt", "prompt": "\u202e"})
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+    mixed_before = LifecycleStateSnapshot.capture(
+        lifecycle.project.root, targets=("claude",), config_paths=configs
+    )
+    refused = _run(
+        lifecycle, ("audit", "--strip"), expected=1, scenario_id="native-hooks-mixed-strip-refusal"
+    )
+    assert "does not rewrite native configuration" in " ".join(refused.stdout.split())
+    assert dirty_skill.read_bytes() == _BIDI_BYTES
+    _assert_same_state(
+        mixed_before,
+        LifecycleStateSnapshot.capture(
+            lifecycle.project.root, targets=("claude",), config_paths=configs
+        ),
+    )
+
+
 def test_unrecorded_unicode_detect_strip_and_idempotent_audit(
     tmp_path: Path,
     apm_binary_path: Path,

@@ -24,9 +24,31 @@
         "src/apm_cli/models/dependency/materialization.py",
         "src/apm_cli/models/dependency/object_fields.py",
         "src/apm_cli/models/dependency/reference.py",
-        "src/apm_cli/deps/apm_resolver.py"
+        "src/apm_cli/primitives/discovery.py",
+        "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/commands/deps/cli.py",
+        "src/apm_cli/install/phases/download.py",
+        "src/apm_cli/install/phases/integrate.py",
+        "src/apm_cli/install/plan.py"
       ],
       "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity"]
+    },
+    {
+      "id": "native-lifecycle-evidence",
+      "decision": "Bounded #2867 fresh source-Python lifecycle evidence, immutable witness bindings and candidate-bound native completion; not repository shipping policy",
+      "owner": "scripts/lifecycle_contracts.py (authored obligations and execution validation) + scripts/check_lifecycle_evidence.py (candidate identity and completion) + tests/utils/lifecycle_evidence.py (fresh runner/Hypothesis observation)",
+      "selectors": [
+        "scripts/check_lifecycle_evidence.py",
+        "scripts/lifecycle_contracts.py",
+        "tests/utils/lifecycle_evidence.py",
+        "tests/utils/apm_lifecycle_runner.py",
+        "tests/utils/isolated_apm_environment.py",
+        "tests/fixtures/lifecycle_bug_ledger.json",
+        "tests/fixtures/lifecycle_completion.schema.json",
+        "tests/unit/scripts/test_lifecycle_evidence.py",
+        "tests/integration/test_architecture_native_lifecycle_evidence.py"
+      ],
+      "guards": ["contracts-tooling-native-lifecycle-evidence"]
     },
     {
       "id": "generated-python-artifact-membership",

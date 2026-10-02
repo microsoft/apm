@@ -128,13 +128,21 @@ def _surface_target_cleanup(
     logger.stale_cleanup(dep_key, len(cleanup.deleted))
 
 
-def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]]:
+def install_governance(
+    targets: list[TargetProfile],
+    *,
+    bounded: bool = False,
+) -> tuple[set[str], set[str]]:
     """Return ``(file_prefixes, uri_schemes)`` governed by *targets*.
 
     Dedicated target roots govern their full subtree. The shared ``.agents``
     root is partitioned by primitive subdirectory so one active target cannot
     claim a declared sibling's files (for example, Copilot's
     ``.agents/skills`` versus Antigravity's ``.agents/rules``).
+
+    ``bounded`` partitions dedicated roots the same way. Ownership tests need
+    the whole root, but a tree walk does not: a root such as ``.claude`` also
+    holds session transcripts and other data APM never deploys.
 
     ``uri_schemes`` is the set of lockfile URI schemes used by dynamic /
     user-machine targets (``copilot-app`` -> ``copilot-app-db://``,
@@ -149,15 +157,16 @@ def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]
         if target_schemes:
             uri_schemes.update(target_schemes)
             continue
-        root = getattr(target, "root_dir", None)
-        if root and str(root).rstrip("/") != ".agents":
-            file_prefixes.add(str(root).rstrip("/") + "/")
+        root = str(getattr(target, "root_dir", None) or "").rstrip("/")
+        shared_root = root == ".agents"
+        if root and not shared_root and not bounded:
+            file_prefixes.add(root + "/")
         primitives = getattr(target, "primitives", None)
         if isinstance(primitives, dict):
             for mapping in primitives.values():
                 deploy_root = getattr(mapping, "deploy_root", None)
                 base = str(deploy_root or root or "").rstrip("/")
-                if base != ".agents":
+                if not base or (base != ".agents" and not bounded):
                     continue
                 subdir = getattr(mapping, "subdir", None)
                 if subdir:
@@ -169,9 +178,9 @@ def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]
                 else:
                     # Compatibility for minimal TargetProfile stand-ins.
                     file_prefixes.add(f"{base}/")
-        if str(root or "").rstrip("/") == ".agents":
+        if root and (shared_root or bounded):
             for generated in getattr(target, "generated_files", ()) or ():
-                file_prefixes.add(f".agents/{str(generated).lstrip('/')}")
+                file_prefixes.add(f"{root}/{str(generated).lstrip('/')}")
     return file_prefixes, uri_schemes
 
 

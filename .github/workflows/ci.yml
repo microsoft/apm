@@ -27,7 +27,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
     - name: Ruff lint
       run: >-
@@ -134,7 +134,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         enable-cache: true
 
@@ -167,6 +167,84 @@ jobs:
         git config --list --show-origin
         echo "::endgroup::"
 
+  windows-git-discovery:
+    name: Windows Git Discovery (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11']
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
+
+    - name: Record native toolchain
+      run: |
+        uv run --frozen python -c "import platform, sys; print(platform.platform()); print(sys.version)"
+        git --version
+        gh --version
+        git rev-parse HEAD
+
+    - name: Run trusted executable contracts
+      run: >-
+        uv run --frozen --extra dev pytest -p no:cacheprovider -v
+        -m trusted_executable
+        tests/unit/cache/test_git_env.py
+        tests/integration/test_trusted_executable_discovery.py
+
+    - name: Prove legacy PATHEXT regression
+      shell: python
+      run: |
+        import pathlib
+        import subprocess
+        import tempfile
+        import xml.etree.ElementTree as ET
+
+        source = pathlib.Path("src/apm_cli/utils/git_env.py")
+        original = source.read_bytes()
+        guard = b'if candidate is None and os.name == "nt" and sys.version_info < (3, 12):'
+        assert original.count(guard) == 1, "PATHEXT mutation guard changed"
+        try:
+            source.write_bytes(original.replace(guard, b"if False:"))
+            with tempfile.TemporaryDirectory() as directory:
+                report = pathlib.Path(directory) / "mutation.xml"
+                result = subprocess.run([
+                    "uv", "run", "--frozen", "--extra", "dev",
+                    "pytest", "-p", "no:cacheprovider", "-q",
+                    "-m", "trusted_executable",
+                    "-k", "real_tools_resolve or install_reinstall_and_update",
+                    "tests/integration/test_trusted_executable_discovery.py",
+                    f"--junitxml={report}",
+                ], timeout=300, check=False)
+                assert result.returncode == 1, "Legacy resolver mutation must fail tests"
+                cases = ET.parse(report).getroot().findall(".//testcase")
+                assert len(cases) == 5, "Both tools, shadows, and real install must execute"
+                for case in cases:
+                    failure = case.find("failure")
+                    assert failure is not None, case.attrib
+                    assert "executable not found" in (failure.text or ""), case.attrib
+                print("PATHEXT mutation killed by all five native consumer cases")
+        finally:
+            source.write_bytes(original)
+
   test-architecture:
     name: Test Architecture Ratchets
     runs-on: ubuntu-24.04
@@ -183,7 +261,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         enable-cache: true
 
@@ -261,7 +339,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         enable-cache: true
 
@@ -388,7 +466,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         enable-cache: true
 
@@ -434,7 +512,7 @@ jobs:
       # committed managed files are preserved: content-integrity detects
       # tampered file hashes and the drift replay compares the committed tree
       # (including .agents/skills/) against a fresh cache-free replay.
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
 
@@ -501,12 +579,18 @@ jobs:
   # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
   # credentials.
   #
-  # Why timeout-minutes: 6
+  # Why timeout-minutes: 8
   # ------------------------
-  # Two xdist workers share the required selection without widening the cap.
+  # Four xdist workers use the public Ubuntu runner's four CPUs without
+  # widening the cap or changing the required selection.
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
-  # matching the merge-group integration scheduler. The 6-minute cap includes
+  # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
+  # 6 minutes was the original intentional tight cap, but the required
+  # selection now routinely approaches ~5:40 of pytest time alone on some
+  # tips (suite stays green; only the wall-clock cascade fails), so the cap
+  # was widened to 8 minutes to absorb setup/cleanup overhead and green-suite
+  # variance while still keeping a hard, tight hang bound.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
   # merge-group-only, and required selections and guards their set partition,
@@ -516,7 +600,7 @@ jobs:
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 8
     permissions:
       contents: read
 
@@ -534,7 +618,7 @@ jobs:
         node-version: '24'
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         enable-cache: true
 
@@ -550,6 +634,8 @@ jobs:
       env:
         APM_E2E_TESTS: "1"
       run: |
+        printf 'Runner logical CPUs: '
+        nproc
         uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
-          -n 2 --dist loadgroup \
+          -n 4 --dist loadgroup \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration

@@ -38,6 +38,10 @@ installed package's source tree are parent-owned content, not separate
 dependencies. Real lockfile-resolved dependencies install at their own package
 roots and remain visible regardless of graph depth.
 
+Declared or locked aliases are found at `apm_modules/<alias>` and displayed
+under their logical dependency identity. The selected project or user store
+remains authoritative; listing does not search another store to fill a gap.
+
 Local dependencies are shown as portable `_local/<name>` keys rather than
 machine-specific absolute paths. For a direct local declaration with matching
 `apm.lock.yaml` metadata, copy that key into `apm uninstall` (with `-g` for user

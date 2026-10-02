@@ -38,10 +38,9 @@ Scope / non-goals
   formatting-only change that produces the same unique key and is correctly
   treated as no drift.
 
-* **Host changes** — *not* detected.  If a user changes the host of an otherwise
-  identical package, the unique key may not change and ``detect_ref_change()``
-  will not signal a re-download.  Host-level changes still require the user to
-  ``apm remove`` + ``apm install`` the package, or use ``--update``.
+* **Host-provider changes** -- detected through the canonical host-provider
+  registry. Equivalent explicit/inferred provider forms remain unchanged,
+  while a backend or credential-route change forces a re-download.
 * **HTTP transport flips** — detected.  Switching between HTTPS and insecure
   HTTP toggles ``is_insecure`` and forces a re-download even when the package
   identity and ref are otherwise unchanged.
@@ -53,7 +52,9 @@ import builtins
 from dataclasses import replace as _dataclass_replace
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.host_providers import effective_host_provider_identity
 from apm_cli.install.phases._skip_logic import _should_use_locked_ref
+from apm_cli.utils.github_host import default_host
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -85,6 +86,12 @@ def _normalize_dep_source(dep: Any) -> str:
     return raw
 
 
+def _optional_string_attr(dep: Any, name: str) -> str | None:
+    """Read an optional string field without accepting dynamic mock attributes."""
+    value = getattr(dep, name, None)
+    return value if isinstance(value, str) and value else None
+
+
 def detect_ref_change(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency | None,
@@ -102,8 +109,8 @@ def detect_ref_change(
 
     .. note::
 
-       Host changes (e.g. github.com -> ghes.corp.net) are a known non-goal
-       for this function.  A future enhancement may detect host drift.
+       Host names are normally part of the dependency key. Provider changes
+       for the same host are detected through canonical host classification.
 
     Args:
         dep_ref: The dependency as declared in the current manifest.
@@ -132,6 +139,24 @@ def detect_ref_change(
     if manifest_source != locked_source:
         return True
 
+    # Compare effective providers, not raw host_type: explicit and inferred
+    # forms selecting the same backend and credential route remain equivalent.
+    if manifest_source == "git":
+        try:
+            manifest_provider = effective_host_provider_identity(
+                _optional_string_attr(dep_ref, "host") or default_host(),
+                host_type=_optional_string_attr(dep_ref, "host_type"),
+            )
+            locked_provider = effective_host_provider_identity(
+                _optional_string_attr(locked_dep, "host") or default_host(),
+                host_type=_optional_string_attr(locked_dep, "host_type"),
+            )
+        except (ValueError, RuntimeError):
+            # An unclassifiable lock cannot safely authorize replay.
+            return True
+        if manifest_provider != locked_provider:
+            return True
+
     # Registry-sourced deps: the manifest carries a semver range
     # (e.g. ``^1.2.0``) while the lockfile records an exact version
     # (e.g. ``1.5.3``). Plain string comparison would be a false
@@ -150,6 +175,11 @@ def detect_ref_change(
             return ref != locked_dep.version
         return not _registry_range_covers_locked_version(ref, locked_dep.version)
 
+    if (getattr(dep_ref, "is_insecure", False) is True) != (
+        getattr(locked_dep, "is_insecure", False) is True
+    ):
+        return True
+
     # Git-source semver-range deps (issue #1488): the manifest carries
     # a semver range (``^1.2.0``) while the lockfile records the
     # resolved tag (``v1.5.3``) plus the original constraint. Direct
@@ -163,12 +193,7 @@ def detect_ref_change(
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
     # and value→value. No truthiness guard on locked_dep.resolved_ref —
     # None != "v1.0.0" is True.
-    if dep_ref.reference != locked_dep.resolved_ref:
-        return True
-
-    return (getattr(dep_ref, "is_insecure", False) is True) != (
-        getattr(locked_dep, "is_insecure", False) is True
-    )
+    return dep_ref.reference != locked_dep.resolved_ref
 
 
 def should_force_ref_recheck(

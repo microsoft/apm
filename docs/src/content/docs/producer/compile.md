@@ -307,6 +307,11 @@ root-context targets:
 OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
 retains explicit sections for `applyTo` instructions as well.
 
+Claude omits each unconditional instruction already delivered by an equivalent
+native user rule, while preserving unmatched fallback and other targets.
+See the [global compilation reference](../../reference/cli/compile/#global-compilation)
+for matching rules, explicit `--clean` cleanup, and file-preservation conditions.
+
 ### Overwrite protection
 
 When a target root context file exists but contains no APM marker, it is

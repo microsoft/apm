@@ -30,7 +30,9 @@ class _MockRefResolver:
     def __init__(self, refs_by_remote: dict[str, list[RemoteRef]]) -> None:
         self._refs = refs_by_remote
 
-    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
+    def list_remote_refs(
+        self, owner_repo: str, *, remote_url: str | None = None
+    ) -> list[RemoteRef]:
         return self._refs.get(owner_repo, [])
 
     def close(self) -> None:
