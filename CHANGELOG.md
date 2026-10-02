@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` reports the original resolution error for a dependency whose git ref cannot be resolved, instead of failing later while annotating the update plan. (#3142)
+- Repeat `apm install` runs keep existing MCP servers from custom (`registry:`) registries instead of reconfiguring them, preserving their authored headers. (#3142)
+
 - `apm audit` discovers tracked and untracked target-native prompts without treating executable commands as prompt text; unreadable or unsupported recognized formats now fail with incomplete coverage, and shared/user configuration cannot be auto-stripped. Review named incomplete or protected locations manually before re-auditing. Proposed `specs/openapm-v0.1.md` audit contract remains subject to specification adoption. -- by @lkshrk (#2962)
 - Cursor MCP configuration now preserves native runtime environment references and authored static values, normalizes scalar environment values, and omits null entries. (by @icecold009, #3070)
 - Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing package or destination safety; frozen installs reject ref, pin, provider and transport drift, and unseeded mutable refs resolve upstream. After an intentional declaration change, review it and run `apm install --update`. (by @DaveMeadAdjust, #2876)

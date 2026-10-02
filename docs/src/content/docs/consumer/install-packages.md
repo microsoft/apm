@@ -127,16 +127,12 @@ Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf
 
 ## What to commit
 
-Commit `apm.yml`, `apm.lock.yaml`, and every target-owned directory APM writes
-to. These can include `.github/`, `.claude/`, `.grok/`, and `.agents/`.
-Committed deployed files give teammates agent context on clone, before they
-run `apm install`.
+Commit `apm.yml`, `apm.lock.yaml`, and target-owned outputs; keep `apm_modules/`
+gitignored. Committed agent files are reviewable and discoverable after clone,
+not necessarily self-contained: run `apm install` to restore linked package
+context.
 
-Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from
-the lockfile on every `apm install`. APM adds the entry automatically on first install.
-
-See the [Quickstart](../../quickstart/#what-to-commit) for the full table and
-rationale.
+See the [Quickstart](../../quickstart/#what-to-commit) for details.
 
 ## Transitive dependencies and the lockfile
 
