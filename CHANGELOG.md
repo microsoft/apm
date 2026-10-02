@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-02
+
+### Added
+
+- `apm auth HOST` checks for a usable token for GitHub, GHES, or GitLab and walks you through creating one if none is found; `--check` and `--export` support scripted use. (by @jonioliveira and @sergio-sisternes-epam, closes #2788, #3134)
+
 ### Fixed
 
 - Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
@@ -23,6 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude MCP redeclarations drop stale transport fields and repair mixed entries when rewritten, while preserving partial updates and unmanaged configuration. -- by @edenfunf (#3041)
 - Cursor rules now use comma-joined `globs` and readable descriptions, while retaining safe escaping for control characters. (by @YGuyomar, #3011)
 - Copilot user-scope installs restore modular `~/.copilot/instructions/**/*.instructions.md` deployment (mirroring the project-scope layout) instead of tracking a single concatenated `copilot-instructions.md`. (by @kilianpaquier, #2317)
+- `apm install` reports the original resolution error for a dependency whose git ref cannot be resolved, and repeat installs keep MCP servers from custom (`registry:`) registries instead of reconfiguring them. (#3142)
+- `apm audit` bounds its hidden-Unicode walk of deployed files to primitive directories and discovers target-native prompts without treating executable commands as prompt text; unreadable or unsupported formats now report incomplete coverage. (by @lkshrk, #2962)
+- Cursor MCP configuration keeps native `${env:NAME}` references and authored static values instead of resolving secrets into `.cursor/mcp.json`. (by @icecold009, #3116)
+- GitHub MCP authentication preserves explicit `Authorization` headers and writes an environment-variable reference on runtime-capable targets instead of a resolved credential. (by @dajiaohuang, #3103)
+- OpenCode MCP installs preserve an explicitly supplied `enabled` value; omitted values still default to `true`. (by @dajiaohuang, #3102)
+- Codex MCP headers sourced from environment variables now use Codex's native runtime fields instead of literal placeholders. (by @edenfunf, #3042)
+- Claude MCP server redeclarations drop stale transport fields from the previous transport while preserving unmanaged configuration. (by @edenfunf, #3041)
+- Codex hooks are now written in Codex's native nested-group shape, so Codex actually runs them. (by @uurien, #3060)
+- Cursor rules now use comma-joined `globs` and readable descriptions in `.mdc` frontmatter. (by @YGuyomar, #3011)
+- Copilot user-scope installs restore modular `~/.copilot/instructions/**/*.instructions.md` deployment instead of a single concatenated `copilot-instructions.md`. (by @kilianpaquier, #2317)
+- `apm compile -g` omits global Claude instructions from `CLAUDE.md` only when a matching native user rule is installed, avoiding duplicate context without dropping unmatched instructions. (#3119)
+- `apm compile --target claude` imports dependency `CLAUDE.md` files at any installed depth, including ADO and nested GitLab paths. (by @vyrnsynx, #2952)
+- `apm compile --target claude` now resolves relative context links in folded instructions, so links in `CLAUDE.md` work regardless of where the source instruction lived. (by @pavelvodrazka-etnetera, #2918)
+- Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing destination safety; frozen installs reject ref, pin, provider, and transport drift. (by @DaveMeadAdjust, #2876)
+- `apm install` now explains skipped symlinked agent sources, naming the path and how to fix it. (#2932)
+- Marketplace version constraints (`pkg@marketplace#1.0.1`) resolve tags from the package's own repository instead of the marketplace catalog. (by @modelpath-dev, #3044)
+- On Windows, APM now finds `git.exe` and `gh.exe` in trusted directories by honoring `PATHEXT`. (by @rwinkelman, #3092)
+- `apm runtime setup codex` on Unix rejects HTTP error responses and bounds download retries instead of failing on a checksum mismatch. (#3111)
+- Docs: `apm install --global` deploys local `~/.apm/` primitives at user scope (previously documented as skipped). (by @tillig, #2769)
+- Docs: security guidance now correctly states that `apm-policy.yml` cannot forbid `allow_insecure: true`, and documents the manifest plus CLI gates instead. (by @WilliamK112, #2910)
 
 ## [0.32.0] - 2026-09-25
 
