@@ -32,6 +32,12 @@ _ROOT_CONTEXT_BY_COMPILE_FAMILY = {
 }
 
 
+def root_context_filename(compile_family: str | None) -> str | None:
+    """Return the known context filename for one catalog compile family."""
+    contract = _ROOT_CONTEXT_BY_COMPILE_FAMILY.get(compile_family)
+    return contract[0] if contract is not None else None
+
+
 def protected_user_root_status(path: Path, content: str) -> str | None:
     """Protect user-authored or edited compiled roots before replacement/cleanup."""
     if path.is_symlink():

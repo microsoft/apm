@@ -742,7 +742,7 @@ transport-platform-unix-install-ownership
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """
-_EXPECTED_RULE_IDS = frozenset(_EXPECTED_RULE_ID_TEXT.split())
+_EXPECTED_RULE_IDS = frozenset(_EXPECTED_RULE_ID_TEXT.split()) | {"audit-primitive-discovery"}
 
 
 def test_registered_rule_inventory_matches_frozen_semantic_contract() -> None:

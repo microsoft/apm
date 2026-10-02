@@ -490,6 +490,8 @@ def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
     targets: Sequence[TargetProfile] = (),
+    *,
+    user_scope: bool = False,
 ) -> CheckResult:
     """Check deployed files for critical hidden Unicode and hash drift.
 
@@ -509,24 +511,32 @@ def _check_content_integrity(
     ownership is rooted in resolved, managed paths. Lockfile entries without a
     recorded hash (e.g. directories) are skipped silently.
     """
-    from ..security.file_scanner import scan_project_files
+    from ..security.file_scanner import scan_project_result
     from ..utils.content_hash import compute_file_hash
 
     # Reuse the already-parsed lock and union its recorded paths with the
     # independently governed deploy-tree scope. The scanner owns exact path
     # accounting and preserves lockfile findings outside resolved targets.
-    findings_by_file, _files_scanned = scan_project_files(
+    scan = scan_project_result(
         project_root,
         lockfile=lock,
         include_deployed_trees=True,
         targets=targets,
+        user_scope=user_scope,
     )
+    findings_by_file = scan.findings_by_file
 
     # Only critical findings fail this check
     critical_files: list[str] = []
     for rel_path, findings in findings_by_file.items():
         if any(f.severity == "critical" for f in findings):
             critical_files.append(rel_path)
+    critical_findings = tuple(
+        finding
+        for findings in findings_by_file.values()
+        for finding in findings
+        if finding.severity == "critical"
+    )
 
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..core.deployment_state import LocatorKind
@@ -606,16 +616,23 @@ def _check_content_integrity(
         and not hash_mismatches
         and not missing_ownership
         and not unresolved_hash_paths
+        and not scan.incomplete
     ):
         return CheckResult(
             name="content-integrity",
             passed=True,
             message="No critical hidden Unicode or hash drift detected",
+            coverage=scan.inventory,
         )
 
     details: list[str] = []
-    for rel_path in critical_files:
-        details.append(f"unicode: {rel_path}")
+    for entry in scan.incomplete:
+        details.append(f"incomplete-coverage: {entry.file}{entry.pointer}: {entry.diagnostic}")
+    details.extend(
+        dict.fromkeys(
+            f"unicode: {finding.file}{finding.pointer or ''}" for finding in critical_findings
+        )
+    )
     for rel_path in missing_ownership:
         details.append(f"missing-ownership: {rel_path}")
     for rel_path in unresolved_hash_paths:
@@ -633,9 +650,16 @@ def _check_content_integrity(
 
     parts: list[str] = []
     remedies: list[str] = []
+    if scan.incomplete:
+        parts.append(f"{len(scan.incomplete)} primitive(s) with incomplete prompt coverage")
+        remedies.append("review the reported format or file access and rerun audit")
     if critical_files:
         parts.append(f"{len(critical_files)} file(s) with critical hidden Unicode")
-        remedies.append("'apm audit --strip' to clean Unicode")
+        remedies.append(
+            "review structured prompt fields manually"
+            if scan.protected_files.intersection(critical_files)
+            else "'apm audit --strip' to clean Unicode"
+        )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
         remedies.append("'apm install' to restore drifted files")
@@ -652,6 +676,8 @@ def _check_content_integrity(
         passed=False,
         message=f"{summary} -- run {remedy}",
         details=details,
+        coverage=scan.inventory,
+        content_findings=critical_findings,
     )
 
 
@@ -796,6 +822,7 @@ def _check_drift(
             project_root,
             user_scope=user_scope,
             explicit_target=_read_apm_yml_target(project_root),
+            create_config=False,
         )
         tracked_files = None
     else:
@@ -933,6 +960,11 @@ def run_baseline_checks(
                         ),
                     )
                 )
+        result.checks.append(
+            _check_content_integrity(
+                deployment_root, LockFile(), resolved_targets, user_scope=user_scope
+            )
+        )
         return result
 
     lock = LockFile.read(lockfile_path)
@@ -988,7 +1020,9 @@ def run_baseline_checks(
         return result
 
     # Check 8: Content integrity
-    if _run(_check_content_integrity(deployment_root, lock, resolved_targets)):
+    if _run(
+        _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+    ):
         return result
 
     # Check 9: Includes consent (advisory; never hard-fails)

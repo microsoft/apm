@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit` discovers tracked and untracked target-native prompts without treating executable commands as prompt text; unreadable or unsupported recognized formats now fail with incomplete coverage, and shared/user configuration cannot be auto-stripped. Review named incomplete or protected locations manually before re-auditing. Proposed `specs/openapm-v0.1.md` audit contract remains subject to specification adoption. -- by @lkshrk (#2962)
 - Cursor MCP configuration now preserves native runtime environment references and authored static values, normalizes scalar environment values, and omits null entries. (by @icecold009, #3070)
 - Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing package or destination safety; frozen installs reject ref, pin, provider and transport drift, and unseeded mutable refs resolve upstream. After an intentional declaration change, review it and run `apm install --update`. (by @DaveMeadAdjust, #2876)
 - GitHub MCP authentication now preserves explicit `Authorization` headers and writes the selected environment-variable reference on runtime-capable targets instead of resolving the credential into generated config. (#3103)
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex MCP headers now use native runtime environment references instead of literal placeholders; unsupported references are skipped with a warning. Unchanged reinstalls preserve existing entries; switch the affected header between `${VAR}` and `${env:VAR}` and reinstall with the same scope and targets to refresh an older managed entry. -- by @edenfunf (#3042)
 - Claude MCP redeclarations drop stale transport fields and repair mixed entries when rewritten, while preserving partial updates and unmanaged configuration. -- by @edenfunf (#3041)
 - Cursor rules now use comma-joined `globs` and readable descriptions, while retaining safe escaping for control characters. (by @YGuyomar, #3011)
+- Copilot user-scope installs restore modular `~/.copilot/instructions/**/*.instructions.md` deployment (mirroring the project-scope layout) instead of tracking a single concatenated `copilot-instructions.md`. (by @kilianpaquier, #2317)
 
 ## [0.32.0] - 2026-09-25
 

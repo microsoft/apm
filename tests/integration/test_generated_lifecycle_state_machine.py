@@ -637,11 +637,11 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     def compile(self) -> None:
         before = self._capture()
         self._run(("compile", "--global"), "compile")
-        text = (self.fixture.external_roots[0].path / "CLAUDE.md").read_text(encoding="ascii")
-        assert f"# revision-{self.installed_revision}" in text
-        assert_snapshot_changes_within(
-            before, self._capture(), exact_paths={"target": {"CLAUDE.md"}}, tree_prefixes={}
-        )
+        target_root = self.fixture.external_roots[0].path
+        native = target_root / "rules" / "revision.md"
+        assert native.read_text(encoding="ascii") == f"# revision-{self.installed_revision}\n"
+        assert not (target_root / "CLAUDE.md").exists()
+        assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
     @precondition(

@@ -29,6 +29,7 @@ from apm_cli.integration.skill_integrator import (
     should_compile_instructions,
     validate_skill_name,
 )
+from apm_cli.integration.targets import TargetProfile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,6 +74,9 @@ def _make_target(
     mapping.deploy_root = deploy_root
     prim.__getitem__ = MagicMock(return_value=mapping)
     target.primitives = {"skills": mapping}
+    target.skills_deploy_path.side_effect = lambda root: TargetProfile.skills_deploy_path(
+        target, root
+    )
     return target
 
 

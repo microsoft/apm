@@ -3,38 +3,9 @@ Integrates hook JSON files and referenced scripts during package installation.
 Supports VSCode Copilot (.github/hooks/), Claude Code
 (.claude/settings.json), and Cursor (.cursor/hooks.json) targets.
 
-Hook JSON format (Claude Code  -- nested matcher groups):
-    {
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "hooks": [
-                        {"type": "command", "command": "./scripts/validate.sh", "timeout": 10}
-                    ]
-                }
-            ]
-        }
-    }
-
-Hook JSON format (GitHub Copilot  -- flat arrays with bash/powershell keys):
-    {
-        "version": 1,
-        "hooks": {
-            "preToolUse": [
-                {"type": "command", "bash": "./scripts/validate.sh", "timeoutSec": 10}
-            ]
-        }
-    }
-
-Hook JSON format (Cursor  -- flat arrays with command key):
-    {
-        "version": 1,
-        "hooks": {
-            "afterFileEdit": [
-                {"command": "./hooks/format.sh"}
-            ]
-        }
-    }
+Native handler layouts are declared in the merge-target registry below and
+converted through ``hook_native_formats``: Claude uses nested matcher groups,
+GitHub Copilot accepts bash/powershell commands, and Cursor uses flat commands.
 
 Script path handling:
     - Supported plugin-root aliases -> package-relative path rewritten for target
@@ -167,6 +138,9 @@ class _MergeHookConfig:
     # overwritten -- the guard in _integrate_merged_hooks() preserves any
     # value the user has set manually.
     top_level_defaults: dict[str, Any] = field(default_factory=dict)
+    prompt_handler_types: tuple[str, ...] = ()
+    named_containers: bool = False
+    nested_handlers: bool | None = None
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -337,6 +311,8 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="claude",
         require_dir=False,
         schema_strict=True,
+        prompt_handler_types=("prompt", "agent"),
+        nested_handlers=True,
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
@@ -348,17 +324,20 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="hooks.json",
         target_key="codex",
         require_dir=True,
+        nested_handlers=True,
     ),
     "gemini": _MergeHookConfig(
         config_filename="settings.json",
         target_key="gemini",
         require_dir=True,
+        nested_handlers=True,
     ),
     "antigravity": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="antigravity",
         require_dir=True,
         event_container_key="apm",
+        named_containers=True,
     ),
     "windsurf": _MergeHookConfig(
         config_filename="hooks.json",
@@ -368,6 +347,11 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
 }
 
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
+
+
+def native_hook_config(target_name: str) -> _MergeHookConfig | None:
+    """Return the canonical native container and content contract for a target."""
+    return _MERGE_HOOK_TARGETS.get(target_name)
 
 
 class HookIntegrator(BaseIntegrator):

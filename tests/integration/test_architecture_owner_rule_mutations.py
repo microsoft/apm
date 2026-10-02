@@ -76,6 +76,22 @@ class MutationCase:
 
 MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
+        guard_id="audit-finding-serialization",
+        rule_id="audit-primitive-discovery",
+        path="src/apm_cli/security/audit_report.py",
+        old="items = [finding_to_json(finding) for finding in all_findings]",
+        new="items = [bypass_serializer(finding) for finding in all_findings]",
+        intent="Ordinary JSON reporting bypasses the canonical single-finding serializer.",
+    ),
+    MutationCase(
+        guard_id="audit-primitive-discovery",
+        rule_id="audit-primitive-discovery",
+        path="src/apm_cli/security/file_scanner.py",
+        old="for surface in primitive_surfaces(project_root, scoped, user_scope=user_scope):",
+        new="for surface in ():",
+        intent="Automatic audit discovery stops enumerating canonical primitive surfaces.",
+    ),
+    MutationCase(
         guard_id="contracts-tests-taxonomy-classification",
         rule_id="contracts-tests-taxonomy-classification",
         path="tests/quality/taxonomy_inventory_plugin.py",

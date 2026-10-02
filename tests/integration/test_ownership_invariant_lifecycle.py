@@ -28,7 +28,11 @@ from tests.integration.test_required_lifecycle_state_machine import (
     _run_success,
     _skill,
 )
-from tests.utils.artifact_snapshot import ArtifactSnapshotSet, assert_snapshot_set_unchanged
+from tests.utils.artifact_snapshot import (
+    ArtifactSnapshotSet,
+    assert_snapshot_changes_within,
+    assert_snapshot_set_unchanged,
+)
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackage
 
@@ -253,7 +257,9 @@ def _all_project_sentinels(project_root: Path) -> tuple[_Sentinel, ...]:
             relative_paths.setdefault(relative, _sentinel_content("project-generated", relative))
         for primitive, mapping in profile.primitives.items():
             relative = _mapping_sentinel_path(profile, primitive, mapping)
-            relative_paths.setdefault(relative, _sentinel_content("project", relative))
+            relative_paths.setdefault(
+                relative, _primitive_sentinel_content("project", relative, mapping)
+            )
     return tuple(
         _Sentinel("workspace", project_root, relative, content)
         for relative, content in sorted(relative_paths.items(), key=lambda item: item[0].as_posix())
@@ -295,7 +301,7 @@ def _all_user_sentinels(
                     _root_id(root_dir),
                     root,
                     relative,
-                    _sentinel_content(f"user-{profile.name}", relative),
+                    _primitive_sentinel_content(f"user-{profile.name}", relative, mapping),
                 ),
             )
     return tuple(
@@ -345,6 +351,23 @@ def _mapping_sentinel_path(
 
 def _sentinel_content(label: str, relative_path: PurePosixPath) -> bytes:
     return _SENTINEL_PREFIX + f"{label}:{relative_path.as_posix()}\n".encode("ascii")
+
+
+def _primitive_sentinel_content(
+    label: str, relative: PurePosixPath, mapping: PrimitiveMapping
+) -> bytes:
+    """Happy-path ownership sentinels must also be valid recognized native content."""
+    marker = _sentinel_content(label, relative).decode("ascii")
+    if mapping.prompt_fields:
+        return "\n".join(
+            f"{field} = {json.dumps(marker)}" for field in mapping.prompt_fields
+        ).encode()
+    if mapping.extension == ".json":
+        document = {"user_sentinel": marker, "hooks": {}}
+        if mapping.format_id == "kiro_hooks":
+            document.update(version="v1", hooks=[])
+        return json.dumps(document).encode()
+    return marker.encode()
 
 
 def _root_id(root_dir: str) -> str:
@@ -888,6 +911,12 @@ def test_global_update_preserves_owned_external_skill_targets(
     assert str(hermes_skill.parent) in deployed
     assert str(external_roots["claude"] / "rules" / "revision.md") in deployed
 
+    artifact_roots = {
+        "project": consumer.root,
+        "user": scenario.isolated.home,
+        **external_roots,
+    }
+    before_compile = ArtifactSnapshotSet.capture(artifact_roots)
     _run_success(
         scenario,
         consumer,
@@ -895,7 +924,16 @@ def test_global_update_preserves_owned_external_skill_targets(
         environment=environment,
         scenario_id="global-update-external-compile",
     )
-    compiled_claude = (external_roots["claude"] / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "revision-b" in compiled_claude
-    assert "revision-a" not in compiled_claude
+    native_claude = external_roots["claude"] / "rules" / "revision.md"
+    assert native_claude.read_text(encoding="utf-8") == "# revision-b\n"
+    assert not (external_roots["claude"] / "CLAUDE.md").exists()
+    compiled_hermes = (external_roots["hermes"] / "AGENTS.md").read_text(encoding="utf-8")
+    assert "# revision-b" in compiled_hermes
+    assert "# revision-a" not in compiled_hermes
+    assert_snapshot_changes_within(
+        before_compile,
+        ArtifactSnapshotSet.capture(artifact_roots),
+        exact_paths={"hermes": {"AGENTS.md"}},
+        tree_prefixes={},
+    )
     assert commit_a.sha != commit_b.sha

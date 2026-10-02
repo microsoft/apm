@@ -425,11 +425,7 @@ class SkillIntegrator(BaseIntegrator):
     @staticmethod
     def _target_skills_root(target: TargetProfile, project_root: Path) -> Path:
         """Return the target skills root for static and dynamic-root targets."""
-        if target.resolved_deploy_root is not None:
-            return target.deploy_path(project_root)
-        skills_mapping = target.primitives["skills"]
-        effective_root = skills_mapping.deploy_root or target.root_dir
-        return project_root / effective_root / "skills"
+        return target.skills_deploy_path(project_root)
 
     @staticmethod
     def _target_skill_dir(target: TargetProfile, project_root: Path, skill_name: str) -> Path:

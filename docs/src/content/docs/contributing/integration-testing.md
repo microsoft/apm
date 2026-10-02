@@ -72,6 +72,12 @@ also enforce one lockfile read per used root and integration phase, zero unused
 reads, and at most 15x record visits when fixture size grows from N to 10N.
 These counts do not claim a wall-clock speedup.
 
+For fully native Claude fixtures, global compile verifies the installed revision
+in `rules/revision.md`, absence of redundant `CLAUDE.md`, and unchanged complete
+snapshots. Separate lifecycle cases retain unmatched fallback, policy refusal,
+and protected explicit-cleanup coverage. Mixed Claude/Hermes fixtures additionally
+check the Hermes revision and permit only its `AGENTS.md` compilation write.
+
 Use a clean committed checkout. Set `BASE_SHA` to the full 40-hex commit SHA
 of a locally available, distinct ancestor of the checked-out `HEAD`.
 Set `REPORT_PATH` and `COMPLETION_PATH` to distinct, new paths outside the checkout:

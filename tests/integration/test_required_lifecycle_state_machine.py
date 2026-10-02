@@ -2632,9 +2632,19 @@ def _exercise_global_revision_commands(
     _assert_same_state(installed, capture())
     assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(artifact_roots))
 
+    native_path = compiled_path.parent / "rules" / "revision.md"
+    hermes_path = artifact_roots["hermes"] / "AGENTS.md"
     run(("compile", "--global"), "global-compile-a")
-    assert "# revision-a" in compiled_path.read_text(encoding="ascii")
-    compiled_a = compiled_path.read_bytes()
+    assert native_path.read_text(encoding="ascii") == "# revision-a\n"
+    assert not compiled_path.exists()
+    assert "# revision-a" in hermes_path.read_text(encoding="ascii")
+    assert_snapshot_changes_within(
+        before,
+        ArtifactSnapshotSet.capture(artifact_roots),
+        exact_paths={"hermes": {"AGENTS.md"}},
+        tree_prefixes={},
+    )
+    native_a = native_path.read_bytes()
     before_lock = capture()
     run(("lock", "--global", "--no-policy", "--parallel-downloads", "0"), "global-lock-a")
     assert capture().deployment_records == before_lock.deployment_records
@@ -2666,10 +2676,20 @@ def _exercise_global_revision_commands(
     run(("update", "--global", "--yes", "--parallel-downloads", "0"), "global-update-b")
     assert_revision(commit_b, "b")
     assert capture().deployment_records != installed_a.deployment_records
+    before_compile = ArtifactSnapshotSet.capture(artifact_roots)
     run(("compile", "--global"), "global-compile-b")
-    assert "# revision-b" in compiled_path.read_text(encoding="ascii")
-    assert "# revision-a" not in compiled_path.read_text(encoding="ascii")
-    assert compiled_path.read_bytes() != compiled_a
+    assert native_path.read_text(encoding="ascii") == "# revision-b\n"
+    assert native_path.read_bytes() != native_a
+    assert not compiled_path.exists()
+    hermes_b = hermes_path.read_text(encoding="ascii")
+    assert "# revision-b" in hermes_b
+    assert "# revision-a" not in hermes_b
+    assert_snapshot_changes_within(
+        before_compile,
+        ArtifactSnapshotSet.capture(artifact_roots),
+        exact_paths={"hermes": {"AGENTS.md"}},
+        tree_prefixes={},
+    )
     installed_b = capture()
     export_b = run(("lock", "export", "--global", "--format", "spdx"), "global-lock-export-b")
     assert json.loads(export_b.stdout)["spdxVersion"].startswith("SPDX-")

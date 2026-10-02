@@ -659,10 +659,11 @@ class TestScopeResolvedPartition:
 
     def test_partition_user_scope_copilot_hooks_not_shadowed(self):
         """User-scope Copilot hook paths must not be swallowed by the
-        instructions catch-all root (``.copilot/``).
+        instructions subdir prefix (``.copilot/instructions/``).
 
-        The user-scope instructions primitive uses an empty ``subdir``, making
-        ``.copilot/`` a shallow catch-all prefix. Hook paths under
+        Copilot CLI supports modular, path-scoped instructions at user scope
+        via ``.copilot/instructions/**/*.instructions.md``, mirroring the
+        project-scope ``.github/instructions/`` layout. Hook paths under
         ``.copilot/hooks/`` must still route to the ``hooks`` bucket so
         uninstall can remove them.
         """
@@ -671,12 +672,12 @@ class TestScopeResolvedPartition:
         managed = {
             ".copilot/hooks/hookpkg-notify.json",
             ".copilot/prompts/test.prompt.md",
-            ".copilot/copilot-instructions.md",
+            ".copilot/instructions/pkg.instructions.md",
         }
         buckets = BaseIntegrator.partition_managed_files(managed, targets=[resolved])
         assert ".copilot/hooks/hookpkg-notify.json" in buckets.get("hooks", set())
         assert ".copilot/prompts/test.prompt.md" in buckets.get("prompts", set())
-        assert ".copilot/copilot-instructions.md" in buckets.get("instructions", set())
+        assert ".copilot/instructions/pkg.instructions.md" in buckets.get("instructions", set())
 
     def test_partition_with_opencode_user_scope(self):
         """Partition routes .config/opencode/ paths correctly."""
@@ -798,7 +799,7 @@ class TestForScope:
         assert resolved.root_dir == ".claude"
 
     def test_filters_unsupported_primitives(self):
-        """for_scope keeps instructions with a different mapping for copilot user scope."""
+        """for_scope keeps instructions supported at copilot user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
@@ -806,9 +807,9 @@ class TestForScope:
         assert "instructions" in copilot.primitives
         resolved = copilot.for_scope(user_scope=True)
         assert "prompts" in resolved.primitives
-        # instructions now supported at user scope via concat (#650)
+        # instructions supported at user scope via modular .copilot/instructions/
         assert "instructions" in resolved.primitives
-        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
+        assert resolved.primitives["instructions"].format_id == "github_instructions"
         # Supported primitives remain
         assert "agents" in resolved.primitives
         assert "skills" in resolved.primitives
