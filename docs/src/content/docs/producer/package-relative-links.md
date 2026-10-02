@@ -39,8 +39,9 @@ deployed file `.claude/agents/architect.md` reads:
 See [design patterns](../../apm_modules/<owner>/my-pkg/references/patterns.md).
 ```
 
-The package itself stays intact under `apm_modules/`; the deployed
-primitive points back into it.
+The deployed primitive points into `apm_modules/`, not a self-contained copy.
+After cloning a consumer repo, run `apm install` to restore the linked
+reference; keep it available while the primitive uses it.
 
 The `<owner>/<repo>` spelling matches the repository display spelling retained
 in `apm.yml`, including case. APM lowercases GitHub coordinates only for
