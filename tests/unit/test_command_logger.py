@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.core.command_logger import (
     CommandLogger,
     InstallDisposition,
@@ -182,6 +184,26 @@ class TestCommandLogger:
         logger = CommandLogger("test")
         logger.progress("Processing 3 files...")
         mock_info.assert_called_once_with("Processing 3 files...", symbol="info")
+
+    @pytest.mark.parametrize("verbose", [False, True])
+    @pytest.mark.parametrize(("count", "noun"), [(1, "file"), (6, "files")])
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_describes_dependency_not_deletion_location(
+        self, mock_info, count, noun, verbose
+    ):
+        logger = CommandLogger("test", verbose=verbose)
+        logger.stale_cleanup("/home/user/local-agent", count)
+        mock_info.assert_called_once_with(
+            f"Cleaned {count} stale deployed {noun} for /home/user/local-agent",
+            symbol="info",
+        )
+
+    @pytest.mark.parametrize("count", [0, -1])
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_nonpositive_count_silent(self, mock_info, count):
+        logger = CommandLogger("test")
+        logger.stale_cleanup("/home/user/local-agent", count)
+        mock_info.assert_not_called()
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_dry_run_notice(self, mock_info):
@@ -370,26 +392,28 @@ class TestInstallLogger:
         logger.install_summary(apm_count=0, mcp_count=0, errors=3)
         assert "3 error" in mock_error.call_args[0][0]
 
+    @pytest.mark.parametrize("verbose", [False, True])
     @patch("apm_cli.core.command_logger._rich_info")
-    def test_stale_cleanup_visible_at_default_verbosity(self, mock_info):
-        logger = InstallLogger(verbose=False)
-        logger.stale_cleanup("pkg/repo", 3)
-        assert mock_info.called
-        msg = mock_info.call_args[0][0]
-        assert "3 stale files" in msg
-        assert "pkg/repo" in msg
+    def test_stale_cleanup_visible_at_default_verbosity(self, mock_info, verbose):
+        logger = InstallLogger(verbose=verbose)
+        logger.stale_cleanup("/home/user/local-agent", 3)
+        mock_info.assert_called_once_with(
+            "Cleaned 3 stale deployed files for /home/user/local-agent",
+            symbol="info",
+        )
         assert logger.stale_cleaned_total == 3
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_stale_cleanup_singular_noun(self, mock_info):
         logger = InstallLogger()
         logger.stale_cleanup("pkg", 1)
-        assert "1 stale file " in mock_info.call_args[0][0]
+        assert "1 stale deployed file " in mock_info.call_args[0][0]
 
+    @pytest.mark.parametrize("count", [0, -1])
     @patch("apm_cli.core.command_logger._rich_info")
-    def test_stale_cleanup_zero_count_silent(self, mock_info):
+    def test_stale_cleanup_zero_count_silent(self, mock_info, count):
         logger = InstallLogger()
-        logger.stale_cleanup("pkg", 0)
+        logger.stale_cleanup("pkg", count)
         assert not mock_info.called
         assert logger.stale_cleaned_total == 0
 

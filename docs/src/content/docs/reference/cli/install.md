@@ -122,6 +122,10 @@ in `apm.yml`, then run `apm install` again.
 
 ## Behavior
 
+- **Stale-file cleanup.** `Cleaned N stale deployed files for DEPENDENCY` names
+  the affected dependency, not a deletion location. Cleanup removes deployed
+  files; a local dependency's source directory is not cleaned.
+
 - **Immutable dependency conflicts.** Install fails when two paths require
   different immutable commits for one package identity, showing both paths and
   requested refs as ordered `owner/repo@ref -> owner/repo@ref` chains.
