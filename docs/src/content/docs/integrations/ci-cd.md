@@ -100,7 +100,10 @@ Repos that gitignore deployed
 outputs can still use the audit-only pattern: `deployed-files-present`
 skips gitignored paths automatically, so a fresh checkout of a repo that
 gitignores a deploy directory (e.g. `.agents/`) passes the check without
-an `apm install` step. See
+an `apm install` step. Note that `content-integrity` and drift have no
+committed deployed bytes to compare in that case, so coverage is limited
+to lockfile/subset consistency for gitignored deploy roots -- commit
+deployed outputs if you need full integrity and drift coverage. See
 [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
 for the full recipe and when to use each approach.
 
