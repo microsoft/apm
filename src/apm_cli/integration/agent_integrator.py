@@ -412,6 +412,12 @@ class AgentIntegrator(BaseIntegrator):
         re.DOTALL,
     )
 
+    # Bound the dropped-fields diagnostic to a fixed number of named keys so
+    # hostile/oversized frontmatter (many keys or very long key names) cannot
+    # blow up a single CLI diagnostic line; the remainder is summarized by
+    # count instead of enumerated.
+    _MAX_DROPPED_FIELDS_SHOWN = 5
+
     @staticmethod
     def _warn_codex_unverified_scope(
         diagnostics: DiagnosticCollector | None,
@@ -511,10 +517,15 @@ class AgentIntegrator(BaseIntegrator):
                         if field not in {"name", "description", "tools", *model_fields}
                     ]
                     if dropped_fields and diagnostics is not None:
+                        shown_fields = dropped_fields[: AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN]
+                        remaining = len(dropped_fields) - len(shown_fields)
+                        fields_text = ", ".join(shown_fields)
+                        if remaining > 0:
+                            fields_text += f" (and {remaining} more)"
                         diagnostics.lossy_agent_compilation(
                             message=(
                                 f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
-                                f"fields {', '.join(dropped_fields)} were dropped; "
+                                f"fields {fields_text} were dropped; "
                                 "this metadata is not translated by APM for Codex."
                             ),
                             package=printable_ascii_text(package_name),

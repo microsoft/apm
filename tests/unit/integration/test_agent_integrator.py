@@ -1097,6 +1097,26 @@ class TestOpenCodeAgentIntegration:
         assert result["errors"] == 0
 
 
+def _verbatim_copy_agent_targets() -> list[str]:
+    """Non-codex, non-kiro targets whose agent deploy is a verbatim copy.
+
+    Derived from ``KNOWN_TARGETS`` (instead of a hardcoded literal list) so a
+    future verbatim-copy target is automatically covered by the Codex-leakage
+    regression test below. ``codex_agent`` is this suite's own transform;
+    ``kiro_agent`` renders/filters the markdown body and is not byte-identical
+    to the source, so both are excluded on purpose, as are targets with no
+    ``agents`` primitive mapping at all (they never reach the copy path).
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return sorted(
+        name
+        for name, profile in KNOWN_TARGETS.items()
+        if (mapping := profile.primitives.get("agents")) is not None
+        and mapping.format_id not in {"codex_agent", "kiro_agent"}
+    )
+
+
 class TestCodexAgentIntegration:
     """Tests for Codex TOML agent transformation."""
 
@@ -1285,8 +1305,16 @@ class TestCodexAgentIntegration:
         metadata_warning = next(
             warning for warning in warnings if "not translated by APM" in warning.message
         )
-        for field in list(unsupported)[:7]:
+        # req: the dropped-fields list is bounded (AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN)
+        # so hostile/oversized frontmatter cannot blow up a single diagnostic line. 9
+        # unsupported keys are supplied; only the first 5 are named, the rest are summarized.
+        shown, elided = list(unsupported)[:5], list(unsupported)[5:]
+        assert len(elided) == 4
+        for field in shown:
             assert f"'{field}'" in metadata_warning.message
+        for field in elided:
+            assert f"'{field}'" not in metadata_warning.message
+        assert f"(and {len(elided)} more)" in metadata_warning.message
         assert "were dropped" in metadata_warning.message
         assert "otherwise do not rely on" in metadata_warning.detail
         tools_warning = next(warning for warning in warnings if "field 'tools'" in warning.message)
@@ -1301,9 +1329,7 @@ class TestCodexAgentIntegration:
         assert "pkg\nnext" not in output
         assert all(character in "\n\r\t" or 32 <= ord(character) <= 126 for character in output)
 
-    @pytest.mark.parametrize(
-        "target_name", ["copilot", "claude", "cursor", "grok-build", "opencode"]
-    )
+    @pytest.mark.parametrize("target_name", _verbatim_copy_agent_targets())
     def test_codex_metadata_change_preserves_other_targets(self, target_name: str) -> None:
         """Codex filtering must not leak into verbatim target deployment."""
         from apm_cli.integration.targets import KNOWN_TARGETS
