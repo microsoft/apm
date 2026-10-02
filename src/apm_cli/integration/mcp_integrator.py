@@ -297,6 +297,7 @@ def _clean_claude_config(
     logger,
     is_user_scope: bool = False,
     fail_on_write_error: bool = False,
+    label: str | None = None,
 ) -> int:
     """Remove stale entries from a Claude Code JSON config file.
 
@@ -310,11 +311,20 @@ def _clean_claude_config(
         logger: Command logger for progress messages.
         is_user_scope: When True, validates that the top-level config is a dict
             (``~/.claude.json`` guard) and uses the user-scope log label.
+        fail_on_write_error: When True, raise RequiredIntegrationError on write failure.
+        label: Optional human-readable config label used in log messages.
 
     Returns:
         Number of entries removed.
     """
-    label = "~/.claude.json" if is_user_scope else ".mcp.json"
+    if label is None:
+        if is_user_scope:
+            try:
+                label = "~/.claude.json" if config_path == Path.home() / ".claude.json" else str(config_path)
+            except Exception:
+                label = str(config_path)
+        else:
+            label = ".mcp.json"
     if (
         _reject_symlink_config(
             config_path,
@@ -758,12 +768,12 @@ class MCPIntegrator:
             target_runtimes = supported
 
         # Claude Code: when scope is unspecified, fail safely toward the project
-        # config only -- never touch ~/.claude.json on the user's behalf without
+        # config only -- never touch user config on the user's behalf without
         # an explicit USER scope, since that file is shared across all Claude
         # Code projects on the host.
-        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
-        clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
-        if "claude" in target_runtimes and scope is None:
+        clean_claude_user = "claude" in target_runtimes and (scope is InstallScope.USER or user_scope)
+        clean_claude_project = "claude" in target_runtimes and not clean_claude_user
+        if "claude" in target_runtimes and scope is None and not user_scope:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
                 "project .mcp.json only; pass -g/--global to also clean ~/.claude.json"
@@ -960,14 +970,45 @@ class MCPIntegrator:
                     fail_on_write_error=fail_on_write_error,
                 )
 
-        # Clean Claude Code user ~/.claude.json (USER scope only)
+        # Clean Claude Code user ~/.claude.json or $CLAUDE_CONFIG_DIR/.claude.json (USER scope only)
         if clean_claude_user:
+            from apm_cli.adapters.client.claude import ClaudeClientAdapter
+            from apm_cli.factory import ClientFactory
+
+            unresolved_cfg = ClaudeClientAdapter.resolve_user_claude_unresolved_path()
+            claude_config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+            claude_label = str(unresolved_cfg) if claude_config_dir else "~/.claude.json"
+
+            if _reject_symlink_config(
+                unresolved_cfg,
+                claude_label,
+                logger,
+                fail_on_write_error=fail_on_write_error,
+            ):
+                return
+
+            try:
+                claude_client = ClientFactory.create_client(
+                    "claude",
+                    project_root=project_root_path,
+                    user_scope=True,
+                )
+                claude_cfg = Path(claude_client.get_config_path())
+            except Exception as exc:
+                _log.debug("Failed to resolve Claude user-scope config path", exc_info=True)
+                if fail_on_write_error:
+                    from apm_cli.install.errors import RequiredIntegrationError
+
+                    raise RequiredIntegrationError(_cleanup_failure_message(claude_label, exc)) from exc
+                return
+
             _clean_claude_config(
-                Path.home() / ".claude.json",
+                claude_cfg,
                 expanded_stale,
                 logger,
                 is_user_scope=True,
                 fail_on_write_error=fail_on_write_error,
+                label=claude_label,
             )
 
     # ------------------------------------------------------------------

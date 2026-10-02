@@ -544,6 +544,128 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
             self.assertIn("keep", data["mcpServers"])
             self.assertNotIn("stale", data["mcpServers"])
 
+    def test_remove_stale_claude_user_honors_claude_config_dir(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        custom_claude_dir = self.root / "custom-claude"
+        custom_claude_dir.mkdir()
+        custom_cfg = custom_claude_dir / ".claude.json"
+        custom_cfg.write_text(
+            json.dumps({"mcpServers": {"keep": {"command": "k"}, "stale": {"command": "s"}}}),
+            encoding="utf-8",
+        )
+
+        with patch.object(Path, "home", return_value=self.root):
+            default_cfg = self.root / ".claude.json"
+            default_cfg.write_text(
+                json.dumps({"mcpServers": {"default_srv": {"command": "d"}}}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(custom_claude_dir)}):
+                MCPIntegrator.remove_stale({"stale"}, runtime="claude", scope=InstallScope.USER)
+
+            custom_data = json.loads(custom_cfg.read_text(encoding="utf-8"))
+            self.assertIn("keep", custom_data["mcpServers"])
+            self.assertNotIn("stale", custom_data["mcpServers"])
+
+            default_data = json.loads(default_cfg.read_text(encoding="utf-8"))
+            self.assertIn("default_srv", default_data["mcpServers"])
+
+    def test_remove_stale_claude_user_preserves_unrelated_settings(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        custom_claude_dir = self.root / "custom-claude"
+        custom_claude_dir.mkdir()
+        custom_cfg = custom_claude_dir / ".claude.json"
+        custom_cfg.write_text(
+            json.dumps({
+                "projects": {"/path/to/project": {"allowedTools": ["Bash"]}},
+                "mcpServers": {
+                    "keep": {"command": "k"},
+                    "stale": {"command": "s"},
+                },
+                "theme": "dark",
+            }),
+            encoding="utf-8",
+        )
+
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(custom_claude_dir)}):
+            MCPIntegrator.remove_stale({"stale"}, runtime="claude", scope=InstallScope.USER)
+
+        data = json.loads(custom_cfg.read_text(encoding="utf-8"))
+        self.assertEqual(data["projects"], {"/path/to/project": {"allowedTools": ["Bash"]}})
+        self.assertEqual(data["theme"], "dark")
+        self.assertIn("keep", data["mcpServers"])
+        self.assertNotIn("stale", data["mcpServers"])
+
+    def test_remove_stale_claude_user_rejects_relative_claude_config_dir(self):
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "../relative-claude"}):
+            with self.assertRaises(RequiredIntegrationError):
+                MCPIntegrator.remove_stale(
+                    {"stale"},
+                    runtime="claude",
+                    scope=InstallScope.USER,
+                    fail_on_write_error=True,
+                )
+
+    def test_remove_stale_claude_user_rejects_symlink_config(self):
+        if os.name == "nt":
+            self.skipTest("Symlinks require elevated privileges on Windows")
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        custom_claude_dir = self.root / "custom-claude"
+        custom_claude_dir.mkdir()
+        target = self.root / "target.json"
+        target_bytes = b'{"mcpServers": {"stale": {"command": "s"}}}'
+        target.write_bytes(target_bytes)
+        symlink_cfg = custom_claude_dir / ".claude.json"
+        symlink_cfg.symlink_to(target)
+
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(custom_claude_dir)}):
+            with self.assertRaises(RequiredIntegrationError) as ctx:
+                MCPIntegrator.remove_stale(
+                    {"stale"},
+                    runtime="claude",
+                    scope=InstallScope.USER,
+                    fail_on_write_error=True,
+                )
+            self.assertIn("symlinked MCP config", str(ctx.exception))
+
+        self.assertTrue(symlink_cfg.is_symlink())
+        self.assertEqual(target.read_bytes(), target_bytes)
+
+    def test_remove_stale_claude_user_rejects_symlinked_ancestor(self):
+        if os.name == "nt":
+            self.skipTest("Symlinks require elevated privileges on Windows")
+        from apm_cli.install.errors import RequiredIntegrationError
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        real_dir = self.root / "real-claude"
+        real_dir.mkdir()
+        real_cfg = real_dir / ".claude.json"
+        target_bytes = b'{"mcpServers": {"stale": {"command": "s"}}}'
+        real_cfg.write_bytes(target_bytes)
+
+        symlink_dir = self.root / "symlink-claude"
+        symlink_dir.symlink_to(real_dir, target_is_directory=True)
+
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(symlink_dir)}):
+            with self.assertRaises(RequiredIntegrationError) as ctx:
+                MCPIntegrator.remove_stale(
+                    {"stale"},
+                    runtime="claude",
+                    scope=InstallScope.USER,
+                    fail_on_write_error=True,
+                )
+            self.assertIn("symlinked MCP config", str(ctx.exception))
+
+        self.assertTrue(symlink_dir.is_symlink())
+        self.assertEqual(real_cfg.read_bytes(), target_bytes)
+
     def test_remove_stale_scope_none_defaults_safely(self):
         """When scope is unspecified, only project .mcp.json is touched."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator

@@ -184,7 +184,23 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _project_mcp_path(self) -> Path:
         return self.project_root / ".mcp.json"
 
-    def _user_claude_json_path(self) -> Path:
+    @classmethod
+    def resolve_user_claude_unresolved_path(cls) -> Path:
+        """Return the un-normalized path for user-scope Claude Code config.
+
+        Used for symlink pre-checks before canonical resolution.
+        """
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        if config_dir:
+            return Path(config_dir).expanduser() / ".claude.json"
+        return Path.home() / ".claude.json"
+
+    @classmethod
+    def resolve_user_claude_json_path(cls) -> Path:
+        """Resolve the user-scope Claude Code configuration path.
+
+        Honors ``CLAUDE_CONFIG_DIR`` when set, falling back to ``~/.claude.json``.
+        """
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
         if config_dir:
             config_path = Path(config_dir).expanduser()
@@ -195,6 +211,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 )
             return config_path.resolve(strict=False) / ".claude.json"
         return Path.home() / ".claude.json"
+
+    def _user_claude_json_path(self) -> Path:
+        return self.resolve_user_claude_json_path()
 
     def _should_write_project(self) -> bool:
         return (self.project_root / ".claude").is_dir()

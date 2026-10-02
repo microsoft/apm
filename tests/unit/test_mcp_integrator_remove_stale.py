@@ -1,7 +1,7 @@
 """Characterisation tests for MCPIntegrator.remove_stale()."""
 
 import os
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -536,3 +536,76 @@ class TestRemoveStaleIntelliJ:
             )
 
         client.get_config_path.assert_called_once_with()
+
+
+def test_remove_stale_claude_honors_claude_config_dir_and_isolates_profiles(tmp_path, monkeypatch):
+    import json
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    claude_dir_a = tmp_path / "claude-a"
+    claude_dir_a.mkdir()
+    cfg_a = claude_dir_a / ".claude.json"
+    cfg_a.write_text(
+        json.dumps({
+            "projects": {"/repo": {"allowedTools": ["Write"]}},
+            "mcpServers": {"server-a": {"command": "run-a"}, "server-shared": {"command": "shared"}},
+        }),
+        encoding="utf-8",
+    )
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    cfg_default = home_dir / ".claude.json"
+    cfg_default.write_text(
+        json.dumps({
+            "mcpServers": {"server-shared": {"command": "default-shared"}},
+        }),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir_a))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
+
+    MCPIntegrator.remove_stale(
+        {"server-shared"},
+        runtime="claude",
+        scope=InstallScope.USER,
+        fail_on_write_error=True,
+    )
+
+    data_a = json.loads(cfg_a.read_text(encoding="utf-8"))
+    assert "server-a" in data_a["mcpServers"]
+    assert "server-shared" not in data_a["mcpServers"]
+    assert data_a["projects"] == {"/repo": {"allowedTools": ["Write"]}}
+
+    data_default = json.loads(cfg_default.read_text(encoding="utf-8"))
+    assert "server-shared" in data_default["mcpServers"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
+def test_remove_stale_rejects_symlinked_claude_config(tmp_path, monkeypatch):
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.errors import RequiredIntegrationError
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    claude_dir = tmp_path / "custom-claude"
+    claude_dir.mkdir()
+    target = tmp_path / "user-config.json"
+    original = b'{"mcpServers": {"stale": {"command": "keep"}}}'
+    target.write_bytes(original)
+    config_path = claude_dir / ".claude.json"
+    config_path.symlink_to(target)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+
+    with pytest.raises(RequiredIntegrationError, match="symlinked MCP config"):
+        MCPIntegrator.remove_stale(
+            {"stale"},
+            runtime="claude",
+            scope=InstallScope.USER,
+            fail_on_write_error=True,
+        )
+
+    assert config_path.is_symlink()
+    assert target.read_bytes() == original
