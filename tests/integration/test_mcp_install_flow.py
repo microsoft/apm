@@ -731,24 +731,39 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     assert contracted_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
 
 
-def test_global_manifest_removal_cleans_antigravity_config_and_lock(tmp_path, monkeypatch):
-    """Removing global MCP deps cleans Antigravity's user config and ownership state."""
+@pytest.mark.parametrize(
+    "target,custom_profile", [("antigravity", False), ("claude", False), ("claude", True)]
+)
+def test_global_manifest_removal_cleans_selected_config_and_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, custom_profile: bool
+) -> None:
+    """Manifest removal cleans the selected user config and recorded ownership."""
     home = tmp_path / "home"
     apm_home = home / ".apm"
     apm_home.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr("pathlib.Path.home", staticmethod(lambda: home))
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    if target == "claude":
+        config_path = (home / "selected" if custom_profile else home) / ".claude.json"
+    else:
+        config_path = home / ".gemini" / "config" / "mcp_config.json"
+    if custom_profile:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_path.parent))
+        default_config = home / ".claude.json"
+        untouched = '{"mcpServers": {"apm-managed": {"command": "other-profile"}}}\n'
+        default_config.write_text(untouched, encoding="utf-8")
 
-    manifest = _self_defined_manifest(targets=["antigravity"])
+    manifest = _self_defined_manifest(targets=[target])
     (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
     LockFile().write(apm_home / "apm.lock.yaml")
 
     installed = CliRunner().invoke(cli, ["install", "--global", "--no-policy"])
     assert installed.exit_code == 0, installed.output
 
-    config_path = home / ".gemini" / "config" / "mcp_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["apm-managed"]["command"] == "echo"
     config["mcpServers"]["user-authored"] = {"command": "keep"}
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
@@ -765,6 +780,8 @@ def test_global_manifest_removal_cleans_antigravity_config_and_lock(tmp_path, mo
     assert lockfile is not None
     assert lockfile.mcp_servers == []
     assert lockfile.mcp_target_servers == {}
+    if custom_profile:
+        assert default_config.read_text(encoding="utf-8") == untouched
 
 
 def test_prune_removes_only_owned_antigravity_mcp(tmp_path, monkeypatch):

@@ -84,6 +84,10 @@ _MCP_VSCODE = "src/apm_cli/adapters/client/vscode.py"
 
 _INTELLIJ_OWNER = "src/apm_cli/adapters/client/intellij.py"
 
+_CLAUDE_OWNER = "src/apm_cli/adapters/client/claude.py"
+
+_MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator.py"
+
 
 def _function_spans(
     facts: FileFacts, name: str, *, top_level: bool = True
@@ -656,6 +660,52 @@ def _check_jetbrains_mcp_path(provider: FactsProvider) -> Iterable[Violation]:
     return tuple(findings)
 
 
+def _check_claude_user_mcp_path(provider: FactsProvider) -> Iterable[Violation]:
+    """Claude cleanup must share the writer's destination and retain symlink checks."""
+    rule_id = "mutation_writes.claude_user_mcp_path"
+    facts_by_path, failures = _read_required(provider, rule_id, (_CLAUDE_OWNER, _MCP_INTEGRATOR))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    required = {
+        _CLAUDE_OWNER: (
+            'config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()',
+            "self._user_claude_json_path(resolve_config_dir=resolve_config_dir)",
+            "if resolve_config_dir:\n                config_path = config_path.resolve(strict=False)",
+            'return config_path / ".claude.json"',
+        ),
+        _MCP_INTEGRATOR: (
+            'claude_client = ClientFactory.create_client(\n                "claude",\n'
+            "                project_root=project_root_path,\n                user_scope=True,",
+            "Path(claude_client.get_config_path(resolve_config_dir=False))",
+        ),
+    }
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "Claude user MCP cleanup must use the adapter destination without hiding symlinks",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=(
+                *_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_CLAUDE_OWNER,)),
+                _MCP_INTEGRATOR,
+            ),
+            pattern=r"""def _user_claude_json_path\(|["']CLAUDE_CONFIG_DIR["']|/\s*["']\.claude\.json["']""",
+            message="Claude user MCP destination selection belongs only to the Claude adapter",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 def _check_mcp_ownership_migration(provider: FactsProvider) -> Iterable[Violation]:
     """Legacy MCP target ownership migration must stay owned by one module.
 
@@ -736,6 +786,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-opencode-enabled-intent",),
         description="OpenCode enabled presence and trust must route through the MCP model.",
         check=_check_opencode_enabled_intent,
+    ),
+    Rule(
+        id="mutation_writes.claude_user_mcp_path",
+        group=GROUP,
+        guard_ids=("hooks-integrations-claude-user-mcp-path",),
+        description="Claude user MCP cleanup routes through the adapter destination authority.",
+        check=_check_claude_user_mcp_path,
     ),
     Rule(
         id="mutation_writes.jetbrains_mcp_path",

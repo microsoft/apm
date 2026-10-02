@@ -583,6 +583,12 @@ At user scope, Claude MCP entries are written to
 non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected.
 
+Stale cleanup uses that same selected Claude destination. Keep the same
+`CLAUDE_CONFIG_DIR` when removing a managed server and rerunning `apm install -g`;
+other profiles, unrelated settings, and unowned entries are preserved. Cleanup
+refuses a symlinked config file or selected directory. This does not isolate APM
+install state per profile.
+
 ## LSP dependency formats
 
 LSP (Language Server Protocol) servers give supported runtimes real-time

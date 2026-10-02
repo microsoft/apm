@@ -531,6 +531,7 @@ class TestRemoveStale:
         )
         client = MagicMock()
         client.supports_user_scope = True
+        client.get_config_path.return_value = str(config_path)
         logger = MagicMock()
 
         with (
@@ -550,6 +551,7 @@ class TestRemoveStale:
         assert "stale" not in config["mcpServers"]
         assert "keep" in config["mcpServers"]
         logger.progress.assert_called_once()
+        client.get_config_path.assert_called_once_with(resolve_config_dir=False)
 
     def test_expands_full_reference_to_short_name(self, tmp_path: Path) -> None:
         config_path = _write_json(

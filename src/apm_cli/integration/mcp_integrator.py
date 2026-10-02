@@ -314,7 +314,7 @@ def _clean_claude_config(
     Returns:
         Number of entries removed.
     """
-    label = "~/.claude.json" if is_user_scope else ".mcp.json"
+    label = "Claude Code user config" if is_user_scope else ".mcp.json"
     if (
         _reject_symlink_config(
             config_path,
@@ -766,7 +766,7 @@ class MCPIntegrator:
         if "claude" in target_runtimes and scope is None:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
-                "project .mcp.json only; pass -g/--global to also clean ~/.claude.json"
+                "project .mcp.json only; pass -g/--global to clean the selected user config"
             )
 
         # Build an expanded set that includes both the full reference and the
@@ -960,10 +960,15 @@ class MCPIntegrator:
                     fail_on_write_error=fail_on_write_error,
                 )
 
-        # Clean Claude Code user ~/.claude.json (USER scope only)
+        # Keep the selected directory unresolved so cleanup can reject symlinks.
         if clean_claude_user:
+            claude_client = ClientFactory.create_client(
+                "claude",
+                project_root=project_root_path,
+                user_scope=True,
+            )
             _clean_claude_config(
-                Path.home() / ".claude.json",
+                Path(claude_client.get_config_path(resolve_config_dir=False)),
                 expanded_stale,
                 logger,
                 is_user_scope=True,

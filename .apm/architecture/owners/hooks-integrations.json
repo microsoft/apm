@@ -93,6 +93,13 @@
       "guards": ["hooks-integrations-jetbrains-mcp-path"]
     },
     {
+      "id": "claude-user-mcp-config-path",
+      "decision": "Claude user MCP destination selection shared by installation and stale cleanup",
+      "owner": "adapters/client/claude.py (ClaudeClientAdapter._user_claude_json_path, get_config_path)",
+      "selectors": ["src/apm_cli/adapters/client/claude.py"],
+      "guards": ["hooks-integrations-claude-user-mcp-path"]
+    },
+    {
       "id": "copilot-cli-mcp-config-paths",
       "decision": "Copilot CLI MCP config paths",
       "owner": "adapters/client/copilot.py",

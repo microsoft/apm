@@ -254,6 +254,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Root context writes lose the canonical hand-authored ownership gate.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-claude-user-mcp-path",
+        rule_id="mutation_writes.claude_user_mcp_path",
+        path="src/apm_cli/integration/mcp_integrator.py",
+        old="Path(claude_client.get_config_path(resolve_config_dir=False))",
+        new='Path.home() / ".claude.json"',
+        intent="Claude stale cleanup reintroduces a destination owner that ignores the selected profile.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-copilot-cli-mcp-paths",
         rule_id="mutation_writes.copilot_cli_mcp_paths",
         path="src/apm_cli/adapters/client/copilot.py",

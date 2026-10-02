@@ -184,7 +184,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _project_mcp_path(self) -> Path:
         return self.project_root / ".mcp.json"
 
-    def _user_claude_json_path(self) -> Path:
+    def _user_claude_json_path(self, *, resolve_config_dir: bool = True) -> Path:
+        """Select the user config, retaining symlinks when cleanup must inspect them."""
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
         if config_dir:
             config_path = Path(config_dir).expanduser()
@@ -193,15 +194,18 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
                     "config; set an absolute path or unset it to use ~/.claude.json."
                 )
-            return config_path.resolve(strict=False) / ".claude.json"
+            if resolve_config_dir:
+                config_path = config_path.resolve(strict=False)
+            return config_path / ".claude.json"
         return Path.home() / ".claude.json"
 
     def _should_write_project(self) -> bool:
         return (self.project_root / ".claude").is_dir()
 
-    def get_config_path(self):
+    def get_config_path(self, *, resolve_config_dir: bool = True) -> str:
+        """Return the selected path; cleanup can inspect the unresolved directory."""
         if self._is_user_scope():
-            return str(self._user_claude_json_path())
+            return str(self._user_claude_json_path(resolve_config_dir=resolve_config_dir))
         return str(self._project_mcp_path())
 
     def get_current_config(self):

@@ -262,6 +262,13 @@ or updates `~/.apm/apm.yml`; it does not fall back to the current project's
 manifest. With `--dry-run`, it previews the user-scope entry and runtime
 targets without creating that manifest, lockfile, or runtime configuration.
 
+Claude user-scope stale cleanup uses the same selected destination as installation.
+Keep `CLAUDE_CONFIG_DIR` set to the intended profile when removing a managed server
+and rerunning `apm install -g`. With a custom profile selected, cleanup leaves the
+default and other profiles untouched. It preserves unrelated settings and
+unowned entries, and refuses a symlinked config file or selected directory.
+This does not create independent APM install state for each Claude profile.
+
 ## stdio vs HTTP servers
 
 MCP defines two transport families. APM exposes both:

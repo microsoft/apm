@@ -6,13 +6,15 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
 from apm_cli.core.scope import InstallScope
 from apm_cli.factory import ClientFactory
+from apm_cli.install.errors import RequiredIntegrationError
+from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.utils.path_security import PathTraversalError
 
 
@@ -493,8 +495,11 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        self._config_dir = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""})
+        self._config_dir.start()
 
     def tearDown(self):
+        self._config_dir.stop()
         self.tmp.cleanup()
 
     def test_remove_stale_claude_project_mcp_json(self):
@@ -566,6 +571,165 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
                 json.loads(proj.read_text(encoding="utf-8")).get("mcpServers", {}),
             )
             self.assertEqual(user_cfg.read_text(encoding="utf-8"), user_raw)
+
+
+@pytest.fixture
+def claude_cleanup_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, ...]:
+    """Isolate profiles with colliding names and unrelated user-owned settings."""
+    home = tmp_path / "home"
+    profiles = (home, home / "selected", home / "other")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    for profile in profiles:
+        profile.mkdir(parents=True, exist_ok=True)
+        (profile / ".claude.json").write_text(
+            json.dumps(
+                {
+                    "theme": "dark",
+                    "projects": {"private": {"mcpServers": {"remove-me": {"command": "local"}}}},
+                    "mcpServers": {
+                        "personal": {"command": "user-owned"},
+                        "remove-me": {"command": "same-name-in-another-profile"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+    return profiles
+
+
+@pytest.mark.parametrize("destination", ["unset", "empty", "blank", "custom", "tilde"])
+def test_claude_user_cleanup_matches_install_destination(
+    claude_cleanup_profiles: tuple[Path, ...],
+    monkeypatch: pytest.MonkeyPatch,
+    destination: str,
+) -> None:
+    """Remove only stale managed names from the profile the real writer selected."""
+    home, custom, _ = claude_cleanup_profiles
+    overrides = {"empty": "", "blank": "   ", "custom": f" {custom} ", "tilde": "~/selected"}
+    if destination in overrides:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", overrides[destination])
+    selected = custom if destination in ("custom", "tilde") else home
+    untouched = {
+        profile / ".claude.json": (profile / ".claude.json").read_bytes()
+        for profile in claude_cleanup_profiles
+        if profile != selected
+    }
+    adapter = ClaudeClientAdapter(user_scope=True)
+    assert adapter.update_config(
+        {"remove-me": {"command": "old-managed"}, "keep-managed": {"command": "still-managed"}}
+    )
+    config = selected / ".claude.json"
+    assert Path(adapter.get_config_path()) == config.resolve()
+    expected = json.loads(config.read_text(encoding="utf-8"))
+    del expected["mcpServers"]["remove-me"]
+    logger = Mock()
+
+    MCPIntegrator.remove_stale(
+        {"remove-me"}, runtime="claude", scope=InstallScope.USER, logger=logger
+    )
+
+    assert json.loads(config.read_text(encoding="utf-8")) == expected
+    assert {path: path.read_bytes() for path in untouched} == untouched
+    logger.progress.assert_called_once_with(
+        "Removed stale MCP server 'remove-me' from Claude Code user config"
+    )
+    after = config.read_bytes()
+    MCPIntegrator.remove_stale({"remove-me"}, runtime="claude", scope=InstallScope.USER)
+    assert config.read_bytes() == after
+
+
+def test_claude_user_cleanup_rejects_relative_destination(
+    claude_cleanup_profiles: tuple[Path, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invalid profile selection cannot silently clean the default profile."""
+    before = {
+        profile / ".claude.json": (profile / ".claude.json").read_bytes()
+        for profile in claude_cleanup_profiles
+    }
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "../selected")
+    with pytest.raises(PathTraversalError, match="CLAUDE_CONFIG_DIR must be an absolute path"):
+        MCPIntegrator.remove_stale({"remove-me"}, runtime="claude", scope=InstallScope.USER)
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires elevated Windows rights")
+@pytest.mark.parametrize("destination", ["default-file", "custom-file", "custom-directory"])
+@pytest.mark.parametrize("strict", [False, True])
+def test_claude_user_cleanup_preserves_symlinked_destination(
+    claude_cleanup_profiles: tuple[Path, ...],
+    monkeypatch: pytest.MonkeyPatch,
+    destination: str,
+    strict: bool,
+) -> None:
+    """Neither profile routing nor canonicalization may hide cleanup symlinks."""
+    home, custom, other = claude_cleanup_profiles
+    if destination == "custom-directory":
+        link = home / "selected-link"
+        link.symlink_to(custom, target_is_directory=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(link))
+    else:
+        profile = home if destination == "default-file" else custom
+        link = profile / ".claude.json"
+        link.unlink()
+        link.symlink_to(other / ".claude.json")
+        if destination == "custom-file":
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom))
+    before = {
+        profile / ".claude.json": (profile / ".claude.json").read_bytes()
+        for profile in claude_cleanup_profiles
+    }
+    logger = Mock()
+    kwargs = dict(
+        runtime="claude", scope=InstallScope.USER, logger=logger, fail_on_write_error=strict
+    )
+    if strict:
+        with pytest.raises(RequiredIntegrationError, match="symlinked MCP config"):
+            MCPIntegrator.remove_stale({"remove-me"}, **kwargs)
+    else:
+        MCPIntegrator.remove_stale({"remove-me"}, **kwargs)
+        logger.warning.assert_called_once()
+        assert "Refusing to clean symlinked MCP config" in logger.warning.call_args.args[0]
+    assert link.is_symlink()
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_claude_user_cleanup_missing_profile_does_not_touch_default(
+    claude_cleanup_profiles: tuple[Path, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup does not create a missing selected profile or fall back to HOME."""
+    home = claude_cleanup_profiles[0]
+    missing = home / "missing"
+    before = (home / ".claude.json").read_bytes()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(missing))
+    MCPIntegrator.remove_stale({"remove-me"}, runtime="claude", scope=InstallScope.USER)
+    assert not missing.exists()
+    assert (home / ".claude.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, None])
+def test_claude_project_cleanup_does_not_resolve_user_destination(
+    claude_cleanup_profiles: tuple[Path, ...],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: InstallScope | None,
+) -> None:
+    """Project and unspecified scopes never consult an invalid user override."""
+    (tmp_path / ".claude").mkdir()
+    project_config = tmp_path / ".mcp.json"
+    project_config.write_text(
+        json.dumps({"mcpServers": {"remove-me": {"command": "project"}}}), encoding="utf-8"
+    )
+    before = {
+        profile / ".claude.json": (profile / ".claude.json").read_bytes()
+        for profile in claude_cleanup_profiles
+    }
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "../invalid")
+    MCPIntegrator.remove_stale({"remove-me"}, runtime="claude", project_root=tmp_path, scope=scope)
+    assert json.loads(project_config.read_text(encoding="utf-8")) == {"mcpServers": {}}
+    assert {path: path.read_bytes() for path in before} == before
 
 
 class TestClaudeAutoDetection(unittest.TestCase):
