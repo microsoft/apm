@@ -45,6 +45,9 @@ CURSOR_NATIVE_EVENTS = frozenset(
     }
 )
 
+# https://cursor.com/docs/hooks - the only keys Cursor's loader recognizes.
+CURSOR_CONFIG_TOP_LEVEL_KEYS = frozenset({"version", "hooks"})
+
 
 def _cursor_matcher(matcher: str | None, event: str, *, foreign: bool) -> str | None:
     """Translate only explicitly representable Claude tool-name alternatives."""
@@ -181,6 +184,11 @@ def validate_cursor_config(document: object) -> None:
     """Reject a native file that Cursor would not load, without repairing user data."""
     if not isinstance(document, dict) or not isinstance(document.get("hooks"), dict):
         raise HookContractError("Cursor config requires a hooks object")
+    unknown_keys = document.keys() - CURSOR_CONFIG_TOP_LEVEL_KEYS
+    if unknown_keys:
+        raise HookContractError(
+            f"Cursor config has unsupported top-level keys {sorted(unknown_keys)!r}"
+        )
     if type(document.get("version")) is not int or document["version"] != 1:
         raise HookContractError("Cursor config requires version 1")
     for event, entries in document["hooks"].items():
