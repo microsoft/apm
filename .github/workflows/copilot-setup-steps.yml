@@ -35,7 +35,7 @@ jobs:
       # Repository compiler pin: gh-aw v0.89.15 tag commit
       # 0fac96fb53dc7d2d82cdcc46049383f4a5734f16.
       - name: Install gh-aw extension
-        uses: github/gh-aw-actions/setup-cli@924af5fdc64061cfbf66fb584c8b07e2ac230c60 # v0.89.21
+        uses: github/gh-aw-actions/setup-cli@045beb2d14bda8d0c1f2e83b41527f63770d2855 # v0.89.15
         with:
           version: v0.89.15
       
