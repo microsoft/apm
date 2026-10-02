@@ -1357,8 +1357,9 @@ class TestCodexAgentIntegration:
         assert len(warnings) == 1
         assert warnings[0].package == "test-pkg"
         assert "Codex" in warnings[0].message
-        assert "handoffs:" in warnings[0].message
+        assert "cannot be guaranteed" in warnings[0].message
         assert "authority" in warnings[0].detail
+        assert "picker" in warnings[0].detail
 
         diagnostics.render_summary()
         rendered = capsys.readouterr()
@@ -1458,8 +1459,9 @@ class TestKiroAgentIntegration:
         assert len(warnings) == 1
         assert warnings[0].package == "test-pkg"
         assert "Kiro" in warnings[0].message
-        assert "handoffs:" in warnings[0].message
+        assert "cannot be guaranteed" in warnings[0].message
         assert "authority" in warnings[0].detail
+        assert "picker" in warnings[0].detail
 
     def test_kiro_agent_visibility_internal_alias_emits_warning(self):
         """The 'visibility: internal' alias must also trip the Kiro drop warning."""

@@ -77,6 +77,17 @@
       "owner": "core/project_name.py (resolve_bootstrap_project_name)",
       "selectors": ["src/apm_cli/core/project_name.py"],
       "guards": ["registry-delegation-bootstrap-project-name"]
+    },
+    {
+      "id": "user-invocable-resolution",
+      "decision": "Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
+      "owner": "primitives/models.py (resolve_user_invocable)",
+      "selectors": [
+        "src/apm_cli/primitives/models.py",
+        "src/apm_cli/primitives/parser.py",
+        "src/apm_cli/integration/agent_integrator.py"
+      ],
+      "guards": ["registry-delegation-user-invocable-resolution"]
     }
   ]
 }
