@@ -13,7 +13,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1496,6 +1496,43 @@ class TestCursorIntegration:
 
         config = json.loads(hooks_path.read_text())
         assert config.get("unsupportedKey") is True
+
+    def test_fallback_preflight_forwards_retiring_targets(self, temp_project):
+        """Per-target preflight fallback must see the same retiring_targets as
+        the up-front ``preflight_hooks_for_targets`` call (#3129).
+
+        ``_integrate_merged_hooks`` only runs its own inline
+        ``preflight_cursor_hooks`` call when ``source_plan.cursor_preflight_done``
+        is NOT already True (e.g. the up-front gate was a no-op because
+        ``hook_source_selection`` was None). That fallback call must still
+        honor ``retiring_targets`` or a target slated for safe retirement
+        this run can be misflagged as an import-coexistence conflict.
+        Verified at the exact plumbing boundary (the forwarded kwarg),
+        not by re-deriving the full overlap-detection algorithm.
+        """
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+        from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+        # hook_source_selection=None + cursor_preflight_done=False means the
+        # up-front preflight_hooks_for_targets() gate is a no-op for this
+        # plan, so the fallback inside _integrate_merged_hooks is the ONLY
+        # preflight that runs.
+        source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
+        expected_retiring = frozenset({"claude"})
+
+        with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
+            integrator._integrate_merged_hooks(
+                _MERGE_HOOK_TARGETS["cursor"],
+                pkg_info,
+                temp_project,
+                source_plan=source_plan,
+                retiring_targets=expected_retiring,
+            )
+
+        mock_preflight.assert_called_once()
+        assert mock_preflight.call_args.kwargs["retiring_targets"] == expected_retiring
 
 
 # ─── Sync/cleanup tests ──────────────────────────────────────────────────────

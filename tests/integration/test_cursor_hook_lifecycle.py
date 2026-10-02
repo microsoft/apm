@@ -64,7 +64,15 @@ def test_cursor_installed_cli_contract(tmp_path: Path, apm_binary_path: Path, sh
     first = runner.run(args, scenario_id="cursor-install", cwd=consumer.root, env=environment)
     if shared:
         assert first.returncode != 0, first.stdout + first.stderr
-        assert "Claude import" in first.stdout + first.stderr
+        # Rich wraps CLI error output to the CI runner's (often narrower,
+        # non-TTY) detected console width, which can split the literal
+        # "Claude import" substring across a line break. Collapse all
+        # whitespace runs (including embedded wrap newlines) before the
+        # substring check so the assertion verifies the full semantic
+        # phrase regardless of wrap point, instead of depending on a
+        # specific terminal width.
+        normalized_output = " ".join((first.stdout + first.stderr).split())
+        assert "Claude import" in normalized_output
         assert config.read_bytes() == before
         assert not (consumer.root / ".claude/settings.json").exists()
         assert not config.with_name("apm-hooks.json").exists()
