@@ -13,7 +13,8 @@ import pytest
 from apm_cli.hook_contract import HookContractError
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
-from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.hook_integrator import HookIntegrator, native_hook_config
+from apm_cli.integration.hook_native_formats import inspect_native_hooks
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -237,6 +238,16 @@ def test_native_prompt_matcher_and_restrictions_are_preserved(tmp_path: Path) ->
         "version": 1,
         "hooks": {"beforeShellExecution": [native]},
     }
+    contract = native_hook_config("cursor")
+    assert contract is not None
+    inspected = inspect_native_hooks(
+        json.loads((project / ".cursor/hooks.json").read_text()),
+        "cursor_hooks",
+        prompt_types=contract.prompt_handler_types,
+        nested_handlers=contract.nested_handlers,
+    )
+    assert [entry.prompt for entry in inspected] == [native["prompt"]]
+    assert all(entry.error is None for entry in inspected)
 
 
 def test_cursor_install_reinstall_and_remove_preserve_user_hooks(tmp_path: Path) -> None:
