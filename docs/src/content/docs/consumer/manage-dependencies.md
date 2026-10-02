@@ -45,6 +45,10 @@ For the full manifest schema (every field, every type), see
 For MCP server entries (`dependencies.mcp`), see
 [Install MCP servers](../install-mcp-servers/).
 
+For the distinction between the source repository and the installed copy
+under `apm_modules/`, see
+[Source packages and installed copies](../../producer/source-vs-installed/).
+
 ## Reference formats
 
 Every entry under `dependencies.apm` is parsed by the same reference
