@@ -100,6 +100,42 @@ def test_network_env_preserves_effective_symlink_setting(
 
 
 @pytest.mark.parametrize(
+    "sequence",
+    [
+        ("true", "false", "true"),
+        ("false", "true", "false"),
+        ("true", "false"),
+        ("false", "true"),
+        ("true", "true", "false"),
+    ],
+)
+def test_network_env_preserves_last_repeated_command_value(
+    tmp_path: Path,
+    config_env: dict[str, str],
+    sequence: tuple[str, ...],
+) -> None:
+    """Repeated indexed command-scope values must resolve to the last one.
+
+    Guards against collapsing a repeated `GIT_CONFIG_KEY_N`/`VALUE_N` sequence
+    (e.g. true, false, true) to the first occurrence instead of matching real
+    Git's last-value-wins semantics for a single-valued setting.
+    """
+    repo = tmp_path / "repo"
+    _git(config_env, "init", "--quiet", "--template=", str(repo))
+    config_env["GIT_CONFIG_COUNT"] = str(len(sequence))
+    for index, value in enumerate(sequence):
+        config_env[f"GIT_CONFIG_KEY_{index}"] = "core.symlinks"
+        config_env[f"GIT_CONFIG_VALUE_{index}"] = value
+    query = ("-C", str(repo), "config", "--bool", "--get", "core.symlinks")
+    expected = sequence[-1]
+    assert _git(config_env, *query) == expected
+
+    child = git_env.git_network_env("https://example.test/org/repo.git", config_env, worktree=repo)
+
+    assert _git(child, *query) == expected
+
+
+@pytest.mark.parametrize(
     ("parent", "child", "expected"),
     [
         ("true", None, "true"),

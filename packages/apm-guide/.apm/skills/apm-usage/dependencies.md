@@ -71,10 +71,12 @@ fallback requires an exhausted plan with an executed same-origin effective
 HTTPS attempt. Path containment rejects symlink or traversal escapes.
 See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-self-managed).
 
-### Windows Git symlinks
+### Git symlink checkout fallback
 
 APM preserves Git's detected `core.symlinks` setting and explicit command-scope
-overrides without changing global Git configuration. On systems without symlink
+overrides without changing global Git configuration. This capability check is
+not Windows-specific, but non-admin Windows accounts are the common case
+without symlink-creation rights. On systems without symlink
 creation support, Git's fallback writes the link's target path as a regular file,
 not the target's contents. Successful checkout is not proof that a package
 requiring real symlinks works. Prefer packages with real source files or use a

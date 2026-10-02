@@ -210,8 +210,10 @@ For the full flag reference, run `apm install --help` or see
 
 ## When things go wrong
 
-- **Windows symlink checkout.** APM preserves Git's detected `core.symlinks`
-  setting instead of letting an inherited global value override it. Explicit
+- **Symlink checkout fallback.** APM preserves Git's detected `core.symlinks`
+  setting instead of letting an inherited global value override it; this
+  capability check is not Windows-specific, but Windows non-admin accounts are
+  the common case without symlink-creation rights. Explicit
   command-scope Git settings still take precedence; APM does not change your
   global Git configuration. When symlink creation is unavailable, Git can check
   out a symlink as a regular file containing its target path, not the target's
