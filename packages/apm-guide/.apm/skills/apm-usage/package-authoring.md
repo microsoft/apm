@@ -837,6 +837,27 @@ Schema rules:
   checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
 
+### Additional marketplace outputs: Codex and Copilot CLI
+
+Beyond the default `.claude-plugin/marketplace.json`, `marketplace.outputs`
+(map form, e.g. `outputs: [claude, codex, copilot]` or with an explicit
+`path:`) can also select:
+
+- `codex` -> `.agents/plugins/marketplace.json` (default path). Every
+  package needs a `category`. Sources compile to the object shape
+  `{source, url/path, ref?, sha?}`.
+- `copilot` -> `.github/plugin/marketplace.json` (default path, override
+  with env var `APM_MARKETPLACE_COPILOT_PATH` -- reserved for a future
+  release, validated but not yet consumed). No `category` requirement.
+  `plugins[].source` is always a relative-path **string** (e.g.
+  `"./plugins/demo"`) -- never the Claude/Codex object shape -- so
+  resolved `ref`/`sha` pins are not carried; only `apm install` (reading
+  `apm.yml`/`apm.lock.yaml` directly) reproduces the exact pin.
+
+Each enabled output needs a matching `.gitignore` unignore line, e.g.
+`!.github/plugin/marketplace.json` alongside
+`!.claude-plugin/marketplace.json` and `!.agents/plugins/marketplace.json`.
+
 ### Cross-repo plugin sources on enterprise marketplaces
 
 When a marketplace published on a `*.ghe.com` host references a plugin

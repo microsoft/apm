@@ -328,9 +328,75 @@ class CodexMarketplaceMapper(MarketplaceOutputMapper):
         return MapperResult(doc, (), tuple(name_diagnostics))
 
 
+class CopilotMarketplaceMapper(MarketplaceOutputMapper):
+    """Map packages into GitHub Copilot CLI marketplace format.
+
+    The Copilot CLI schema (see issue #2430) intentionally diverges from the
+    Claude mapper above in several ways:
+      - ``description`` and ``version`` nest under a top-level ``metadata``
+        object instead of living at the document root.
+      - ``plugins[].source`` must always be a relative path *string*
+        (e.g. ``"./plugins/demo"``) -- never the ``{source, url, ref, sha}``
+        pin-preserving object shape used by Claude/Codex.
+      - Fields the Copilot CLI does not understand (``author``, ``tags``,
+        ``homepage``, ``repository``, ``license``, ``category``, git pin
+        metadata such as ``ref``/``sha``) are omitted entirely rather than
+        passed through.
+    """
+
+    uses_remote_metadata = True
+
+    def compose(
+        self,
+        *,
+        config: MarketplaceConfig,
+        resolved: tuple[ResolvedPackage, ...],
+        remote_metadata: dict[str, dict[str, Any]] | None = None,
+    ) -> MapperResult:
+        remote_metadata = remote_metadata or {}
+        entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
+
+        doc: dict[str, Any] = OrderedDict()
+        sanitized, name_diagnostics = _sanitized_name_with_diagnostic(config.name)
+        doc["name"] = sanitized
+        owner: dict[str, Any] = OrderedDict({"name": config.owner.name})
+        if config.owner.email:
+            owner["email"] = config.owner.email
+        doc["owner"] = owner
+
+        metadata: dict[str, Any] = OrderedDict()
+        if config.description:
+            metadata["description"] = config.description
+        if config.version:
+            metadata["version"] = config.version
+        if metadata:
+            doc["metadata"] = metadata
+
+        diagnostics = list(name_diagnostics)
+        plugins: list[dict[str, Any]] = []
+        for pkg in resolved:
+            entry = entry_by_name.get(pkg.name)
+            if entry is None:
+                continue
+            plugin: dict[str, Any] = OrderedDict({"name": pkg.name})
+            meta = remote_metadata.get(pkg.name, {})
+            description = entry.description or meta.get("description")
+            if description:
+                plugin["description"] = description
+            version = entry.version if entry.is_local else meta.get("version") or entry.version
+            if version:
+                plugin["version"] = version
+            plugin["source"] = _copilot_source(entry, pkg, diagnostics)
+            plugins.append(plugin)
+
+        doc["plugins"] = plugins
+        return MapperResult(doc, (), tuple(diagnostics))
+
+
 MARKETPLACE_OUTPUT_MAPPERS: dict[str, MarketplaceOutputMapper] = {
     "claude": ClaudeMarketplaceMapper(),
     "codex": CodexMarketplaceMapper(),
+    "copilot": CopilotMarketplaceMapper(),
 }
 
 
@@ -381,6 +447,71 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
         source_obj["sha"] = pkg.sha
     _set_effective_tag_pattern(source_obj, pkg)
     return source_obj
+
+
+def _copilot_source(
+    entry: PackageEntry,
+    pkg: ResolvedPackage,
+    diagnostics: list[BuildDiagnostic] | None = None,
+) -> str:
+    """Return a Copilot CLI ``source`` as a relative path string.
+
+    Unlike Claude/Codex, the Copilot CLI schema has no object-shaped source
+    (no ``url``/``repo``/``ref``/``sha`` pin metadata) -- it only accepts a
+    relative path. Local packages keep their configured path unchanged.
+    Remote packages prefer the resolved ``subdir`` (normalized to a leading
+    ``./``); when a package has no subdir, fall back to a relative path
+    derived from the package name so every entry still resolves to a
+    sensible on-disk location.
+
+    Trade-off (by design, not a bug): resolved ``ref``/``sha`` pin metadata
+    is intentionally dropped for remote packages, because the Copilot CLI
+    schema has nowhere to carry it -- a consumer reinstalling from
+    ``marketplace.json`` alone cannot reproduce the exact pinned commit the
+    producer resolved at pack time; only ``apm install`` (which reads
+    ``apm.yml``/``apm.lock.yaml`` directly) retains that precision. Likewise,
+    a package with no ``subdir`` gets a *fabricated* ``./<pkg.name>`` path --
+    this is a best-effort placeholder, not a verified on-disk location; if
+    the installed layout differs, set an explicit ``subdir:`` on the package
+    entry. Both trade-offs surface as ``verbose``-level diagnostics below so
+    authors can audit them without changing the emitted (intentionally
+    minimal) Copilot schema.
+    """
+    if entry.is_local:
+        return entry.source
+
+    if diagnostics is not None and (pkg.ref or pkg.sha):
+        diagnostics.append(
+            BuildDiagnostic(
+                level="verbose",
+                message=(
+                    f"Copilot output for '{pkg.name}': resolved pin "
+                    f"(ref={pkg.ref or '-'}, sha={pkg.sha or '-'}) is not "
+                    f"carried in the Copilot schema's path-only 'source'. "
+                    f"Use 'apm install' (reads apm.yml/apm.lock.yaml) to "
+                    f"reproduce the exact pin."
+                ),
+            )
+        )
+
+    if pkg.subdir:
+        relative = pkg.subdir.strip("/")
+        return relative if relative.startswith("./") else f"./{relative}"
+
+    if diagnostics is not None:
+        diagnostics.append(
+            BuildDiagnostic(
+                level="verbose",
+                message=(
+                    f"Copilot output for '{pkg.name}': no 'subdir' resolved; "
+                    f"fabricated './{pkg.name}' as a best-effort placeholder "
+                    f"path. Set an explicit 'subdir:' on the package entry if "
+                    f"the installed layout differs."
+                ),
+            )
+        )
+
+    return f"./{pkg.name}"
 
 
 def _apply_field_with_precedence(

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm pack` can emit a GitHub Copilot CLI marketplace output (`.github/plugin/marketplace.json`, selected via `marketplace.outputs: [copilot]`); its `plugins[].source` is always a relative-path string, never the Claude/Codex pin-preserving object shape. Documented in the publish-to-a-marketplace and `apm pack` reference guides. (#2600)
+
 ## [0.33.0] - 2026-10-02
 
 ### Added

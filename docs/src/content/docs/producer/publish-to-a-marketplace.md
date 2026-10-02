@@ -58,6 +58,9 @@ APM uses a single source-of-truth model:
 - `.agents/plugins/marketplace.json` -- optional Codex repo
   marketplace output. Enable it by adding `codex` to
   `marketplace.outputs`.
+- `.github/plugin/marketplace.json` -- optional Copilot CLI
+  marketplace output. Enable it by adding `copilot` to
+  `marketplace.outputs`.
 
 Commit every generated file matching your enabled
 `marketplace.outputs`. The legacy standalone `marketplace.yml` is
@@ -85,13 +88,16 @@ marketplace:
     url: https://github.com/acme-org
 
   outputs:                             # map form (recommended)
-    claude: {}                         # default; add codex for Codex output
+    claude: {}                         # default; add codex for Codex output, copilot for Copilot CLI output
 
   claude:
     output: .claude-plugin/marketplace.json
 
   codex:
     output: .agents/plugins/marketplace.json
+
+  copilot:
+    output: .github/plugin/marketplace.json
 
   # Optional: package sources can be relative to this git base.
   sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
@@ -215,6 +221,19 @@ remote entries to `source: url`, and remote subdirectory entries to
 `source: git-subdir`. Claude output also emits `category` on any
 package where it is set, even though only `codex` requires it.
 
+The `copilot` output targets the GitHub Copilot CLI marketplace
+schema (`.github/plugin/marketplace.json` by default). It has no
+`category` requirement. Unlike Claude/Codex, its `plugins[].source`
+is always a relative-path **string** -- never the
+`{source, url, ref, sha}` pin-preserving object shape -- so resolved
+git `ref`/`sha` pins are not carried in this output; only
+`apm install` (which reads `apm.yml`/`apm.lock.yaml` directly)
+reproduces the exact pin. Each output format also declares an
+`APM_MARKETPLACE_<FORMAT>_PATH` environment variable name (for
+example `APM_MARKETPLACE_COPILOT_PATH`) reserved for a future release
+to override its output path; it is validated at startup but not yet
+consumed by `apm pack`.
+
 ## Build
 
 ```bash
@@ -269,8 +288,9 @@ range exits non-zero before you push the release commit.
 - **`*.json` in `.gitignore`** will silently skip generated files.
   `apm marketplace init` warns on this; if you hit it, add an
   unignore for every enabled output, such as
-  `!.claude-plugin/marketplace.json` and
-  `!.agents/plugins/marketplace.json`.
+  `!.claude-plugin/marketplace.json`,
+  `!.agents/plugins/marketplace.json`, and
+  `!.github/plugin/marketplace.json`.
 - **Local-path entries skip git resolution.** They emit the path
   verbatim; consumers see the same path. Use `metadata.pluginRoot` if
   your plugins live under a common subdirectory.
