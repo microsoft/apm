@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.commands.marketplace import _parse_marketplace_source
+from apm_cli.core.auth import AdoAuthChainExhaustedError
 from apm_cli.marketplace.client import (
     _FETCHERS,
     _fetch_ado,
@@ -48,6 +49,7 @@ def fake_auth_resolver():
     resolver.resolve.return_value = SimpleNamespace(git_env={"GIT_TERMINAL_PROMPT": "0"})
     resolver.resolve_for_remote.return_value = resolver.resolve.return_value
     resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: auth_ctx.git_env
+    resolver.hardened_git_base_env.return_value = {"GIT_TERMINAL_PROMPT": "0"}
     return resolver
 
 
@@ -181,9 +183,7 @@ def test_fetch_git_ssh_does_not_forward_http_credentials(tmp_path: Path, raw: st
     assert env["SSH_ASKPASS_REQUIRE"] == "never"
 
 
-def test_fetch_git_ado_url_routes_via_subprocess(
-    tmp_path: Path, fake_host_info, fake_auth_resolver
-) -> None:
+def test_fetch_git_ado_url_routes_via_auth_fallback(tmp_path: Path, fake_auth_resolver) -> None:
     """``_fetch_git`` (the ADO REST fallback path) still clones via ``GitCache``.
 
     ADO marketplace reads now prefer ``_fetch_ado`` (REST items API); this test
@@ -196,11 +196,12 @@ def test_fetch_git_ado_url_routes_via_subprocess(
 
     gitcache_mock = MagicMock()
     gitcache_mock.get_checkout.return_value = str(checkout)
-    fake_auth_resolver.resolve.return_value = SimpleNamespace(
-        git_env={
-            "GIT_CONFIG_KEY_0": "http.extraheader",
-            "GIT_CONFIG_VALUE_0": "AUTHORIZATION: bearer xxx",
-        }
+    auth_env = {
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "AUTHORIZATION: bearer xxx",
+    }
+    fake_auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: (
+        operation("bearer-token", auth_env)
     )
     fake_auth_resolver.resolve_for_remote.return_value = fake_auth_resolver.resolve.return_value
 
@@ -216,6 +217,10 @@ def test_fetch_git_ado_url_routes_via_subprocess(
         )
 
     assert result == {}
+    _, fallback_kwargs = fake_auth_resolver.try_with_fallback.call_args
+    assert fallback_kwargs["path"] == "org/project/_git/repo"
+    fake_auth_resolver.hardened_git_base_env.assert_called_once()
+    assert fallback_kwargs["base_env"] == fake_auth_resolver.hardened_git_base_env.return_value
     env = gitcache_mock.get_checkout.call_args.kwargs["env"]
     assert "GIT_CONFIG_VALUE_0" in env
 
@@ -370,6 +375,65 @@ def test_fetch_git_preserves_cache_stage_rewrite_recovery(
     assert "git config --show-origin --get-regexp" in message
     assert "Correct the matching Git configuration" in message
     assert "verify the remote" not in message
+
+
+def test_fetch_git_ado_wraps_url_rewrite_rejection(tmp_path: Path, fake_auth_resolver) -> None:
+    """ADO checkout still validates rewrite safety on the hardened Git env."""
+    gitcache_mock = MagicMock()
+    with (
+        patch("apm_cli.cache.git_cache.GitCache", return_value=gitcache_mock),
+        patch("apm_cli.cache.paths.get_cache_root", return_value=tmp_path / "cache"),
+        patch(
+            "apm_cli.utils.git_env.validate_git_url_rewrite_safety",
+            side_effect=GitUrlRewriteError(
+                "https-downgrade",
+                "HTTPS Git remote must not rewrite to insecure HTTP",
+            ),
+        ),
+        pytest.raises(MarketplaceFetchError) as raised,
+    ):
+        _fetch_git(
+            _git_source("https://dev.azure.com/org/project/_git/repo"),
+            "marketplace.json",
+            host_info=SimpleNamespace(host="dev.azure.com", kind="ado"),
+            auth_resolver=fake_auth_resolver,
+        )
+
+    message = str(raised.value)
+    assert "insecure" in message
+    assert "git config --show-origin --get-regexp" in message
+    assert "apm marketplace update acme" in message
+    fake_auth_resolver.try_with_fallback.assert_not_called()
+
+
+def test_fetch_git_preserves_ado_chain_exhausted_message(
+    tmp_path: Path, fake_auth_resolver
+) -> None:
+    """Marketplace wrap keeps the attempted-step ADO chain error."""
+    detail = (
+        "Authentication failed for dev.azure.com: git credential fill was rejected. "
+        "Refresh ADO_APM_PAT, run 'az login', or store a repository credential "
+        "in Git Credential Manager, then retry."
+    )
+    fake_auth_resolver.try_with_fallback.side_effect = AdoAuthChainExhaustedError(detail)
+    gitcache_mock = MagicMock()
+
+    with (
+        patch("apm_cli.cache.git_cache.GitCache", return_value=gitcache_mock),
+        patch("apm_cli.cache.paths.get_cache_root", return_value=tmp_path / "cache"),
+        pytest.raises(MarketplaceFetchError) as raised,
+    ):
+        _fetch_git(
+            _git_source("https://dev.azure.com/org/project/_git/repo"),
+            "marketplace.json",
+            host_info=SimpleNamespace(host="dev.azure.com", kind="ado"),
+            auth_resolver=fake_auth_resolver,
+        )
+
+    message = str(raised.value)
+    assert "git credential fill was rejected" in message
+    assert "verify the remote" not in message
+    assert "apm marketplace update acme" in message
 
 
 def test_fetchers_dispatch_table_routes_kinds_to_correct_callable() -> None:

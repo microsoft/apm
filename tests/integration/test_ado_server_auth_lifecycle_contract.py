@@ -404,7 +404,9 @@ def test_ado_server_auth_failure_is_secret_free_and_preserves_state(
 
     assert result.returncode != 0
     output = result.stdout + result.stderr
-    assert "Azure DevOps Server requires ADO_APM_PAT." in " ".join(output.split())
+    assert "Azure DevOps Server requires ADO_APM_PAT or a Git credential helper." in " ".join(
+        output.split()
+    )
     assert "ADO_APM_PAT" in output
     assert "az login" not in output
     assert all(secret not in output for secret in _SECRET_VALUES)
