@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
 - `apm install` reports the original resolution error for a dependency whose git ref cannot be resolved, instead of failing later while annotating the update plan. (#3142)
 - Repeat `apm install` runs keep existing MCP servers from custom (`registry:`) registries instead of reconfiguring them, preserving their authored headers. (#3142)
 
