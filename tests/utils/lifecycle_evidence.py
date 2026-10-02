@@ -6,6 +6,7 @@ No smoke deferral, synthetic evidence ingestion, or global pytest registration.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import subprocess
 import sys
@@ -203,7 +204,10 @@ class LifecycleEvidencePlugin:
 
     def pytest_sessionstart(self, session: pytest.Session) -> None:
         """Install observers before test-module imports bind runner/model functions."""
-        from hypothesis import stateful
+        # Resolve through sys.modules: `from hypothesis import stateful` can return a
+        # stale package attribute after pytester restores sys.modules, leaving the
+        # module that test code imports unpatched.
+        stateful = importlib.import_module("hypothesis.stateful")
 
         original = ApmLifecycleRunner._run_with_timeout
         model = stateful.run_state_machine_as_test

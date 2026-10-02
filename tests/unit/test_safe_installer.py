@@ -42,6 +42,20 @@ class TestSafeMCPInstaller(unittest.TestCase):
         # Verify adapter was called
         self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
 
+    def test_conflict_check_uses_cached_registry_info(self):
+        """The resolved (possibly custom-registry) entry is reused for conflict checks."""
+        info = {"name": "custom-server"}
+        self.mock_conflict_detector.check_server_exists.return_value = True
+
+        summary = self.installer.install_servers(
+            ["custom-server"], server_info_cache={"custom-server": info}
+        )
+
+        self.mock_conflict_detector.check_server_exists.assert_called_once_with(
+            "custom-server", server_info=info
+        )
+        self.assertEqual(len(summary.skipped), 1)
+
     def test_skip_existing_server(self):
         """Test skipping server that already exists."""
         # Setup mocks

@@ -236,7 +236,9 @@ def test_native_hook_discovery_across_reinstall_update_and_user_scope(
         env=lifecycle.environment,
     )
     assert global_install.returncode == 0, _result_evidence(global_install)
-    user_instructions = lifecycle.isolated.home / ".copilot" / "copilot-instructions.md"
+    user_instructions = (
+        lifecycle.isolated.home / ".copilot" / "instructions" / "user-owned.instructions.md"
+    )
     user_instructions.parent.mkdir(parents=True, exist_ok=True)
     user_instructions.write_bytes(_BIDI_BYTES)
     global_lock = lifecycle.isolated.config_root / "apm.lock.yaml"
@@ -250,7 +252,7 @@ def test_native_hook_discovery_across_reinstall_update_and_user_scope(
     assert global_audit.returncode == 1, _result_evidence(global_audit)
     report = json.loads(global_audit.stdout)
     check = next(check for check in report["checks"] if check["name"] == "content-integrity")
-    assert "unicode: .copilot/copilot-instructions.md" in check["details"]
+    assert "unicode: .copilot/instructions/user-owned.instructions.md" in check["details"]
     assert global_lock.read_bytes() == before_lock
     assert settings_path.read_bytes() == settings_bytes
     assert user_instructions.read_bytes() == _BIDI_BYTES

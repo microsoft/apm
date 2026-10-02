@@ -769,7 +769,7 @@ def test_symlink_prompt_is_never_read(project: Path, monkeypatch: pytest.MonkeyP
 def test_user_scope_claims_keep_tracking_metadata(project: Path) -> None:
     profile = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
     assert profile is not None
-    path = ".copilot/copilot-instructions.md"
+    path = ".copilot/instructions/probe.instructions.md"
     _write(project, path, _BIDI)
     result = scan_project_result(
         project,
