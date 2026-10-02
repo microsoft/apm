@@ -1270,10 +1270,13 @@ class TestCodexAgentIntegration:
             "model_verbosity": "low",
             "personality": "friendly",
             "service_tier": "fast",
+            # req: a malformed/control-character key must land inside the
+            # shown range (not only the elided tail) so sanitization of a
+            # *displayed* key name is actually exercised by this test.
+            "bad\x1b[31m\nkey": "do-not-print-values",
             "codex": {"model": "do-not-passthrough"},
             "developer_instructions": "Do not replace the Markdown body.",
             "color": "cyan",
-            "bad\x1b[31m\nkey": "do-not-print-values",
             7: "non-string-key",
         }
         frontmatter = {
@@ -1311,12 +1314,22 @@ class TestCodexAgentIntegration:
         shown, elided = list(unsupported)[:5], list(unsupported)[5:]
         assert len(elided) == 4
         for field in shown:
-            assert f"'{field}'" in metadata_warning.message
+            if isinstance(field, str) and field.isidentifier():
+                assert f"'{field}'" in metadata_warning.message
+        # req: the malformed/control-character key is in the shown range (see
+        # reordering above); its sanitized form must be named, never the raw
+        # control bytes.
+        assert "'bad?[31m?key'" in metadata_warning.message
         for field in elided:
             assert f"'{field}'" not in metadata_warning.message
         assert f"(and {len(elided)} more)" in metadata_warning.message
         assert "were dropped" in metadata_warning.message
         assert "otherwise do not rely on" in metadata_warning.detail
+        # req: an individually oversized key name is also bounded
+        # (AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN), independent of the
+        # fixed-count cap above, so a single hostile key cannot blow up the
+        # diagnostic line either.
+        assert len(metadata_warning.message) < 600
         tools_warning = next(warning for warning in warnings if "field 'tools'" in warning.message)
         assert "project/session MCP servers" in tools_warning.message
 
@@ -1328,6 +1341,36 @@ class TestCodexAgentIntegration:
         assert "\x1b" not in output
         assert "pkg\nnext" not in output
         assert all(character in "\n\r\t" or 32 <= ord(character) <= 126 for character in output)
+
+    def test_codex_dropped_field_with_oversized_key_name_is_bounded(self) -> None:
+        """A single hostile/oversized key name must not blow up the diagnostic.
+
+        The fixed-count cap (_MAX_DROPPED_FIELDS_SHOWN) alone does not bound
+        an individual key's *length*; a frontmatter with as few as one
+        unsupported key but a very long name must still produce a bounded
+        message.
+        """
+        source = self.root / "oversized-key.agent.md"
+        oversized_key = "x" * 20_000
+        frontmatter = {"name": "reviewer", oversized_key: "value"}
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        message = warnings[0].message
+        # req: the displayed key itself is truncated, not merely the number
+        # of named keys; the raw 20000-char key must never appear whole.
+        assert oversized_key not in message
+        assert "...(truncated)" in message
+        assert len(message) < 300
 
     @pytest.mark.parametrize("target_name", _verbatim_copy_agent_targets())
     def test_codex_metadata_change_preserves_other_targets(self, target_name: str) -> None:

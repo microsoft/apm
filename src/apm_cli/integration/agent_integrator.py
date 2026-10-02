@@ -413,10 +413,29 @@ class AgentIntegrator(BaseIntegrator):
     )
 
     # Bound the dropped-fields diagnostic to a fixed number of named keys so
-    # hostile/oversized frontmatter (many keys or very long key names) cannot
-    # blow up a single CLI diagnostic line; the remainder is summarized by
-    # count instead of enumerated.
+    # hostile/oversized frontmatter (many keys) cannot blow up a single CLI
+    # diagnostic line; the remainder is summarized by count instead of
+    # enumerated.
     _MAX_DROPPED_FIELDS_SHOWN = 5
+    # Bound each individually-named key to a fixed display length so a
+    # single hostile/oversized key name cannot blow up a single CLI
+    # diagnostic line either; combined with _MAX_DROPPED_FIELDS_SHOWN this
+    # bounds the whole diagnostic's total length.
+    _MAX_DROPPED_FIELD_KEY_LEN = 60
+
+    @staticmethod
+    def _display_dropped_field_key(field: object) -> str:
+        """Render one dropped frontmatter key name, bounded and ASCII-safe.
+
+        Sanitizes control/non-ASCII characters first, then truncates the
+        *displayed* key (never the full value) so a single oversized key
+        name cannot blow up the diagnostic line.
+        """
+        text = printable_ascii_text(str(field))
+        max_len = AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN
+        if len(text) > max_len:
+            text = text[:max_len] + "...(truncated)"
+        return text
 
     @staticmethod
     def _warn_codex_unverified_scope(
@@ -511,14 +530,23 @@ class AgentIntegrator(BaseIntegrator):
                                     "then rerun 'apm install'."
                                 ),
                             )
-                    dropped_fields = [
-                        f"'{printable_ascii_text(str(field))}'"
+                    # Collect only the raw dropped keys here (no formatting)
+                    # so hostile frontmatter with many keys does not force
+                    # rendering every key just to discard most of them below.
+                    dropped_field_names = [
+                        field
                         for field in fm
                         if field not in {"name", "description", "tools", *model_fields}
                     ]
-                    if dropped_fields and diagnostics is not None:
-                        shown_fields = dropped_fields[: AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN]
-                        remaining = len(dropped_fields) - len(shown_fields)
+                    if dropped_field_names and diagnostics is not None:
+                        shown_names = dropped_field_names[
+                            : AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN
+                        ]
+                        remaining = len(dropped_field_names) - len(shown_names)
+                        shown_fields = [
+                            f"'{AgentIntegrator._display_dropped_field_key(field)}'"
+                            for field in shown_names
+                        ]
                         fields_text = ", ".join(shown_fields)
                         if remaining > 0:
                             fields_text += f" (and {remaining} more)"
