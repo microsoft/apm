@@ -184,6 +184,33 @@ hook action under `.kiro/hooks/`.
 For Codex, APM wraps flat command entries in hook groups containing a
 nested `hooks` array in `.codex/hooks.json`.
 
+For Cursor, APM writes version 1 with flat command or prompt handlers.
+The documented Claude aliases map as follows: `PreToolUse` -> `preToolUse`,
+`PostToolUse` -> `postToolUse`, `UserPromptSubmit` -> `beforeSubmitPrompt`,
+`Stop` -> `stop`, `SubagentStop` -> `subagentStop`, `SessionStart` ->
+`sessionStart`, `SessionEnd` -> `sessionEnd`, and `PreCompact` -> `preCompact`.
+Native Cursor events and matchers pass through unchanged.
+
+For Claude tool-use aliases, literal `Bash` maps to `Shell`; `Edit|Write`
+maps to `Write` only when both alternatives are present. `Read`, `Grep`,
+`Task`, `WebFetch`, and `WebSearch` keep their names. Unknown events,
+unrepresentable matchers (including `Glob` and server-qualified MCP patterns),
+platform-specific commands and unsupported handler fields fail before writes,
+not by silently dropping restrictions. Claude stop aliases preserve the
+unlimited import default with `loop_limit: null`.
+
+Cursor runs all matching native and Claude-imported hooks. APM refuses
+overlapping planned or existing actions, including same-owner events with
+different matchers, rather than assuming imports are disabled. Choose one hook
+target per dependency: `claude` plus Cursor's existing third-party import, or
+`cursor` with native hooks. APM never changes import settings or redirects a
+Cursor-only dependency into Claude settings. Reinstall migrates matching owned
+legacy Cursor hooks; unrelated user hooks remain intact, and invalid user
+configuration is not overwritten. See the
+[Cursor native hooks guide](../../../../../docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import)
+for supported mappings and limitations. Test execution in each harness;
+configuration compatibility does not guarantee equivalent behavior.
+
 <!-- Keep this table synchronized with docs/src/content/docs/producer/author-primitives/hooks-and-commands.md. -->
 
 ### Session lifecycle event aliases
@@ -194,7 +221,7 @@ nested `hooks` array in `.codex/hooks.json`.
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
 | `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
-Event names absent from this table are preserved unchanged. Only an unmapped
+For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
 an install warning. All-lowercase names such as `stop` pass through silently;
 `stop` is not a native Copilot or Claude event and will not fire.

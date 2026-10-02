@@ -45,6 +45,7 @@
         "src/apm_cli/hook_contract.py",
         "src/apm_cli/integration/hook_ir.py",
         "src/apm_cli/integration/hook_native_formats.py",
+        "src/apm_cli/integration/hook_cursor_preflight.py",
         "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/integration/hook_ownership.py"
       ],

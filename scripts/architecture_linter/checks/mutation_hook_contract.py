@@ -348,6 +348,7 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_rewrite_scope(provider, rule_id),
         *_nhc_claude_project_dir(provider, rule_id),
         *_nhc_event_map(provider, rule_id),
+        *_nhc_cursor_edge(provider, rule_id),
         *_nhc_contract_vocabulary(provider, rule_id),
         *_nhc_command_keys(provider, rule_id),
         *_nhc_file_routing(provider, rule_id),
@@ -495,6 +496,45 @@ def _nhc_contract_vocabulary(provider: FactsProvider, rule_id: str) -> tuple[Vio
             exempt_marker=EXEMPT_MARKER,
         )
     )
+
+
+def _nhc_cursor_edge(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Keep Cursor rendering and import preflight on the canonical native edge."""
+    renderer = "src/apm_cli/integration/hook_native_formats.py"
+    preflight = "src/apm_cli/integration/hook_cursor_preflight.py"
+    services = "src/apm_cli/install/services.py"
+    facts, failures = _read_required(
+        provider, rule_id, (renderer, preflight, _HOOK_INTEGRATOR, services)
+    )
+    findings: list[Violation] = list(failures)
+    if not failures:
+        for path, required in (
+            (_HOOK_INTEGRATOR, "entries = _to_cursor_hook_entries("),
+            (_HOOK_INTEGRATOR, "preflight_cursor_hooks("),
+            (preflight, "_to_cursor_hook_entries("),
+            (preflight, "validate_cursor_config(candidate)"),
+            (services, '"preflight_hooks_for_targets"'),
+            (services, "preflight_hooks("),
+        ):
+            findings.extend(
+                _require(
+                    _has_fixed(facts[path], required),
+                    rule_id,
+                    path,
+                    "Cursor hooks must use canonical rendering and import preflight before writes",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(renderer,)),
+            pattern=r"^(CURSOR_NATIVE_EVENTS\s*[:=]|def _to_cursor_hook_entries\()",
+            message="Cursor native hook contract must have one renderer owner",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
 
 
 def _nhc_command_keys(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:

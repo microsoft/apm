@@ -423,6 +423,17 @@ def integrate_package_primitives(  # noqa: PLR0913
         "skills": integrators.skill,
     }
 
+    preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
+    if _hooks_approved and callable(preflight_hooks):
+        preflight_hooks(
+            targets,
+            package_info,
+            project_root,
+            source_plan,
+            user_scope=scope is InstallScope.USER,
+            retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
+        )
+
     # Validate every converted instruction target before any primitive kind can
     # write. A rejected instruction must not leave prompts, agents, commands,
     # or identity-target instructions from the same package active.
