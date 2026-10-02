@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent primitives (`*.agent.md`) accept an optional `user-invocable: false` frontmatter field (default `true`; `visibility: internal` is an accepted alias) to mark an agent as programmatic-only, reachable via another agent's `handoffs:` but hidden from the user-facing picker. Verbatim-copy targets preserve the field; Codex and Kiro warn instead of silently dropping it. -- by @richard-fowles-epam (#3132)
+
 ## [0.33.0] - 2026-10-02
 
 ### Added

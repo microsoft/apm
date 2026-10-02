@@ -731,6 +731,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A manifest consumer reads raw targets instead of canonical_targets.",
     ),
     MutationCase(
+        guard_id="registry-delegation-user-invocable-resolution",
+        rule_id="registry_delegation.user_invocable_resolution",
+        path="src/apm_cli/primitives/models.py",
+        old="def resolve_user_invocable(metadata: dict) -> bool:",
+        new="def _resolve_user_invocable_removed(metadata: dict) -> bool:",
+        intent="The user-invocable owner loses its single interpretation entry point.",
+    ),
+    MutationCase(
         guard_id="transport-platform-ado-validation-bearer-fallback",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/install/validation.py",
