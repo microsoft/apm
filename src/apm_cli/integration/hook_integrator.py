@@ -1033,10 +1033,7 @@ class HookIntegrator(BaseIntegrator):
 
         if not hook_files:
             return HookIntegrationResult(
-                files_integrated=0,
-                files_updated=0,
-                files_skipped=0,
-                target_paths=[],
+                files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
             )
 
         root_dir = target.root_dir if target else ".github"
@@ -1206,13 +1203,11 @@ class HookIntegrator(BaseIntegrator):
         target=None,
         user_scope: bool = False,
         source_plan=None,
+        retiring_targets: frozenset[str] = frozenset(),
     ) -> HookIntegrationResult:
         """Merge native hook entries into a shared target-specific JSON config."""
         _empty = HookIntegrationResult(
-            files_integrated=0,
-            files_updated=0,
-            files_skipped=0,
-            target_paths=[],
+            files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
         )
 
         root_dir = target.root_dir if target else f".{config.target_key}"
@@ -1246,6 +1241,7 @@ class HookIntegrator(BaseIntegrator):
             dependency_sources,
         )
         # Skip if preflight_hooks_for_targets already authorized this plan (#3129).
+        # Forward retiring_targets: this fallback also needs it.
         already_preflighted = getattr(source_plan, "cursor_preflight_done", False)
         if config.target_key in {"cursor", "claude"} and not already_preflighted:
             preflight_cursor_hooks(
@@ -1255,6 +1251,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_sources,
                 _HOOK_EVENT_MAP,
                 user_scope=user_scope,
+                retiring_targets=retiring_targets,
             )
         hooks_integrated = 0
         scripts_copied = 0
@@ -1669,6 +1666,7 @@ class HookIntegrator(BaseIntegrator):
         dep_targets_active: bool = False,
         allowed_targets: set[str] | None = None,
         source_plan=None,
+        retiring_targets: frozenset[str] = frozenset(),
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
@@ -1720,6 +1718,7 @@ class HookIntegrator(BaseIntegrator):
                 target=target,
                 user_scope=user_scope,
                 source_plan=source_plan,
+                retiring_targets=retiring_targets,
             )
 
         return HookIntegrationResult(
