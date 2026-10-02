@@ -503,14 +503,10 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
-                # Mirror the retiring_targets passed to preflight_hooks_for_targets
-                # above (#3129): when that call is skipped (cached) this value is
-                # unused, but when the per-target fallback preflight below has to
-                # run on its own (e.g. hook_source_selection is None), it must see
-                # the same retiring-target exemptions or a target slated for safe
-                # retirement can be misflagged as an import-coexistence conflict.
+                # Mirror retiring_targets (#3129) so a fallback preflight isn't
+                # misflagged as an import-coexistence conflict on retirement.
                 _call_kwargs["retiring_targets"] = frozenset(
-                    target.name for target in target_selection.excluded_targets
+                    t.name for t in target_selection.excluded_targets
                 )
             # Canvas integration: always pass is_first_party.  Approval
             # is enforced by the gate above (canvas already skipped if
