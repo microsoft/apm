@@ -135,6 +135,50 @@ def test_network_env_preserves_last_repeated_command_value(
     assert _git(child, *query) == expected
 
 
+def test_network_env_symlink_precedence_preserves_auth_isolation(
+    tmp_path: Path,
+    config_env: dict[str, str],
+) -> None:
+    """Symlink precedence resolution must not resurrect scrubbed auth state.
+
+    Regression-traps the shared entry loop in
+    ``_materialize_git_config_snapshot``: a repeated command-scope
+    ``core.symlinks`` sequence is interleaved with a command-scope
+    ``credential.helper`` reset and a stale ``http.extraheader``. A bug that
+    over-broadly widened the symlinks continue/retention branch could just as
+    easily let the fenced auth entries pass through unfiltered.
+    """
+    repo = tmp_path / "repo"
+    _git(config_env, "init", "--quiet", "--template=", str(repo))
+    config_env["GIT_CONFIG_COUNT"] = "5"
+    config_env["GIT_CONFIG_KEY_0"] = "http.extraheader"
+    config_env["GIT_CONFIG_VALUE_0"] = "Authorization: Basic stale"
+    config_env["GIT_CONFIG_KEY_1"] = "core.symlinks"
+    config_env["GIT_CONFIG_VALUE_1"] = "true"
+    config_env["GIT_CONFIG_KEY_2"] = "credential.helper"
+    config_env["GIT_CONFIG_VALUE_2"] = ""
+    config_env["GIT_CONFIG_KEY_3"] = "core.symlinks"
+    config_env["GIT_CONFIG_VALUE_3"] = "false"
+    config_env["GIT_CONFIG_KEY_4"] = "credential.helper"
+    config_env["GIT_CONFIG_VALUE_4"] = "!stale-helper"
+
+    child = git_env.git_network_env("https://example.test/org/repo.git", config_env, worktree=repo)
+
+    query = ("-C", str(repo), "config", "--bool", "--get", "core.symlinks")
+    assert _git(child, *query) == "false"
+
+    assert "GIT_HTTP_EXTRAHEADER" not in child
+    entries = {
+        (
+            child.get(f"GIT_CONFIG_KEY_{index}", ""),
+            child.get(f"GIT_CONFIG_VALUE_{index}", ""),
+        )
+        for index in range(int(child.get("GIT_CONFIG_COUNT", "0")))
+    }
+    assert ("credential.helper", "!stale-helper") not in entries
+    assert all(not value.lower().startswith("authorization:") for _, value in entries)
+
+
 @pytest.mark.parametrize(
     ("parent", "child", "expected"),
     [
