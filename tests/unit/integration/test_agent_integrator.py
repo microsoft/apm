@@ -214,6 +214,7 @@ class TestAgentIntegrator:
         source_content = """---
 description: My agent
 tools: []
+user-invocable: false
 ---
 
 # Agent content here"""
@@ -222,6 +223,7 @@ tools: []
         self.integrator.copy_agent(source, target)
 
         assert target.read_text() == source_content
+        assert "user-invocable: false" in target.read_text()
 
     def test_integrate_first_time_copies_verbatim(self):
         """Test that first-time integration creates files with proper frontmatter metadata."""
@@ -759,6 +761,7 @@ name: security-reviewer
 description: Reviews code for security issues
 tools: Read, Grep, Glob
 model: sonnet
+user-invocable: false
 ---
 
 You are a security reviewer. Analyze code for vulnerabilities."""
@@ -770,6 +773,7 @@ You are a security reviewer. Analyze code for vulnerabilities."""
         target_content = (self.project_root / ".claude" / "agents" / "security.md").read_text()
         assert "name: security-reviewer" in target_content
         assert "description: Reviews code for security issues" in target_content
+        assert "user-invocable: false" in target_content
         assert "security reviewer" in target_content
 
     def test_sync_integration_claude_removes_apm_agents(self):
@@ -931,6 +935,7 @@ class TestCursorAgentIntegration:
         content = """---
 name: security-reviewer
 description: Reviews code for security issues
+user-invocable: false
 ---
 
 You are a security reviewer. Analyze code for vulnerabilities."""
@@ -942,6 +947,7 @@ You are a security reviewer. Analyze code for vulnerabilities."""
         target_content = (self.project_root / ".cursor" / "agents" / "security.md").read_text()
         assert "name: security-reviewer" in target_content
         assert "description: Reviews code for security issues" in target_content
+        assert "user-invocable: false" in target_content
         assert "security reviewer" in target_content
 
     def test_integrate_package_agents_deploys_to_cursor_when_dir_exists(self):
