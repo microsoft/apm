@@ -17,7 +17,7 @@ agents, skills, and MCP server configurations across projects.
 - User mentions `apm` or "Agent Package Manager"
 - Questions about installing or managing AI-agent packages
 - Setting up instructions, prompts, agents, skills, or chatmodes
-- Configuring MCP servers through apm.yml
+- Configuring MCP or LSP servers through apm.yml
 - Authentication for private repos (GitHub, ADO, GHES, Artifactory)
 - Policy enforcement or `apm audit`
 - Package authoring or publishing
@@ -31,7 +31,7 @@ agents, skills, and MCP server configurations across projects.
 - **Team sync:** after `git clone`, run `apm install` to restore dependencies
 - **Update deps:** `apm install --update` refreshes to latest refs
 - **Pin versions:** use tags (`#v1.0.0`) in production, branches for development
-- **ASCII only:** all CLI output and source must stay within printable ASCII
+- **Prefer ASCII:** keep CLI output and scripts to printable ASCII for portability; package content itself may be UTF-8
 
 ## Reference
 
@@ -40,7 +40,7 @@ For detailed guidance, see the following resources:
 - [Installation](./installation.md) -- install and update APM
 - [Workflow](./workflow.md) -- core workflow, apm.yml format, what to commit
 - [Commands](./commands.md) -- full CLI command reference
-- [Dependencies](./dependencies.md) -- all dependency formats and version pinning
+- [Dependencies](./dependencies.md) -- all dependency formats, including MCP and LSP servers, and version pinning
 - [Authentication](./authentication.md) -- token setup for private repos
 - [Governance](./governance.md) -- policy engine and audit checks
 - [Package Authoring](./package-authoring.md) -- creating APM packages
