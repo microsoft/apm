@@ -170,12 +170,23 @@ def check_token(token: str, host: str, host_kind: str) -> tuple[str, int | None]
         headers.update(AuthResolver.gitlab_rest_headers(token))
 
     try:
-        status = requests.get(url, headers=headers, timeout=15).status_code
+        # A fresh session with trust_env disabled keeps the probe from
+        # picking up ambient .netrc credentials or proxy auth, and
+        # allow_redirects=False keeps a redirecting host (e.g. http->https,
+        # or a misconfigured/malicious endpoint) from silently changing
+        # where the token gets sent.
+        session = requests.Session()
+        session.trust_env = False
+        status = session.get(url, headers=headers, timeout=15, allow_redirects=False).status_code
     except requests.RequestException:
         return "indeterminate", None
 
     if status == 200:
         return "ok", status
+    if 300 <= status < 400:
+        # A redirect means the host did not actually answer; following it
+        # could send the token somewhere else entirely.
+        return "indeterminate", status
     if status == 403 and AuthResolver.detect_token_type(token) == "github-app":
         # An installation token has no user context; 403 here says nothing
         # about whether it can read repositories.
@@ -284,13 +295,14 @@ def run_auth(
     goes to stderr -- keeping ``eval "$(apm auth <host> --export)"`` safe.
     """
     from ..core.auth import AuthResolver
+    from ..utils.github_host import is_valid_fqdn
 
     _EXPORT_LINE = sink if sink is not None else []
 
     logger = CommandLogger("auth", verbose=verbose)
     host = (host or "").strip().lower()
-    if not host or "/" in host:
-        logger.error(f"Expected a host name like 'github.com', got '{host}'.")
+    if not host or "/" in host or not is_valid_fqdn(host):
+        logger.error(f"Expected a bare host name like 'github.com', got '{host}'.")
         return 1
 
     host_kind = AuthResolver.classify_host(host).kind
