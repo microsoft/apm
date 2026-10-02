@@ -5,6 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
+import tomllib
+
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import (
@@ -12,6 +15,7 @@ from apm_cli.utils.diagnostics import (
     CATEGORY_WARNING,
     DiagnosticCollector,
 )
+from apm_cli.utils.yaml_io import yaml_to_str
 
 
 class TestAgentIntegrator:
@@ -1166,6 +1170,168 @@ class TestCodexAgentIntegration:
         source = Path("/fake/test.agent.md")
         filename = integrator.get_target_filename_for_target(source, "pkg", codex)
         assert filename == "test.toml"
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {},
+            {"model": "gpt-5.6-sol"},
+            {"model_reasoning_effort": "high"},
+            {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+            {"model": 'custom"model\\variant', "model_reasoning_effort": "future-effort"},
+        ],
+    )
+    def test_codex_native_settings_reach_generated_agent(self, settings: dict[str, str]) -> None:
+        """Preserve supplied strings at TOML top level without inventing defaults."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        frontmatter = {"name": "reviewer", "description": "Review code", **settings}
+        (agents_dir / "reviewer.agent.md").write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+        assert result.target_paths == [target]
+        assert tomllib.loads(target.read_text(encoding="utf-8")) == {
+            "name": "reviewer",
+            "description": "Review code",
+            "developer_instructions": "Review changes.",
+            **settings,
+        }
+        assert diagnostics.by_category() == {}
+
+    @pytest.mark.parametrize("field", ["model", "model_reasoning_effort"])
+    @pytest.mark.parametrize("value", [None, False, 7, ["high"], {"value": "high"}])
+    def test_codex_non_string_settings_are_diagnosed(self, field: str, value: object) -> None:
+        """Do not stringify invalid YAML shapes or silently drop null settings."""
+        source = self.root / "invalid-setting.agent.md"
+        source.write_text(
+            f"---\n{yaml_to_str({'name': 'reviewer', field: value})}---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        assert tomllib.loads(target.read_text(encoding="utf-8")) == {
+            "name": "reviewer",
+            "description": "",
+            "developer_instructions": "Review changes.",
+        }
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        assert field in warnings[0].message
+        assert "must be a string" in warnings[0].message
+        assert "was dropped" in warnings[0].message
+        assert "source agent" in warnings[0].detail
+        assert "apm install" in warnings[0].detail
+
+    def test_codex_unsupported_metadata_is_diagnosed_without_passthrough(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Name dropped fields without claiming Codex lacks their native semantics."""
+        source = self.root / "metadata.agent.md"
+        unsupported = {
+            "model_reasoning_summary": "detailed",
+            "model_verbosity": "low",
+            "personality": "friendly",
+            "service_tier": "fast",
+            "codex": {"model": "do-not-passthrough"},
+            "developer_instructions": "Do not replace the Markdown body.",
+            "color": "cyan",
+            "bad\x1b[31m\nkey": "do-not-print-values",
+            7: "non-string-key",
+        }
+        frontmatter = {
+            "name": "reviewer",
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "high",
+            "tools": [],
+            **unsupported,
+        }
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="evil\x1b[31mpkg\nnext"
+        )
+
+        assert tomllib.loads(target.read_text(encoding="utf-8")) == {
+            "name": "reviewer",
+            "description": "",
+            "developer_instructions": "Review changes.",
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "high",
+        }
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 2
+        metadata_warning = next(
+            warning for warning in warnings if "not translated by APM" in warning.message
+        )
+        for field in list(unsupported)[:7]:
+            assert f"'{field}'" in metadata_warning.message
+        assert "were dropped" in metadata_warning.message
+        assert "otherwise do not rely on" in metadata_warning.detail
+        tools_warning = next(warning for warning in warnings if "field 'tools'" in warning.message)
+        assert "project/session MCP servers" in tools_warning.message
+
+        diagnostics.render_summary()
+        output = capsys.readouterr().out
+        assert "[!]" in output
+        assert "metadata.agent.md" in output
+        assert "do-not-print-values" not in output
+        assert "\x1b" not in output
+        assert "pkg\nnext" not in output
+        assert all(character in "\n\r\t" or 32 <= ord(character) <= 126 for character in output)
+
+    @pytest.mark.parametrize(
+        "target_name", ["copilot", "claude", "cursor", "grok-build", "opencode"]
+    )
+    def test_codex_metadata_change_preserves_other_targets(self, target_name: str) -> None:
+        """Codex filtering must not leak into verbatim target deployment."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        content = (
+            "---\nname: reviewer\nmodel: native-model\nmodel_reasoning_effort: high\n"
+            "model_verbosity: low\n---\nReview changes.\n"
+        )
+        source = agents_dir / "reviewer.agent.md"
+        source.write_text(content, encoding="utf-8")
+        profile = KNOWN_TARGETS[target_name]
+        (self.root / profile.root_dir).mkdir(exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            profile,
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        assert result.target_paths[0].read_text(encoding="utf-8") == content
+        assert source.read_text(encoding="utf-8") == content
+        assert diagnostics.by_category() == {}
 
     def test_codex_agent_tools_scope_emits_lossy_compilation_warning(self, capsys):
         """Codex installs must not silently discard agent tool restrictions."""

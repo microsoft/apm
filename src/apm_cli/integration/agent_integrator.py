@@ -463,8 +463,8 @@ class AgentIntegrator(BaseIntegrator):
     ) -> None:
         """Transform an ``.agent.md`` file to Codex ``.toml`` format.
 
-        Parses YAML frontmatter for ``name`` and ``description``, uses
-        the markdown body as ``developer_instructions``.
+        Preserves ``name``, ``description``, and native model settings;
+        uses the markdown body as ``developer_instructions``.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -477,6 +477,8 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        model_fields = ("model", "model_reasoning_effort")
+        model_settings: dict[str, str] = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
@@ -486,6 +488,41 @@ class AgentIntegrator(BaseIntegrator):
                 if isinstance(fm, dict):
                     name = fm.get("name", name)
                     description = fm.get("description", description)
+                    for field in model_fields:
+                        if field not in fm:
+                            continue
+                        if isinstance(fm[field], str):
+                            model_settings[field] = fm[field]
+                        elif diagnostics is not None:
+                            diagnostics.lossy_agent_compilation(
+                                message=(
+                                    f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                    f"field '{field}' must be a string and was dropped."
+                                ),
+                                package=printable_ascii_text(package_name),
+                                detail=(
+                                    f"Fix: set '{field}' to a string in the source agent, "
+                                    "then rerun 'apm install'."
+                                ),
+                            )
+                    dropped_fields = [
+                        f"'{printable_ascii_text(str(field))}'"
+                        for field in fm
+                        if field not in {"name", "description", "tools", *model_fields}
+                    ]
+                    if dropped_fields and diagnostics is not None:
+                        diagnostics.lossy_agent_compilation(
+                            message=(
+                                f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                f"fields {', '.join(dropped_fields)} were dropped; "
+                                "this metadata is not translated by APM for Codex."
+                            ),
+                            package=printable_ascii_text(package_name),
+                            detail=(
+                                "Fix: remove these fields if unnecessary; otherwise do not rely on "
+                                "their settings in the generated Codex agent."
+                            ),
+                        )
                 else:
                     AgentIntegrator._warn_codex_unverified_scope(
                         diagnostics,
@@ -513,6 +550,7 @@ class AgentIntegrator(BaseIntegrator):
         doc = {
             "name": name,
             "description": description,
+            **model_settings,
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))
