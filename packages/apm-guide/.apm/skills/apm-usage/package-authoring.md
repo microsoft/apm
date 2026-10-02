@@ -181,6 +181,10 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+For Claude, APM wraps flat command entries in `{ "matcher", "hooks": [...] }`
+groups in `.claude/settings.json` and adds the required `"type": "command"`
+when a flat command entry omits `type`. Explicit handler types are kept.
+
 For Codex, APM wraps flat command entries in hook groups containing a
 nested `hooks` array in `.codex/hooks.json`.
 

@@ -221,8 +221,29 @@ def _to_gemini_hook_entries(entries: list) -> list:
     )
 
 
-def _to_claude_hook_entries(entries: list) -> list:
-    """Render portable bindings in Claude's nested matcher schema."""
+def _with_claude_default_handler_type(entry: object) -> object:
+    """Supply Claude's required ``type`` for an untyped flat command entry.
+
+    Only flat entries that the neutral grammar reads as a command handler are
+    defaulted; explicit types, nested groups, and non-command entries pass
+    through unchanged.
+    """
+    if not isinstance(entry, dict) or "type" in entry or isinstance(entry.get("hooks"), list):
+        return entry
+    if not isinstance(_handler_to_ir(entry, None).command, str):
+        return entry
+    return {"type": "command", **entry}
+
+
+def _to_claude_hook_entries(entries: list, *, default_handler_type: bool = True) -> list:
+    """Render portable bindings in Claude's nested matcher schema.
+
+    ``default_handler_type=False`` reproduces the output of installs before
+    untyped flat command entries were typed, so owned entries they wrote can
+    still be matched on reinstall.
+    """
+    if default_handler_type:
+        entries = [_with_claude_default_handler_type(entry) for entry in entries]
     return _render_nested_document(
         _entries_to_ir(entries),
         timeout_milliseconds=False,
