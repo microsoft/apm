@@ -217,9 +217,11 @@ Directory shorthand in a row stays under that row's target root. Shared skills
 use `.agents/skills/**/SKILL.md`. A target's generated context files and
 compile-family root file (`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`) are also
 recognized. Global audit uses scope-resolved profiles instead: for example
-Copilot's root becomes `~/.copilot` with the exact `copilot-instructions.md`
-aggregate, and Claude/Hermes respect their configured external roots.
-Primitives unsupported in user scope are not discovered there.
+Copilot's root becomes `~/.copilot` with per-file modular
+`instructions/*.instructions.md` (mirroring the project-scope layout; the
+legacy concatenated `copilot-instructions.md` is not tracked at user scope),
+and Claude/Hermes respect their configured external roots. Primitives
+unsupported in user scope are not discovered there.
 
 Only documented prompt fields are decoded and checked in structured formats.
 Command strings, referenced scripts, unrelated settings, ownership sidecars,

@@ -31,9 +31,9 @@ def test_static_user_scope_refuses_automatic_strip_in_real_cli(audit_project, tr
     workspace = home / ".apm"
     workspace.mkdir(exist_ok=True)
     (workspace / "apm.yml").write_text("name: user-audit\nversion: 1.0.0\ntarget: copilot\n")
-    relative = ".copilot/copilot-instructions.md"
+    relative = ".copilot/instructions/user-owned.instructions.md"
     prompt = home / relative
-    prompt.parent.mkdir(exist_ok=True)
+    prompt.parent.mkdir(parents=True, exist_ok=True)
     prompt.write_text("user-owned \u202e instructions")
     LockFile(local_deployed_files=[relative] if tracked else []).write(workspace / "apm.lock.yaml")
     scan = scan_project_result(workspace)

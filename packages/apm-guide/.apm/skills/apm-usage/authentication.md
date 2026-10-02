@@ -21,6 +21,22 @@ to preserve custom fields, use environment references and rotate exposed
 credentials.
 See [GitHub MCP token injection](https://microsoft.github.io/apm/consumer/install-mcp-servers/#token-injection-github-mcp-server).
 
+## Getting a token
+
+```bash
+# Check for, and set up, a working credential for a host
+apm auth github.com
+
+# Also validate the credential against the host's REST API
+apm auth gitlab.com --check
+
+# Export the resolved token into the current shell
+eval "$(apm auth github.com --export)"
+```
+
+`apm auth` does not register a marketplace or install anything; it only
+resolves or helps you create a token for `HOST`.
+
 ## Token precedence chain
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
