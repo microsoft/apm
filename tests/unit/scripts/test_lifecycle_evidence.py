@@ -100,7 +100,7 @@ def test_immutable_witnesses_and_current_inventory() -> None:
     assert set(schema["properties"]["witnesses"]["items"]["enum"]) == expected
     inventory = command_inventory()
     assert set(contract["commands"]) == set(inventory)
-    assert len(inventory) == 85
+    assert len(inventory) == 86
     assert sum(e["disposition"] == "applicable" for e in contract["commands"].values()) == 22
     assert (
         command_path(["lock", "--global", "export", "--format", "spdx"], inventory) == "lock export"
