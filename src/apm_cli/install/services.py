@@ -398,14 +398,7 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
-    warn_unsupported_primitives(
-        package_info,
-        package_name,
-        targets,
-        ctx,
-        diagnostics,
-        logger,
-    )
+    warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
 
     def _log_integration(msg):
         if logger:
@@ -426,7 +419,6 @@ def integrate_package_primitives(  # noqa: PLR0913
     preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
     if _hooks_approved and callable(preflight_hooks):
         preflight_hooks(
-            targets,
             package_info,
             project_root,
             source_plan,

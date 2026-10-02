@@ -1483,6 +1483,20 @@ class TestCursorIntegration:
         config = json.loads(hooks_path.read_text())
         assert config.get("version") == 2
 
+    def test_cursor_existing_unknown_top_level_key_rejected(self, temp_project):
+        """Unsupported top-level keys Cursor would not load are rejected, not silently kept."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(json.dumps({"version": 1, "hooks": {}, "unsupportedKey": True}))
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        with pytest.raises(HookContractError, match="unsupported top-level keys"):
+            integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+
+        config = json.loads(hooks_path.read_text())
+        assert config.get("unsupportedKey") is True
+
 
 # ─── Sync/cleanup tests ──────────────────────────────────────────────────────
 

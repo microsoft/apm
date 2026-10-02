@@ -1245,7 +1245,9 @@ class HookIntegrator(BaseIntegrator):
             package_name,
             dependency_sources,
         )
-        if config.target_key in {"cursor", "claude"}:
+        # Skip if preflight_hooks_for_targets already authorized this plan (#3129).
+        already_preflighted = getattr(source_plan, "cursor_preflight_done", False)
+        if config.target_key in {"cursor", "claude"} and not already_preflighted:
             preflight_cursor_hooks(
                 self,
                 package_info,
@@ -1632,7 +1634,6 @@ class HookIntegrator(BaseIntegrator):
 
     def preflight_hooks_for_targets(
         self,
-        targets: list[Any],
         package_info: Any,
         project_root: Path,
         source_plan: Any,
@@ -1652,6 +1653,7 @@ class HookIntegrator(BaseIntegrator):
                 user_scope=user_scope,
                 retiring_targets=retiring_targets,
             )
+            object.__setattr__(source_plan, "cursor_preflight_done", True)
 
     def integrate_hooks_for_target(
         self,
