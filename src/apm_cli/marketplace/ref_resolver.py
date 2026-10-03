@@ -22,6 +22,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
+from ..deps.git_remote_ops import tag_commit_shas
 from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
     build_ado_https_clone_url,
@@ -170,8 +171,14 @@ class RefCache:
 
 
 def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
-    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``."""
-    refs: list[RemoteRef] = []
+    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``.
+
+    Tags carry the commit a checkout of them lands on, as resolved by
+    ``deps.git_remote_ops.tag_commit_shas``: an annotated or signed tag takes
+    the SHA of its peeled record, which adds no ref of its own. Branches and
+    other refs keep their only SHA.
+    """
+    records: list[tuple[str, str]] = []
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -182,9 +189,14 @@ def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
         if not _SHA_RE.match(sha):
             continue
-        # Skip peeled tag objects (^{})
-        if refname.endswith("^{}"):
-            continue
+        records.append((sha, refname))
+    commits, _annotated = tag_commit_shas(records)
+    refs: list[RemoteRef] = []
+    for sha, refname in records:
+        if refname.startswith("refs/tags/"):
+            if refname not in commits:
+                continue  # the peeled record of an annotated tag
+            sha = commits[refname]
         refs.append(RemoteRef(name=refname, sha=sha))
     return refs
 

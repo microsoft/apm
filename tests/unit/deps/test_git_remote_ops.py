@@ -17,6 +17,7 @@ from apm_cli.deps.git_remote_ops import (
     parse_ls_remote_output,
     semver_sort_key,
     sort_remote_refs,
+    tag_commit_shas,
     validate_ls_remote_tag_output,
 )
 from apm_cli.models.apm_package import GitReferenceType, RemoteRef
@@ -123,6 +124,34 @@ class TestParseLsRemoteOutput:
         assert len(refs) == 1
         assert refs[0].commit_sha == "abc123"
         assert refs[0].name == "main"
+
+
+class TestTagCommitShas:
+    """The one place that turns ls-remote tag records into commits (#3048)."""
+
+    def test_annotated_tag_takes_its_peeled_commit(self) -> None:
+        commits, annotated = tag_commit_shas(
+            [("a" * 40, "refs/tags/v1.0.0"), ("b" * 40, "refs/tags/v1.0.0^{}")]
+        )
+        assert commits == {"refs/tags/v1.0.0": "b" * 40}
+        assert annotated == frozenset({"refs/tags/v1.0.0"})
+
+    def test_peeled_record_first_still_wins(self) -> None:
+        commits, annotated = tag_commit_shas(
+            [("b" * 40, "refs/tags/v1.0.0^{}"), ("a" * 40, "refs/tags/v1.0.0")]
+        )
+        assert commits == {"refs/tags/v1.0.0": "b" * 40}
+        assert annotated == frozenset({"refs/tags/v1.0.0"})
+
+    def test_lightweight_tag_keeps_its_sha_and_is_not_annotated(self) -> None:
+        commits, annotated = tag_commit_shas([("c" * 40, "refs/tags/v2.0.0")])
+        assert commits == {"refs/tags/v2.0.0": "c" * 40}
+        assert annotated == frozenset()
+
+    def test_records_outside_refs_tags_are_ignored(self) -> None:
+        commits, annotated = tag_commit_shas([("d" * 40, "refs/heads/main"), ("e" * 40, "HEAD")])
+        assert commits == {}
+        assert annotated == frozenset()
 
 
 class TestValidateLsRemoteTagOutput:

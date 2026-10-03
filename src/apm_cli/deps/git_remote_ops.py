@@ -6,6 +6,7 @@ no side effects.
 """
 
 import re
+from collections.abc import Iterable
 
 from ..models.apm_package import GitReferenceType, RemoteRef
 
@@ -76,18 +77,64 @@ def validate_ls_remote_tag_output(output: str) -> None:
         raise RemoteRefParseError("Malformed git ls-remote tag output.")
 
 
+def tag_commit_shas(
+    records: Iterable[tuple[str, str]],
+) -> tuple[dict[str, str], frozenset[str]]:
+    """Resolve ``git ls-remote`` tag records to the commits they name.
+
+    ``records`` are ``(sha, refname)`` pairs in output order. For an annotated
+    or signed tag git emits two records::
+
+        <tag-object-sha>   refs/tags/v1.0.0
+        <commit-sha>       refs/tags/v1.0.0^{}
+
+    A checkout of the tag lands on the commit, so the ``^{}`` record wins and
+    adds no refname of its own; a lightweight tag keeps its only SHA.
+
+    Returns ``(commits, annotated)``: ``commits`` maps each ``refs/tags/<name>``
+    to its commit SHA in first-seen order, and ``annotated`` holds the
+    refnames that had a ``^{}`` record. Records outside ``refs/tags/`` are
+    ignored. This is the one place that interprets ``^{}`` records; the
+    dependency resolver and the marketplace builder both read tags through it.
+    """
+    commits: dict[str, str] = {}
+    annotated: set[str] = set()
+    for sha, refname in records:
+        if not refname.startswith("refs/tags/"):
+            continue
+        if refname.endswith("^{}"):
+            # Dereferenced commit -- overwrite with the real commit SHA.
+            #
+            # SECURITY INVARIANT (load-bearing, do not weaken): only
+            # ANNOTATED tags emit this peeled ``^{}`` line, so the
+            # presence of a peeled ref is our sole signal for
+            # ``annotated=True``. The revision-pin resolver
+            # (find_latest_annotated_tag) accepts ONLY annotated tags and
+            # rejects branches and lightweight tags fail-closed, so a
+            # branch or lightweight tag named like a release can never
+            # masquerade as a SHA-pin update target. A transport that
+            # suppressed peeled refs would misclassify a genuine annotated
+            # tag as lightweight. Revision-pin updates then retain the
+            # current SHA rather than selecting an unverified target, which
+            # is the safe direction. Any future edit here that marks a
+            # non-peeled ref as annotated would break this anti-spoofing
+            # fence.
+            refname = refname[:-3]
+            commits[refname] = sha
+            annotated.add(refname)
+        else:
+            # Only store if we haven't seen the deref line yet.
+            commits.setdefault(refname, sha)
+    return commits, frozenset(annotated)
+
+
 def parse_ls_remote_output(output: str) -> list[RemoteRef]:
     """Parse ``git ls-remote --tags --heads`` output into RemoteRef objects.
 
     Format per line: ``<sha>\\t<refname>``
 
-    For annotated tags git emits two lines::
-
-        <tag-object-sha>   refs/tags/v1.0.0
-        <commit-sha>       refs/tags/v1.0.0^{}
-
-    We want the commit SHA (from the ``^{}`` line) and skip the
-    tag-object-only line.
+    Tags take the commit SHA :func:`tag_commit_shas` resolves for them, so an
+    annotated tag carries its peeled commit and ``annotated=True``.
 
     Args:
         output: Raw stdout from ``git ls-remote``.
@@ -95,8 +142,7 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
     Returns:
         Unsorted list of RemoteRef.
     """
-    tags: dict[str, str] = {}  # tag name -> commit sha
-    annotated_tags: set[str] = set()
+    tag_records: list[tuple[str, str]] = []
     branches: list[RemoteRef] = []
 
     for line in output.splitlines():
@@ -109,31 +155,7 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
 
         if refname.startswith("refs/tags/"):
-            tag_name = refname[len("refs/tags/") :]
-            if tag_name.endswith("^{}"):
-                # Dereferenced commit -- overwrite with the real commit SHA.
-                #
-                # SECURITY INVARIANT (load-bearing, do not weaken): only
-                # ANNOTATED tags emit this peeled ``^{}`` line, so the
-                # presence of a peeled ref is our sole signal for
-                # ``annotated=True``. The revision-pin resolver
-                # (find_latest_annotated_tag) accepts ONLY annotated tags and
-                # rejects branches and lightweight tags fail-closed, so a
-                # branch or lightweight tag named like a release can never
-                # masquerade as a SHA-pin update target. A transport that
-                # suppressed peeled refs would misclassify a genuine annotated
-                # tag as lightweight. Revision-pin updates then retain the
-                # current SHA rather than selecting an unverified target, which
-                # is the safe direction. Any future edit here that marks a
-                # non-peeled ref as annotated would break this anti-spoofing
-                # fence.
-                tag_name = tag_name[:-3]
-                tags[tag_name] = sha
-                annotated_tags.add(tag_name)
-            else:
-                # Only store if we haven't seen the deref line yet.
-                tags.setdefault(tag_name, sha)
-
+            tag_records.append((sha, refname))
         elif refname.startswith("refs/heads/"):
             branch_name = refname[len("refs/heads/") :]
             branches.append(
@@ -144,14 +166,15 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
                 )
             )
 
+    commits, annotated_tags = tag_commit_shas(tag_records)
     tag_refs = [
         RemoteRef(
-            name=name,
+            name=refname[len("refs/tags/") :],
             ref_type=GitReferenceType.TAG,
             commit_sha=sha,
-            annotated=name in annotated_tags,
+            annotated=refname in annotated_tags,
         )
-        for name, sha in tags.items()
+        for refname, sha in commits.items()
     ]
     return tag_refs + branches
 
