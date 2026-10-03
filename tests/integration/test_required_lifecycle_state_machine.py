@@ -1390,7 +1390,7 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     state_a = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
 
-    scenario.consumers.set_targets(consumer, ("claude", "cursor"))
+    scenario.consumers.set_targets(consumer, ("claude", "windsurf"))
     _run_success(
         scenario,
         consumer,
@@ -1400,7 +1400,7 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     state_ab = LifecycleStateSnapshot.capture(
         consumer.root,
-        targets=("claude", "cursor"),
+        targets=("claude", "windsurf"),
     )
 
     scenario.consumers.set_targets(consumer, ("claude",))
@@ -1420,10 +1420,10 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     state_final = LifecycleStateSnapshot.capture(
         consumer.root,
-        targets=("claude", "cursor"),
+        targets=("claude", "windsurf"),
         config_paths=(
             PurePosixPath(".agents/skills/scope/SKILL.md"),
-            PurePosixPath(".cursor/rules/scope.mdc"),
+            PurePosixPath(".windsurf/rules/scope.md"),
         ),
     )
     _, audit = _audit(
@@ -1438,18 +1438,18 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
         == state_ab.file(".claude/skills/scope/SKILL.md").content
     )
     assert state_ab.file(".agents/skills/scope/SKILL.md").content == _skill("scope").encode()
-    assert state_ab.file(".cursor/rules/scope.mdc").kind == "file"
-    assert state_ab.file(".cursor/hooks.json").kind == "file"
-    assert state_ab.file(".cursor/apm-hooks.json").kind == "file"
+    assert state_ab.file(".windsurf/rules/scope.md").kind == "file"
+    assert state_ab.file(".windsurf/hooks.json").kind == "file"
+    assert state_ab.file(".windsurf/apm-hooks.json").kind == "file"
     assert state_final.file(".agents/skills/scope/SKILL.md").kind == "missing"
-    assert state_final.file(".cursor/rules/scope.mdc").kind == "missing"
-    assert _hook_commands(consumer.root / ".cursor" / "hooks.json") == []
-    assert state_final.file(".cursor/apm-hooks.json").kind == "missing"
+    assert state_final.file(".windsurf/rules/scope.md").kind == "missing"
+    assert _hook_commands(consumer.root / ".windsurf" / "hooks.json") == []
+    assert state_final.file(".windsurf/apm-hooks.json").kind == "missing"
     assert (
         state_final.file(".claude/skills/scope/SKILL.md").content
         == state_a.file(".claude/skills/scope/SKILL.md").content
     )
-    assert not any(record.locator.target == "cursor" for record in state_final.deployment_records)
+    assert not any(record.locator.target == "windsurf" for record in state_final.deployment_records)
     assert audit["passed"] is True
 
 

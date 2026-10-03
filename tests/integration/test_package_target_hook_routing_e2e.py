@@ -251,6 +251,24 @@ def _expected_sidecar(source: str) -> dict[str, object]:
     return hooks
 
 
+def _expected_cursor_sidecar(source: str) -> dict[str, object]:
+    """Pin native Cursor ownership after a Cursor-only installation."""
+    events = {"Stop": "stop", "PreToolUse": "preToolUse", "PostToolUse": "postToolUse"}
+    return {
+        events[event]: [
+            {
+                "type": "command",
+                "command": command,
+                "timeout": 10,
+                "_apm_source": source,
+                "matcher": "*",
+                **({"loop_limit": None} if event == "Stop" else {}),
+            }
+        ]
+        for event, command in _EVENT_COMMANDS.items()
+    }
+
+
 def _assert_claude_owned_cursor_empty(
     snapshot: LifecycleStateSnapshot,
     *,
@@ -289,15 +307,11 @@ def _add_manual_cursor_hook(project: LocalPackage) -> None:
     """Add one user-authored Cursor entry outside APM provenance."""
     path = project.root / ".cursor" / "hooks.json"
     document = json.loads(path.read_text(encoding="utf-8"))
-    document.setdefault("hooks", {}).setdefault("PreToolUse", []).append(
+    document.setdefault("hooks", {}).setdefault("preToolUse", []).append(
         {
             "matcher": "manual",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": _MANUAL_CURSOR_COMMAND,
-                }
-            ],
+            "type": "command",
+            "command": _MANUAL_CURSOR_COMMAND,
         }
     )
     path.write_text(
@@ -307,7 +321,7 @@ def _add_manual_cursor_hook(project: LocalPackage) -> None:
 
 
 def _cursor_commands(snapshot: LifecycleStateSnapshot) -> list[str]:
-    """Return exact commands from Cursor's nested fixture entries."""
+    """Return exact commands from Cursor's native flat entries."""
     document = _json(snapshot, ".cursor/hooks.json")
     commands: list[str] = []
     hooks = document.get("hooks", {})
@@ -316,7 +330,7 @@ def _cursor_commands(snapshot: LifecycleStateSnapshot) -> list[str]:
         assert isinstance(entries, list)
         for entry in entries:
             assert isinstance(entry, dict)
-            handlers = entry.get("hooks", [])
+            handlers = entry.get("hooks", [entry])
             assert isinstance(handlers, list)
             for handler in handlers:
                 assert isinstance(handler, dict)
@@ -372,7 +386,7 @@ def test_package_target_transition_repairs_cursor_and_uninstall_preserves_user_h
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """Universal-to-Claude update removes only APM-owned Cursor state."""
+    """Cursor-to-Claude update removes only APM-owned Cursor state."""
     scenario = _new_scenario(tmp_path / "target-transition", apm_binary_path)
     universal = _publish(
         scenario,
@@ -384,13 +398,13 @@ def test_package_target_transition_repairs_cursor_and_uninstall_preserves_user_h
     _run_success(
         scenario,
         consumer,
-        _INSTALL_ARGS,
+        (*_INSTALL_ARGS, "--target", "cursor"),
         environment=universal.environment,
         scenario_id="target-transition-universal-install",
     )
     universal_state = _snapshot(consumer)
     assert set(_cursor_commands(universal_state)) == set(_EVENT_COMMANDS.values())
-    assert _json(universal_state, ".cursor/apm-hooks.json") == _expected_sidecar(
+    assert _json(universal_state, ".cursor/apm-hooks.json") == _expected_cursor_sidecar(
         f"{_OWNER}/{universal.name}"
     )
     _add_manual_cursor_hook(consumer)
@@ -479,7 +493,7 @@ def test_failed_restricted_update_preserves_existing_hook_state(
     _run_success(
         scenario,
         consumer,
-        _INSTALL_ARGS,
+        (*_INSTALL_ARGS, "--target", "cursor"),
         environment=universal.environment,
         scenario_id="failed-transition-universal-install",
     )

@@ -13,11 +13,12 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apm_cli.core.deployment_state import MaterializationStatus
+from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_command_paths import normalize_quoted_plugin_root
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
@@ -1282,18 +1283,18 @@ class TestCursorIntegration:
         config = json.loads(hooks_path.read_text())
         assert "hooks" in config
         assert config["version"] == 1
-        assert "PreToolUse" in config["hooks"]
-        assert "PostToolUse" in config["hooks"]
-        assert "Stop" in config["hooks"]
-        assert "UserPromptSubmit" in config["hooks"]
+        assert "preToolUse" in config["hooks"]
+        assert "postToolUse" in config["hooks"]
+        assert "stop" in config["hooks"]
+        assert "beforeSubmitPrompt" in config["hooks"]
 
         # Ownership stays in the external APM sidecar, not the native schema.
-        assert "_apm_source" not in config["hooks"]["PreToolUse"][0]
+        assert "_apm_source" not in config["hooks"]["preToolUse"][0]
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
-        assert sidecar["PreToolUse"][0]["_apm_source"] == "hookify"
+        assert sidecar["preToolUse"][0]["_apm_source"] == "hookify"
 
         # Verify rewritten paths point to .cursor/hooks/ (normalize separators)
-        cmd = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        cmd = config["hooks"]["preToolUse"][0]["command"]
         assert ".cursor/hooks/hookify/hooks/pretooluse.py" in cmd.replace("\\", "/")
 
     def test_skips_when_no_cursor_dir(self, temp_project):
@@ -1333,10 +1334,10 @@ class TestCursorIntegration:
         assert len(config["hooks"]["afterFileEdit"]) == 1
         assert config["hooks"]["afterFileEdit"][0]["command"] == "echo user-hook"
         # New hook added
-        assert "Stop" in config["hooks"]
-        assert "_apm_source" not in config["hooks"]["Stop"][0]
+        assert "stop" in config["hooks"]
+        assert "_apm_source" not in config["hooks"]["stop"][0]
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
-        assert sidecar["Stop"][0]["_apm_source"] == "pkg"
+        assert sidecar["stop"][0]["_apm_source"] == "pkg"
 
     def test_additive_merge_same_event(self, temp_project):
         """Test that multiple packages can add hooks to the same event."""
@@ -1370,11 +1371,11 @@ class TestCursorIntegration:
         integrator.integrate_package_hooks_cursor(pkg2_info, temp_project)
 
         config = json.loads((temp_project / ".cursor" / "hooks.json").read_text())
-        # Both entries present under Stop
-        assert len(config["hooks"]["Stop"]) == 2
-        assert all("_apm_source" not in entry for entry in config["hooks"]["Stop"])
+        # Both entries present under native stop.
+        assert len(config["hooks"]["stop"]) == 2
+        assert all("_apm_source" not in entry for entry in config["hooks"]["stop"])
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
-        assert [entry["_apm_source"] for entry in sidecar["Stop"]] == [
+        assert [entry["_apm_source"] for entry in sidecar["stop"]] == [
             "ralph-loop",
             "other-pkg",
         ]
@@ -1469,17 +1470,69 @@ class TestCursorIntegration:
         assert config.get("version") == 1
 
     def test_cursor_existing_version_preserved(self, temp_project):
-        """A pre-existing "version" value in hooks.json must not be overwritten."""
+        """Unsupported existing versions are rejected, not overwritten."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
         hooks_path.write_text(json.dumps({"version": 2, "hooks": {}}))
 
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
 
-        integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+        with pytest.raises(HookContractError, match="requires version 1"):
+            integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
 
         config = json.loads(hooks_path.read_text())
         assert config.get("version") == 2
+
+    def test_cursor_existing_unknown_top_level_key_rejected(self, temp_project):
+        """Unsupported top-level keys Cursor would not load are rejected, not silently kept."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(json.dumps({"version": 1, "hooks": {}, "unsupportedKey": True}))
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        with pytest.raises(HookContractError, match="unsupported top-level keys"):
+            integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+
+        config = json.loads(hooks_path.read_text())
+        assert config.get("unsupportedKey") is True
+
+    def test_fallback_preflight_forwards_retiring_targets(self, temp_project):
+        """Per-target preflight fallback must see the same retiring_targets as
+        the up-front ``preflight_hooks_for_targets`` call (#3129).
+
+        ``_integrate_merged_hooks`` only runs its own inline
+        ``preflight_cursor_hooks`` call when ``source_plan.cursor_preflight_done``
+        is NOT already True (e.g. the up-front gate was a no-op because
+        ``hook_source_selection`` was None). That fallback call must still
+        honor ``retiring_targets`` or a target slated for safe retirement
+        this run can be misflagged as an import-coexistence conflict.
+        Verified at the exact plumbing boundary (the forwarded kwarg),
+        not by re-deriving the full overlap-detection algorithm.
+        """
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+        from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+        # hook_source_selection=None + cursor_preflight_done=False means the
+        # up-front preflight_hooks_for_targets() gate is a no-op for this
+        # plan, so the fallback inside _integrate_merged_hooks is the ONLY
+        # preflight that runs.
+        source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
+        expected_retiring = frozenset({"claude"})
+
+        with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
+            integrator._integrate_merged_hooks(
+                _MERGE_HOOK_TARGETS["cursor"],
+                pkg_info,
+                temp_project,
+                source_plan=source_plan,
+                retiring_targets=expected_retiring,
+            )
+
+        mock_preflight.assert_called_once()
+        assert mock_preflight.call_args.kwargs["retiring_targets"] == expected_retiring
 
 
 # ─── Sync/cleanup tests ──────────────────────────────────────────────────────
@@ -4135,8 +4188,8 @@ class TestIssue1007Fixes:
         assert "PostToolUse" in hooks, "PascalCase key must be preserved"
         assert "postToolUse" not in hooks, "No duplicate camelCase key should appear"
 
-    def test_cursor_no_normalisation(self, temp_project_with_cursor: Path) -> None:
-        """Cursor target has no event-name mapping; PostToolUse passes through as-is."""
+    def test_cursor_native_normalisation(self, temp_project_with_cursor: Path) -> None:
+        """Cursor maps the documented PostToolUse alias to its native event."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         project = temp_project_with_cursor
@@ -4154,7 +4207,8 @@ class TestIssue1007Fixes:
         HookIntegrator().integrate_hooks_for_target(target, pkg_info, project)
 
         hooks = self._read_cursor_hooks(project).get("hooks", {})
-        assert "PostToolUse" in hooks, "PostToolUse must survive cursor integration unchanged"
+        assert "postToolUse" in hooks
+        assert "PostToolUse" not in hooks
 
     # ------------------------------------------------------------------
     # Group D: Deduplication

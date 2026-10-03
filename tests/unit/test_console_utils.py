@@ -527,3 +527,67 @@ class TestSetConsoleStderr:
         mod.set_console_stderr(False)
         assert mod._console_stderr is False
         assert mod._console_instance is None
+
+
+class TestRichErrorNarrowWidthWrapping:
+    """Regression coverage for microsoft/apm#3129's Lifecycle Smoke flake.
+
+    ``_rich_error`` renders through a real Rich ``Console`` which
+    word-wraps to the detected terminal width. Under a narrow / non-TTY
+    width (as in CI runners), a long diagnostic can have a literal
+    multi-word substring like "Claude import" split across a wrapped
+    line. Callers that assert on that literal substring must normalize
+    whitespace first; this test locks in that the wrap genuinely
+    happens at narrow widths and that whitespace-normalization recovers
+    the full semantic phrase regardless of where the wrap lands.
+    """
+
+    def setup_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
+    def teardown_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
+    def test_long_diagnostic_wraps_but_normalizes_back(self):
+        import io
+
+        from rich.console import Console
+
+        from apm_cli.utils.console import _rich_error
+
+        # Mirrors the actual HookContractError message raised by
+        # hook_native_formats.py for a Cursor/Claude import-coexistence
+        # conflict (#3129); this is the real text whose wrap broke the
+        # test's substring assertion.
+        message = (
+            "Cannot install hooks for cursor-native: Cursor native hooks "
+            "overlap Claude import and may run twice. Select one hook "
+            "target per dependency; existing Claude hooks can use "
+            "Cursor's third-party import instead. No import setting was "
+            "changed. Use supported Cursor-native hooks or a single "
+            "Claude-import route, then reinstall."
+        )
+        buffer = io.StringIO()
+        narrow_console = Console(file=buffer, width=20, force_terminal=False)
+        with patch(
+            "apm_cli.utils.console._get_console",
+            return_value=narrow_console,
+        ):
+            _rich_error(message, symbol="error")
+
+        rendered = buffer.getvalue()
+        # The narrow width must actually force a wrap for this
+        # regression test to mean anything -- otherwise it would pass
+        # even if the wrap-robustness fix were reverted.
+        assert "\n" in rendered.strip()
+        # The raw literal substring may be split across the wrap point;
+        # whitespace-normalizing (collapsing all runs of whitespace,
+        # including embedded newlines, to single spaces) must always
+        # recover the full semantic phrase.
+        normalized = " ".join(rendered.split())
+        assert "Claude import" in normalized
+        assert "No import setting was changed" in normalized

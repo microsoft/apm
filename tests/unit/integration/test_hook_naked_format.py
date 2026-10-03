@@ -93,7 +93,7 @@ def test_claude_merges_naked_hook_format(tmp_path: Path) -> None:
 
 
 def test_cursor_merges_naked_hook_format(tmp_path: Path) -> None:
-    """Cursor hooks.json must contain the Stop entry, not ``{"hooks": {}}``."""
+    """Cursor hooks.json must contain native stop, not an empty event map."""
     pkg_info = _build_naked_hook_package(tmp_path / "pkg")
     project_root = tmp_path / "project"
     (project_root / ".cursor").mkdir(parents=True)
@@ -107,8 +107,8 @@ def test_cursor_merges_naked_hook_format(tmp_path: Path) -> None:
     assert data.get("hooks", {}), (
         f"Cursor hooks.json hooks must be non-empty for #1499 repro; got {data!r}"
     )
-    assert "Stop" in data["hooks"], (
-        f"Stop event must be merged into cursor hooks.json; got {data['hooks']!r}"
+    assert "stop" in data["hooks"], (
+        f"Native stop must be merged into cursor hooks.json; got {data['hooks']!r}"
     )
     assert result.files_integrated == 1
 

@@ -460,6 +460,16 @@ requirements:
     section: "8.5.8"
     conformance_class: consumer
     notes: "user-scoped MCP target selection uses a disclosed versioned capability contract, ignores project-only detection signals, applies first-source precedence without fallback, filters mixed sets, and refuses zero-supported selections before user manifest, lockfile, or target-config mutation"
+  - id: req-tg-016
+    keyword: MUST
+    section: "8.5.9"
+    conformance_class: consumer
+    notes: "a Cursor-native hook installation implementation fails closed (no partial write) when converting a source-declared hook configuration whose event, top-level key, or handler field falls outside the accepted Cursor-native vocabulary, emitting an actionable diagnostic naming the unrecognized value(s)"
+  - id: req-tg-017
+    keyword: MUST
+    section: "8.5.9"
+    conformance_class: consumer
+    notes: "a Cursor-native hook installation implementation detects, before writing, an observable overlap with an in-effect Claude-settings hook import for either install order, and rejects the write with an actionable diagnostic rather than merging, redirecting, or broadening accepted input, without altering the Claude import's own settings"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"
