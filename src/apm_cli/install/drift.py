@@ -901,13 +901,13 @@ def diff_scratch_against_project(
     )
     # Hook merge targets are shared with the user and never claimed in
     # deployed_files, so they can never be "unrecorded". Their APM-owned slice
-    # is compared through hook_ownership; sidecars remain byte-for-byte owned.
+    # is compared through hook_ownership; sidecars compare all owned content
+    # while ignoring JSON object-key ordering from the live merge.
     from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
 
     merge_config_specs = merge_hook_config_projection_specs(targets)
-    merge_config_paths = set(merge_config_specs) | {
-        sidecar_path for sidecar_path, _ in merge_config_specs.values()
-    }
+    merge_sidecar_paths = {sidecar_path for sidecar_path, _ in merge_config_specs.values()}
+    merge_config_paths = set(merge_config_specs) | merge_sidecar_paths
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
@@ -976,6 +976,11 @@ def diff_scratch_against_project(
                     _normalize((project_root / sidecar_rel).read_bytes()),
                     event_container_key,
                 )
+            elif rel in merge_sidecar_paths:
+                from apm_cli.integration.hook_ownership import canonicalize_hook_sidecar
+
+                s_bytes = canonicalize_hook_sidecar(s_bytes)
+                p_bytes = canonicalize_hook_sidecar(p_bytes)
         except (OSError, ValueError) as exc:
             findings.append(
                 DriftFinding(

@@ -208,8 +208,8 @@ def merge_hook_config_paths(targets: list[TargetProfile]) -> set[str]:
     tracking -- the same state ``reconcile_dropped_merge_hook_targets`` below
     exists to reconcile. A membership-driven check must therefore exempt them,
     or it reports every hooks-using project as under-recording. Content
-    coverage is unaffected: the drift replay reproduces these files and
-    compares them byte-for-byte.
+    coverage is unaffected: the drift replay compares APM-owned native hook
+    entries and the complete JSON content of their ownership sidecars.
 
     Lives here rather than beside ``_MERGE_HOOK_TARGETS`` because
     ``hook_integrator.py`` is at its CI line-count budget, the same reason

@@ -62,6 +62,37 @@ def extract_apm_source_sidecar(hooks: dict) -> dict[str, list[dict[str, Any]]]:
     return sidecar
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_non_json_constant(constant: str) -> None:
+    raise ValueError(f"invalid JSON constant: {constant}")
+
+
+def canonicalize_hook_sidecar(sidecar_bytes: bytes) -> bytes:
+    """Compare all ownership content without depending on JSON object-key order.
+
+    Keep list order and every field, including ownership markers. Reject
+    duplicate keys and non-JSON constants rather than normalizing invalid input.
+    """
+    # The integrator reads sidecars as UTF-8; json.loads(bytes) would also
+    # accept UTF-16/32 files that the next install cannot read.
+    sidecar = json.loads(
+        sidecar_bytes.decode("utf-8"),
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_non_json_constant,
+    )
+    if not isinstance(sidecar, dict):
+        raise ValueError("ownership sidecar must be a JSON object")
+    return json.dumps(sidecar, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def project_apm_owned_hook_entries(
     config_bytes: bytes,
     sidecar_bytes: bytes,
@@ -74,14 +105,6 @@ def project_apm_owned_hook_entries(
     sidecar is APM-owned and maps matching native entries back to their
     ``_apm_source`` markers; retain only that marked slice for comparison.
     """
-
-    def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate JSON key: {key}")
-            result[key] = value
-        return result
 
     config = json.loads(config_bytes, object_pairs_hook=_reject_duplicate_keys)
     sidecar = json.loads(sidecar_bytes, object_pairs_hook=_reject_duplicate_keys)

@@ -287,6 +287,12 @@ descendants, are skipped.
 
 ## Security and audit
 
+For shared hook targets, drift compares only APM-owned hook entries. Ownership
+sidecars are compared as JSON: object-key order and formatting do not cause
+drift, but changed fields, ownership markers, or list order do. Malformed JSON,
+duplicate keys, and non-JSON constants (`NaN`, `Infinity`, `-Infinity`) report
+`modified`. User-owned hooks do not cause drift.
+
 Automatic `apm audit` discovers registry-recognized primitive files, including
 untracked native hook definitions in shared settings. It checks prompt
 documents and decoded native prompt fields, not command strings, executables,

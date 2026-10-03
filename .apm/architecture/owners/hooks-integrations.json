@@ -39,8 +39,8 @@
     },
     {
       "id": "neutral-hook-contract",
-      "decision": "Neutral hook source grammar, per-target native shape, and shared-config APM-owned drift projection",
-      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries)",
+      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, and ownership-sidecar comparison",
+      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar)",
       "selectors": [
         "src/apm_cli/hook_contract.py",
         "src/apm_cli/integration/hook_ir.py",

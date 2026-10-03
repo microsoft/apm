@@ -628,40 +628,37 @@ def _nhc_ownership_markers(provider: FactsProvider, rule_id: str) -> tuple[Viola
 
 
 def _nhc_drift_projection(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
-    """Shared hook drift projection must route through ``hook_ownership.py``."""
+    """Shared hook drift comparisons must route through ``hook_ownership.py``."""
     facts_by_path, failures = _read_required(provider, rule_id, (_HOOK_OWNERSHIP, _INSTALL_DRIFT))
     findings: list[Violation] = list(failures)
-    if not failures:
-        findings.extend(
-            _require(
-                _count_regex_lines(
-                    facts_by_path[_HOOK_OWNERSHIP], r"^def project_apm_owned_hook_entries\("
+    for helper in ("project_apm_owned_hook_entries", "canonicalize_hook_sidecar"):
+        if not failures:
+            findings.extend(
+                _require(
+                    _count_regex_lines(facts_by_path[_HOOK_OWNERSHIP], rf"^def {helper}\(") == 1,
+                    rule_id,
+                    _HOOK_OWNERSHIP,
+                    f"{helper} must be defined exactly once",
                 )
-                == 1,
-                rule_id,
-                _HOOK_OWNERSHIP,
-                "project_apm_owned_hook_entries must be defined exactly once",
             )
-        )
+            findings.extend(
+                _require(
+                    _count_fixed_lines(facts_by_path[_INSTALL_DRIFT], f"{helper}(") == 2,
+                    rule_id,
+                    _INSTALL_DRIFT,
+                    f"install drift must call {helper} exactly twice",
+                )
+            )
         findings.extend(
-            _require(
-                _count_fixed_lines(facts_by_path[_INSTALL_DRIFT], "project_apm_owned_hook_entries(")
-                == 2,
-                rule_id,
-                _INSTALL_DRIFT,
-                "install drift must call project_apm_owned_hook_entries exactly twice",
+            _duplicate_scan(
+                provider,
+                rule_id=rule_id,
+                paths=_python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,)),
+                pattern=rf"^def {helper}\(",
+                message="shared hook drift comparisons must route through hook_ownership.py",
+                exempt=False,
             )
         )
-    findings.extend(
-        _duplicate_scan(
-            provider,
-            rule_id=rule_id,
-            paths=_python_paths(provider, under=_SRC, exclude=(_HOOK_OWNERSHIP,)),
-            pattern=r"^def project_apm_owned_hook_entries\(",
-            message="shared hook drift projection must route through hook_ownership.py",
-            exempt=False,
-        )
-    )
     return tuple(findings)
 
 

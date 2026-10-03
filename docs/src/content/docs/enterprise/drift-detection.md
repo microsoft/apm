@@ -48,9 +48,10 @@ only the deployment destination. `unrecorded` means replay produced the
 same normalized bytes as the project but no exact or directory
 `deployed_files` claim covers the path; shared merge-hook targets are exempt
 from `unrecorded`. For their drift comparison, only APM-owned hook entries are
-considered; user-owned hooks do not create drift. The APM-owned sidecar remains
-byte-for-byte checked, so tampered or missing APM-owned hooks report
-`modified`. Pass `--no-drift` to skip the replay.
+considered; user-owned hooks do not create drift. The APM-owned sidecar is
+compared as JSON: object-key order and formatting are ignored, but all fields
+and list order remain significant. Changed content, malformed JSON, and
+duplicate keys report `modified`. Pass `--no-drift` to skip the replay.
 In bare `apm audit`, the replay remains cache-only and a fresh checkout
 without a warm cache yields an informational skip. In `apm audit --ci`, a
 cold cache instead triggers the lock-pinned scratch self-hydration owned by

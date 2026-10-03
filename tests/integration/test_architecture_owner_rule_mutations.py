@@ -55,6 +55,45 @@ ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/integration/hook_ownership.py",
+            "def canonicalize_hook_sidecar(",
+            "def canonicalize_hook_sidecar_disabled(",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "s_bytes = canonicalize_hook_sidecar(s_bytes)",
+            "s_bytes = s_bytes",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "p_bytes = canonicalize_hook_sidecar(p_bytes)",
+            "p_bytes = p_bytes",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "def diff_scratch_against_project(",
+            "def canonicalize_hook_sidecar(data):\n    return data\n\n\ndef diff_scratch_against_project(",
+        ),
+    ],
+)
+def test_hook_sidecar_comparison_must_use_canonical_owner(path: str, old: str, new: str) -> None:
+    """Both drift inputs must use the single sidecar comparison authority."""
+    rule_id = "mutation_writes.neutral_hook_contract"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.

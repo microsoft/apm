@@ -252,8 +252,10 @@ integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when
 replay produced the same normalized bytes as the project but no exact or
 directory `deployed_files` claim covers the path. For shared merge-hook
 targets, audit compares only APM-owned hook entries; user-owned hooks do not
-create drift. The APM-owned sidecar remains byte-for-byte checked, so tampered
-or missing APM-owned hooks report `modified`. `unrecorded` findings fail
+create drift. The APM-owned sidecar is compared as JSON, ignoring object-key
+order and formatting while retaining every field and list order. Changed
+commands, ownership markers, or execution order still report `modified`, as
+do malformed JSON and duplicate keys. `unrecorded` findings fail
 `--ci`; run `apm install`, then commit the regenerated `apm.lock.yaml`.
 
 Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.

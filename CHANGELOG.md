@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook ownership sidecars ignore JSON formatting during drift checks while preserving meaningful and invalid-content findings. — by @Pybsama (#3155)
+
 ## [0.33.0] - 2026-10-02
 
 ### Added
