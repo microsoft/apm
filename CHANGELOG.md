@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/src/content/docs/specs/openapm-v0.1.md` adds `req-tg-015`, documenting the already-shipped Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostic as a normative conformance requirement. (#3150)
+
+### Fixed
+
+- Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
+
 ## [0.33.0] - 2026-10-02
 
 ### Added

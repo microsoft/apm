@@ -168,6 +168,7 @@ for...
 | `name` | recommended | Display name; defaults to filename stem |
 | `description` | yes | Used by Cascade and Copilot to decide when to surface the agent |
 | `model` | optional | Pinned model the harness should switch to when invoked |
+| `model_reasoning_effort` | optional | Native Codex reasoning effort, supplied as a string |
 | `tools` | optional | Whitelist of tools the persona may call |
 | `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
@@ -182,9 +183,21 @@ of the supported capability tags (`read`, `write`, `shell`, `web`,
 `*`). If any unsupported tag is present, the agent is not deployed at
 all -- APM fails closed. Kiro may warn and fall back if the specified
 `model` is unavailable; APM passes the value through without
-validation. Codex translates only `name`, `description`, and the
-Markdown body; APM does not yet generate the complete per-agent MCP
-transport definitions needed to preserve `model` or `tools`. When
+validation.
+
+Codex receives `name`, `description`, and the Markdown body as
+`developer_instructions`. Supplied string values for `model` and
+`model_reasoning_effort` become top-level keys in the generated agent TOML,
+as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
+Omitted fields remain absent; APM does not translate model names, choose
+defaults, or validate which models and effort values your Codex supports.
+Non-string values are dropped with a warning naming the field.
+
+Other frontmatter fields are dropped with a warning that APM does not
+translate them for Codex. This includes other native Codex settings and
+any `codex:` block; there is no namespaced or arbitrary passthrough.
+Remove unnecessary fields, or do not rely on their settings in the
+generated agent. APM still cannot preserve `tools` restrictions. When
 `tools` is present, `apm install` warns that the generated agent may
 inherit every project or session MCP server. Remove `tools` if
 unrestricted access is intentional; otherwise, do not use the
@@ -222,7 +235,7 @@ offending package and field so you can fix the source.
 | grok-build | `.grok/agents/<name>.md` | verbatim |
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
-| codex | `.codex/agents/<name>.toml` | `name` and `description` -> TOML; body becomes `developer_instructions`; unsupported `tools` emits a warning |
+| codex | `.codex/agents/<name>.toml` | `name`, `description`, and supplied string `model` / `model_reasoning_effort` -> top-level TOML; body becomes `developer_instructions`; dropped metadata emits warnings |
 | kiro | `.kiro/agents/<relative-stem>.md` | `description`, `model`, `tools` kept; `name` and unknown fields stripped; identity from path; fail closed on unsupported tools (ref: [kiro.dev/docs/custom-agents](https://kiro.dev/docs/custom-agents/), accessed 2026-08-03) |
 | grok-build | `.grok/agents/<name>.md` | verbatim |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
