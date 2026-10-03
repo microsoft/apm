@@ -7,10 +7,11 @@ so no I/O or network access is required.
 
 from __future__ import annotations
 
+import os
 import unittest
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional  # noqa: F401, UP035
-from unittest.mock import MagicMock  # noqa: F401
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 from apm_cli.drift import (
     build_download_ref,
@@ -32,7 +33,9 @@ class _LockedDep:
     repo_url: str = "owner/repo"
     resolved_ref: str | None = None
     resolved_commit: str | None = None
+    constraint: str | None = None
     host: str | None = None
+    host_type: str | None = None
     registry_prefix: str | None = None
     virtual_path: str | None = None
     source: str | None = None
@@ -107,6 +110,20 @@ class TestDetectRefChange(unittest.TestCase):
         dep = _dep(reference=None)
         self.assertFalse(detect_ref_change(dep, locked))
 
+    def test_git_semver_transport_change_precedes_constraint_replay(self) -> None:
+        for locked_insecure in (False, True):
+            with self.subTest(locked_insecure=locked_insecure):
+                locked = _LockedDep(
+                    resolved_ref="v1.2.3", constraint="^1.2.0", is_insecure=locked_insecure
+                )
+                dep = DependencyReference(
+                    repo_url="owner/repo", reference="^1.2.0", is_insecure=not locked_insecure
+                )
+                self.assertTrue(detect_ref_change(dep, locked))
+                self.assertFalse(detect_ref_change(dep, locked, update_refs=True))
+                dep.is_insecure = locked_insecure
+                self.assertFalse(detect_ref_change(dep, locked))
+
     # --- ref changed ---
 
     def test_ref_added_returns_true(self):
@@ -137,6 +154,41 @@ class TestDetectRefChange(unittest.TestCase):
         locked = _LockedDep(resolved_ref=None)
         dep = _dep(reference="abc1234")
         self.assertTrue(detect_ref_change(dep, locked))
+
+    def test_custom_host_backend_change_returns_true(self):
+        locked = _LockedDep(host="code.example.com", resolved_ref="main")
+        dep = DependencyReference(
+            repo_url="owner/repo", host="code.example.com", host_type="gitlab", reference="main"
+        )
+        self.assertTrue(detect_ref_change(dep, locked))
+
+    def test_inferred_and_explicit_equivalent_provider_returns_false(self):
+        locked = _LockedDep(host="gitlab.com", resolved_ref="main")
+        dep = DependencyReference(
+            repo_url="owner/repo", host="gitlab.com", host_type="gitlab", reference="main"
+        )
+        self.assertFalse(detect_ref_change(dep, locked))
+
+    def test_provider_drift_routes_through_canonical_host_identity_owner(self):
+        locked = _LockedDep(host="code.example.com", resolved_ref="main")
+        dep = DependencyReference(repo_url="owner/repo", host="code.example.com", reference="main")
+        with patch(
+            "apm_cli.drift.effective_host_provider_identity",
+            side_effect=[("gitlab", "generic_modules"), ("generic", "generic_modules")],
+        ) as identity:
+            self.assertTrue(detect_ref_change(dep, locked))
+        self.assertEqual(
+            identity.call_args_list,
+            [call("code.example.com", host_type=None), call("code.example.com", host_type=None)],
+        )
+
+    def test_unclassifiable_locked_provider_fails_closed_as_drift(self):
+        locked = _LockedDep(host="code.example.com", host_type="gitlab", resolved_ref="main")
+        dep = DependencyReference(
+            repo_url="owner/repo", host="code.example.com", host_type="gitlab", reference="main"
+        )
+        with patch.dict(os.environ, {"GITHUB_HOST": "code.example.com"}, clear=True):
+            self.assertTrue(detect_ref_change(dep, locked))
 
     # --- local-path deps (issue: false source-flip) ---
 

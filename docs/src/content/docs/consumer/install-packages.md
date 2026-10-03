@@ -127,16 +127,12 @@ Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf
 
 ## What to commit
 
-Commit `apm.yml`, `apm.lock.yaml`, and every target-owned directory APM writes
-to. These can include `.github/`, `.claude/`, `.grok/`, and `.agents/`.
-Committed deployed files give teammates agent context on clone, before they
-run `apm install`.
+Commit `apm.yml`, `apm.lock.yaml`, and target-owned outputs; keep `apm_modules/`
+gitignored. Committed agent files are reviewable and discoverable after clone,
+not necessarily self-contained: run `apm install` to restore linked package
+context.
 
-Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from
-the lockfile on every `apm install`. APM adds the entry automatically on first install.
-
-See the [Quickstart](../../quickstart/#what-to-commit) for the full table and
-rationale.
+See the [Quickstart](../../quickstart/#what-to-commit) for details.
 
 ## Transitive dependencies and the lockfile
 
@@ -222,6 +218,13 @@ For the full flag reference, run `apm install --help` or see
 - **Drift between `apm_modules/` and the lockfile.** Run
   `apm audit --ci` locally to reproduce the CI gate; see
   [Update and refresh](../update-and-refresh/) to recover.
+- **Skipped symlinked agent source.** `apm install` warns and skips agent
+  files or directories that are symlinks (for example
+  `.apm/agents -> ../agents`). Fix by shipping real files and directories in
+  the source package, then rerun `apm install`. Do not edit `apm_modules/` --
+  cached edits are not a durable fix. For a third-party package,
+  ask the author to publish real sources. See
+  [Instructions and agents](../../producer/author-primitives/instructions-and-agents/#agents).
 
 Once your dependencies are installed, scripts run them.
 [Run scripts](../run-scripts/) shows how to wire `apm.yml`'s

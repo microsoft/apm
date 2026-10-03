@@ -551,6 +551,51 @@ class TestCheckRefHeadsPrefix:
 
 
 class TestCheckPerHostResolution:
+    @pytest.mark.parametrize("configured_host", [None, "", "github.example.com"])
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(
+            token="ghp-private",
+            auth_scheme="basic",
+            host_info=SimpleNamespace(kind="github"),
+        ),
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_default_host_shorthand_uses_standard_auth_resolution(
+        self, MockResolver, mock_token, configured_host, runner, tmp_path, monkeypatch
+    ):
+        """Resolve auth for bare owner/repo sources on the configured default host."""
+        monkeypatch.chdir(tmp_path)
+        if configured_host is None:
+            monkeypatch.delenv("GITHUB_HOST", raising=False)
+            expected_host = "github.com"
+        else:
+            monkeypatch.setenv("GITHUB_HOST", configured_host)
+            expected_host = configured_host or "github.com"
+        (tmp_path / "marketplace.yml").write_text(_YML_WITH_REF, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_token.assert_called_once_with(
+            expected_host, offline=False, org=None, auth_resolver=ANY
+        )
+        MockResolver.assert_called_once_with(
+            offline=False,
+            host=expected_host,
+            token="ghp-private",
+            auth_scheme="basic",
+            git_env=ANY,
+            auth_resolver=ANY,
+            auth_target=expected_host,
+        )
+        mock_inst.list_remote_refs.assert_called_once_with("acme-org/pinned-pkg")
+
     @patch(
         "apm_cli.commands.marketplace.check.resolve_auth_for_host",
         return_value=SimpleNamespace(

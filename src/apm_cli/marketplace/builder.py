@@ -869,7 +869,7 @@ class MarketplaceBuilder:
                 curator_metadata=self._curator_metadata(entry),
             )
 
-        refs = resolver.list_remote_refs(owner_repo)
+        refs = resolver.list_remote_refs(owner_repo, remote_url=source_url)
 
         # Single-pass index for O(1) lookup by tag name, full refname, and branch
         tags_by_name: dict[str, Any] = {}
@@ -972,7 +972,7 @@ class MarketplaceBuilder:
         pattern = entry.tag_pattern or yml.build.tag_pattern
 
         tag_rx = build_tag_regex(pattern, name=entry.name)
-        refs = resolver.list_remote_refs(owner_repo)
+        refs = resolver.list_remote_refs(owner_repo, remote_url=source_url)
 
         # Filter tags matching the pattern and extract versions
         candidates: list[tuple[SemVer, str, str]] = []  # (semver, tag_name, sha)

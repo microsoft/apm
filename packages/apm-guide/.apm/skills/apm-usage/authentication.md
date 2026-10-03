@@ -4,6 +4,39 @@
 
 CLI bootstrap/update metadata recovery is separate from package authentication. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and bounded anonymous retry, and [mirror migration](https://microsoft.github.io/apm/getting-started/installation/#enterprise-bootstrap-mirror-mode) for final-endpoint configuration.
 
+## GitHub MCP authentication
+
+MCP authentication is separate from repository authentication below. For a
+recognized GitHub MCP server, the first nonempty variable wins:
+`GITHUB_COPILOT_PAT`, `GITHUB_TOKEN`, `GITHUB_APM_PAT`, then
+`GITHUB_PERSONAL_ACCESS_TOKEN`. No per-org or credential-helper fallback runs.
+Runtime-capable targets write the selected variable's native reference;
+literal-only targets retain their existing token behavior.
+
+A nonempty string manifest `Authorization` value wins, regardless of header-name
+casing. Registry headers alone do not disable automatic authentication.
+Reinstalling the same declaration does not automatically repair existing
+credentials. Follow [Repairing existing credentials](https://microsoft.github.io/apm/consumer/install-mcp-servers/#repairing-existing-credentials)
+to preserve custom fields, use environment references and rotate exposed
+credentials.
+See [GitHub MCP token injection](https://microsoft.github.io/apm/consumer/install-mcp-servers/#token-injection-github-mcp-server).
+
+## Getting a token
+
+```bash
+# Check for, and set up, a working credential for a host
+apm auth github.com
+
+# Also validate the credential against the host's REST API
+apm auth gitlab.com --check
+
+# Export the resolved token into the current shell
+eval "$(apm auth github.com --export)"
+```
+
+`apm auth` does not register a marketplace or install anything; it only
+resolves or helps you create a token for `HOST`.
+
 ## Token precedence chain
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
@@ -13,26 +46,32 @@ Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the
 Managed GitHub, GitLab, and Azure DevOps credentials use process-scoped
 Authorization headers. They are never embedded in Git URL userinfo.
 
-Before each dependency Git operation that consumes a remote URL, APM rejects a
-matching rewrite that embeds credentials, downgrades to insecure transports such
-as `http://` or `git://`, selects remote-helper syntax such as `ext::` or
-`https::`, or redirects any network remote to another host, regardless of host
-class. A managed HTTPS credential cannot cross a scheme, host, or port boundary.
-Same-host SSH and local-mirror selections remain credential-free. Inspect
-rejected rules with:
+Before each dependency Git operation that uses a remote URL, APM checks the
+longest matching rewrite. It rejects rewrites that embed credentials, switch to
+insecure transports such as `http://` or `git://`, use remote-helper syntax
+such as `ext::` or `https::`, or send a network remote to a different host. A
+managed HTTPS credential cannot cross a scheme, host, or port boundary.
+Same-host SSH rewrites and local mirrors remain credential-free.
+
+If a rewrite is rejected and it should be safe, inspect the effective Git
+config and matching `insteadOf` rules, then retry:
 
 ```bash
 git config --show-origin --get-regexp '^url\..*\.insteadOf$'
 ```
 
+Remove or replace the rule only if it is unsafe or misconfigured.
+
 If the selected rewrite is a `file://` mirror and the clone fails, verify that
 the local path exists and is readable. Fix or remove that rewrite; host
 credentials cannot repair a missing local mirror.
 
-APM snapshots effective Git config, validates the longest matching rewrite, and
-freezes the result for the child. It drops malformed ambient HTTP headers before
-applying an anonymous empty-header fence or one path-scoped AuthResolver header.
-Dependency clones ignore Git templates and checkout hooks.
+APM snapshots the effective Git config, validates the longest matching rewrite,
+and passes that fixed result to the child Git process. It drops malformed
+ambient HTTP headers before it applies either an anonymous empty-header fence or
+one path-scoped AuthResolver header. For effective URLs outside HTTP(S), APM
+skips the `http.extraHeader` URL-match probe. Dependency clones ignore Git
+templates and checkout hooks.
 
 When fallback is required, APM checks these sources in order:
 
@@ -214,23 +253,21 @@ apm pack                                 # marketplace.json also resolves agains
 
 ## GitLab (SaaS or self-managed)
 
-APM fetches `path:`-specified files from GitLab dependencies via git sparse/partial
-checkout (the same transport as the clone). Git transport is tried first, so SSH
-keys and git credential helpers work without any extra token, and self-hosted
-GitLab instances where the API returns 410 (disabled) no longer fail. Explicit
-`git:` / SSH URLs carry the host in the dependency; set `GITLAB_HOST` (or
-`APM_GITLAB_HOSTS`) only when bare-host or shorthand forms should classify as
-GitLab.
+GitLab `path:` single-file sparse fetches follow the clone transport policy:
+`--ssh`, `APM_GIT_PROTOCOL`, saved `prefer-ssh`, and opt-in
+`--allow-protocol-fallback` / `APM_ALLOW_PROTOCOL_FALLBACK`. In strict mode,
+APM passes the selected SSH/SCP URL to Git with its user, host, port, and
+requested ref intact; safe Git `insteadOf` rewrites still apply. If the
+effective transport remains SSH, failure never unlocks REST, even with a
+PAT available. Fix SSH or declare the HTTPS web endpoint.
 
-If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
-
-```bash
-export GITLAB_APM_PAT=glpat_your_token
-apm install
-```
-
-`GITLAB_TOKEN` is accepted as a lower-precedence fallback. `git credential fill` is
-also tried (same as for GitHub) so credential-manager users need no env var at all.
+Default HTTPS compatibility remains. REST requires an exhausted Git plan
+and an executed effective HTTPS attempt matching the API's normalized
+scheme/host/port. HTTP is not upgraded; HTTPS rewritten to SSH/local does
+not qualify. Opt-in alternate protocol reuses the declared custom port and
+warns, without mapping SSH aliases to web hostnames. See the
+[GitLab fetch policy](https://microsoft.github.io/apm/consumer/authentication/#gitlab-saas-or-self-managed)
+and [GitLab hosts](#gitlab-hosts) for token trust.
 
 ## GHE Cloud data residency (*.ghe.com)
 
@@ -406,7 +443,7 @@ credential under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 
-APM tries SSH as a fallback when HTTPS auth is not available. It forces
+APM tries SSH when selected or cross-protocol fallback is enabled. It forces
 `BatchMode=yes`, disables askpass and HTTP credential channels, and uses a
 30-second connection timeout so SSH attempts fail without prompting.
 

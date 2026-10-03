@@ -92,6 +92,7 @@ class TestFromInstalledPackagesIsDev:
     def _mock_dep_ref(self, repo_url):
         ref = Mock()
         ref.repo_url = repo_url
+        ref.alias = None
         ref.host = None
         ref.host_type = None
         ref.port = None

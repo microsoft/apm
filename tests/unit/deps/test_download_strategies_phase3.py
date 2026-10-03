@@ -34,6 +34,12 @@ import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate, _debug
+from apm_cli.deps.git_file_transport import GitFileTransportError
+from apm_cli.deps.transport_selection import (
+    NoOpInsteadOfResolver,
+    ProtocolPreference,
+    TransportSelector,
+)
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.archive import safe_extract_zip
 
@@ -1250,6 +1256,19 @@ class TestDownloadAdoFile:
 
 
 class TestDownloadGitlabFile:
+    @pytest.fixture(autouse=True)
+    def _git_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise REST recovery after a selected HTTPS Git attempt fails."""
+        monkeypatch.setattr(
+            DownloadDelegate,
+            "_download_gitlab_file_via_git",
+            MagicMock(side_effect=GitFileTransportError("git transport unavailable")),
+        )
+        monkeypatch.setattr(
+            "apm_cli.deps.download_strategies.validate_git_url_rewrite_safety",
+            lambda requested_url, _env: requested_url,
+        )
+
     def _dep(self) -> DependencyReference:
         return DependencyReference(
             repo_url="mygroup/myproject",
@@ -1258,11 +1277,18 @@ class TestDownloadGitlabFile:
 
     def _setup_host_info(self, host_mock: MagicMock) -> None:
         info = MagicMock()
+        info.kind = "gitlab"
         info.api_base = "https://gitlab.example.com/api/v4"
         host_mock.auth_resolver.classify_host.return_value = info
         ctx = MagicMock()
         ctx.token = "gl-tok"
         host_mock.auth_resolver.resolve.return_value = ctx
+        host_mock.auth_resolver.resolve_for_remote.return_value = ctx
+        host_mock.auth_resolver.git_env_for_remote.return_value = {}
+        host_mock.auth_resolver.build_native_git_credential_env.return_value = {}
+        host_mock._protocol_pref = ProtocolPreference.NONE
+        host_mock._allow_fallback = False
+        host_mock._transport_selector = TransportSelector(NoOpInsteadOfResolver())
 
     def test_success_returns_content(self) -> None:
         host = _make_host()
@@ -1336,12 +1362,8 @@ class TestDownloadGitlabFile:
 
     def test_401_without_token_includes_context(self) -> None:
         host = _make_host()
-        info = MagicMock()
-        info.api_base = "https://gitlab.example.com/api/v4"
-        host.auth_resolver.classify_host.return_value = info
-        ctx = MagicMock()
-        ctx.token = None  # no token
-        host.auth_resolver.resolve.return_value = ctx
+        self._setup_host_info(host)
+        host.auth_resolver.resolve.return_value.token = None
         host.auth_resolver.build_error_context.return_value = "Set GITLAB_APM_PAT."
 
         d = DownloadDelegate(host)
@@ -1405,17 +1427,9 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = resp
         callback = MagicMock()
 
-        with (
-            patch(
-                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-                return_value={},
-            ),
-            patch(
-                "apm_cli.deps.download_strategies.GitSparseFileTransport",
-                return_value=MagicMock(
-                    fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
-                ),
-            ),
+        with patch(
+            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+            return_value={},
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
         # The mocked git failure drives the REST fallback path without spawning

@@ -91,7 +91,8 @@ def _retry_on_lock(
     operation:
         Zero-arg callable that performs the file operation.
     description:
-        Human-readable label for debug messages (e.g. ``"rmtree /tmp/x"``).
+        Human-readable operation label. It is not emitted because file paths
+        may contain secrets.
     max_retries:
         Total attempts = 1 (initial) + *max_retries*.
     initial_delay:
@@ -124,9 +125,8 @@ def _retry_on_lock(
             if not _is_transient_lock_error(exc) or attempt == max_retries:
                 raise
             _debug_file_op(
-                f"{description}: transient lock (attempt "
-                f"{attempt + 1}/{max_retries}), retrying in {delay:.2f}s "
-                f"-- {exc}"
+                f"Transient file lock (attempt {attempt + 1}/{max_retries}); "
+                f"retrying in {delay:.2f}s"
             )
             if before_retry is not None:
                 try:  # noqa: SIM105

@@ -51,11 +51,13 @@
     },
     {
       "id": "distributed-agents-output-preparation",
-      "decision": "Agent root-context output eligibility and content preparation",
-      "owner": "compilation/agents_compiler.py with compilation/root_context_protection.py",
+      "decision": "Agent root-context output eligibility, user-root replacement and redundant-root cleanup, and content preparation",
+      "owner": "compilation/agents_compiler.py with compilation/root_context_protection.py and compilation/build_id.py",
       "selectors": [
         "src/apm_cli/compilation/agents_compiler.py",
-        "src/apm_cli/compilation/root_context_protection.py"
+        "src/apm_cli/compilation/root_context_protection.py",
+        "src/apm_cli/compilation/user_root_context.py",
+        "src/apm_cli/compilation/build_id.py"
       ],
       "guards": [
         "contracts-tooling-distributed-agents-output",

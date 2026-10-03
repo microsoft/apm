@@ -5,7 +5,7 @@ import logging
 import os
 import threading
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
@@ -23,6 +23,11 @@ from .dependency_graph import (
     DependencyNode,
     DependencyTree,
     FlatDependencyMap,
+)
+from .immutable_requirements import (
+    ImmutableRequirementError,
+    ImmutableRequirements,
+    ReferenceResolver,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +104,9 @@ class APMDependencyResolver:
         update_refs: bool = False,
         existing_lockfile: "LockFile | None" = None,
         activation_callback: ActivationCallback | None = None,
+        cache_validation_callback: Callable[[Path, str], Path | None] | None = None,
+        reference_resolver: ReferenceResolver | None = None,
+        frozen: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -127,14 +135,19 @@ class APMDependencyResolver:
                 must re-enter the download callback.
             activation_callback: Optional callback that publishes a downloaded
                 candidate only after this resolver validates it.
+            cache_validation_callback: Optional read-only admission check for reused
+                bytes, after the fetch decision and before package normalization.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
         self._activation_callback = activation_callback
+        self._cache_validation_callback = cache_validation_callback
         self._update_refs = update_refs
         self._existing_lockfile = existing_lockfile
+        self._reference_resolver = reference_resolver
+        self._frozen = frozen
         # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
         # Detected once via signature inspection so legacy callbacks that
         # predate the field still work without raising a silent TypeError
@@ -405,24 +418,30 @@ class APMDependencyResolver:
             return anchored.resolve().as_posix()
         return portable_relpath(anchored, base)
 
-    def _remote_repo_root_for_parent(
+    def _remote_source_paths_for_parent(
         self,
         parent_dep: DependencyReference,
         parent_pkg: APMPackage,
-    ) -> Path:
-        """Return the on-disk clone root for a remote parent package."""
+    ) -> tuple[Path, Path]:
+        """Return contained repository and package source-coordinate anchors."""
         if self._apm_modules_dir is None or parent_pkg.source_path is None:
             raise PathTraversalError(
                 "remote parent package has no source path to anchor local path"
             )
         source_path = ensure_path_within(parent_pkg.source_path, self._apm_modules_dir)
+        if parent_dep.alias:
+            # Aliases flatten materialization, not authenticated repository coordinates.
+            source_path = ensure_path_within(
+                replace(parent_dep, alias=None).get_install_path(self._apm_modules_dir),
+                self._apm_modules_dir,
+            )
         repo_root = source_path
         if parent_dep.virtual_path:
             validate_path_segments(parent_dep.virtual_path, context="virtual_path")
             for _segment in parent_dep.virtual_path.replace("\\", "/").split("/"):
                 if _segment:
                     repo_root = repo_root.parent
-        return ensure_path_within(repo_root, self._apm_modules_dir)
+        return ensure_path_within(repo_root, self._apm_modules_dir), source_path
 
     def _expand_remote_parent_local_path(
         self,
@@ -448,8 +467,8 @@ class APMDependencyResolver:
         if self._is_absolute_local_path(local_str):
             raise PathTraversalError("absolute paths inside remote packages are not allowed")
 
-        repo_root = self._remote_repo_root_for_parent(parent_dep, parent_pkg)
-        parent_source = ensure_path_within(parent_pkg.source_path, repo_root)
+        repo_root, parent_source = self._remote_source_paths_for_parent(parent_dep, parent_pkg)
+        parent_source = ensure_path_within(parent_source, repo_root)
         local_path = Path(local_str.replace("\\", "/"))
         resolved = ensure_path_within(parent_source / local_path, repo_root)
         virtual_path = resolved.relative_to(repo_root).as_posix()
@@ -643,6 +662,13 @@ class APMDependencyResolver:
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
+        requirements = ImmutableRequirements(
+            root_package.name,
+            self._reference_resolver,
+            self._existing_lockfile,
+            frozen=self._frozen,
+            update_refs=self._update_refs,
+        )
 
         # Queue for breadth-first traversal: (dependency_ref, depth, parent_node, is_dev)
         processing_queue: deque[tuple[DependencyReference, int, DependencyNode | None, bool]] = (
@@ -772,6 +798,12 @@ class APMDependencyResolver:
                 work_items.append((node, dep_ref, parent_node, is_dev))
 
             winner_candidates.extend(item[0] for item in work_items)
+            for node, _, _, _ in work_items:
+                try:
+                    requirements.add(node)
+                except ImmutableRequirementError as exc:
+                    tree.resolution_errors.append(str(exc))
+                    return tree
             _, winner_ids = _select_dependency_winners(winner_candidates)
             work_items = [
                 item
@@ -1191,6 +1223,12 @@ class APMDependencyResolver:
             if not install_path.exists():
                 return None
 
+        if (
+            self._cache_validation_callback is not None
+            and self._download_dedup_key(dep_ref, parent_pkg) not in self._downloaded_packages
+        ):
+            self._cache_validation_callback(install_path, dep_ref.get_unique_key())
+
         materialize_marketplace_manifest(dep_ref, install_path)
 
         # Native Agent Plugins must retain their projected compatibility package
@@ -1227,7 +1265,7 @@ class APMDependencyResolver:
             )
 
         package_type, _ = detect_package_type(install_path)
-        if package_type is PackageType.MARKETPLACE_PLUGIN:
+        if package_type in (PackageType.MARKETPLACE_PLUGIN, PackageType.SKILL_BUNDLE):
             validation = validate_apm_package(
                 install_path,
                 source_path=dep_source_path,
@@ -1445,7 +1483,8 @@ class APMDependencyResolver:
         For LOCAL deps we return the *original* user source directory so that
         transitive ``../sibling`` references inside its apm.yml resolve as a
         developer reading the file expects (#857). For REMOTE deps we return
-        the clone location under apm_modules.
+        the materialized package location; repository-relative expansion derives
+        separate source-coordinate anchors.
         """
         if dep_ref.is_local and dep_ref.local_path:
             local = Path(dep_ref.local_path).expanduser()

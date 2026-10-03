@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,11 +135,10 @@ _SCP_HOST_RE = re.compile(r"^(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:@\s]+):")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _GIT_CONFIG_PROBE_TIMEOUTS = (10, 30)
 
-_URL_REWRITE_RECOVERY = (
-    "inspect matching rules with "
-    "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$' "
-    "and remove the unsafe rule"
+_URL_REWRITE_INSPECTION = (
+    "inspect matching rules with 'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'"
 )
+_URL_REWRITE_RECOVERY = f"{_URL_REWRITE_INSPECTION} and remove the unsafe rule"
 
 
 class GitUrlRewriteError(ValueError):
@@ -159,7 +159,7 @@ class GitUrlRewriteProbeError(ValueError):
         self.category = category
         super().__init__(
             f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_RECOVERY}"
+            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
         )
 
 
@@ -244,7 +244,19 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
+        # A qualified lookup never searches the implicit Windows cwd. Python
+        # before 3.12 needs explicit PATHEXT candidates for qualified commands.
         candidate = shutil.which(str(directory / name))
+        if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
+            extensions = os.environ.get("PATHEXT") or (
+                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+            )
+            for extension in extensions.split(os.pathsep):
+                if not extension.startswith(".") or any(c in extension for c in "/\\:"):
+                    continue
+                candidate = shutil.which(str(directory / f"{name}{extension}"))
+                if candidate is not None:
+                    break
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
@@ -327,8 +339,8 @@ def redact_git_diagnostic(text: str) -> str:
     """Redact credentials and private key paths from Git diagnostics."""
     without_url_secrets = _DIAGNOSTIC_GIT_URL_RE.sub(_redact_git_diagnostic_url, text)
     without_userinfo = _URL_USERINFO_RE.sub(r"\1***@", without_url_secrets)
-    without_query_secrets = _URL_SECRET_QUERY_RE.sub(r"\1***", without_userinfo)
-    without_headers = _AUTH_HEADER_RE.sub(r"\1******", without_query_secrets)
+    query_redacted = _URL_SECRET_QUERY_RE.sub(r"\1***", without_userinfo)
+    without_headers = _AUTH_HEADER_RE.sub(r"\1******", query_redacted)
     without_env = _SECRET_ENV_ASSIGNMENT_RE.sub(r"\1=***", without_headers)
     without_tokens = _BARE_PLATFORM_TOKEN_RE.sub("***", without_env)
     without_labelled = _LABELLED_SECRET_RE.sub(r"\1\2***", without_tokens)
@@ -597,7 +609,13 @@ def _has_applicable_http_authorization(
     headers: Sequence[GitConfigEntry],
     env: dict[str, str],
 ) -> bool:
-    """Ask Git which URL-scoped extra headers apply to one remote."""
+    """Ask Git which URL-scoped extra headers apply to one HTTP(S) remote."""
+    try:
+        scheme = urlsplit(remote_url).scheme.lower()
+    except ValueError:
+        return False
+    if scheme not in {"http", "https"}:
+        return False
     direct_header = env.get("GIT_HTTP_EXTRAHEADER", "")
     if _is_valid_http_extraheader_value(direct_header) and _is_credential_bearing_http_header(
         direct_header
@@ -657,7 +675,7 @@ def _urlmatched_header_group(
     if result.returncode == 1:
         return ()
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git URL-match probe failed")
+        raise GitUrlRewriteProbeError(f"Git URL-match probe exited with status {result.returncode}")
     selected = result.stdout.rstrip(b"\0\n")
     prefix = b"X-Apm-Config-Probe: "
     if not selected.startswith(prefix):

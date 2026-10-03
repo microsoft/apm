@@ -266,6 +266,26 @@ class AuthResolver:
         with self._lock:
             self._cache.clear()
 
+    def resolve_github_mcp_token(self, *, source_only: bool = False) -> str | None:
+        """Select GitHub MCP auth without repository or external-helper fallback.
+
+        Runtime-capable clients request only the selected variable name.
+        Literal-only clients retain the historical Copilot token lookup.
+        The caller must first admit the MCP server's name and HTTPS host.
+        """
+        selected = (
+            self._token_manager.get_token_env_var_for_purpose("copilot")
+            if source_only
+            else self._token_manager.get_token_for_purpose("copilot")
+        )
+        if selected:
+            return selected
+        compatibility_name = "GITHUB_PERSONAL_ACCESS_TOKEN"
+        compatibility_token = os.environ.get(compatibility_name)
+        if source_only:
+            return compatibility_name if compatibility_token else None
+        return compatibility_token or None
+
     def has_cached_resolution(
         self,
         host: str,
@@ -1123,7 +1143,8 @@ class AuthResolver:
         4. Host-specific git credential helper
 
         Resolution order (``gitlab``): ``GITLAB_APM_PAT`` -> ``GITLAB_TOKEN`` ->
-        credential helper. GitHub env vars are not consulted.
+        credential helper when the remote transport permits lookup.
+        GitHub env vars are not consulted.
 
         Resolution order (``generic``): credential helper only (no GitHub or
         GitLab platform env vars).
@@ -1187,7 +1208,7 @@ class AuthResolver:
 
         # 4. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",) and (
-            host_info.kind != "generic" or allow_generic_credential_lookup
+            host_info.kind not in ("generic", "gitlab") or allow_generic_credential_lookup
         ):
             # Most primary resolution calls remain host-scoped. The public
             # github.com anonymous-first fallback supplies path= after a

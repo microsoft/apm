@@ -889,7 +889,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     is_flag=True,
     help=(
         "Refuse to install when apm.lock.yaml is missing or out of sync with "
-        "apm.yml, including MCP config state (CI-safe; mutually exclusive with "
+        "apm.yml, including Git source, ref, host provider, transport, and MCP "
+        "config state (CI-safe; mutually exclusive with "
         "--update, --mcp, and positional packages). Use 'apm audit' for on-disk "
         "integrity."
     ),

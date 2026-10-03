@@ -130,11 +130,11 @@ the [policy schema](../policy-schema/).
 
 ### `content-integrity`
 
-- **What it verifies.** Two signals across every deployed file (including local `.apm/` content via the synthesized self-entry), each with the scope its evidence allows:
-  1. Critical hidden Unicode (tag characters, bidi overrides, variation selectors 17-256, and similar steganographic markers), over **every file under the deploy trees the project's targets govern**. This signal needs no recorded baseline, so it is deliberately not limited to `deployed_files` -- otherwise a deployed file the lockfile omits would be exempt from scanning for as long as it stayed unrecorded.
+- **What it verifies.** Two independent signals, including local `.apm/` deployments recorded through the synthesized self-entry:
+  1. Critical hidden Unicode in recognized prompt documents and decoded native prompt fields. Discovery uses each resolved target's filenames and primitive patterns, including untracked files and shared hook settings. Recorded paths use the same applicability rules: tracking a command or script does not turn it into prompt text. Hook definitions remain visible even when their command-only content is not applicable to Unicode prompt checks. Session transcripts, history, caches, command strings and referenced executables are not scanned. See [Discovery and prompt coverage](../cli/audit/#discovery-and-prompt-coverage) for the format boundaries.
   2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against.
-- **Fails when.** Any deployed file contains a critical Unicode finding or its hash no longer matches the lockfile entry. Missing files are intentionally not reported here -- `deployed-files-present` owns that signal. Symlinks and entries without a recorded hash are skipped.
-- **Remediation.** Run `apm audit --strip` to clean Unicode findings, and `apm install` to restore hash-drifted files. Both may be needed.
+- **Fails when.** An applicable prompt contains critical Unicode, recognized content is unreadable or unsupported (incomplete coverage), a recorded hash differs, or a legacy hash lacks canonical ownership metadata. Missing files are reported by `deployed-files-present`; unrecorded files have no hash baseline. Existing path and symlink protections still apply.
+- **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files. Discovery does not grant ownership or permission to rewrite user configuration.
 
 ### `includes-consent`
 

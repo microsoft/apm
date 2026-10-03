@@ -30,6 +30,7 @@ import ssl
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -85,8 +86,6 @@ _TRUST_ENV_VARS = (
     "APM_DISABLE_TRUSTSTORE",
     "APM_EXTRA_CA_BUNDLE",
     "NODE_EXTRA_CA_CERTS",
-    "APM_NODE_EXTRA_CA_CERTS_IS_DERIVED_ADDITIVE",
-    "APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE",
     "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
 )
 
@@ -196,8 +195,11 @@ class _OkHandler(http.server.BaseHTTPRequestHandler):
 
 @contextlib.contextmanager
 def private_ca_https_server(
-    dirpath: Path, ca_common_name: str = "APM Test Root CA", *, handler=_OkHandler
-):
+    dirpath: Path,
+    ca_common_name: str = "APM Test Root CA",
+    *,
+    handler: type[http.server.BaseHTTPRequestHandler] = _OkHandler,
+) -> Iterator[SimpleNamespace]:
     """Run one private-CA loopback server and yield its trust material."""
     dirpath.mkdir(parents=True, exist_ok=True)
     try:
@@ -222,6 +224,8 @@ def private_ca_https_server(
             url=f"https://localhost:{port}/",
             ca_path=str(ca_pem),
             ca_pem=ca_pem,
+            srv_pem=srv_pem,
+            srv_key=srv_key,
             port=port,
         )
     finally:
@@ -297,7 +301,9 @@ def test_truststore_injection_keeps_verification_on(custom_ca_server):
         requests.get(custom_ca_server.url, timeout=5)
 
 
-def test_apm_extra_ca_bundle_trusts_private_ca(custom_ca_server, monkeypatch):
+def test_apm_extra_ca_bundle_trusts_private_ca(
+    custom_ca_server: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The real parent Requests stack accepts a selected private root."""
     monkeypatch.setenv("APM_EXTRA_CA_BUNDLE", custom_ca_server.ca_path)
     # Avoid permanently extending Requests' module-level preloaded context;
@@ -311,7 +317,9 @@ def test_apm_extra_ca_bundle_trusts_private_ca(custom_ca_server, monkeypatch):
     assert response.text == "ok"
 
 
-def test_apm_extra_ca_bundle_updates_requests_preloaded_context(custom_ca_server, monkeypatch):
+def test_apm_extra_ca_bundle_updates_requests_preloaded_context(
+    custom_ca_server: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Requests 2.32's successful preloaded-context path receives the extra CA."""
     original = ssl.create_default_context()
     monkeypatch.setattr(requests.adapters, "_preloaded_ssl_context", original, raising=False)
@@ -326,49 +334,10 @@ def test_apm_extra_ca_bundle_updates_requests_preloaded_context(custom_ca_server
     _assert_tls_handshake(custom_ca_server.port, published)
 
 
-def test_apm_run_propagates_extra_ca_to_real_child(custom_ca_server, tmp_path, apm_binary_path):
-    """The real CLI-to-runner boundary gives a shell child additive trust."""
-    project = tmp_path / "apm-run-project"
-    project.mkdir()
-    interpreter = Path(sys.executable).as_posix()
-    (project / "tls_probe.py").write_text(
-        "import sys, requests\n"
-        "response = requests.get(sys.argv[1], timeout=5)\n"
-        "print(response.text)\n",
-        encoding="ascii",
-    )
-    (project / "apm.yml").write_text(
-        "name: tls-probe\n"
-        'version: "0.1.0"\n'
-        "scripts:\n"
-        "  tls-probe: >-\n"
-        f'    "{interpreter}" tls_probe.py "{custom_ca_server.url}"\n',
-        encoding="ascii",
-    )
-    env = {key: value for key, value in os.environ.items() if key not in _TRUST_ENV_VARS}
-    env.update(
-        {
-            "APM_E2E_TESTS": "1",
-            "APM_EXTRA_CA_BUNDLE": custom_ca_server.ca_path,
-            "NO_PROXY": "localhost,127.0.0.1",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
-        }
-    )
-
-    result = subprocess.run(
-        [str(apm_binary_path), "run", "tls-probe"],
-        cwd=project,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "ok" in result.stdout.splitlines()
-
-
-def test_invalid_extra_ca_fails_before_real_cli_command(tmp_path, apm_binary_path):
+@pytest.mark.windows_compat
+def test_invalid_extra_ca_fails_before_real_cli_command(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
     """A fresh CLI reports one ASCII-safe error before executing the script."""
     project = tmp_path / "invalid-ca-project"
     project.mkdir()
@@ -392,7 +361,7 @@ def test_invalid_extra_ca_fails_before_real_cli_command(tmp_path, apm_binary_pat
     )
 
     result = subprocess.run(
-        [str(apm_binary_path), "run", "blocked"],
+        [*apm_engine_command, "run", "blocked"],
         cwd=project,
         env=env,
         capture_output=True,
@@ -409,7 +378,59 @@ def test_invalid_extra_ca_fails_before_real_cli_command(tmp_path, apm_binary_pat
     assert not sentinel.exists()
 
 
-def test_additive_ca_still_rejects_wrong_server_identity(custom_ca_server, monkeypatch):
+@pytest.mark.parametrize("fallback", [False, True], ids=["os-trust", "certifi-fallback"])
+def test_apm_run_does_not_export_additive_trust(
+    custom_ca_server: SimpleNamespace,
+    tmp_path: Path,
+    apm_engine_command: tuple[str, ...],
+    fallback: bool,
+) -> None:
+    """The real shell child keeps its own trust, including on parent fallback."""
+    (tmp_path / "probe.py").write_text(
+        "import os, requests, sys\n"
+        "assert not any(os.environ.get(key) for key in "
+        "('REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS'))\n"
+        "try:\n"
+        "    requests.get(sys.argv[1], timeout=5)\n"
+        "except requests.exceptions.SSLError:\n"
+        "    print('child rejected private CA')\n"
+        "else:\n"
+        "    raise AssertionError('APM exported additive trust to its child')\n",
+        encoding="ascii",
+    )
+    interpreter = Path(sys.executable).as_posix()
+    (tmp_path / "apm.yml").write_text(
+        'name: tls-scope\nversion: "0.1.0"\nscripts:\n  probe: >-\n'
+        f'    "{interpreter}" probe.py "{custom_ca_server.url}"\n',
+        encoding="ascii",
+    )
+    env = {key: value for key, value in os.environ.items() if key not in _TRUST_ENV_VARS}
+    env.update(
+        APM_EXTRA_CA_BUNDLE=custom_ca_server.ca_path,
+        APM_E2E_TESTS="1",
+        NO_PROXY="localhost,127.0.0.1",
+        PYTHONPATH=str(Path(__file__).resolve().parents[2] / "src"),
+    )
+    if fallback:
+        (tmp_path / "sitecustomize.py").write_text(
+            "import sys\nsys.modules['truststore'] = None\n", encoding="ascii"
+        )
+        env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env["PYTHONPATH"]
+    result = subprocess.run(
+        [*apm_engine_command, "run", "probe"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "child rejected private CA" in result.stdout
+
+
+def test_additive_ca_still_rejects_wrong_server_identity(
+    custom_ca_server: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Trusting the issuer never weakens hostname verification."""
     monkeypatch.setenv("APM_EXTRA_CA_BUNDLE", custom_ca_server.ca_path)
     monkeypatch.setattr(requests.adapters, "_preloaded_ssl_context", None, raising=False)
@@ -423,14 +444,22 @@ def test_additive_ca_still_rejects_wrong_server_identity(custom_ca_server, monke
 
 
 @pytest.mark.parametrize("failure", ["import", "publication"])
-def test_additive_ca_survives_real_requests_fallback(tmp_path, failure):
-    """A fresh process keeps stdlib SSL usable and reaches the CA on fallback."""
-    with private_ca_https_server(tmp_path / "fallback", "APM Fallback Extra Root") as server:
+def test_additive_ca_survives_real_requests_fallback(tmp_path: Path, failure: str) -> None:
+    """Both HTTP stacks retain default roots and verification on fallback."""
+    with (
+        private_ca_https_server(tmp_path / "fallback", "APM Fallback Extra Root") as server,
+        private_ca_https_server(tmp_path / "baseline", "APM Baseline Root") as baseline,
+        private_ca_https_server(tmp_path / "untrusted", "APM Untrusted Root") as untrusted,
+    ):
         probe = """
 import json
 import os
+import socket
 import ssl
 import sys
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
 
 import apm_cli.core.tls_trust as tls
 
@@ -440,7 +469,8 @@ else:
     original_install = tls._install_additive_ca_context
     def fail_after_publication(*args):
         original_install(*args)
-        raise RuntimeError("forced failure after additive TLS publication")
+        if args[0] is not tls._STDLIB_SSL_CONTEXT:
+            raise RuntimeError("forced failure after additive TLS publication")
     tls._install_additive_ca_context = fail_after_publication
 
 configured = tls.configure_tls_trust()
@@ -448,7 +478,26 @@ context = ssl.create_default_context()
 import requests
 
 response = requests.get(sys.argv[1], timeout=5)
-derived = os.environ["REQUESTS_CA_BUNDLE"]
+derived = os.environ.get("REQUESTS_CA_BUNDLE")
+with urllib.request.urlopen(sys.argv[1], timeout=5) as extra_response:
+    extra_status = extra_response.status
+with urllib.request.urlopen(sys.argv[3], timeout=5) as baseline_response:
+    baseline_status = baseline_response.status
+try:
+    urllib.request.urlopen(sys.argv[4], timeout=5)
+except urllib.error.URLError as exc:
+    assert isinstance(exc.reason, ssl.SSLCertVerificationError), exc
+else:
+    raise AssertionError("Untrusted root accepted")
+https_context = ssl._create_default_https_context()
+port = urlparse(sys.argv[1]).port
+with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+    try:
+        https_context.wrap_socket(connection, server_hostname="wrong.example")
+    except ssl.SSLCertVerificationError:
+        pass
+    else:
+        raise AssertionError("Wrong hostname accepted")
 print(json.dumps({
     "configured": configured,
     "ssl_module": type(context).__module__,
@@ -456,17 +505,17 @@ print(json.dumps({
     "verify_mode": int(context.verify_mode),
     "response_status": response.status_code,
     "response_text": response.text,
-    "derived_absolute": os.path.isabs(derived),
-    "marker_matches": (
-        os.environ["APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE"] == derived
-    ),
+    "derived_bundle": derived,
+    "stdlib_extra_status": extra_status,
+    "stdlib_baseline_status": baseline_status,
 }))
 """
         env = {key: value for key, value in os.environ.items() if key not in _TRUST_ENV_VARS}
         env["APM_EXTRA_CA_BUNDLE"] = server.ca_path
+        env["SSL_CERT_FILE"] = baseline.ca_path
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src")
         result = subprocess.run(
-            [sys.executable, "-c", probe, server.url, failure],
+            [sys.executable, "-c", probe, server.url, failure, baseline.url, untrusted.url],
             cwd=Path(__file__).resolve().parents[2],
             env=env,
             capture_output=True,
@@ -482,8 +531,9 @@ print(json.dumps({
         "verify_mode": int(ssl.CERT_REQUIRED),
         "response_status": 200,
         "response_text": "ok",
-        "derived_absolute": True,
-        "marker_matches": True,
+        "derived_bundle": None,
+        "stdlib_extra_status": 200,
+        "stdlib_baseline_status": 200,
     }
 
 
@@ -493,7 +543,9 @@ def _assert_tls_handshake(port: int, context: ssl.SSLContext) -> None:
             pass
 
 
-def test_additive_context_retains_independent_existing_root(tmp_path, monkeypatch):
+def test_additive_context_retains_independent_existing_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two independent synthetic roots prove the extra CA does not replace trust."""
     import urllib3.util.ssl_ as urllib3_ssl
 
@@ -504,7 +556,7 @@ def test_additive_context_retains_independent_existing_root(tmp_path, monkeypatc
         stdlib_context = ssl.SSLContext
 
         class SyntheticDefaultContext(stdlib_context):
-            def __init__(self, protocol=None):
+            def __init__(self, protocol: int | None = None) -> None:
                 # SSLContext configures PROTOCOL_TLS_CLIENT in __new__; loading
                 # this root here models the trust that existed before #2034.
                 self.load_verify_locations(cafile=baseline.ca_path)

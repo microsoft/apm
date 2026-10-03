@@ -25,6 +25,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from .test_tls_custom_ca import _OPENSSL_EXECUTABLE, _TRUST_ENV_VARS, private_ca_https_server
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(_OPENSSL_EXECUTABLE is None, reason="openssl CLI not available"),
@@ -33,7 +34,10 @@ pytestmark = [
 _GUIDE = "---\napplyTo: '**'\ndescription: TLS install fixture\n---\n# Corporate package\n"
 
 
-def test_apm_install_trusts_private_ca_and_retains_default_root(tmp_path, apm_engine_command):
+@pytest.mark.parametrize("fallback", [False, True], ids=["os-trust", "certifi-fallback"])
+def test_apm_install_trusts_private_ca_and_retains_default_root(
+    tmp_path: Path, apm_engine_command: tuple[str, ...], fallback: bool
+) -> None:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as package:
         package.writestr(
@@ -56,7 +60,7 @@ def test_apm_install_trusts_private_ca_and_retains_default_root(tmp_path, apm_en
     requests_seen = []
 
     class ArchiveHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self) -> None:
             path = urlparse(self.path).path
             if path == "/v1/packages/fixture/testrepo/versions":
                 body, content_type = versions, "application/json"
@@ -72,7 +76,7 @@ def test_apm_install_trusts_private_ca_and_retains_default_root(tmp_path, apm_en
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *_args):
+        def log_message(self, *_args: object) -> None:
             pass
 
     with (
@@ -99,6 +103,8 @@ def test_apm_install_trusts_private_ca_and_retains_default_root(tmp_path, apm_en
             stream.write(
                 "\nimport certifi\ncertifi.where = lambda: os.environ['APM_TEST_DEFAULT_CA']\n"
             )
+            if fallback:
+                stream.write("\nimport sys\nsys.modules['truststore'] = None\n")
         runner = ApmLifecycleRunner(apm_engine_command, timeout_seconds=45)
         enabled = runner.run(
             ("experimental", "enable", "registries"), cwd=isolated.work_root, env=env

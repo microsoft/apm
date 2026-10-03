@@ -107,7 +107,11 @@ class SafeMCPInstaller:
         summary = InstallationSummary()
 
         for server_ref in server_references:
-            if not replace_existing and self.conflict_detector.check_server_exists(server_ref):
+            cached_info = (server_info_cache or {}).get(server_ref)
+            exists_kwargs = {"server_info": cached_info} if cached_info else {}
+            if not replace_existing and self.conflict_detector.check_server_exists(
+                server_ref, **exists_kwargs
+            ):
                 summary.add_skipped(server_ref, "already configured")
                 self._log_skip(server_ref)
                 continue

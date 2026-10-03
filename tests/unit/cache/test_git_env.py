@@ -1,14 +1,17 @@
 """Tests for git subprocess environment sanitization."""
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
 import pytest
 
+from apm_cli.utils import git_env
 from apm_cli.utils.git_env import (
     _STRIP_GIT_VARS,
     GitConfigEntry,
@@ -23,6 +26,7 @@ from apm_cli.utils.git_env import (
     git_remote_refs,
     git_subprocess_env,
     git_subprocess_error_text,
+    git_url_has_authorization,
     reset_git_cache,
     set_git_authorization_header,
 )
@@ -43,6 +47,41 @@ def _run_real_git_config_and_fake_clone(args, **kwargs):
     return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Modern qualified PATHEXT lookup")
+@pytest.mark.parametrize("name", ["git", "gh"])
+def test_modern_windows_missing_lookup_scales_linearly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Count real stdlib candidate probes without repeating modern PATHEXT scans."""
+    project = tmp_path / "project"
+    trusted_bin = tmp_path / "tools"
+    project.mkdir()
+    trusted_bin.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(shutil, "sys", SimpleNamespace(platform="win32"))
+    counts = []
+    for size in (20, 200):
+        extensions = [f".EXT{index}" for index in range(size)]
+        monkeypatch.setenv("PATHEXT", os.pathsep.join(extensions))
+        monkeypatch.setattr(
+            git_env,
+            "os",
+            SimpleNamespace(
+                name="nt",
+                pathsep=";",
+                environ={"PATHEXT": ";".join(extensions)},
+                get_exec_path=lambda: [str(trusted_bin)],
+            ),
+        )
+        with patch("shutil._access_check", return_value=False) as access:
+            with pytest.raises(FileNotFoundError, match="trusted PATH"):
+                _resolve_trusted_executable(name)
+            counts.append(access.call_count)
+
+    assert counts == [20, 200]
+
+
+@pytest.mark.trusted_executable
 class TestGetGitExecutable:
     """Test cached git binary lookup."""
 
@@ -93,6 +132,7 @@ class TestGetGitExecutable:
         assert mock_resolve.call_count == 2
 
 
+@pytest.mark.trusted_executable
 class TestGetGhExecutable:
     """Test cached GitHub CLI binary lookup."""
 
@@ -111,6 +151,7 @@ class TestGetGhExecutable:
             get_gh_executable()
 
 
+@pytest.mark.trusted_executable
 class TestResolveTrustedExecutable:
     """Test exclusion of executable candidates controlled by the project."""
 
@@ -135,6 +176,92 @@ class TestResolveTrustedExecutable:
 
         assert result == str((trusted_bin / "git").resolve())
         mock_which.assert_called_once_with(str(trusted_bin / "git"))
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    @pytest.mark.parametrize("extension", [".EXE", ".CMD"])
+    def test_real_lookup_expands_extensions_without_searching_project_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, extension: str
+    ) -> None:
+        """Real filesystem lookup honors PATH even with a project-local shadow."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "trusted tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        filename = f"{name}{extension}" if sys.platform == "win32" else name
+        trusted_executable = trusted_bin / filename
+        trusted_executable.touch()
+        trusted_executable.chmod(0o700)
+        shadow = project / filename
+        shadow.touch()
+        shadow.chmod(0o700)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(project), str(trusted_bin)]))
+        monkeypatch.setenv("PATHEXT", ".EXE;.CMD")
+        monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
+
+        assert _resolve_trusted_executable(name) == str(trusted_executable.resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    @pytest.mark.parametrize("marker", [".git", "apm.yml"])
+    def test_real_lookup_excludes_nested_project_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, marker: str
+    ) -> None:
+        """Both repository and manifest roots exclude executable descendants."""
+        project = tmp_path / "project"
+        nested = project / "nested"
+        nested.mkdir(parents=True)
+        (project / marker).touch()
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        executable = project / filename
+        executable.touch()
+        executable.chmod(0o700)
+        monkeypatch.chdir(nested)
+        monkeypatch.setenv("PATH", str(project))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            _resolve_trusted_executable(name)
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_real_lookup_preserves_path_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """An earlier trusted PATH directory wins without recursive discovery."""
+        project = tmp_path / "project"
+        project.mkdir()
+        directories = [tmp_path / "first", tmp_path / "second"]
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        for directory in directories:
+            directory.mkdir()
+            executable = directory / filename
+            executable.touch()
+            executable.chmod(0o700)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", os.pathsep.join(map(str, directories)))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        assert _resolve_trusted_executable(name) == str((directories[0] / filename).resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_real_lookup_rejects_symlink_into_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """A trusted directory cannot redirect execution into the excluded project."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        target = project / filename
+        target.touch()
+        target.chmod(0o700)
+        (trusted_bin / filename).symlink_to(target)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", str(trusted_bin))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            _resolve_trusted_executable(name)
 
     def test_rejects_candidate_resolving_inside_worktree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -341,6 +468,7 @@ class TestGitSubprocessEnv:
         assert "Git config probe failed" in message
         assert "check Git configuration and retry" in message
         assert "--show-origin" in message
+        assert "remove the unsafe rule" not in message
         assert "private config detail" not in message
 
     def test_rewrite_probe_retries_once_after_timeout(self) -> None:
@@ -914,6 +1042,88 @@ class TestGitSubprocessEnv:
         ):
             clone_git_worktree(
                 "git@git.example.com:acme/repo",
+                tmp_path / "clone",
+                env=env,
+            )
+
+    def test_clone_allows_scp_ssh_rewrite_while_a_header_is_injected(self, tmp_path) -> None:
+        env = {
+            "PATH": os.environ["PATH"],
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Basic sentinel",
+            "GIT_CONFIG_KEY_1": "url.git@git.example.com:.insteadOf",
+            "GIT_CONFIG_VALUE_1": "https://git.example.com/",
+        }
+        with (
+            patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
+            patch(
+                "apm_cli.utils.git_env.subprocess.run",
+                side_effect=_run_real_git_config_and_fake_clone,
+            ) as run,
+        ):
+            clone_git_worktree(
+                "https://git.example.com/acme/repo",
+                tmp_path / "clone",
+                env=env,
+            )
+
+        argv = run.call_args_list[-1].args[0]
+        assert "clone" in argv
+        assert [urlsplit(arg).hostname for arg in argv if urlsplit(arg).scheme == "https"] == [
+            "git.example.com"
+        ]
+
+    def test_scp_ssh_url_reports_no_http_authorization_without_probing_git(self) -> None:
+        headers = (GitConfigEntry("command", "http.extraheader", "Authorization: Basic sentinel"),)
+        with patch(
+            "apm_cli.utils.git_env._git_config_run",
+            side_effect=AssertionError("the URL-match probe must not run for a non-HTTP URL"),
+        ) as probe:
+            authorized = git_url_has_authorization("git@git.example.com:acme/repo", headers)
+
+        assert authorized is False
+        probe.assert_not_called()
+
+    def test_http_urlmatch_failure_reports_status_without_raw_config(self) -> None:
+        headers = (GitConfigEntry("command", "http.extraheader", "Authorization: Basic sentinel"),)
+        result = subprocess.CompletedProcess(
+            ["git", "config"],
+            128,
+            stdout=b"",
+            stderr=b"private config detail",
+        )
+        with (
+            patch("apm_cli.utils.git_env._git_config_run", return_value=result),
+            pytest.raises(GitUrlRewriteProbeError) as raised,
+        ):
+            git_url_has_authorization("https://git.example.com/acme/repo", headers)
+
+        message = str(raised.value)
+        assert "Git URL-match probe exited with status 128" in message
+        assert "check Git configuration and retry" in message
+        assert "remove the unsafe rule" not in message
+        assert "private config detail" not in message
+
+    def test_malformed_rewrite_target_keeps_the_wrapped_safety_error(self, tmp_path) -> None:
+        env = {
+            "PATH": os.environ["PATH"],
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Basic sentinel",
+            "GIT_CONFIG_KEY_1": "url.https://[::1/.insteadOf",
+            "GIT_CONFIG_VALUE_1": "https://git.example.com/",
+        }
+        with (
+            patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
+            patch(
+                "apm_cli.utils.git_env.subprocess.run",
+                side_effect=_run_real_git_config_and_fake_clone,
+            ),
+            pytest.raises(ValueError, match="Unable to verify Git URL rewrite safety"),
+        ):
+            clone_git_worktree(
+                "https://git.example.com/acme/repo",
                 tmp_path / "clone",
                 env=env,
             )

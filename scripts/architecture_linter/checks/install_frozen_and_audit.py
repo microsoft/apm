@@ -94,6 +94,7 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         _present_re(owner, re.compile(r"^    def enforce_frozen\("))
         and _present_re(owner, re.compile(r"^    def reject_frozen_mutation\("))
         and _present_re(owner, re.compile(r"^    def reject_missing_frozen_root\("))
+        and _first_line(owner, "project_dir = get_lockfile_dir(request.scope)") is not None
     )
 
     def _before(first: int | None, second: int | None) -> bool:
@@ -326,7 +327,7 @@ def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, .
             "disable_flag": "serialized_lifecycle",
             "reset_flags": "serialized_lifecycle",
         },
-        "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle"},
+        "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle_unless"},
         "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless"},
         "src/apm_cli/commands/lifecycle.py": {
             "lifecycle_init": "serialized_lifecycle",

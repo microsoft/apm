@@ -2,6 +2,20 @@
   "version": 1,
   "owners": [
     {
+      "id": "orphan-package-selection",
+      "decision": "Declaration-aware selection of orphaned installed packages",
+      "owner": "commands/_helpers.py (_find_orphaned_packages)",
+      "selectors": ["src/apm_cli/commands/_helpers.py"],
+      "guards": ["install-deployment-orphan-selection"]
+    },
+    {
+      "id": "immutable-dependency-requirements",
+      "decision": "Commit-based compatibility of immutable dependency edges and frozen lock pins before hoisting",
+      "owner": "deps/immutable_requirements.py (ImmutableRequirements)",
+      "selectors": ["src/apm_cli/deps/immutable_requirements.py"],
+      "guards": ["install-deployment-immutable-requirements"]
+    },
+    {
       "id": "effective-package-target-authorization",
       "decision": "Effective package target authorization",
       "owner": "install/target_filter.py (resolve_effective_package_targets)",
@@ -18,8 +32,12 @@
     {
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
-      "owner": "deployment_ledger.py",
-      "selectors": ["src/apm_cli/core/deployment_ledger.py"],
+      "owner": "deployment_ledger.py; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
+      "selectors": [
+        "src/apm_cli/core/deployment_ledger.py",
+        "src/apm_cli/integration/skill_support.py",
+        "src/apm_cli/install/pipeline.py"
+      ],
       "guards": ["install-deployment-provenance-state"]
     },
     {

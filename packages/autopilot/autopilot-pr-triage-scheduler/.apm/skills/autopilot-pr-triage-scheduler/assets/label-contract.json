@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "authority": "GOVERNANCE.md and CONTRIBUTING.md: a responsible human maintainer records scope approval. Labels, recommendations and silence are not authorization. GitHub Triage access is not a per-label ACL.",
+  "human_decisions": {
+    "status/needs-triage": "Awaiting a human scope decision, even after automated advice.",
+    "status/needs-design": "Design discussion is required before implementation.",
+    "status/accepted": "Communicates human approval; the issue's human approval record is authoritative.",
+    "status/deferred": "Not invited for implementation now; never equivalent to accepted."
+  },
+  "human_metadata": ["priority/*", "help wanted", "good first issue", "milestone"],
+  "classification_labels": [
+    "theme/governance", "theme/portability", "theme/security",
+    "area/audit-policy", "area/ci-cd", "area/cli", "area/content-security",
+    "area/distribution", "area/docs-site", "area/enterprise", "area/lockfile",
+    "area/marketplace", "area/mcp-config", "area/mcp-trust", "area/multi-target",
+    "area/package-authoring", "area/testing",
+    "type/architecture", "type/automation", "type/bug", "type/docs",
+    "type/feature", "type/performance", "type/refactor", "type/release"
+  ],
+  "classification_policy": "Optional, useful classification only. No mandatory five-axis taxonomy. Add only existing allowlisted labels to empty dimensions; preserve human choices and discuss conflicts in the comment.",
+  "processing": {
+    "reviewed": "triage/recommended",
+    "requested": "triage/requested",
+    "read_reviewed": ["triage/recommended", "status/triaged"],
+    "request_triggers": ["triage/requested"],
+    "active_write_reviewed": "triage/recommended",
+    "removable": ["triage/requested"],
+    "meaning": "Advisory processing and deduplication only, never human acceptance."
+  },
+  "legacy_read_aliases": {
+    "needs-triage": "status/needs-triage",
+    "needs-design": "status/needs-design",
+    "accepted": "status/accepted",
+    "status/triaged": "triage/recommended",
+    "bug": "type/bug",
+    "enhancement": "type/feature",
+    "type/enhancement": "type/feature",
+    "documentation": "type/docs",
+    "docs": "type/docs",
+    "feature": "type/feature",
+    "architecture": "type/architecture",
+    "automation": "type/automation",
+    "CI/CD": "area/ci-cd",
+    "ci/cd": "area/ci-cd",
+    "cli": "area/cli",
+    "marketplace": "area/marketplace",
+    "performance": "type/performance",
+    "policy": "area/audit-policy",
+    "refactor": "type/refactor",
+    "security": "theme/security",
+    "testing": "area/testing"
+  },
+  "legacy_manual_review": [
+    "status/triage-pending", "status/blocked", "status/in-flight", "status/declined",
+    "needs-triage]", "enhancement]", "documentation]", "type/automation]"
+  ],
+  "legacy_policy": "Aliases are read compatibility, not migrations or proof of approval. Do not infer deferred versus accepted from historic bot labels. Preserve unknown labels; malformed and ambiguous names require human review. Shepherd status labels remain separate processing metadata.",
+  "rollout": [
+    "Canonical rollout requires a maintainer to provision triage/recommended and triage/requested before deploying this workflow on the default branch. Code changes alone do not provision or deploy labels.",
+    "Read both completed-advice markers but write only triage/recommended, the active_write_reviewed label, matching the workflow literal allowlist.",
+    "Read repository label definitions before any emission. If active_write_reviewed is missing or unreadable, stop with an actionable run-log error; do not create it or emit repeated advisory comments without durable deduplication.",
+    "Do not create, rename or delete live labels or milestones, migrate issues, or consume human status. Human decision labels remain separate from automated processing.",
+    "Keep both reviewed markers in read filters during rollout. Preserve legacy markers until separately approved migration and rollback have been checked. Never remove status/needs-triage when an advisory completes.",
+    "Request fresh advice with triage/requested or manual dispatch. status/needs-triage is no longer an event trigger and is never consumed.",
+    "Paginate oldest-first past skipped, reviewed and per-author-quota items until the eligible batch is full or candidates are exhausted. Never stop at an all-skipped first page.",
+    "Sweep list queries exclude processing.read_reviewed labels (triage/recommended and status/triaged) at GitHub so already-advised open issues and PRs are not downloaded. Explicit requests still fetch the named item. Do not write status/triaged."
+  ]
+}

@@ -117,7 +117,7 @@ def test_current_native_profiles_are_characterized() -> None:
         )
         for name, profile in KNOWN_TARGETS.items()
     }
-    assert actual == {
+    expected = {
         "copilot": (
             ".github",
             {
@@ -272,6 +272,22 @@ def test_current_native_profiles_are_characterized() -> None:
             None,
             "copilot_app",
         ),
+    }
+    prompt_fields = {
+        ("gemini", "commands"): ("prompt",),
+        ("codex", "agents"): ("developer_instructions",),
+    }
+    assert actual == {
+        name: (
+            root,
+            {
+                primitive: (*mapping, prompt_fields.get((name, primitive), ()))
+                for primitive, mapping in mappings.items()
+            },
+            family,
+            flag,
+        )
+        for name, (root, mappings, family, flag) in expected.items()
     }
 
 

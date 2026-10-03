@@ -27,23 +27,6 @@ function decisionLabel(decision) {
   return labels[decision] || decision;
 }
 
-function priorityClass(priority) {
-  if (!priority) return "prio-normal";
-  if (priority.includes("critical")) return "prio-critical";
-  if (priority.includes("high")) return "prio-high";
-  if (priority.includes("low")) return "prio-low";
-  return "prio-normal";
-}
-
-function priorityLabel(priority) {
-  if (!priority) return "--";
-  if (priority.includes("critical")) return "P0";
-  if (priority.includes("high")) return "P1";
-  if (priority.includes("medium") || priority.includes("normal")) return "P2";
-  if (priority.includes("low")) return "P3";
-  return priority.replace("priority/", "");
-}
-
 function typeLabel(type) {
   if (!type) return "--";
   return type.replace("type/", "");
@@ -79,11 +62,8 @@ export default function TriageTable(props) {
         <tr>
           <th class="clickable sortable" onClick={() => props.onSort("number")}>Issue{sortIndicator("number")}</th>
           <th>Title</th>
-          <th class="clickable sortable" onClick={() => props.onSort("decision")}>Decision{sortIndicator("decision")}</th>
-          <th class="clickable sortable" onClick={() => props.onSort("priority")}>Priority{sortIndicator("priority")}</th>
+          <th class="clickable sortable" onClick={() => props.onSort("decision")}>Recommendation{sortIndicator("decision")}</th>
           <th class="clickable sortable" onClick={() => props.onSort("type")}>Type{sortIndicator("type")}</th>
-          <th class="clickable sortable" onClick={() => props.onSort("status")}>Status{sortIndicator("status")}</th>
-          <th class="clickable sortable" onClick={() => props.onSort("milestone")}>Milestone{sortIndicator("milestone")}</th>
           <th>Next Action</th>
           <th>Action</th>
         </tr>
@@ -99,15 +79,7 @@ export default function TriageTable(props) {
                   class={`badge ${decisionClass(item.decision)} filterable`}
                   onClick={() => props.onFilter("decision", item.decision)}
                 >
-                  {decisionLabel(item.decision)}
-                </span>
-              </td>
-              <td>
-                <span
-                  class={`badge ${priorityClass(item.priority)} filterable`}
-                  onClick={() => props.onFilter("priority", item.priority)}
-                >
-                  {priorityLabel(item.priority)}
+                  {item.legacy ? "Legacy advice: " : "Recommend: "}{decisionLabel(item.decision)}
                 </span>
               </td>
               <td>
@@ -118,12 +90,6 @@ export default function TriageTable(props) {
                   {typeLabel(item.type)}
                 </span>
               </td>
-              <td>
-                <span class="badge" style={{ background: "#1f6feb20", color: "#58a6ff" }}>
-                  {item.status ? item.status.replace("status/", "") : "--"}
-                </span>
-              </td>
-              <td>{item.milestone || <span class="no-pr">--</span>}</td>
               <td class="title-cell" title={item.nextAction}>{item.nextAction || "--"}</td>
               <td class="action-cell">
                 <ActionDropdown

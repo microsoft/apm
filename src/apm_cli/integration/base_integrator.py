@@ -820,9 +820,19 @@ class BaseIntegrator:
 
         Used to scope discovery to ``.apm/`` and ``.github/`` instead of
         walking the entire project tree -- see issue #1507.
+
+        During drift replay *project_root* is the scratch directory;
+        fall back to ``root_local_project_root`` when set (same pattern
+        as ``HookIntegrator._is_root_local_package``).
         """
         try:
-            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+            resolved_install = Path(package_info.install_path).resolve()
+            if resolved_install == Path(project_root).resolve():
+                return True
+            root_local = getattr(package_info, "root_local_project_root", None)
+            if root_local is not None:
+                return resolved_install == Path(root_local).resolve()
+            return False
         except (OSError, RuntimeError):
             return False
 

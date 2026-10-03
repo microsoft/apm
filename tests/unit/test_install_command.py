@@ -1572,14 +1572,16 @@ class TestAllowInsecureFlag:
             assert "allow_insecure: true" in result.output
             assert "--allow-insecure" in result.output
 
-    def test_install_help_mentions_allow_insecure_for_http_deps(self):
-        """Install help should mention the HTTP allow-insecure flow."""
+    def test_install_help_describes_transport_and_frozen_identity(self):
+        """Install help describes opt-in HTTP and the frozen identity boundary."""
         result = self.runner.invoke(cli, ["install", "--help"])
 
         assert result.exit_code == 0
         normalized = " ".join(result.output.split())
         assert "use --allow-insecure for http:// packages" in normalized
         assert "--allow-insecure-host HOSTNAME" in result.output
+        assert "Git source, ref, host provider, transport, and MCP config state" in normalized
+        assert "Use 'apm audit' for on-disk integrity." in normalized
 
     def test_allow_insecure_host_rejects_non_hostname(self):
         """The explicit transitive host option only accepts bare hostnames."""

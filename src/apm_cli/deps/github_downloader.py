@@ -381,7 +381,7 @@ class GitHubPackageDownloader:
                     sparse_paths=sparse_paths,
                 )
 
-            return self.auth_resolver.try_with_fallback(
+            checkout = self.auth_resolver.try_with_fallback(
                 dep_ref.host or default_host(),
                 _checkout,
                 org=org,
@@ -392,13 +392,23 @@ class GitHubPackageDownloader:
                 base_env=self.git_env,
             )
 
-        return cache.get_checkout(
-            repository_url,
-            ref,
-            locked_sha=locked_sha,
-            env=self._cache_git_env(dep_ref),
-            sparse_paths=sparse_paths,
-        )
+        else:
+            checkout = cache.get_checkout(
+                repository_url,
+                ref,
+                locked_sha=locked_sha,
+                env=self._cache_git_env(dep_ref),
+                sparse_paths=sparse_paths,
+            )
+        resolver = getattr(self, "_tiered_resolver", None)
+        if (
+            resolver is not None
+            and locked_sha
+            and dep_ref.reference
+            and resolver.remotely_resolved(dep_ref, locked_sha) is True
+        ):
+            cache.remember_resolved_ref(repository_url, dep_ref.reference, locked_sha)
+        return checkout
 
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.

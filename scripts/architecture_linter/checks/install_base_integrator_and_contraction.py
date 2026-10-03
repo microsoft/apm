@@ -87,6 +87,25 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
                 + ", ".join(missing),
             ),
         )
+    native_path = "src/apm_cli/integration/skill_integrator.py"
+    native, native_fail = _facts_for(provider, native_path, rule_id)
+    if native_fail:
+        return tuple(native_fail)
+    definition = next(
+        (item for item in native.definitions if item.name == "_integrate_native_skill"), None
+    )
+    if definition is None or not any(
+        call.qualname == "self.check_collision"
+        and definition.line <= call.line <= definition.end_line
+        for call in native.calls
+    ):
+        return (
+            _summary(
+                rule_id,
+                native_path,
+                "Native root skills must route collision protection through BaseIntegrator.check_collision",
+            ),
+        )
     return ()
 
 
@@ -276,11 +295,15 @@ _UNTRUSTED_NAME_PARTS = ("ghost", "invalid", "removed_record", "violation")
 
 
 _REQUIRED_OWNER_CALLS = {
+    "src/apm_cli/install/phases/lockfile.py": ("merge_dependencies",),
     "src/apm_cli/commands/prune.py": ("legacy_value", "reconcile_owner_references"),
     "src/apm_cli/commands/audit.py": ("owner_reference_violations",),
     "src/apm_cli/commands/uninstall/cli.py": ("cleanup_snapshot",),
     "src/apm_cli/policy/ci_checks.py": ("owner_reference_violations",),
 }
+
+
+_SKILL_INTEGRATOR = "src/apm_cli/integration/skill_integrator.py"
 
 
 _OWNED_STATE_FIELDS = frozenset(
@@ -413,6 +436,100 @@ def _deployment_owner_findings(provider: FactsProvider, path: str, rule_id: str)
     for call in sorted(set(_REQUIRED_OWNER_CALLS.get(path, ())) - calls_seen):
         findings.append(
             violation(rule_id, path, f"required canonical call {call} is missing", line=1)
+        )
+    return findings
+
+
+def _skill_lockfile_root_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """User-scope skill ownership must read provenance from the canonical lockfile root."""
+    facts, fail = _facts_for(provider, _SKILL_INTEGRATOR, rule_id)
+    if fail:
+        return list(fail)
+
+    route_message = "user-scope skill ownership must route lockfile provenance through get_apm_dir(InstallScope.USER)"
+    forward_message = "skill ownership consumers must forward the canonical lockfile_root through every ownership-map integration path"
+    required_import = "from apm_cli.core.scope import InstallScope, get_apm_dir"
+    required_route = (
+        "get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root"
+    )
+    required_forward_count = 4
+    findings: list[Violation] = []
+    if not _present(facts, required_import) or not _present(facts, required_route):
+        findings.append(_summary(rule_id, _SKILL_INTEGRATOR, route_message))
+    support_path = "src/apm_cli/integration/skill_support.py"
+    support, support_failures = _facts_for(provider, support_path, rule_id)
+    findings.extend(support_failures)
+    if not _present(facts, "_build_ownership_maps = staticmethod(build_skill_ownership_maps)") or (
+        not support_failures
+        and not _present(support, "LockFile.read(get_lockfile_path(lockfile_root))")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _SKILL_INTEGRATOR,
+                "skill ownership maps must resolve deployment provenance from the selected lockfile_root",
+            )
+        )
+    if sum("lockfile_root=lockfile_root" in line for line in facts.lines) != required_forward_count:
+        findings.append(_summary(rule_id, _SKILL_INTEGRATOR, forward_message))
+    snapshot_body = _awk_body(
+        facts, re.compile(r"^    def ownership_snapshot\("), re.compile(r"^    def ")
+    )
+    accessor_body = _awk_body(
+        facts, re.compile(r"^    def _ownership_maps\("), re.compile(r"^    def ")
+    )
+    if not re.search(
+        r"finally:\s*\n\s+self\._ownership_snapshots = None",
+        "\n".join(snapshot_body),
+    ) or not all(
+        _body_has(accessor_body, snippet)
+        for snippet in (
+            "if self._ownership_snapshots is None:",
+            "return self._build_ownership_maps(lockfile_root)",
+            "root = lockfile_root.resolve()",
+            "self._build_ownership_maps(root)",
+            "MappingProxyType(owned_by)",
+            "MappingProxyType(native_owners)",
+        )
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _SKILL_INTEGRATOR,
+                "skill ownership snapshots must reuse the canonical builder immutably and expire on phase exit",
+            )
+        )
+    if (
+        sum("self._ownership_maps(lockfile_root or project_root)" in line for line in facts.lines)
+        != 3
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _SKILL_INTEGRATOR,
+                "all skill layouts must consume the phase-scoped ownership accessor",
+            )
+        )
+    pipeline_path = "src/apm_cli/install/pipeline.py"
+    pipeline, pipeline_failures = _facts_for(provider, pipeline_path, rule_id)
+    findings.extend(pipeline_failures)
+    if not pipeline_failures and (
+        not re.search(
+            r"with \(\s*contextlib\.nullcontext\(\)\s*if ctx\.lockfile_only\s*"
+            r'else ctx\.integrators\["skill"\]\.ownership_snapshot\(\)\s*\):\s*'
+            r'_run_phase\("integrate", _integrate_phase, ctx\)',
+            "\n".join(pipeline.lines),
+        )
+        or sum("_run_integration_phase(ctx)" in line for line in pipeline.lines) != 1
+        or sum('_run_phase("integrate", _integrate_phase, ctx)' in line for line in pipeline.lines)
+        != 1
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                pipeline_path,
+                "ownership snapshot lifetime must enclose only integration and bypass lockfile-only mode",
+            )
         )
     return findings
 
@@ -727,6 +844,7 @@ def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     findings: list[Violation] = []
     for path in _REQUIRED_OWNER_CALLS:
         findings.extend(_deployment_owner_findings(provider, path, rule_id))
+    findings.extend(_skill_lockfile_root_findings(provider, rule_id))
     findings.extend(_legacy_scope_findings(provider, rule_id))
     findings.extend(_state_mutation_findings(provider, rule_id))
     findings.extend(_local_bundle_findings(provider, rule_id))

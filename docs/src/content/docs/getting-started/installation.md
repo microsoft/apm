@@ -27,7 +27,7 @@ Use `brew upgrade apm`, not `apm self-update`; see the
 [Homebrew core update policy](../../reference/cli/self-update/#description).
 
 Homebrew is optional. Use the standalone installer below, [pip](#pip-install),
-[Scoop](#package-managers), or a [manual binary install](#manual-binary-install).
+[WinGet or Scoop](#package-managers), or a [manual binary install](#manual-binary-install).
 
 Already installed from `microsoft/apm/apm`? See
 [Migrate from the Microsoft tap](#migrate-from-the-microsoft-tap).
@@ -318,6 +318,16 @@ For `apm self-update`, run `apm self-update --check` with the same env vars and 
 
 **Homebrew (macOS/Linux):** See [Homebrew](#homebrew-macoslinux) above.
 
+**WinGet (Windows):**
+
+Requires [WinGet / App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget) on Windows 10 version 1809 or later.
+
+```powershell
+winget install --id Microsoft.APM --exact --source winget
+```
+
+Update with `winget upgrade --id Microsoft.APM --exact --source winget`, not `apm self-update`.
+
 **Scoop (Windows):**
 
 ```powershell
@@ -596,7 +606,7 @@ For existing installations, follow [ownership and migration](#unix-install-owner
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 
-Prebuilt Linux binaries require glibc 2.35+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or Python 3.10+ and pip. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
+Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.38+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or [pip with a working Python 3.10+](#pip-install). This glibc floor applies to prebuilt binaries, not your system Python. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
 
 ### Authentication errors when installing packages
 

@@ -1821,7 +1821,7 @@ Use this skill for comprehensive guidance.
         with patch.object(
             SkillIntegrator,
             "_build_ownership_maps",
-            return_value=({}, {"humanizer": "brandonwise/humanizer"}),
+            return_value=({}, {".agents/skills/humanizer": "brandonwise/humanizer"}),
         ):
             self.integrator.integrate_package_skill(pkg, self.project_root, diagnostics=diag)
 

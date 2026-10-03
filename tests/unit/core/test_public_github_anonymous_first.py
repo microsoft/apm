@@ -24,6 +24,7 @@ from apm_cli.deps.transport_selection import (
     TransportSelector,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.git_env import get_git_executable, git_network_env
 
 _GITHUB_TOKEN_ENV_NAMES = {
     "GH_TOKEN",
@@ -228,6 +229,88 @@ def test_public_github_fallback_preserves_caller_git_config_isolation(tmp_path: 
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
         assert env["GIT_ALLOW_PROTOCOL"] == "file"
         assert "GITHUB_APM_PAT_ACME" not in env
+
+
+def test_public_github_authenticated_retry_drops_header_after_real_ssh_rewrite(
+    tmp_path: Path,
+) -> None:
+    """The authenticated retry keeps the rewrite but loses HTTP auth on SSH."""
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text(
+        '[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n',
+        encoding="ascii",
+    )
+    base_env = {
+        "GIT_CONFIG_GLOBAL": str(git_config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "PATH": os.environ["PATH"],
+    }
+    resolver = AuthResolver()
+    attempts: list[tuple[str | None, dict[str, str], dict[str, str]]] = []
+    remote_url = "https://github.com/acme/widgets"
+
+    def operation(token: str | None, env: dict[str, str]) -> str:
+        child = git_network_env(remote_url, env)
+        attempts.append((token, env, child))
+        if token is None:
+            raise _HttpStatusError(404)
+        return "private-ok"
+
+    with patch.dict(
+        os.environ,
+        {"GITHUB_APM_PAT_ACME": "private-token", "PATH": os.environ["PATH"]},
+        clear=True,
+    ):
+        result = resolver.try_with_fallback(
+            "github.com",
+            operation,
+            org="acme",
+            path="acme/widgets",
+            unauth_first=True,
+            base_env=base_env,
+        )
+
+    assert result == "private-ok"
+    assert [token for token, _env, _child in attempts] == [None, "private-token"]
+    auth_retry_env = attempts[1][1]
+    auth_retry_child = attempts[1][2]
+    assert any(
+        key.lower().endswith("extraheader") and value.startswith("Authorization:")
+        for key, value in _indexed_git_config(auth_retry_env)
+    )
+    assert _git_auth_entries(auth_retry_child) == []
+
+    headers = subprocess.run(
+        (
+            get_git_executable(),
+            "config",
+            "--get-urlmatch",
+            "http.extraHeader",
+            remote_url,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        env=auth_retry_child,
+        cwd=tmp_path,
+    )
+    rewrites = subprocess.run(
+        (
+            get_git_executable(),
+            "config",
+            "--null",
+            "--get-regexp",
+            r"^url\..*\.insteadOf$",
+        ),
+        check=True,
+        capture_output=True,
+        env=auth_retry_child,
+        cwd=tmp_path,
+    )
+
+    assert headers.returncode == 1
+    assert headers.stdout == ""
+    assert rewrites.stdout == b"url.git@github.com:.insteadof\nhttps://github.com/\0"
 
 
 @pytest.mark.parametrize("secondary_source", ("gh", "git"))

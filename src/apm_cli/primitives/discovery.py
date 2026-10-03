@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils import perf_stats
 from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.path_security import ensure_path_within
+from ..utils.paths import portable_relpath
 from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
 
@@ -19,7 +21,7 @@ if TYPE_CHECKING:
     from ..compilation.inventory import CompileInventory
 
 logger = logging.getLogger(__name__)
-from ..deps.lockfile import LockFile  # noqa: E402
+from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read  # noqa: E402
 from ..models.apm_package import APMPackage  # noqa: E402
 
 # Common primitive patterns for local discovery (with recursive search)
@@ -314,124 +316,62 @@ def scan_dependency_primitives(
             )
 
 
-def get_dependency_declaration_order(base_dir: str) -> list[str]:
+def get_dependency_declaration_order(
+    base_dir: str, *, installation_root: Path | None = None
+) -> list[str]:
     """Get APM dependency installed paths in their declaration order.
 
     The returned list contains the actual installed path for each dependency,
     combining:
     1. Direct dependencies from apm.yml (highest priority, declaration order)
-    2. Transitive dependencies from apm.lock (appended after direct deps)
+    2. Transitive dependencies from the selected lockfile (after direct deps)
 
     This ensures transitive dependencies are included in primitive discovery
-    and compilation, not just direct dependencies. The installed path differs for:
-    - Regular packages: owner/repo (GitHub) or org/project/repo (ADO)
-    - Virtual packages: owner/virtual-pkg-name (GitHub) or org/project/virtual-pkg-name (ADO)
+    and compilation, not just direct dependencies. Canonical materialization
+    preserves host namespace depth, virtual subdirectories, aliases, and casing.
 
     Args:
         base_dir (str): Base directory containing apm.yml.
+        installation_root: Root containing the installed modules and lockfile.
+            Defaults to base_dir; may differ after ``apm install --root``.
 
     Returns:
         List[str]: List of dependency installed paths in declaration order.
     """
-    try:
-        apm_yml_path = Path(base_dir) / "apm.yml"
-        if not apm_yml_path.exists():
-            return []
-
+    project_root = Path(base_dir)
+    installed_root = installation_root if installation_root is not None else project_root
+    modules_root = installed_root / "apm_modules"
+    ensure_path_within(modules_root, installed_root)
+    apm_yml_path = project_root / "apm.yml"
+    ensure_path_within(apm_yml_path, project_root)
+    dependency_names: list[str] = []
+    if apm_yml_path.exists() or apm_yml_path.is_symlink():
         package = APMPackage.from_apm_yml(apm_yml_path)
-        apm_dependencies = package.get_apm_dependencies()
+        for dep in package.get_apm_dependencies():
+            # Marketplace references acquire their source coordinates at install;
+            # their resolved roots come from the lockfile below.
+            if not dep.is_marketplace:
+                dependency_names.append(
+                    portable_relpath(dep.get_install_path(modules_root), modules_root)
+                )
 
-        # Extract installed paths from dependency references
-        # Virtual file/collection packages use get_virtual_package_name() (flattened),
-        # while virtual subdirectory packages use natural repo/subdir paths.
-        dependency_names = []
-        for dep in apm_dependencies:
-            if dep.alias:
-                dependency_names.append(dep.alias)
-            elif dep.is_virtual:
-                repo_parts = dep.repo_url.split("/")
+    lockfile_path = resolve_lockfile_path_for_read(installed_root, read_only=True)
+    ensure_path_within(lockfile_path, installed_root)
+    lock = LockFile.read(lockfile_path)
+    if lock is not None:
+        dependency_names.extend(lock.get_installed_paths(modules_root))
+        # Local bundles stage primitives without adding a manifest dependency.
+        # Only lockfile-proven staging roots count, never arbitrary directories.
+        local_slugs: set[str] = set()
+        for deployed in lock.local_deployed_files:
+            parts = Path(deployed).parts
+            if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
+                local_slugs.add(parts[1])
+        for slug in sorted(local_slugs):
+            ensure_path_within(modules_root / slug, modules_root)
+            dependency_names.append(slug)
 
-                if dep.is_virtual_subdirectory() and dep.virtual_path:
-                    # Virtual subdirectory packages keep natural path structure.
-                    # GitHub: owner/repo/subdir
-                    # ADO: org/project/repo/subdir
-                    if dep.is_azure_devops() and len(repo_parts) >= 3:
-                        dependency_names.append(
-                            f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}/{dep.virtual_path}"
-                        )
-                    elif len(repo_parts) >= 2:
-                        dependency_names.append(
-                            f"{repo_parts[0]}/{repo_parts[1]}/{dep.virtual_path}"
-                        )
-                    else:
-                        dependency_names.append(dep.virtual_path)
-                else:
-                    # Virtual file/collection packages are flattened by package name.
-                    # GitHub: owner/virtual-pkg-name
-                    # ADO: org/project/virtual-pkg-name
-                    virtual_name = dep.get_virtual_package_name()
-                    if dep.is_azure_devops() and len(repo_parts) >= 3:
-                        dependency_names.append(f"{repo_parts[0]}/{repo_parts[1]}/{virtual_name}")
-                    elif len(repo_parts) >= 2:
-                        dependency_names.append(f"{repo_parts[0]}/{virtual_name}")
-                    else:
-                        dependency_names.append(virtual_name)
-            else:
-                # Regular packages: use full org/repo path
-                # This matches our org-namespaced directory structure
-                dependency_names.append(dep.repo_url)
-
-        # Include transitive dependencies + local-bundle slugs from the
-        # lockfile.  Read it once and reuse the parsed object for both
-        # the transitive-paths walk and the ``local_deployed_files``
-        # slug derivation (issue #1363) to avoid duplicate YAML parses
-        # on every compile.
-        project_root = Path(base_dir)
-        lockfile_path = project_root / "apm.lock.yaml"
-        if not lockfile_path.exists():
-            legacy = project_root / "apm.lock"
-            if legacy.exists():
-                lockfile_path = legacy
-        lock = LockFile.read(lockfile_path) if lockfile_path.exists() else None
-
-        direct_set = set(dependency_names)
-        if lock is not None:
-            for path in lock.get_installed_paths(project_root / "apm_modules"):
-                if path not in direct_set:
-                    dependency_names.append(path)
-
-        # Local-bundle install stages instructions under
-        # ``apm_modules/<slug>/.apm/...`` but intentionally does NOT
-        # mutate ``apm.yml`` (services.py:489-490), so the scan loop
-        # would otherwise never visit those staged dirs and
-        # ``apm compile`` would produce no output for compile-only
-        # targets (opencode, codex, gemini).
-        #
-        # Provenance is anchored to the lockfile record -- a stray
-        # directory under ``apm_modules/`` without a lockfile entry must
-        # not be discovered (defends against phantom-content injection
-        # and stale-debris drift).
-        if lock is not None:
-            local_slugs: set[str] = set()
-            for deployed in lock.local_deployed_files:
-                # Match ``apm_modules/<slug>/.apm/...`` only. Other
-                # deployed files (``.github/instructions/...``,
-                # ``.agents/skills/...``) are not bundle staging
-                # markers and must not produce phantom slugs.
-                parts = Path(deployed).parts
-                if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
-                    local_slugs.add(parts[1])
-            seen = set(dependency_names)
-            for slug in sorted(local_slugs):
-                if slug not in seen:
-                    dependency_names.append(slug)
-                    seen.add(slug)
-
-        return dependency_names
-
-    except Exception as e:
-        print(f"Warning: Failed to parse dependency order from apm.yml: {e}")
-        return []
+    return list(dict.fromkeys(dependency_names))
 
 
 def _matches_any_pattern(rel_path: str, patterns: list[str]) -> bool:

@@ -44,19 +44,18 @@ Controls how APM clones packages and enumerates refs on Git hosts. These setting
 
 ## TLS trust
 
-APM verifies HTTPS against the operating-system trust store by default, with bundled `certifi` as the Requests fallback. Use `APM_EXTRA_CA_BUNDLE` to add an enterprise CA to whichever default is active instead of replacing it. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
+APM verifies package-management HTTPS against the operating-system trust store by default, with bundled `certifi` as the Requests fallback. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for the full troubleshooting flow.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS trust-store injection. | unset | Disables APM's OS and additive trust propagation. It does not unset an independently configured `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`; those explicit replacements remain authoritative. |
-| `REQUESTS_CA_BUNDLE` | PEM bundle for APM's Python HTTP requests. | unset | Explicit replacement override; wins over `CURL_CA_BUNDLE`, additive trust, and the OS trust store. |
-| `CURL_CA_BUNDLE` | PEM bundle fallback honoured by `requests`. | unset | Explicit replacement override when `REQUESTS_CA_BUNDLE` is unset; wins over additive trust and the OS trust store. |
-| `APM_EXTRA_CA_BUNDLE` | Certificate-only PEM bundle to add to APM's normal TLS trust. | unset | Additive: truststore-backed parent contexts retain OS roots, the parent Requests fallback and Python/Requests children receive `certifi` plus the extra CA, and APM derives `NODE_EXTRA_CA_CERTS` for Node children unless that native variable is already set. A selected bundle that is missing, unreadable, empty, non-regular, over 8 MiB, non-ASCII, malformed, or contains a private-key block fails closed. |
-| `NODE_EXTRA_CA_CERTS` | PEM bundle added by Node.js to its normal roots. | unset | Native Node override. APM preserves an explicitly set value instead of replacing it with `APM_EXTRA_CA_BUNDLE`. |
+| `REQUESTS_CA_BUNDLE` | PEM bundle replacing APM's normal Requests trust. | unset | Wins over `CURL_CA_BUNDLE`, additive trust, and OS injection. |
+| `CURL_CA_BUNDLE` | Replacement PEM bundle honored by Requests. | unset | Used when `REQUESTS_CA_BUNDLE` is unset; suppresses additive trust and OS injection. |
+| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS/additive trust. | unset | Restores bundled `certifi` unless an explicit Requests/curl replacement is set. |
+| `APM_EXTRA_CA_BUNDLE` | Certificate-only PEM bundle added to APM package-management HTTPS. | unset | Retains OS roots, or `certifi` roots on Requests fallback. Invalid selected input fails closed: it must be a readable, non-empty regular file, no larger than 8 MiB, containing ASCII PEM certificates and no private keys. |
 
-Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, the OS trust store, then bundled `certifi` as the final Requests fallback. The `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` settings replace normal Requests trust; `APM_DISABLE_TRUSTSTORE` suppresses OS/additive propagation without deleting those replacements; `APM_EXTRA_CA_BUNDLE` augments the selected defaults. APM derives child settings only when the additive bundle wins this precedence.
+Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
 
-See [runtime coverage and limitations](../../troubleshooting/ssl-issues/#runtime-coverage) for Python, Node, Git, and Rust behavior, fallback trust, and snapshot lifetime.
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage).
 
 ## Registry (MCP and proxy)
 

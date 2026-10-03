@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.deps.plugin_parser import normalize_plugin_directory
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.integration.agent_integrator import AgentIntegrator
@@ -14,7 +15,7 @@ from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
-from apm_cli.integration.skill_integrator import copy_skill_to_target
+from apm_cli.integration.skill_integrator import SkillIntegrator, copy_skill_to_target
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.security.gate import SecurityGate
@@ -203,6 +204,81 @@ def test_source_only_canvas_content_is_not_authorized_for_scan(tmp_path: Path) -
         str(tmp_path / ".apm" / "extensions"),
         ["valid", "source-only"],
     ) == ["source-only"]
+
+
+@pytest.mark.parametrize(
+    ("layout", "package_type"),
+    [
+        (".", PackageType.CLAUDE_SKILL),
+        ("skills/demo", PackageType.SKILL_BUNDLE),
+        (".apm/skills/demo", PackageType.APM_PACKAGE),
+        ("skills/demo", PackageType.MARKETPLACE_PLUGIN),
+    ],
+)
+def test_package_skill_root_alias_preserves_authorization(
+    tmp_path: Path, layout: str, package_type: PackageType
+) -> None:
+    """Root aliases deploy real files without authorizing descendant links."""
+    source = tmp_path / "demo"
+    skill = source / layout
+    skill.mkdir(parents=True)
+    alias = tmp_path / "source-alias"
+    try:
+        alias.symlink_to(source, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks unavailable")
+    if package_type is PackageType.MARKETPLACE_PLUGIN:
+        manifest = source / ".claude-plugin" / "plugin.json"
+        manifest.parent.mkdir()
+        manifest.write_text('{"name":"demo","skills":["./skills/demo"]}\n', encoding="utf-8")
+    (skill / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+    references = skill / "references"
+    references.mkdir()
+    (references / "safe.md").write_text("safe resource\n", encoding="utf-8")
+    if package_type is PackageType.MARKETPLACE_PLUGIN:
+        normalize_plugin_directory(source, plugin_json_path=manifest)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.md"
+    secret.write_text("outside resource\n", encoding="utf-8")
+    (references / "escape.md").symlink_to(secret)
+    (references / "internal-link.md").symlink_to(references / "safe.md")
+    (skill / "linked-directory").symlink_to(outside, target_is_directory=True)
+    project = tmp_path / "project"
+    project.mkdir()
+    package_info = PackageInfo(
+        package=APMPackage(name="demo", version="1.0.0"),
+        install_path=alias,
+        package_type=package_type,
+    )
+    original_metadata = vars(package_info).copy()
+    targets = [KNOWN_TARGETS["codex"]]
+    plan = DeployableSourcePlan.create(
+        package_info,
+        targets,
+        skill_subset=None,
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+    )
+
+    result = SkillIntegrator().integrate_package_skill(
+        package_info,
+        project,
+        targets=targets,
+        source_plan=plan,
+        skip_bin=True,
+    )
+
+    assert vars(package_info) == original_metadata
+    assert len(result.target_paths) == 1
+    deployed = result.target_paths[0]
+    assert (deployed / "SKILL.md").read_text(encoding="utf-8") == "# Demo\n"
+    assert (deployed / "references" / "safe.md").read_text(encoding="utf-8") == "safe resource\n"
+    assert not (deployed / "references" / "escape.md").exists()
+    assert not (deployed / "references" / "internal-link.md").exists()
+    assert not (deployed / "linked-directory").exists()
+    assert not plan.includes((Path(layout) / "references" / "escape.md").as_posix())
 
 
 @pytest.mark.windows_compat

@@ -60,27 +60,27 @@ apm install --verbose
 
 APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This covers in-process commands such as `apm install` and the standalone frozen binary, with bundled `certifi` as a fallback.
 
-For the Python-based `llm` child runtime, `apm runtime setup llm` installs `truststore` in its virtual environment and adds a self-contained bootstrap. APM refreshes that bootstrap before managed `llm` launches, including after an APM upgrade. Corporate CAs installed in Keychain on macOS, through `update-ca-certificates`/`update-ca-trust` on Linux, or in the Windows Trusted Root store then work without APM-specific configuration. If `APM_EXTRA_CA_BUNDLE` is selected, both the APM parent and this managed Python child retain those native roots and add the certificates from the PEM bundle when `truststore` is available.
+**Scope caveat:** `APM_EXTRA_CA_BUNDLE` applies to APM's own package-management HTTPS, including installation, registry access, and downloads. It does not derive trust settings for experimental `apm run` children. Node/Copilot and Rust/Codex retain their runtime-owned trust configuration; configure Node's native `NODE_EXTRA_CA_CERTS` separately when needed.
 
-For ordinary Python/Requests children launched by `apm run`, APM creates an APM-owned merged snapshot containing bundled `certifi` roots plus the validated extra CA. For Node-based children such as Copilot, APM derives `NODE_EXTRA_CA_CERTS` from an extra-only snapshot. If you explicitly set `NODE_EXTRA_CA_CERTS`, APM preserves your value. Rust-based Codex retains its runtime-owned trust configuration.
+For the Python-based `llm` child runtime, `apm runtime setup llm` installs `truststore` in its virtual environment and adds a self-contained OS-trust bootstrap. Corporate CAs installed in Keychain on macOS, through `update-ca-certificates`/`update-ca-trust` on Linux, or in the Windows Trusted Root store then work without APM-specific configuration.
 
 You only need the settings below when the CA is *not* in the OS store, or you intentionally want to pin a replacement bundle:
 
 - `APM_EXTRA_CA_BUNDLE` adds a readable PEM bundle to APM's active defaults: OS roots while `truststore` is active, or bundled `certifi` for the Requests fallback. This is the recommended per-shell corporate CA setting.
 - `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` makes APM's Python HTTP layer verify against that bundle instead of the OS store. (`SSL_CERT_FILE` configures the stdlib `ssl` layer but is *not* read by `requests`, so on its own it does not override the HTTP path -- use `REQUESTS_CA_BUNDLE` for that.)
-- `APM_DISABLE_TRUSTSTORE=1` disables APM's OS/additive propagation. It does not unset `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`; an explicit replacement still controls Requests.
+- `APM_DISABLE_TRUSTSTORE=1` disables APM's OS/additive trust. It does not unset `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`; an explicit replacement still controls Requests.
 
-The exact order is `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, the OS trust store, then bundled `certifi` as the final Requests fallback. APM derives Python and Node child settings only when `APM_EXTRA_CA_BUNDLE` wins that precedence.
+The exact order is `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, the OS trust store, then bundled `certifi` as the final Requests fallback. Higher-precedence controls suppress additive-bundle validation. Leaving the extra bundle unset or blank preserves existing behavior.
 
 ### Runtime coverage
 
 | Path | Behaviour when `APM_EXTRA_CA_BUNDLE` is selected |
 |---|---|
-| APM parent Requests HTTP | Retains native OS roots and adds the selected PEM certificates; falls back to `certifi` plus the extra CA if OS injection is unavailable. |
-| Other parent stdlib HTTPS | Retains OS-plus-extra trust while truststore is active; on injection failure it uses the stdlib's own fallback and does not consult `REQUESTS_CA_BUNDLE`. |
-| Python/Requests child | Receives an APM-owned merged snapshot containing `certifi` roots plus the validated extra CA. |
-| Managed Python `llm` child | Also retains native OS roots through the refreshed bootstrap when `truststore` is available. |
-| Node/Copilot child | Receives the validated extra-only snapshot as `NODE_EXTRA_CA_CERTS` unless that native Node variable is already set. |
+| APM package-management Requests HTTPS | Retains native OS roots and adds the selected PEM certificates; falls back to `certifi` plus the extra CA if OS injection is unavailable. |
+| In-process stdlib metadata HTTPS | Receives OS-plus-extra trust while truststore is active; on injection failure its HTTPS context retains the stdlib defaults plus the extra certificates. |
+| Python/Requests execution child | Unchanged; no additive settings are derived. |
+| Managed Python `llm` child | Unchanged; the existing setup-time bootstrap still provides OS trust when available. |
+| Node/Copilot child | Unchanged; set `NODE_EXTRA_CA_CERTS` using the runtime's own trust settings. |
 | Git | Unchanged; configure `GIT_SSL_CAINFO` or Git's native trust settings separately. |
 | Rust/Codex | Unchanged; configure the runtime's own trust settings. |
 
@@ -88,9 +88,8 @@ The exact order is `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTO
 
 - Git uses its own trust configuration; `APM_EXTRA_CA_BUNDLE` does not change `git clone`, `git fetch`, or `git ls-remote`. Configure `GIT_SSL_CAINFO` separately when Git needs the same CA.
 - Rust-based Codex uses its own runtime trust configuration. APM does not translate `APM_EXTRA_CA_BUNDLE` into a Rust/OpenSSL setting.
-- If parent truststore injection is unavailable, the merged `certifi`-plus-extra fallback applies to Requests-based HTTPS. Parent code that directly uses the stdlib `urllib` stack does not read `REQUESTS_CA_BUNDLE` and retains its own default trust in that fallback mode.
-- An abnormal termination can leave an `apm_tls_*` snapshot directory beneath `~/.apm/tls/`. After confirming no APM process is using that directory, it can be removed.
-- The `llm` child runtime's OS-trust bootstrap needs the runtime venv's interpreter to be **Python 3.10+** (the `truststore` library requires 3.10). On systems where `apm runtime setup llm` builds the venv from a stock **Python 3.9** (for example Apple's `/usr/bin/python3`), `truststore` cannot install, so CAs present only in the OS store are unavailable to that child. Requests-based HTTPS still receives bundled `certifi` plus `APM_EXTRA_CA_BUNDLE`. Use a Python 3.10+ `python3` on your `PATH` before running setup when the child must use native OS trust.
+- If truststore injection is unavailable, Requests-based HTTPS retains `certifi` roots plus the extra certificates. The stdlib HTTPS context used by metadata requests retains its own default roots plus the extra certificates. Raw stdlib SSL contexts keep their existing settings.
+- The `llm` child runtime's OS-trust bootstrap needs the runtime venv's interpreter to be **Python 3.10+** (the `truststore` library requires 3.10). On systems where `apm runtime setup llm` builds the venv from a stock **Python 3.9** (for example Apple's `/usr/bin/python3`), `truststore` cannot install, so CAs present only in the OS store are unavailable to that child. That child keeps its existing certificate defaults; the additive APM setting does not apply to it. Use a Python 3.10+ `python3` on your `PATH` before running setup when the child must use native OS trust.
 - The initial `pip install` run *during* `apm runtime setup llm` uses pip's **own** certificate resolution, not APM's OS-trust path. Behind a MITM proxy, `pip` may fail to fetch `llm`/`truststore` before the bootstrap is even in place. Export `PIP_CERT=/path/to/org-ca-bundle.pem` (or run `pip config set global.cert /path/to/org-ca-bundle.pem`) before running setup so pip trusts your proxy CA.
 
 ## Configure trust
@@ -103,9 +102,9 @@ APM's primary Python HTTP paths use `requests`, a small number of metadata paths
 export APM_EXTRA_CA_BUNDLE=/path/to/corporate-ca.pem
 ```
 
-This retains native OS roots and adds the selected PEM certificates. If the APM parent cannot inject OS trust, Requests-based HTTPS retains the additive certificates over its `certifi` fallback. APM validates the bundle before using it: the file must be regular, readable, non-empty, no larger than 8 MiB, certificate-only ASCII PEM, and contain at least one certificate. Private-key blocks are rejected before any child snapshot is created. Before child launch, APM copies the validated bytes into an APM-owned per-process directory beneath `~/.apm/tls/`, so replacing the source file after validation cannot change the child's trust. Those snapshots are removed when the APM process exits normally. An invalid selected bundle fails closed, so the command or child launch stops rather than silently weakening or bypassing certificate verification.
+This retains native OS roots and adds the selected PEM certificates. If APM cannot inject OS trust, Requests-based HTTPS retains the additive certificates over its `certifi` fallback. APM validates one in-memory copy of the bundle before using it: the file must be regular, readable, non-empty, no larger than 8 MiB, certificate-only ASCII PEM, and contain at least one certificate. Private-key blocks are rejected. An invalid selected bundle fails closed before the command runs, rather than silently ignoring the requested trust or disabling verification. Set trust controls in the environment that launches APM.
 
-Use a replacement bundle only when you intend to pin the entire Python trust set:
+Use a replacement bundle only when you intend to pin the entire Requests trust set:
 
 ```bash
 export REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem
@@ -113,37 +112,13 @@ export REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem
 
 `REQUESTS_CA_BUNDLE` wins for `requests`. `SSL_CERT_FILE` / `SSL_CERT_DIR` cover parts of the stdlib TLS stack, but on their own they are not reliable overrides for the `requests` HTTP path APM uses.
 
-### Shell commands and per-script trust controls
-
-APM resolves trust precedence and prepares the child environment **before** an
-`apm.yml` shell command executes. Set `APM_EXTRA_CA_BUNDLE`,
-`APM_DISABLE_TRUSTSTORE`, `REQUESTS_CA_BUNDLE`, or `CURL_CA_BUNDLE` in the
-environment that launches APM. For example, on POSIX:
-
-```bash
-APM_DISABLE_TRUSTSTORE=1 apm run probe
-CURL_CA_BUNDLE=/path/to/replacement.pem apm run probe
-```
-
-Assignments inside the shell command remain shell-owned. An inline additive
-assignment is not translated into `NODE_EXTRA_CA_CERTS`; an inline opt-out or
-curl replacement cannot remove the Requests/Node settings APM already derived.
-An inline `REQUESTS_CA_BUNDLE` is honored by Requests, but does not remove an
-inherited Node CA setting. Likewise, Node honors an explicit `NODE_EXTRA_CA_CERTS`
-but does not interpret APM's opt-out variable. A nested APM invocation recomputes
-its own child environment and clears inherited APM-derived values when its
-disable or replacement controls win; a direct Python/Node child does not perform
-that APM step.
-
 ### Node children
 
-Normally, set only `APM_EXTRA_CA_BUNDLE`; APM passes its validated extra-only snapshot to Node children through `NODE_EXTRA_CA_CERTS`. To use a different Node-specific bundle, set it explicitly:
+Configure Node independently; APM does not translate `APM_EXTRA_CA_BUNDLE` into a Node setting:
 
 ```bash
 export NODE_EXTRA_CA_CERTS=/path/to/node-ca-bundle.pem
 ```
-
-APM never overwrites this explicit native Node setting.
 
 ### Git operations
 
@@ -218,7 +193,7 @@ APM_LOG_LEVEL=DEBUG apm install
 GIT_CURL_VERBOSE=1 git ls-remote https://github.example.com/org/repo.git 2>&1 | grep -i 'ssl\|cert'
 ```
 
-The debug output identifies whether APM selected the OS trust store, additive bundle, replacement bundle, or `certifi` fallback. That line plus a clean install confirms APM's in-process Python path; a successful `ls-remote` confirms Git trust separately. Verify the managed `llm` child and Node child with their normal HTTPS-backed commands.
+The debug output identifies whether APM selected the OS trust store, additive bundle, replacement bundle, or `certifi` fallback. That line plus a clean install confirms APM's in-process Python path; a successful `ls-remote` confirms Git trust separately.
 
 ## Development-only escape hatches
 

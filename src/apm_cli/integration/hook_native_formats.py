@@ -2,16 +2,160 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from apm_cli.hook_contract import (
+    HOOK_COMMAND_KEYS,
+    HookContractError,
     HookDocument,
     HookHandler,
     _entries_to_ir,
     _handler_to_ir,
+    hook_handlers,
 )
 
 _ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
+
+
+@dataclass(frozen=True)
+class HookContentEntry:
+    """Discovered native hook content, independent of ownership and safety."""
+
+    pointer: str
+    prompt: str | None = None
+    error: str | None = None
+
+
+def _inspect_handler(
+    value: dict[str, Any],
+    pointer: str,
+    prompt_types: tuple[str, ...],
+    command_keys: tuple[str, ...] = ("command",),
+) -> HookContentEntry:
+    """Classify one documented handler without inspecting command text."""
+    kind = value.get("type", "command")
+    if kind in prompt_types:
+        prompt = value.get("prompt")
+        if isinstance(prompt, str):
+            return HookContentEntry(f"{pointer}/prompt", prompt=prompt)
+        return HookContentEntry(pointer, error="prompt handler requires a string prompt")
+    if kind == "command":
+        commands = [value[key] for key in command_keys if key in value]
+        if commands and all(isinstance(command, str) for command in commands):
+            return HookContentEntry(pointer)
+        return HookContentEntry(pointer, error="command handler requires string command fields")
+    return HookContentEntry(pointer, error="unsupported native hook handler type")
+
+
+def inspect_native_hooks(
+    document: object,
+    format_id: str,
+    *,
+    container: str = "hooks",
+    prompt_types: tuple[str, ...] = (),
+    named_containers: bool = False,
+    shared: bool = False,
+    nested_handlers: bool | None = None,
+) -> tuple[HookContentEntry, ...]:
+    """Read only documented native hook containers and prompt-bearing fields."""
+    if not isinstance(document, dict):
+        return (HookContentEntry("", error="hook document must be an object"),)
+    if format_id == "kiro_hooks":
+        if document.get("version") != "v1" or not isinstance(document.get("hooks"), list):
+            return (HookContentEntry("", error="unsupported Kiro hook document"),)
+        result = []
+        for index, hook in enumerate(document["hooks"]):
+            pointer = f"/hooks/{index}"
+            if (
+                not isinstance(hook, dict)
+                or not isinstance(hook.get("trigger"), str)
+                or not isinstance(hook.get("action"), dict)
+            ):
+                result.append(HookContentEntry(pointer, error="invalid Kiro hook action"))
+            else:
+                result.append(_inspect_handler(hook["action"], f"{pointer}/action", ("agent",)))
+        return tuple(result)
+    if format_id not in {
+        "github_hooks",
+        "claude_hooks",
+        "cursor_hooks",
+        "codex_hooks",
+        "gemini_hooks",
+        "antigravity_hooks",
+        "windsurf_hooks",
+    }:
+        return (HookContentEntry("", error="unsupported native hook format"),)
+    if format_id in {"github_hooks", "cursor_hooks"}:
+        version = document.get("version", 1)
+        if type(version) is not int or version != 1:
+            return (HookContentEntry("", error="unsupported native hook version"),)
+    if named_containers:
+        containers = [
+            (f"/{name.replace('~', '~0').replace('/', '~1')}", value)
+            for name, value in document.items()
+            if name != "version"
+        ]
+    elif container in document:
+        containers = [(f"/{container}", document[container])]
+    elif shared:
+        return ()
+    else:
+        return (HookContentEntry("", error="missing native hook container"),)
+    result: list[HookContentEntry] = []
+    for prefix, events in containers:
+        try:
+            handlers = hook_handlers({"hooks": events})
+        except HookContractError as exc:
+            # Shape errors can include user-controlled event names. The diagnostic
+            # identifies the container instead of echoing its contents.
+            result.append(
+                HookContentEntry(prefix, error=f"invalid hook container ({type(exc).__name__})")
+            )
+            continue
+        for handler in handlers:
+            nested = (
+                handler.event in _ANTIGRAVITY_NESTED_EVENTS if named_containers else nested_handlers
+            )
+            is_child = "/hooks/" in handler.json_pointer.removeprefix("/hooks/")
+            if not is_child and nested is True and not isinstance(handler.value.get("hooks"), list):
+                result.append(
+                    HookContentEntry(
+                        prefix + handler.json_pointer.removeprefix("/hooks"),
+                        error="native hook event requires nested handlers",
+                    )
+                )
+                continue
+            if not is_child and nested is False and "hooks" in handler.value:
+                result.append(
+                    HookContentEntry(
+                        prefix + handler.json_pointer.removeprefix("/hooks"),
+                        error="native hook event requires flat handlers",
+                    )
+                )
+                continue
+            if is_child and nested is False:
+                continue
+            if is_child and "hooks" in handler.value:
+                result.append(
+                    HookContentEntry(
+                        prefix + handler.json_pointer.removeprefix("/hooks"),
+                        error="unsupported additional hook nesting",
+                    )
+                )
+                continue
+            if isinstance(handler.value.get("hooks"), list):
+                continue
+            pointer = prefix + handler.json_pointer.removeprefix("/hooks")
+            result.append(
+                _inspect_handler(
+                    dict(handler.value),
+                    pointer,
+                    prompt_types,
+                    HOOK_COMMAND_KEYS if format_id == "github_hooks" else ("command",),
+                )
+            )
+    return tuple(result)
 
 
 def _handler_from_ir(handler: HookHandler, *, timeout_milliseconds: bool) -> dict[str, Any]:
@@ -83,6 +227,14 @@ def _to_claude_hook_entries(entries: list) -> list:
         _entries_to_ir(entries),
         timeout_milliseconds=False,
         default_matcher="*",
+    )
+
+
+def _to_codex_hook_entries(entries: list) -> list:
+    """Render portable bindings in Codex's nested hook schema."""
+    return _render_nested_document(
+        _entries_to_ir(entries),
+        timeout_milliseconds=False,
     )
 
 

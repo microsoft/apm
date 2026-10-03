@@ -102,11 +102,30 @@ browse / install / update workflow works against:
   HTTPS.
 
 Remote package entries keep their own source identity independently of the
-marketplace registration. This includes a GitHub.com marketplace that points
-to a package on a self-hosted Git server and a generated `git-subdir` entry
-for a self-hosted GitLab monorepo. APM preserves the package host, path, and
-ref in `apm.yml` and `apm.lock.yaml`. Invalid URLs and unsafe subdirectory
+marketplace registration. Version lookup uses the package repository's tags,
+not the catalog's; packages inside the catalog repository use its tags.
+APM preserves the package's host, port, explicit transport, SSH user, path,
+and ref. A catalog on port `8443` does not change a package's default HTTPS
+port, even when both URLs share the same hostname and repository path.
+An explicit SSH source stays SSH. Lookup and installation use the same package
+identity; bare cross-repository entries retain their normal dependency defaults.
+Invalid URLs and unsafe subdirectory
 paths fail before manifest, lockfile, or deployment writes.
+
+Use `apm install pkg@catalog#v1.0.1` for a literal Git tag. For a range, declare
+the marketplace dependency in `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - name: pkg
+      marketplace: catalog
+      version: "^1.0.0"
+```
+
+APM selects the highest matching package tag using the publisher's
+`source.tag_pattern`. No match is an error; it does not fall back to catalog
+tags or treat the range as a raw ref.
 
 Marketplace entries can also provide inline LSP or MCP servers when their
 downloaded source has no package manifest. APM validates these

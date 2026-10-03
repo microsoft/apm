@@ -15,17 +15,24 @@ from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration.test_required_lifecycle_state_machine import (
+    _EXTERNAL_USER_ROOT_ENV,
     _OWNER,
     _assert_same_state,
     _audit,
     _hook,
     _instruction,
     _new_scenario,
+    _publish,
+    _publish_revision,
     _result_evidence,
     _run_success,
     _skill,
 )
-from tests.utils.artifact_snapshot import ArtifactSnapshotSet, assert_snapshot_set_unchanged
+from tests.utils.artifact_snapshot import (
+    ArtifactSnapshotSet,
+    assert_snapshot_changes_within,
+    assert_snapshot_set_unchanged,
+)
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackage
 
@@ -250,7 +257,9 @@ def _all_project_sentinels(project_root: Path) -> tuple[_Sentinel, ...]:
             relative_paths.setdefault(relative, _sentinel_content("project-generated", relative))
         for primitive, mapping in profile.primitives.items():
             relative = _mapping_sentinel_path(profile, primitive, mapping)
-            relative_paths.setdefault(relative, _sentinel_content("project", relative))
+            relative_paths.setdefault(
+                relative, _primitive_sentinel_content("project", relative, mapping)
+            )
     return tuple(
         _Sentinel("workspace", project_root, relative, content)
         for relative, content in sorted(relative_paths.items(), key=lambda item: item[0].as_posix())
@@ -292,7 +301,7 @@ def _all_user_sentinels(
                     _root_id(root_dir),
                     root,
                     relative,
-                    _sentinel_content(f"user-{profile.name}", relative),
+                    _primitive_sentinel_content(f"user-{profile.name}", relative, mapping),
                 ),
             )
     return tuple(
@@ -342,6 +351,23 @@ def _mapping_sentinel_path(
 
 def _sentinel_content(label: str, relative_path: PurePosixPath) -> bytes:
     return _SENTINEL_PREFIX + f"{label}:{relative_path.as_posix()}\n".encode("ascii")
+
+
+def _primitive_sentinel_content(
+    label: str, relative: PurePosixPath, mapping: PrimitiveMapping
+) -> bytes:
+    """Happy-path ownership sentinels must also be valid recognized native content."""
+    marker = _sentinel_content(label, relative).decode("ascii")
+    if mapping.prompt_fields:
+        return "\n".join(
+            f"{field} = {json.dumps(marker)}" for field in mapping.prompt_fields
+        ).encode()
+    if mapping.extension == ".json":
+        document = {"user_sentinel": marker, "hooks": {}}
+        if mapping.format_id == "kiro_hooks":
+            document.update(version="v1", hooks=[])
+        return json.dumps(document).encode()
+    return marker.encode()
 
 
 def _root_id(root_dir: str) -> str:
@@ -554,7 +580,9 @@ def test_unrecognized_claude_plugin_schema_falls_back_to_legacy_structure(
     assert skill_path.is_file(), _result_evidence(result)
     assert skill_path.read_bytes() == skill_bytes
     assert result.returncode == 0, _result_evidence(result)
-    assert "Unrecognized plugin manifest $schema" in result.stdout + result.stderr
+    assert "Unrecognized plugin manifest $schema" in " ".join(
+        (result.stdout + result.stderr).split()
+    )
 
 
 @pytest.mark.parametrize(
@@ -804,3 +832,108 @@ def test_apm_install_dry_run_preserves_complete_unowned_state(
     assert (scenario.isolated.config_root / "apm_modules").exists() is False
     _assert_same_state(before, after)
     assert_snapshot_set_unchanged(before_artifacts, after_artifacts)
+
+
+def test_global_update_preserves_owned_external_skill_targets(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """User-scope update must reuse the user lockfile for external skill ownership."""
+    scenario = _new_scenario(tmp_path / "global-update-external-skills", apm_binary_path)
+    published = _publish(scenario, "global-audit-kit", skill="global-audit")
+    commit_a = _publish_revision(scenario, published, "a")
+    dependency = {**published.dependency, "ref": "main"}
+    consumer = LocalPackage(
+        "global-update-consumer",
+        scenario.isolated.work_root,
+        scenario.isolated.config_root / "apm.yml",
+    )
+    external_roots = {
+        target: scenario.isolated.root / f"{target}-home" for target in ("claude", "hermes")
+    }
+    for root in external_roots.values():
+        root.mkdir(parents=True)
+
+    environment = dict(published.environment)
+    for target, root in external_roots.items():
+        environment[_EXTERNAL_USER_ROOT_ENV[target]] = str(root)
+
+    dump_yaml(
+        {
+            "name": consumer.name,
+            "version": "0.1.0",
+            "dependencies": {"apm": [dependency]},
+            "targets": ["claude", "hermes"],
+        },
+        consumer.manifest_path,
+    )
+
+    install_args = ("install", "--global", "--no-policy", "--parallel-downloads", "0")
+    _run_success(
+        scenario,
+        consumer,
+        install_args,
+        environment=environment,
+        scenario_id="global-update-external-install",
+    )
+
+    commit_b = _publish_revision(scenario, published, "b")
+    update = _run_success(
+        scenario,
+        consumer,
+        ("update", "--global", "--yes", "--parallel-downloads", "0", "--verbose"),
+        environment=environment,
+        scenario_id="global-update-external-update",
+    )
+
+    expected_skill = (_skill("global-audit") + "\nrevision-b\n").encode()
+    claude_skill = external_roots["claude"] / "skills" / "global-audit" / "SKILL.md"
+    hermes_skill = external_roots["hermes"] / "skills" / "global-audit" / "SKILL.md"
+    assert claude_skill.read_bytes() == expected_skill
+    assert hermes_skill.read_bytes() == expected_skill
+    assert "file skipped (local files exist)" not in (update.stdout + update.stderr)
+    installed_cache = scenario.isolated.config_root / "apm_modules" / "global-audit-kit"
+    non_alias_cache = scenario.isolated.config_root / "apm_modules" / _OWNER / "global-audit-kit"
+    assert (installed_cache / "skills" / "global-audit" / "SKILL.md").read_bytes() == (
+        expected_skill
+    )
+    assert not non_alias_cache.exists()
+
+    lock = LockFile.read(scenario.isolated.config_root / "apm.lock.yaml")
+    assert lock is not None
+    dependency_lock = lock.get_package_dependencies()[0]
+    assert dependency_lock.alias == "global-audit-kit"
+    assert dependency_lock.resolved_commit == commit_b.sha
+    deployed = set(dependency_lock.deployed_files)
+    assert str(claude_skill) in deployed
+    assert str(hermes_skill) in deployed
+    assert str(claude_skill.parent) in deployed
+    assert str(hermes_skill.parent) in deployed
+    assert str(external_roots["claude"] / "rules" / "revision.md") in deployed
+
+    artifact_roots = {
+        "project": consumer.root,
+        "user": scenario.isolated.home,
+        **external_roots,
+    }
+    before_compile = ArtifactSnapshotSet.capture(artifact_roots)
+    _run_success(
+        scenario,
+        consumer,
+        ("compile", "--global"),
+        environment=environment,
+        scenario_id="global-update-external-compile",
+    )
+    native_claude = external_roots["claude"] / "rules" / "revision.md"
+    assert native_claude.read_text(encoding="utf-8") == "# revision-b\n"
+    assert not (external_roots["claude"] / "CLAUDE.md").exists()
+    compiled_hermes = (external_roots["hermes"] / "AGENTS.md").read_text(encoding="utf-8")
+    assert "# revision-b" in compiled_hermes
+    assert "# revision-a" not in compiled_hermes
+    assert_snapshot_changes_within(
+        before_compile,
+        ArtifactSnapshotSet.capture(artifact_roots),
+        exact_paths={"hermes": {"AGENTS.md"}},
+        tree_prefixes={},
+    )
+    assert commit_a.sha != commit_b.sha

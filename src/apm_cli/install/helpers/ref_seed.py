@@ -17,8 +17,8 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
 
     For every locked dep that records a concrete ``resolved_commit`` for a
     named ``resolved_ref`` (a branch or tag), inject ``ref -> commit`` into
-    the per-run cache BEFORE resolution runs. Any later
-    ``resolve_git_reference()`` for that (repo, ref) then hits L0 and never
+    the dependency-scoped lock-seed cache BEFORE resolution runs. Any later
+    ``resolve_git_reference()`` for that dependency and ref hits L0 and never
     fires the commits-API tier (L1) or a clone.
 
     This closes a gap the semver lockfile-replay path
@@ -35,8 +35,10 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     changed pin is still caught and re-resolved.
 
     Cache-key invariant: the locked dependency is reconstructed as a
-    ``DependencyReference`` so host, port, and complete repository path flow
-    through the same normalized identity as ``resolve()``.
+    ``DependencyReference`` so its complete package identity, repository
+    transport, and effective host provider match ``resolve()``. A sibling
+    virtual package cannot inherit this seed; only fresh upstream answers
+    are shared repository-wide.
     """
     from apm_cli.deps.tiered_ref_resolver import ref_freshness_policy_for_install
 

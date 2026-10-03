@@ -1065,7 +1065,7 @@ class TestRunBaselineChecks:
     def test_no_apm_yml(self, tmp_path):
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 1  # only lockfile-exists
+        assert [check.name for check in result.checks] == ["lockfile-exists", "content-integrity"]
 
     def test_stops_early_on_lockfile_missing(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo"])

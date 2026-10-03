@@ -8,7 +8,12 @@ parse so converters and the placement optimizer behave consistently.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
+
+import yaml
+
+from apm_cli.utils.yaml_io import load_yaml_str
 
 _APPLY_TO_ESCAPE = "\\"
 _APPLY_TO_SEPARATOR = ","
@@ -90,6 +95,82 @@ def yaml_double_quote(value: str) -> str:
     return json.dumps(value, ensure_ascii=True)
 
 
+def yaml_plain_scalar(value: str) -> str:
+    """Render ``value`` in the least-quoted valid YAML scalar form.
+
+    Prefer a bare scalar when it round-trips losslessly
+    through YAML's own resolver, fall back to a single-quoted scalar
+    (still no backslash escaping) when the value merely needs
+    delimiting, and only resort to a double-quoted scalar for values
+    neither can represent, such as one containing a newline. Unlike
+    :func:`yaml_double_quote`, this never forces ``\\uXXXX`` escaping of
+    printable non-ASCII text -- the escaping there is ASCII-only
+    defence-in-depth for targets that always quote; here, the bare and
+    single-quoted forms already avoid backslash escapes entirely, so
+    the double-quoted fallback keeps UTF-8 literal for the same reason.
+
+    Introduced for the Cursor target (issue #3002); other converters
+    keep their existing always-double-quoted behavior via
+    :func:`yaml_double_quote`.
+    """
+    if not _YAML_UNSAFE_SCALAR_RE.search(value):
+        if _yaml_scalar_round_trips(value, value):
+            return value
+        single_quoted = "'" + value.replace("'", "''") + "'"
+        if _yaml_scalar_round_trips(single_quoted, value):
+            return single_quoted
+    return _yaml_double_quote_utf8_safe(value)
+
+
+def _yaml_scalar_round_trips(candidate: str, expected: str) -> bool:
+    """Return True if parsing ``candidate`` as a bare YAML scalar yields ``expected``.
+
+    ``description``/``globs`` values originate in an installed package's
+    frontmatter -- untrusted content. Routed through the same
+    ``_BoundedSafeLoader`` every other untrusted-YAML entry point in this
+    codebase uses (:func:`apm_cli.utils.yaml_io.load_yaml_str`), not stock
+    ``yaml.safe_load``: a description whose literal text happens to be a
+    YAML alias/merge-key expansion bomb would otherwise bypass that guard
+    on this second, in-memory parse even though the original frontmatter
+    parse was already bounded (issue #2389's attack class).
+    """
+    try:
+        return load_yaml_str(candidate) == expected
+    except yaml.YAMLError:
+        return False
+
+
+# Keep scalars on one physical line and escape YAML-forbidden literal
+# characters. JSON alone does not escape C1 controls, LS/PS or surrogates
+# when ensure_ascii=False.
+_YAML_UNSAFE_SCALAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\ud800-\udfff\ufffe\uffff]")
+
+
+def _yaml_double_quote_utf8_safe(value: str) -> str:
+    """Double-quote ``value``, keeping printable non-ASCII literal.
+
+    Like :func:`yaml_double_quote` but with ``ensure_ascii=False`` --
+    except for codepoints YAML 1.1 treats as a line break
+    or excludes from double-quoted scalars outright, and any lone UTF-16
+    surrogate, all of which still need a JSON-style ``\\uXXXX`` escape
+    despite being outside JSON's own required control-character range.
+    """
+    encoded = json.dumps(value, ensure_ascii=False)
+    return _YAML_UNSAFE_SCALAR_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", encoded)
+
+
+def yaml_globs_scalar(value: str) -> str:
+    """Render Cursor globs bare, escaping unsafe literal characters.
+
+    Ordinary globs, including leading ``**``, follow Cursor's documented
+    comma-separated format rather than strict YAML alias syntax. Controls,
+    line breaks and non-encodable characters still require double quoting.
+    """
+    if _YAML_UNSAFE_SCALAR_RE.search(value):
+        return _yaml_double_quote_utf8_safe(value)
+    return value
+
+
 def normalize_apply_to(value: object, default: str = "") -> str:
     """Normalize scalar or YAML-list ``applyTo`` values into one OR expression.
 
@@ -104,15 +185,25 @@ def normalize_apply_to(value: object, default: str = "") -> str:
                 continue
             normalized = str(pattern).strip()
             if normalized:
-                patterns.append(_escape_apply_to_segment(normalized))
+                patterns.append(escape_apply_to_segment(normalized))
         return ",".join(patterns) if patterns else default
     if value is None:
         return default
     return str(value)
 
 
-def _escape_apply_to_segment(pattern: str) -> str:
-    """Encode one YAML-list pattern so top-level commas retain their boundary."""
+def escape_apply_to_segment(pattern: str) -> str:
+    """Encode one already-resolved pattern so top-level commas/backslashes
+    round-trip losslessly back through :func:`parse_apply_to`.
+
+    Used both to re-encode a YAML-list ``applyTo`` into the single
+    comma-separated OR expression (:func:`normalize_apply_to`) and to
+    re-join :func:`parse_apply_to`'s output into one comma-separated
+    scalar (Cursor's ``globs:``, issue #3002) -- without this, a glob
+    that legitimately contains a literal comma (escaped by the author as
+    ``\\,``) would become indistinguishable from two separate globs once
+    rejoined.
+    """
     escaped: list[str] = []
     depth = 0
     in_character_class = False

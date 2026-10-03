@@ -1,9 +1,7 @@
 """Documentation drift guards for the #2005 and #2034 TLS trust contracts.
 
-The additive bundle is now implemented for APM's parent Python path, its
-managed Python child, and Node child propagation. Git and Rust-based Codex
-still own their native trust configuration; the docs must keep that boundary
-visible while positively describing the shipped additive controls.
+The additive bundle applies to package-management HTTPS. Execution children
+retain their existing trust configuration.
 """
 
 from __future__ import annotations
@@ -58,7 +56,7 @@ def test_changelog_names_tls_precedence_controls():
     assert "`CURL_CA_BUNDLE`" in entry
 
 
-def test_ssl_docs_runtime_scope_appears_early():
+def test_ssl_docs_runtime_scope_appears_early() -> None:
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
@@ -90,7 +88,7 @@ def test_ssl_docs_pip_cert_and_replaces_notes():
     assert "stale `REQUESTS_CA_BUNDLE`" in docs
 
 
-def test_ssl_docs_describe_additive_validation_and_precedence():
+def test_ssl_docs_describe_additive_validation_and_precedence() -> None:
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
@@ -112,13 +110,30 @@ def test_enterprise_security_docs_transport_trust_model():
     assert "REQUESTS_CA_BUNDLE" in security
     assert "CURL_CA_BUNDLE" in security
     assert "APM_EXTRA_CA_BUNDLE" in security
-    assert "NODE_EXTRA_CA_CERTS" in security
+    assert "does not extend that bootstrap" in security
     assert ".pth" in security
     assert "Node" in security
     assert "Rust" in security
 
 
-def test_ssl_docs_verify_apm_path_and_shipped_scope():
+def test_enterprise_security_docs_do_not_claim_transport_aware_policy():
+    security = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "enterprise" / "security.md"
+    ).read_text(encoding="utf-8")
+    # Keep this contract about the guidance rather than Markdown presentation.
+    normalized = " ".join(security.replace("**", "").split())
+
+    assert "no dedicated `allow_insecure` field" in normalized
+    assert "scheme-blind, host-blind canonical package identities" in normalized
+    assert "owner/repo`, not `github.com/owner/repo" in normalized
+    assert "non-default hosts are retained" not in normalized
+    assert "cannot restrict host identity" in normalized
+    assert "does not enforce HTTPS" in normalized
+    assert "`registry_source.allow_non_registry`" in normalized
+    assert "Forbid `allow_insecure: true` via the policy allow list" not in normalized
+
+
+def test_ssl_docs_verify_apm_path_and_shipped_scope() -> None:
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
@@ -130,12 +145,10 @@ def test_ssl_docs_verify_apm_path_and_shipped_scope():
     assert "schannel" not in docs.lower()
 
 
-def test_changelog_names_additive_bundle_and_node_non_override():
+def test_changelog_scopes_additive_bundle_to_package_management() -> None:
     changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
-    entry = _changelog_entry(changelog, "#2034")
-    prose = " ".join(entry.split())
-
+    entry = _changelog_entry(changelog, "#2741")
     assert "`APM_EXTRA_CA_BUNDLE`" in entry
-    assert "without replacing existing trust" in prose
-    assert "`NODE_EXTRA_CA_CERTS`" in entry
-    assert "without overwriting" in prose
+    assert "package-management HTTPS" in entry
+    assert "retaining default trust roots" in entry
+    assert "Node" not in entry

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import ssl
 import subprocess
 import sys
@@ -27,20 +28,13 @@ import pytest
 
 from apm_cli.core.tls_trust import configure_tls_trust
 
-from .test_tls_custom_ca import _OPENSSL_EXECUTABLE, private_ca_https_server
-
 pytestmark = pytest.mark.integration
 
 _TRUST_ENV_VARS = (
     "REQUESTS_CA_BUNDLE",
     "CURL_CA_BUNDLE",
     "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
     "APM_DISABLE_TRUSTSTORE",
-    "APM_EXTRA_CA_BUNDLE",
-    "NODE_EXTRA_CA_CERTS",
-    "APM_NODE_EXTRA_CA_CERTS_IS_DERIVED_ADDITIVE",
-    "APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE",
     "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
 )
 _HOOK_PATH = Path(__file__).resolve().parents[2] / "build" / "hooks" / "runtime_hook_ssl_certs.py"
@@ -52,7 +46,7 @@ _requires_truststore = pytest.mark.skipif(
     _truststore_missing, reason="truststore not importable in this environment"
 )
 _requires_openssl = pytest.mark.skipif(
-    _OPENSSL_EXECUTABLE is None, reason="openssl CLI not available"
+    shutil.which("openssl") is None, reason="openssl CLI not available"
 )
 
 # Child that bootstraps trust in its own process then does one real HTTPS GET.
@@ -220,6 +214,8 @@ def test_bundled_default_neutralized_system_store_wins(tmp_path):
     the bundled certifi is no longer the trust source. Run in a child process to
     avoid global-state bleed.
     """
+    from ._tls_ca_server import private_ca_https_server
+
     with private_ca_https_server(tmp_path) as server:
         bundle = _bundle_with_private_ca(tmp_path, server.ca_pem)
         env = _clean_child_env()
@@ -245,6 +241,7 @@ def test_bundled_default_neutralized_system_store_wins(tmp_path):
 
 @_requires_truststore
 @_requires_openssl
+@pytest.mark.windows_compat
 def test_genuine_user_override_still_honored(tmp_path):
     """B2 Test B: a genuine user CA override (no marker) is honored -> request succeeds.
 
@@ -254,6 +251,8 @@ def test_genuine_user_override_still_honored(tmp_path):
     backend honors (SSL_CERT_FILE on Linux, REQUESTS_CA_BUNDLE elsewhere). Run in
     a child process to avoid global-state bleed.
     """
+    from ._tls_ca_server import private_ca_https_server
+
     with private_ca_https_server(tmp_path) as server:
         bundle = _bundle_with_private_ca(tmp_path, server.ca_pem)
         env = _clean_child_env()

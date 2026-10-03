@@ -142,7 +142,7 @@ def _log_tls_failure(host_display: str, exc: BaseException, verbose_log, logger)
         "organisation's CA is installed in the OS trust store, or set "
         "APM_EXTRA_CA_BUNDLE to a readable PEM bundle to add it while retaining "
         "public trust. Use REQUESTS_CA_BUNDLE only to replace the complete "
-        "Python trust set. "
+        "Requests trust set. "
         "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
     )
     if verbose_log:
@@ -401,6 +401,7 @@ def _validate_ado_git_package(
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
     from apm_cli.deps.transport_selection import (
         ProtocolPreference,
+        initial_transport_scheme,
         is_fallback_allowed,
         protocol_pref_from_env,
     )
@@ -445,10 +446,7 @@ def _validate_ado_git_package(
     resolved_fallback = (
         is_fallback_allowed() if allow_protocol_fallback is None else allow_protocol_fallback
     )
-    explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
-    candidate_uses_ssh = explicit_scheme == "ssh" or (
-        explicit_scheme is None and resolved_pref == ProtocolPreference.SSH
-    )
+    candidate_uses_ssh = initial_transport_scheme(dep_ref, resolved_pref) == "ssh"
     candidate_url = ado_downloader._build_repo_url(
         dep_ref.repo_url,
         use_ssh=candidate_uses_ssh,

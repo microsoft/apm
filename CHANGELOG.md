@@ -9,19 +9,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `APM_EXTRA_CA_BUNDLE` adds enterprise CA certificates to existing Python HTTPS trust and propagates stable CA snapshots to Python and Node children while preserving explicit overrides. (closes #2034) — by @TameTheGame (#2741)
-- gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
-- OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
+- `APM_EXTRA_CA_BUNDLE` adds corporate PEM certificates to APM package-management HTTPS while retaining default trust roots and explicit Requests/curl overrides. (#2034) — by @TameTheGame (#2741)
+
+## [0.33.0] - 2026-10-02
+
+### Added
+
+- `apm auth HOST` checks for a usable token for GitHub, GHES, or GitLab and walks you through creating one if none is found; `--check` and `--export` support scripted use. (by @jonioliveira and @sergio-sisternes-epam, closes #2788, #3134)
+
+### Fixed
+
+- `apm install` reports the original resolution error for a dependency whose git ref cannot be resolved, and repeat installs keep MCP servers from custom (`registry:`) registries instead of reconfiguring them. (#3142)
+- `apm audit` bounds its hidden-Unicode walk of deployed files to primitive directories and discovers target-native prompts without treating executable commands as prompt text; unreadable or unsupported formats now report incomplete coverage. (by @lkshrk, #2962)
+- Cursor MCP configuration keeps native `${env:NAME}` references and authored static values instead of resolving secrets into `.cursor/mcp.json`. (by @icecold009, #3116)
+- GitHub MCP authentication preserves explicit `Authorization` headers and writes an environment-variable reference on runtime-capable targets instead of a resolved credential. (by @dajiaohuang, #3103)
+- OpenCode MCP installs preserve an explicitly supplied `enabled` value; omitted values still default to `true`. (by @dajiaohuang, #3102)
+- Codex MCP headers sourced from environment variables now use Codex's native runtime fields instead of literal placeholders. (by @edenfunf, #3042)
+- Claude MCP server redeclarations drop stale transport fields from the previous transport while preserving unmanaged configuration. (by @edenfunf, #3041)
+- Codex hooks are now written in Codex's native nested-group shape, so Codex actually runs them. (by @uurien, #3060)
+- Cursor rules now use comma-joined `globs` and readable descriptions in `.mdc` frontmatter. (by @YGuyomar, #3011)
+- Copilot user-scope installs restore modular `~/.copilot/instructions/**/*.instructions.md` deployment instead of a single concatenated `copilot-instructions.md`. (by @kilianpaquier, #2317)
+- `apm compile -g` omits global Claude instructions from `CLAUDE.md` only when a matching native user rule is installed, avoiding duplicate context without dropping unmatched instructions. (#3119)
+- `apm compile --target claude` imports dependency `CLAUDE.md` files at any installed depth, including ADO and nested GitLab paths. (by @vyrnsynx, #2952)
+- `apm compile --target claude` now resolves relative context links in folded instructions, so links in `CLAUDE.md` work regardless of where the source instruction lived. (by @pavelvodrazka-etnetera, #2918)
+- Global skill installs work through `HOME`/`APM_HOME` directory aliases without relaxing destination safety; frozen installs reject ref, pin, provider, and transport drift. (by @DaveMeadAdjust, #2876)
+- `apm install` now explains skipped symlinked agent sources, naming the path and how to fix it. (#2932)
+- Marketplace version constraints (`pkg@marketplace#1.0.1`) resolve tags from the package's own repository instead of the marketplace catalog. (by @modelpath-dev, #3044)
+- On Windows, APM now finds `git.exe` and `gh.exe` in trusted directories by honoring `PATHEXT`. (by @rwinkelman, #3092)
+- `apm runtime setup codex` on Unix rejects HTTP error responses and bounds download retries instead of failing on a checksum mismatch. (#3111)
+- Docs: `apm install --global` deploys local `~/.apm/` primitives at user scope (previously documented as skipped). (by @tillig, #2769)
+- Docs: security guidance now correctly states that `apm-policy.yml` cannot forbid `allow_insecure: true`, and documents the manifest plus CLI gates instead. (by @WilliamK112, #2910)
+
+## [0.32.0] - 2026-09-25
 
 ### Changed
 
-- **BREAKING:** after consumers re-vendor the shared gh-aw `apm.md`, its import requires an explicit `target` instead of deprecated `all`; `apm-action` otherwise writes `all` into the isolated `apm.yml`, where it degrades to auto-detection without harness markers. Set the workflow engine's target and recompile; see the [gh-aw migration recipe](https://microsoft.github.io/apm/integrations/gh-aw/#shared-apmmd-import-recommended). (#2706)
-- Re-vendored shared gh-aw workflows now default to APM 0.28.0 for both pack and restore, the version used for the recorded `microsoft/apm-action@v1.10.0` compatibility proof, not the latest CLI release; an explicit `apm-version` still overrides it. (#2706)
+- `apm --help`, `apm doctor --help`, and `apm config get` no longer import heavyweight command modules; those load only when the matching command runs. (by @sergio-sisternes-epam, #3001)
+
+### Fixed
+
+- `apm prune` removes orphaned manifestless skills while retaining bundles and roots containing needed nested packages. Keep personal files outside `apm_modules/` and preview with `--dry-run`, since personal files inside removable package roots are also deleted. (by @fangkangmi, #3057)
+- `apm install` now rejects incompatible immutable dependency requirements, including inconsistent frozen replay and short SHA pins, instead of silently keeping one version; equivalent tag/SHA pins remain valid. Align root/parent refs, then run `apm install` without `--frozen` to regenerate the lockfile. (#3061)
+- `apm marketplace check` now authenticates bare `owner/repo` sources through the configured default host and standard token chain, so private GitHub and GHES checks honor `GITHUB_APM_PAT`. (by @yfoel, #2917)
+- Copilot hooks declared as `UserPromptSubmit` or `userPromptSubmit` now deploy as `userPromptSubmitted`, so Copilot CLI actually runs them. (by @sheilagithub, #3030)
+- Partial dependency updates preserve deployment targets for refreshed and untouched packages, including `.agents/skills/`, instead of demoting them to `legacy`. (by @Wanming08, #2924)
+- The Unix installer now checks the prebuilt Linux glibc 2.38 minimum and routes older systems to the existing eligible Python/pip fallback before downloading an incompatible binary. (#2931)
+- `apm install` shortens dependency-staging paths by 68 characters to avoid Windows `MAX_PATH` failures in deep checkouts. This does not guarantee arbitrary long-path support. (by @MohammedAlkindi, closes #2896, #2941)
+- Dependency updates preserve marketplace provenance so `plugin@marketplace` uninstall aliases keep working in project and global scope. (by @mfroembgen, #2949)
+- `apm audit` drift replay now discovers root-local primitives with the same source scope as a normal install, rather than treating the scratch deployment directory as the project root. (#3021)
+
+### Security
+
+- **BREAKING:** `apm install` rejects bare `.`/`..` aliases and unsafe symlink destinations, and records optional lockfile aliases for replay without changing `lockfile_version`. Replace rejected aliases with a safe name and reinstall; opting into the 0.1.41 manifest schema requires a supporting client (see [migration](https://microsoft.github.io/apm/troubleshooting/migration/#rejected-dependency-aliases)). (by @Danvs60, #2901)
+- The locked build toolchain now uses setuptools 83.0.0 to address Unicode filename mismatches that could bypass `MANIFEST.in` exclusions during source-distribution creation on macOS. (#2893)
+
+## [0.31.0] - 2026-09-15
+
+### Added
+
+- `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz. (#2937)
+- Windows installation guidance now includes `winget install --id Microsoft.APM --exact --source winget` and updates through `winget upgrade` instead of `apm self-update`. (by @Gijsreyn, #2520)
+
+### Changed
+
+- **BREAKING:** Non-dry-run `apm install` now exits `1` when Agent Plugins v1 target exclusion leaves no package deployed; mixed installs that deploy another package still succeed. Install a direct skill subpath for the desired target or select `--target copilot` for native registration. (#2806)
+- **BREAKING:** Re-vendored shared gh-aw APM imports require a concrete `target`; set the engine's target and recompile, with optional read-only `token-source: github-token` for same-repository private packages (`cascade` and APM 0.28.0 remain defaults). Dependency-policy matching now follows canonical repository casing, closing mixed-case deny bypasses; keep lowercase workarounds until all runners use APM 0.31.0 or later. (#2706)
+
+### Fixed
+
+- Git-subpath cache checkouts now preserve committed LF content regardless of host `core.autocrlf` settings; older unpinned cache shards rematerialize on the next install. (by @sergio-sisternes-epam, #2982)
+- `apm uninstall` now preserves unmanaged Claude and Kiro skills when removing an MCP-only package whose lockfile has no deployed files. (by @mfroembgen, #2947)
+- Private Git dependencies rewritten from HTTPS to SSH no longer fail the HTTP-header safety probe; that probe now runs only for HTTP(S) effective URLs. (by @arnaudoisel, #2906)
+- GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2939)
+- Exact registry version selectors now prefer the matching published build, preventing selection of a different build with the same semantic version but different build metadata. (by @nadav-y, #2894)
+- `apm install` again accepts `skills:` subsets from Git collections with nested `skills/<name>/SKILL.md` files but no root manifest or skill, without a `path:` workaround. (#2891)
+- Registry `apm outdated` now separates installed `Current`, constraint-bound `Wanted`, and published `Latest`, so exact pins no longer hide newer releases. It leaves legacy lockfiles unchanged, while `apm update` continues respecting manifest constraints. (#2874)
 
 ### Security
 
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
+- File-lock retry diagnostics no longer include paths or exception text that may contain secrets, while retaining retry counts and delays. (#2742)
 
 ## [0.30.0] - 2026-09-07
 

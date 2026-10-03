@@ -28,23 +28,6 @@ function decisionLabel(decision) {
   return base;
 }
 
-function priorityLabel(p) {
-  if (!p) return null;
-  if (p.includes("critical")) return "P0";
-  if (p.includes("high")) return "P1";
-  if (p.includes("medium") || p.includes("normal")) return "P2";
-  if (p.includes("low")) return "P3";
-  return p.replace("priority/", "");
-}
-
-function priorityClass(p) {
-  if (!p) return "prio-normal";
-  if (p.includes("critical")) return "prio-critical";
-  if (p.includes("high")) return "prio-high";
-  if (p.includes("low")) return "prio-low";
-  return "prio-normal";
-}
-
 function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -113,24 +96,20 @@ export default function TriageDetail(props) {
           const hasDiscussion = () => (d().nonTriageComments || []).length > 0;
           return (
             <>
+              <div class="td-next-action">
+                <div class="td-section-label">{d().legacy ? "Legacy automated advice" : "Automated recommendation"}</div>
+                <div class="td-next-action-body">
+                  Not scope approval. Check the issue's human approval record and review contact before implementation.
+                  Labels and silence are not approval or a release commitment.
+                </div>
+              </div>
               {/* Decision metadata chips row */}
               <div class="td-meta-bar">
                 <span class={`badge ${decisionClass(d().decision)}`}>{decisionLabel(d().decision)}</span>
-                <Show when={priorityLabel(d().priority)}>
-                  <span class={`badge ${priorityClass(d().priority)}`}>{priorityLabel(d().priority)}</span>
-                </Show>
                 <Show when={d().type}>
                   <span class="badge" style={{ background: "#1f2328", border: "1px solid #30363d", color: "#e6edf3" }}>
                     {d().type.replace("type/", "")}
                   </span>
-                </Show>
-                <Show when={d().status}>
-                  <span class="badge" style={{ background: "#1f6feb20", color: "#58a6ff" }}>
-                    {d().status.replace("status/", "")}
-                  </span>
-                </Show>
-                <Show when={d().milestone}>
-                  <span class="badge" style={{ background: "#30363d", color: "#e6edf3" }}>{d().milestone}</span>
                 </Show>
                 <span class="td-triaged-by">triaged by <code>{d().triageAuthor}</code></span>
               </div>
@@ -151,6 +130,17 @@ export default function TriageDetail(props) {
               </Show>
 
               {/* Next Action callout */}
+              <Show when={d().proposedBrief}>
+                <div class="td-next-action">
+                  <div class="td-section-label">Proposed scope brief (not approved)</div>
+                  <For each={[
+                    ["Scope", "scope"], ["Done when", "done_when"],
+                    ["Exclusions", "exclusions"], ["Review needs", "review_needs"],
+                  ]}>
+                    {([label, key]) => <div><strong>{label}:</strong> {d().proposedBrief[key] || "Not specified"}</div>}
+                  </For>
+                </div>
+              </Show>
               <Show when={d().nextAction}>
                 <div class="td-next-action">
                   <div class="td-section-label">Next Action</div>
