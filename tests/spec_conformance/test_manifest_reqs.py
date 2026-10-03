@@ -1213,10 +1213,12 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
         "A consumer implementation providing the accepted\nCodex-native agent conversion capability MUST preserve a\nsource-declared",
         "MUST leave either field absent from the generated file when it is\nabsent from the source",
         "This clause does not require or imply\npreservation of any other",
-        "does not\ndefine behavior for any other conversion target",
+        "define behavior for any other conversion target. A source-declared\n`model` or `model_reasoning_effort` value that is not a YAML string\nscalar is not subject to preservation under this clause, and the\nconsumer MUST still emit a diagnostic for it.",
         "it MUST emit a diagnostic naming the source agent,\nand MUST bound both",
-        "the diagnostic MUST\nNOT include the dropped field's value",
-        "existing capability-restriction diagnostic is unaffected and continues\nto apply on its own terms",
+        "limit (the named-field-name\nlimit MUST be at least one when at least one field was dropped)",
+        "each\nnamed field name MUST be sanitized to printable ASCII (U+0020 through\nU+007E), replacing or escaping any byte outside that range before\ndisplay",
+        "the diagnostic MUST NOT include the dropped field's value",
+        "existing capability-restriction diagnostic\nis unaffected and continues to apply on its own terms",
     )
 
 
