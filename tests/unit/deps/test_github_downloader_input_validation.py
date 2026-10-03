@@ -34,6 +34,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps import github_downloader_validation as gdv
@@ -236,6 +237,60 @@ class TestDirectoryExistsAtRef:
     def _log(self, _msg: str) -> None:
         pass
 
+    @pytest.mark.parametrize("host", ["github.com", "corp.ghe.com"])
+    @pytest.mark.parametrize("ref", [None, "main"])
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [
+            (b'[{"type":"file","name":"plugin.json"},{"type":"symlink","name":"link"}]', True),
+            (b"[]", True),
+            (b'{"type":"file","name":"plugin-1.2.3"}', False),
+            (b'{"type":"symlink","target":"plugin-1.2.3"}', False),
+            (b'{"type":"submodule","submodule_git_url":"https://github.com/acme/other"}', False),
+            (b'{"type":"file","submodule_git_url":"https://github.com/acme/other"}', False),
+            (b'{"type":"dir","entries":[]}', False),
+            (b"null", False),
+            (b'"directory"', False),
+            (b'["not an entry object"]', False),
+            (b"not json", False),
+        ],
+        ids=[
+            "directory-listing",
+            "empty-directory",
+            "file-or-symlink-to-file",
+            "symlink",
+            "submodule",
+            "legacy-submodule",
+            "unexpected-object-media-type",
+            "null",
+            "string",
+            "invalid-listing-entry",
+            "invalid-json",
+        ],
+    )
+    def test_validation_requires_directory_listing_response(
+        self, host: str, ref: str | None, body: bytes, expected: bool
+    ) -> None:
+        """The normal validation entrypoint must inspect a successful API payload."""
+        downloader = _make_downloader(host=host)
+        dependency = DependencyReference.parse_from_dict(
+            {"git": f"https://{host}/acme/catalog", "path": "plugins/tool-1.2.3", "ref": ref}
+        )
+        response = requests.Response()
+        response.status_code = 200
+        response._content = body
+        with (
+            patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")),
+            patch.object(downloader, "_resilient_get", return_value=response) as api_get,
+            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(False, None)) as fallback,
+        ):
+            result = downloader.validate_virtual_package_exists(dependency)
+
+        assert result is expected
+        assert fallback.called is (not expected and ref is not None)
+        assert api_get.call_count == 1
+        assert api_get.call_args.kwargs["headers"]["Accept"] == "application/vnd.github+json"
+
     def test_azure_devops_returns_false_without_probe(self) -> None:
         dl = _make_downloader()
         dep = _make_github_dep()
@@ -265,6 +320,7 @@ class TestDirectoryExistsAtRef:
 
         resp = MagicMock()
         resp.status_code = 200
+        resp.json.return_value = []
         with patch.object(dl, "_resilient_get", return_value=resp):
             result = _directory_exists_at_ref(dl, dep, "skills/foo", "main", self._log)
 
@@ -320,6 +376,7 @@ class TestDirectoryExistsAtRef:
             captured_urls.append(url)
             resp = MagicMock()
             resp.status_code = 200
+            resp.json.return_value = []
             return resp
 
         with patch.object(dl, "_resilient_get", side_effect=_capture):

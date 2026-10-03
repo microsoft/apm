@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Git marketplace installs accept versioned plugin directories while rejecting file, symlink, and submodule responses during directory validation. (by @Pybsama, #3156)
+
 ## [0.33.0] - 2026-10-02
 
 ### Added

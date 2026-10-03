@@ -90,6 +90,11 @@ lowercase before constructing the package-registry path.
 
 ### Install validation chain (virtual subdirectory packages)
 
+Marketplace installation supports versioned directories produced by `apm pack`,
+such as `plugins/my-plugin-1.2.3`, including positional `--dry-run` previews.
+Directory content and path validation still apply. Git directory probes reject
+files, symbolic links, and submodules.
+
 `apm install` validates subdirectory packages (`owner/repo/path#ref`) before writing to `apm.yml` using the same credential chain as the actual install. Git-source semver ranges (for example, `owner/repo/path#^1.2.0`) defer raw-ref validation to semver tag resolution; registry-routed dependencies retain registry version validation. See [Authentication > Install validation chain](../authentication/) for the full probe sequence and troubleshooting.
 
 When a default registry is configured, plain shorthand deps (`owner/repo#<ref>`) bypass the GitHub probe. `apm install` requires a version selector before writing to `apm.yml`; deps with no `#<ref>` at all are rejected. Semver selectors (`1.0.0`, `^1.2.3`) use range matching; non-semver selectors (`stable`, `v1.4.2`, any opaque label) are matched exactly against the registry's published versions.

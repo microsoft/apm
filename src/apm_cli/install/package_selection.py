@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
+
+from apm_cli.models.dependency.reference import DependencyReference
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import _ValidationOutcome
 
 
+def selected_dependency_identity(package: str, dependencies: Iterable[DependencyReference]) -> str:
+    """Resolve a selector using interpreted references before shorthand parsing."""
+    for dependency in dependencies:
+        # Explicit git+path coordinates can contain dotted bundle directories
+        # whose canonical display is not a valid shorthand file reference.
+        if dependency.to_canonical() == package:
+            return dependency.get_identity()
+    return DependencyReference.parse(package).get_identity()
+
+
 def existing_dependency_identities(current_dependencies: list[object]) -> set[str]:
     """Return canonical identities for every parseable manifest dependency."""
-    from apm_cli.models.apm_package import DependencyReference
-
     identities: set[str] = set()
     for entry in current_dependencies:
         try:

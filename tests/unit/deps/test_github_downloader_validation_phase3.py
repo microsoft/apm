@@ -277,6 +277,7 @@ class TestDirectoryExistsAtRef:
 
         resp = MagicMock()
         resp.status_code = 200
+        resp.json.return_value = []
         with patch.object(dl, "_resilient_get", return_value=resp):
             result = _directory_exists_at_ref(dl, dep, "skills/foo", "main", self._log)
 
@@ -332,6 +333,7 @@ class TestDirectoryExistsAtRef:
             captured_urls.append(url)
             resp = MagicMock()
             resp.status_code = 200
+            resp.json.return_value = []
             return resp
 
         with patch.object(dl, "_resilient_get", side_effect=_capture):

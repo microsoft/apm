@@ -47,3 +47,26 @@ def test_run_records_complete_keys_before_only_filter(monkeypatch):
     }
     assert ctx.deps_to_install == [selected]
     assert ctx.intended_dep_keys == {selected.get_unique_key()}
+
+
+def test_only_filter_preserves_structured_versioned_path_and_descendants() -> None:
+    selected = DependencyReference.parse_from_dict(
+        {"git": "https://github.com/acme/catalog", "path": "plugins/tool-1.2.3", "ref": "release"}
+    )
+    child = DependencyReference(repo_url="acme/child")
+    unselected = DependencyReference(repo_url="acme/other")
+    child_node = SimpleNamespace(dependency_ref=child, children=[])
+    nodes = {
+        selected.get_unique_key(): SimpleNamespace(dependency_ref=selected, children=[child_node]),
+        child.get_unique_key(): child_node,
+        unselected.get_unique_key(): SimpleNamespace(dependency_ref=unselected, children=[]),
+    }
+    ctx = SimpleNamespace(
+        only_packages=["acme/catalog/plugins/tool-1.2.3#release"],
+        deps_to_install=[selected, child, unselected],
+        dependency_graph=SimpleNamespace(dependency_tree=SimpleNamespace(nodes=nodes)),
+    )
+
+    resolve._apply_only_filter(ctx)
+
+    assert ctx.deps_to_install == [selected, child]
