@@ -22,6 +22,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
+from ..deps.git_remote_ops import tag_commit_shas
 from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
     build_ado_https_clone_url,
@@ -172,14 +173,12 @@ class RefCache:
 def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
     """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``.
 
-    An annotated or signed tag arrives as two lines: the tag object under
-    ``refs/tags/<name>`` and the commit it points to under
-    ``refs/tags/<name>^{}``. A checkout of the tag lands on that commit, so
-    the tag's ``RemoteRef`` carries the peeled SHA; the ``^{}`` line adds no
-    ref of its own. Lightweight tags and branches keep their only SHA.
+    Tags carry the commit a checkout of them lands on, as resolved by
+    ``deps.git_remote_ops.tag_commit_shas``: an annotated or signed tag takes
+    the SHA of its peeled record, which adds no ref of its own. Branches and
+    other refs keep their only SHA.
     """
-    refs: list[RemoteRef] = []
-    peeled: dict[str, str] = {}
+    records: list[tuple[str, str]] = []
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -190,11 +189,16 @@ def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
         if not _SHA_RE.match(sha):
             continue
-        if refname.endswith("^{}"):
-            peeled[refname[:-3]] = sha
-            continue
+        records.append((sha, refname))
+    commits, _annotated = tag_commit_shas(records)
+    refs: list[RemoteRef] = []
+    for sha, refname in records:
+        if refname.startswith("refs/tags/"):
+            if refname not in commits:
+                continue  # the peeled record of an annotated tag
+            sha = commits[refname]
         refs.append(RemoteRef(name=refname, sha=sha))
-    return [RemoteRef(name=ref.name, sha=peeled.get(ref.name, ref.sha)) for ref in refs]
+    return refs
 
 
 class RefResolver:

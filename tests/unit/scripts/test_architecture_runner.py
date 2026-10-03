@@ -729,6 +729,7 @@ transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
+transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
