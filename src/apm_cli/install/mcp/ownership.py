@@ -105,6 +105,20 @@ def adopt_legacy_mcp_target_servers(
                     exc_info=True,
                 )
                 continue
-            if any(existing.get(name) == expected for existing in existing_configs):
+            native_baselines = [expected]
+            candidates = [existing.get(name) for existing in existing_configs]
+            if runtime == "codex":
+                from apm_cli.adapters.client.codex import CodexClientAdapter
+
+                # Earlier Codex renders added an empty id to self-defined
+                # entries. A nonempty ID, including its new comment encoding,
+                # still disqualifies a native entry from this exact baseline.
+                native_baselines.append({**expected, "id": ""})
+                candidates = [
+                    entry
+                    for entry in candidates
+                    if isinstance(entry, dict) and not CodexClientAdapter.get_registry_id(entry)
+                ]
+            if any(entry in native_baselines for entry in candidates):
                 adopted.setdefault(runtime, set()).add(name)
     return adopted

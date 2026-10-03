@@ -1233,6 +1233,13 @@ def run_mcp_install(  # noqa: PLR0913
             else:
                 managed_target_servers[target].intersection_update(current_names)
 
+    if "codex" in target_runtimes and managed_target_servers is not None:
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        CodexClientAdapter(
+            project_root=project_root, user_scope=user_scope
+        ).migrate_legacy_managed_servers(managed_target_servers.get("codex", set()))
+
     # Use the new registry operations module for better server detection
     configured_count = 0
 

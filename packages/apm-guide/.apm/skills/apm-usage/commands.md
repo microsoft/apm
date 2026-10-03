@@ -107,6 +107,12 @@ lock state may skip the write, so repeating that install is not a migration.
 
 ### Registry MCP runtime variables
 
+Codex keeps APM registry identity in TOML comments instead of an unsupported
+native `id` setting. After upgrading, `apm install --only mcp --target codex`
+repairs recorded APM-owned entries; add `--global` for user scope. Unowned or
+edited legacy entries need manual review. Keep generated identity comments;
+inline containers being written may expand while preserving values and comments.
+
 For registry MCP runtime variables, `apm install` prompts once for a required
 non-secret default and accepts an override; secret defaults remain hidden.
 Non-secret values resolve every matching `{variable}` launcher reference,

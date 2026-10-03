@@ -153,11 +153,13 @@ class MCPServerOperations:
                                     installed_ids.add(server_id)
 
                     elif runtime == "codex":
+                        from ..adapters.client.codex import CodexClientAdapter
+
                         # Codex stores servers as mcp_servers.{name} sections in config.toml
                         mcp_servers = config.get("mcp_servers", {})
                         for server_name, server_config in mcp_servers.items():  # noqa: B007
                             if isinstance(server_config, dict):
-                                server_id = server_config.get("id")
+                                server_id = CodexClientAdapter.get_registry_id(server_config)
                                 if server_id:
                                     installed_ids.add(server_id)
 

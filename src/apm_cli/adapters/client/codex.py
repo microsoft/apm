@@ -1,5 +1,6 @@
 """OpenAI Codex CLI implementation of MCP client adapter."""
 
+import json
 import logging
 import os
 import re
@@ -8,6 +9,7 @@ from urllib.parse import urlparse
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
+from tomlkit.items import InlineTable, Item, String, Table
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
@@ -31,6 +33,7 @@ _log = logging.getLogger(__name__)
 # ``_resolve_variable_placeholders`` untouched.
 # See https://learn.chatgpt.com/docs/extend/mcp?surface=cli
 _CODEX_BEARER_HEADER = "authorization"
+_CODEX_REGISTRY_ID_COMMENT = "# apm-registry-id: "
 # Reuse the canonical placeholder syntax so the two spellings APM accepts
 # (``${VAR}`` and ``${env:VAR}``) cannot drift apart here. The auth scheme is
 # case-insensitive per RFC 7235; Codex always writes it as ``Bearer``.
@@ -102,13 +105,118 @@ class CodexClientAdapter(MCPClientAdapter):
         """
         return str(self._get_codex_dir() / "config.toml")
 
+    @staticmethod
+    def _registry_id_item(server_config: object) -> Item | None:
+        """Locate a comment that survives standard, dotted and inline TOML layouts.
+
+        Inline values cannot contain comments, so annotate the whole inline
+        entry. Other layouts expose command/url scalar trivia even when their
+        parent tables are implicit or split across out-of-order fragments.
+        """
+        if isinstance(server_config, InlineTable):
+            return server_config
+        if isinstance(server_config, dict):
+            for key in ("command", "url"):
+                value = server_config.get(key)
+                if isinstance(value, String):
+                    return value
+        return None
+
+    @classmethod
+    def get_registry_id(cls, server_config: dict) -> str | None:
+        """Read APM identity metadata without exposing it as a Codex setting.
+
+        Keep reading legacy native IDs for conflict detection; their presence
+        alone is not ownership evidence and never authorizes a migration.
+        """
+        legacy_id = server_config.get("id")
+        if isinstance(legacy_id, str) and legacy_id:
+            return legacy_id
+        item = cls._registry_id_item(server_config)
+        if item is None:
+            return None
+        comment = item.trivia.comment
+        if not comment.startswith(_CODEX_REGISTRY_ID_COMMENT):
+            return None
+        try:
+            registry_id, _ = json.JSONDecoder().raw_decode(
+                comment[len(_CODEX_REGISTRY_ID_COMMENT) :]
+            )
+        except ValueError:
+            return None
+        return registry_id if isinstance(registry_id, str) and registry_id else None
+
+    @classmethod
+    def _annotate_registry_id(cls, server_config: dict, registry_id: str) -> None:
+        """Keep UUID matching metadata in an escaped, round-trip TOML comment."""
+        item = cls._registry_id_item(server_config)
+        if item is None:
+            raise ValueError("Codex MCP server must have a string command or url")
+        original_comment = item.trivia.comment
+        suffix = f" {original_comment}" if original_comment else ""
+        item.comment(_CODEX_REGISTRY_ID_COMMENT[2:] + json.dumps(registry_id) + suffix)
+
+    @staticmethod
+    def _expand_inline_table(entry: InlineTable) -> Table:
+        """Expand an inline container without discarding its values or comments.
+
+        Nested inline comments are invalid TOML, and deleting a middle key can
+        leave stray separators in tomlkit. Expand only containers being written
+        or owned entries being repaired; keep unrelated child items intact.
+        """
+        table = tomlkit.table(is_super_table=False)
+        for key, value in entry.items():
+            table.add(key, value)
+        if entry.trivia.comment:
+            table.comment(entry.trivia.comment)
+        return table
+
+    def _write_config(self, config: dict) -> None:
+        """Validate serialized TOML before atomically replacing the native file."""
+        serialized = tomlkit.dumps(config)
+        tomlkit.parse(serialized)
+        config_path = Path(self.get_config_path())
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(config_path, serialized, new_file_mode=0o600)
+        _log.debug("Codex config written to %s", config_path)
+
+    def migrate_legacy_managed_servers(self, managed_names: set[str]) -> set[str]:
+        """Remove unsupported IDs only from entries with recorded APM ownership."""
+        if not managed_names:
+            return set()
+        config = self.get_current_config()
+        if config is None:
+            return set()
+        servers = config.get("mcp_servers", {})
+        migrated: set[str] = set()
+        for name in sorted(managed_names):
+            config_key = self._determine_config_key(name, None)
+            entry = servers.get(config_key)
+            if not isinstance(entry, dict) or "id" not in entry:
+                continue
+            registry_id = entry["id"]
+            if not isinstance(registry_id, str):
+                continue
+            if isinstance(servers, InlineTable):
+                servers = self._expand_inline_table(servers)
+                config["mcp_servers"] = servers
+            if isinstance(entry, InlineTable):
+                entry = self._expand_inline_table(entry)
+                servers[config_key] = entry
+            if registry_id:
+                self._annotate_registry_id(entry, registry_id)
+            del entry["id"]
+            migrated.add(name)
+        if migrated:
+            self._write_config(config)
+        return migrated
+
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
 
         Args:
             config_updates (dict): Configuration updates to apply.
         """
-        config_path = Path(self.get_config_path())
         current_config = self.get_current_config()
         if current_config is None:
             return False
@@ -116,15 +224,13 @@ class CodexClientAdapter(MCPClientAdapter):
         # Ensure mcp_servers section exists
         if "mcp_servers" not in current_config:
             current_config["mcp_servers"] = {}
+        elif isinstance(current_config["mcp_servers"], InlineTable):
+            current_config["mcp_servers"] = self._expand_inline_table(current_config["mcp_servers"])
 
         # Apply updates to mcp_servers section
         current_config["mcp_servers"].update(config_updates)
 
-        # Ensure directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        atomic_write_text(config_path, tomlkit.dumps(current_config), new_file_mode=0o600)
-        _log.debug("Codex config written to %s", config_path)
+        self._write_config(current_config)
         return True
 
     def get_current_config(self):
@@ -199,6 +305,12 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_config is None:
                 return False
 
+            # Registry identity is APM metadata, not a supported native field.
+            registry_id = server_info.get("id")
+            if isinstance(registry_id, str) and registry_id:
+                server_config = tomlkit.item(server_config)
+                self._annotate_registry_id(server_config, registry_id)
+
             # Update configuration using the chosen key
             if not self.update_config({config_key: server_config}):
                 return False
@@ -227,12 +339,11 @@ class CodexClientAdapter(MCPClientAdapter):
         if runtime_vars is None:
             runtime_vars = {}
 
-        # Default configuration structure with registry ID for conflict detection
+        # Only fields accepted by Codex belong in the native server mapping.
         config = {
             "command": "unknown",
             "args": [],
             "env": {},
-            "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
         }
 
         # Self-defined stdio deps carry raw command/args. Route ``env`` and
@@ -313,10 +424,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            remote_config = {
-                "url": remote_url,
-                "id": server_info.get("id", ""),
-            }
+            remote_config = {"url": remote_url}
             http_headers: dict[str, str] = {}
             env_http_headers: dict[str, str] = {}
             bearer_token_env_var = ""

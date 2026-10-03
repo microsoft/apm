@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex MCP entries no longer emit the unsupported `id` setting; reinstalling corrects recorded APM-owned entries while preserving registry identity, user settings, and ownership safeguards. — by @Pybsama (#3157)
+
 ## [0.33.0] - 2026-10-02
 
 ### Added
