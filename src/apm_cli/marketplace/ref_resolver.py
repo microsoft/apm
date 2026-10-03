@@ -170,8 +170,16 @@ class RefCache:
 
 
 def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
-    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``."""
+    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``.
+
+    An annotated or signed tag arrives as two lines: the tag object under
+    ``refs/tags/<name>`` and the commit it points to under
+    ``refs/tags/<name>^{}``. A checkout of the tag lands on that commit, so
+    the tag's ``RemoteRef`` carries the peeled SHA; the ``^{}`` line adds no
+    ref of its own. Lightweight tags and branches keep their only SHA.
+    """
     refs: list[RemoteRef] = []
+    peeled: dict[str, str] = {}
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -182,11 +190,11 @@ def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
         if not _SHA_RE.match(sha):
             continue
-        # Skip peeled tag objects (^{})
         if refname.endswith("^{}"):
+            peeled[refname[:-3]] = sha
             continue
         refs.append(RemoteRef(name=refname, sha=sha))
-    return refs
+    return [RemoteRef(name=ref.name, sha=peeled.get(ref.name, ref.sha)) for ref in refs]
 
 
 class RefResolver:
