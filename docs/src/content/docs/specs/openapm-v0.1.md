@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **126 normative statements (121 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **128 normative statements (123 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2977,6 +2977,58 @@ manifest restriction, it MUST serialize only the supported subset using target
 identifiers whose replay selects the same runtimes; it MUST NOT persist an
 unsupported member or remap one to a different supported runtime.
 
+#### 8.5.9 Cursor-native hook installation: fail-closed validation and Claude-import coexistence
+
+<a id="req-tg-016"></a>
+**[req-tg-016]** A conforming consumer implementation that provides Cursor-native
+hook installation MUST fail closed when converting a source-declared hook
+configuration into that Cursor-native format: if any source-declared event,
+top-level configuration key, or handler field falls outside the vocabulary of
+events, top-level keys, and handler fields the implementation accepts for
+Cursor-native hooks, the implementation MUST NOT write the Cursor-native hook
+artifact (zero bytes, no partial file) and MUST emit an actionable diagnostic
+naming the unrecognized value(s). Implementations SHOULD document or
+programmatically expose the set of accepted source-format identifiers so that
+conformance claims are independently verifiable.
+
+<a id="req-tg-017"></a>
+**[req-tg-017]** A conforming consumer implementation that provides Cursor-native
+hook installation, when the project or user scope also has a Claude-settings
+hook import in effect for the same scope, MUST detect before writing whether
+installing or retaining the Cursor-native hook configuration would create or
+extend an observable overlap with that Claude-imported hook configuration, for
+both install orders (Claude-import-first and Cursor-native-first). On a
+detected overlap the implementation MUST reject the write with an actionable
+diagnostic rather than merge, redirect, or broaden either side's accepted
+input, and MUST NOT alter the Claude import's own settings. For the purposes
+of this requirement, "observable overlap" is defined as a non-empty
+intersection between the set of hook-event identifiers claimed by the
+Cursor-native configuration and those claimed by the in-effect Claude-settings
+import, evaluated after alias normalization.
+
+> **Editorial note.** The event vocabulary, the Claude-to-Cursor event
+> aliases, and the two-key (`version`, `hooks`) top-level shape this
+> implementation validates are drawn from Cursor's own hook reference and
+> third-party-hook reference as published at
+> `https://cursor.com/docs/hooks` and
+> `https://cursor.com/docs/reference/third-party-hooks` (fetched 2026-10-03).
+> As with [req-tg-009]'s target-native capability encodings, these concrete
+> vendor-specific vocabularies are intentionally kept out of the normative
+> text above; a future harness implementing the same Cursor-native capability
+> may accept a different, equally fail-closed vocabulary as the vendor
+> surface evolves. The vendor reference also documents a `prompt` handler
+> kind alongside `command`; this note does not assert that the accepted
+> vocabulary covers every hook feature Cursor documents, only that whatever
+> vocabulary an implementation does accept is enforced fail-closed. The
+> rejection in [req-tg-017] is an APM consumer-side safety policy, not a
+> reflection of Cursor's own documented default: the vendor's third-party-hook
+> reference states that when hooks exist in multiple locations "All matching
+> hooks from every source run" (merge, not reject). Likewise, the unknown-key
+> rejection in [req-tg-016] is this implementation's own conservative
+> conversion policy; the cited vendor example shows only `version` and
+> `hooks` as top-level keys but does not itself document the top-level shape
+> as closed to extension.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2995,7 +3047,9 @@ without a spec revision. The current matrix is in the companion
   [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
   [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
   [req-tg-014](#req-tg-014), [req-tg-015](#req-tg-015),
-  [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007).
+  [req-pr-006](#req-pr-006),
+  [req-pr-007](#req-pr-007), [req-tg-016](#req-tg-016),
+  [req-tg-017](#req-tg-017).
 
 ---
 
@@ -3642,6 +3696,7 @@ conformance statement identifying:
 [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
 [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
 [req-tg-014](#req-tg-014), [req-tg-015](#req-tg-015),
+[req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -4105,6 +4160,8 @@ renumbering of conformance classes.
 | [req-tg-013](#req-tg-013)                | MUST    | 8.5.7   | consumer    |
 | [req-tg-014](#req-tg-014)                | MUST    | 8.5.8   | consumer    |
 | [req-tg-015](#req-tg-015)                | MUST    | 8.5.1   | consumer    |
+| [req-tg-016](#req-tg-016)                | MUST    | 8.5.9   | consumer    |
+| [req-tg-017](#req-tg-017)                | MUST    | 8.5.9   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -4124,7 +4181,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 126** (121 MUST, 5 SHOULD).
+**Total normative statements: 128** (123 MUST, 5 SHOULD).
 
 ---
 
@@ -4177,6 +4234,7 @@ renumbering of conformance classes.
 | 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 10.7, 10.11, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
 | 0.1.42 (proposed) | 2026-09-30 | Optional deployed-prompt audit capability for PR #2962. Added conditional governance [req-pl-019] and [req-pl-020] in Section 6.8.1, both enumerations, Appendix C, requirements manifest and behavioral conformance coverage. Under Section 9.2 this is a new opt-in conformance capability, not behavior-neutral errata or a reinterpretation of an existing obligation: implementations not claiming it acquire no new required feature. APM claims it; newly discovered prompt findings and incomplete native coverage can newly fail default and CI audits, command-only content remains non-failing, and protected remediation is refused before writes. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 123 -> 125 (120 MUST, 5 SHOULD). |
 | 0.1.43 (proposed) | 2026-10-03 | Codex-native agent model preservation and bounded dropped-metadata diagnostic for PR #3150 (closes #3126). Added [req-tg-015] (Section 8.5.1, consumer MUST): a conforming consumer providing the Codex-native agent conversion capability MUST preserve a source-declared `model` or `model_reasoning_effort` string value in its native top-level placement, MUST leave either field absent when absent from the source, MUST diagnose a non-string value by field name without including that value, and MUST emit a diagnostic bounded on both dropped-field count and per-field name length (never the value) for any other dropped, non-capability-restriction frontmatter field. Under Section 9.2 this is a new opt-in conformance capability scoped to consumers providing the Codex-native agent conversion capability, not behavior-neutral errata: it does not require or imply preservation of any other `config.toml`-native key and does not define behavior for any other conversion target. Implementations not providing Codex-native agent conversion acquire no new required feature. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 125 -> 126 (121 MUST, 5 SHOULD). |
+| 0.1.44 (proposed) | 2026-10-03 | Spec-citation fold for already-accepted Cursor-native hook installation (PR #3149, closes issue #3129's conformance gap). Added [req-tg-016] (Section 8.5.9, consumer MUST): fail-closed validation of out-of-vocabulary events, top-level keys, and handler fields when converting into the Cursor-native hook format. Added [req-tg-017] (Section 8.5.9, consumer MUST): pre-write detection and rejection of a Cursor-native-plus-Claude-import hook overlap, for both install orders, without altering the Claude import's own settings. Both anchors are bound specifically to the already-accepted Cursor-native (and Cursor-native-plus-Claude-import) capability, not a universal target-native or cross-target obligation. Section 8.7, Section 11.3.2, and Appendix C updated. Under Section 9.2 this is a defensive citation of previously unspecified fail-closed/coexistence behavior already shipped and tested in PR #3149, not a new mandatory feature for implementations that do not provide this capability. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 125 -> 127 (122 MUST, 5 SHOULD). Revision label `0.1.43` and requirement id [req-tg-015] are reserved by a concurrent sibling unit on a separate branch and are not assigned here. |
 
 Errata (none at publication).
 

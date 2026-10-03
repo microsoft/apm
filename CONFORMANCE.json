@@ -1555,12 +1555,34 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_native_model_settings_preserved_and_dropped_metadata_bounded"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-016",
+      "keyword": "MUST",
+      "section": "8.5.9",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_native_fail_closed_conversion_clause_persists_in_spec"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-017",
+      "keyword": "MUST",
+      "section": "8.5.9",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_import_overlap_rejection_clause_persists_in_spec"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 92,
+      "active": 94,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1584,5 +1606,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 126
+  "total_requirements": 128
 }
