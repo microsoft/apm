@@ -1199,15 +1199,67 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     tools_warnings = tools_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
     assert any("field 'tools' was dropped" in w.message for w in tools_warnings)
 
-    # A different (non-Codex) target is unaffected by this clause: the
-    # source agent is deployed verbatim, filtering logic does not run.
-    verbatim_source = tmp_path / "verbatim.agent.md"
+    # A different (non-Codex) target is unaffected by this clause: deploy
+    # through the real integration dispatch (not a write+reread of the
+    # source alone) and confirm the target file carries the frontmatter
+    # verbatim, including `model`/`model_reasoning_effort`/the unsupported
+    # `model_verbosity` key, because non-Codex/non-Kiro targets copy the
+    # agent through `copy_agent` with no field-level filtering.
+    from datetime import datetime
+
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import (
+        APMPackage,
+        GitReferenceType,
+        PackageInfo,
+        ResolvedReference,
+    )
+
+    nc_project_root = tmp_path / "nc_project"
+    (nc_project_root / ".claude").mkdir(parents=True)
+    nc_package_dir = tmp_path / "nc_pkg"
+    nc_apm_agents = nc_package_dir / ".apm" / "agents"
+    nc_apm_agents.mkdir(parents=True)
     verbatim_content = (
         "---\nname: reviewer\nmodel: native-model\nmodel_reasoning_effort: high\n"
         "model_verbosity: low\n---\nReview changes.\n"
     )
+    verbatim_source = nc_apm_agents / "verbatim.agent.md"
     verbatim_source.write_text(verbatim_content, encoding="utf-8")
-    assert verbatim_source.read_text(encoding="utf-8") == verbatim_content
+
+    nc_package = APMPackage(
+        name="nc-pkg",
+        version="1.0.0",
+        package_path=nc_package_dir,
+        source="github.com/test/nc-pkg",
+    )
+    nc_resolved_ref = ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit="abc123",
+        ref_name="main",
+    )
+    nc_pi = PackageInfo(
+        package=nc_package,
+        install_path=nc_package_dir,
+        resolved_reference=nc_resolved_ref,
+        installed_at=datetime.now().isoformat(),
+    )
+
+    nc_diagnostics = DiagnosticCollector()
+    nc_result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["claude"],
+        nc_pi,
+        nc_project_root,
+        diagnostics=nc_diagnostics,
+    )
+    assert nc_result.files_integrated == 1
+    nc_target_path = nc_project_root / ".claude" / "agents" / "verbatim.md"
+    assert nc_target_path.read_text(encoding="utf-8") == verbatim_content
+    # No req-tg-015 diagnostic fires for this target: the dropped-field
+    # bounding/preservation clause is Codex-specific and copy_agent never
+    # inspects frontmatter keys.
+    assert nc_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
     assert_spec_contains(
         "A consumer implementation providing the accepted\nCodex-native agent conversion capability MUST preserve a\nsource-declared",
