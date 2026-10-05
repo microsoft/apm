@@ -431,8 +431,15 @@ class AgentIntegrator(BaseIntegrator):
     _CODEX_KNOWN_FIELDS = frozenset({"name", "description", "tools", *_CODEX_MODEL_FIELDS})
 
     @staticmethod
-    def _display_dropped_field_key(field: str | int | float | bool | None) -> str:
+    def _display_dropped_field_key(field: object) -> str:
         """Render one dropped frontmatter key name, bounded and ASCII-safe.
+
+        ``field`` stays ``object`` (not a narrower union) because the YAML
+        frontmatter loader (``load_yaml_str``) accepts the full YAML 1.1 key
+        domain, including ``datetime.date`` (bare ``2026-10-05:`` keys) and
+        ``bytes`` (``!!binary`` keys) -- neither representable by a small
+        str/int/float/bool/None union. ``str(field)`` below covers all of
+        them uniformly.
 
         Sanitizes control/non-ASCII characters first, then truncates the
         *displayed* key (never the full value) so a single oversized key
