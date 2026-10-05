@@ -1240,10 +1240,13 @@ class HookIntegrator(BaseIntegrator):
             package_name,
             dependency_sources,
         )
-        # Skip if preflight_hooks_for_targets already authorized this plan (#3129).
-        # Forward retiring_targets: this fallback also needs it.
-        already_preflighted = getattr(source_plan, "cursor_preflight_done", False)
-        if config.target_key in {"cursor", "claude"} and not already_preflighted:
+        # Always re-check authorized Cursor/import sources at this write
+        # boundary, even if preflight_hooks_for_targets already ran for this
+        # plan. A plan object can be reused across projects or after a
+        # Claude import file is added mid-install; a cached "already
+        # preflighted" flag would silently bypass the check in exactly that
+        # case (#3129). Forward retiring_targets: this fallback also needs it.
+        if config.target_key in {"cursor", "claude"}:
             preflight_cursor_hooks(
                 self,
                 package_info,
@@ -1650,7 +1653,6 @@ class HookIntegrator(BaseIntegrator):
                 user_scope=user_scope,
                 retiring_targets=retiring_targets,
             )
-            object.__setattr__(source_plan, "cursor_preflight_done", True)
 
     def integrate_hooks_for_target(
         self,

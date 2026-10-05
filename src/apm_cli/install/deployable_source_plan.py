@@ -59,10 +59,6 @@ class DeployableSourcePlan:
     authorized_parent_prefixes: frozenset[str] = frozenset()
     hook_source_selection: Any | None = None
     plugin_bin_deployable: bool = False
-    # Set once the up-front cursor/claude preflight gate has run for this
-    # plan, so per-target hook integration does not repeat the same
-    # authorization check for every merge-based target (#3129).
-    cursor_preflight_done: bool = False
 
     def __post_init__(self) -> None:
         """Index authorized parents for constant-time copy filtering."""

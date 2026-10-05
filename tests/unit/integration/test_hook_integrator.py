@@ -1498,27 +1498,24 @@ class TestCursorIntegration:
         assert config.get("unsupportedKey") is True
 
     def test_fallback_preflight_forwards_retiring_targets(self, temp_project):
-        """Per-target preflight fallback must see the same retiring_targets as
-        the up-front ``preflight_hooks_for_targets`` call (#3129).
-
-        ``_integrate_merged_hooks`` only runs its own inline
-        ``preflight_cursor_hooks`` call when ``source_plan.cursor_preflight_done``
-        is NOT already True (e.g. the up-front gate was a no-op because
-        ``hook_source_selection`` was None). That fallback call must still
-        honor ``retiring_targets`` or a target slated for safe retirement
-        this run can be misflagged as an import-coexistence conflict.
-        Verified at the exact plumbing boundary (the forwarded kwarg),
-        not by re-deriving the full overlap-detection algorithm.
+        """``_integrate_merged_hooks`` always re-checks Cursor/import sources
+        at its own write boundary, unconditionally, even when an up-front
+        ``preflight_hooks_for_targets`` call already ran for this plan
+        (#3129). That check must still honor ``retiring_targets`` or a
+        target slated for safe retirement this run can be misflagged as an
+        import-coexistence conflict. Verified at the exact plumbing
+        boundary (the forwarded kwarg), not by re-deriving the full
+        overlap-detection algorithm.
         """
         from apm_cli.install.deployable_source_plan import DeployableSourcePlan
         from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
 
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
-        # hook_source_selection=None + cursor_preflight_done=False means the
-        # up-front preflight_hooks_for_targets() gate is a no-op for this
-        # plan, so the fallback inside _integrate_merged_hooks is the ONLY
-        # preflight that runs.
+        # hook_source_selection=None means the up-front
+        # preflight_hooks_for_targets() gate is a no-op for this plan, so
+        # the unconditional check inside _integrate_merged_hooks is the
+        # ONLY preflight that runs for this single invocation.
         source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
         expected_retiring = frozenset({"claude"})
 
@@ -1533,6 +1530,44 @@ class TestCursorIntegration:
 
         mock_preflight.assert_called_once()
         assert mock_preflight.call_args.kwargs["retiring_targets"] == expected_retiring
+
+    def test_integrate_merged_hooks_rechecks_preflight_after_upfront_run(self, temp_project):
+        """Mutation-break proof for the #3129 cached-plan bypass.
+
+        The up-front ``preflight_hooks_for_targets`` call and the per-target
+        write boundary inside ``_integrate_merged_hooks`` must each call
+        ``preflight_cursor_hooks`` independently. If a "run once per plan"
+        cache bit is reintroduced (the removed ``cursor_preflight_done``
+        field), the per-target call below would be skipped and the mock's
+        total call count would stay at 1 instead of reaching 2.
+        """
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+        from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+        source_plan = DeployableSourcePlan.create(
+            pkg_info,
+            [KNOWN_TARGETS["cursor"]],
+            skill_subset=None,
+            hooks_approved=True,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        assert source_plan.hook_source_selection is not None
+
+        with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
+            integrator.preflight_hooks_for_targets(pkg_info, temp_project, source_plan)
+            assert mock_preflight.call_count == 1
+
+            integrator._integrate_merged_hooks(
+                _MERGE_HOOK_TARGETS["cursor"],
+                pkg_info,
+                temp_project,
+                source_plan=source_plan,
+            )
+            assert mock_preflight.call_count == 2
 
 
 # ─── Sync/cleanup tests ──────────────────────────────────────────────────────

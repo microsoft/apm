@@ -3002,9 +3002,18 @@ detected overlap the implementation MUST reject the write with an actionable
 diagnostic rather than merge, redirect, or broaden either side's accepted
 input, and MUST NOT alter the Claude import's own settings. For the purposes
 of this requirement, "observable overlap" is defined as a non-empty
-intersection between the set of hook-event identifiers claimed by the
-Cursor-native configuration and those claimed by the in-effect Claude-settings
-import, evaluated after alias normalization.
+intersection, after alias normalization, between the set of (event
+identifier, handler kind, handler content) tuples claimed by the
+Cursor-native configuration and those claimed by the in-effect
+Claude-settings import, where two entries for the same event but a
+different handler kind or different handler content are not an overlap;
+an entry whose declared source package ownership (the installing
+implementation's own internal provenance marker, recorded for later
+reinstall/removal cleanup and never written into the Claude side) is
+already attributed to the installing implementation on one side counts
+as an overlap for that event regardless of handler content. This is an
+APM consumer-side coexistence policy choice, not a bare
+event-identifier-only comparison.
 
 > **Editorial note.** The event vocabulary, the Claude-to-Cursor event
 > aliases, and the two-key (`version`, `hooks`) top-level shape this
