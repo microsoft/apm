@@ -130,8 +130,14 @@ def source_provenance(root: Path, expected_head: str) -> dict[str, str]:
     status = subprocess.check_output(  # noqa: S603 - resolved Git, fixed argv, no shell
         [*command, "status", "--porcelain", "--untracked-files=no"], text=True, timeout=30
     )
-    if head != expected_head or status:
-        raise RuntimeError("The acceptance source does not match the clean expected PR head")
+    if head != expected_head:
+        raise RuntimeError(f"Expected source head {expected_head}, found {head}")
+    if status:
+        paths = status.splitlines()
+        raise RuntimeError(
+            f"The tracked acceptance source is dirty ({len(paths)} paths):\n"
+            + "\n".join(paths[:20])
+        )
     os.environ["APM_BINARY_PATH"] = str(binary)
     return {"head": head, "python": str(python), "apm_binary": str(binary), "source": str(source)}
 

@@ -25,6 +25,11 @@ def test_native_job_is_unconditional_bounded_and_read_only() -> None:
     assert not job.get("continue-on-error", False)
     checkout = job["steps"][0]
     assert checkout["uses"].split("@")[0] == "actions/checkout"
+    assert checkout["env"] == {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.autocrlf",
+        "GIT_CONFIG_VALUE_0": "false",
+    }
     assert checkout["with"] == {"ref": EXACT_HEAD, "persist-credentials": False}
     assert workflow_step(job, "Install dependencies")["run"] == "uv sync --frozen --extra dev"
 

@@ -14,6 +14,8 @@ import pytest
 
 import apm_cli
 from scripts import windows_native_symlink_probe_entry as probe
+from tests.unit.cache.test_git_symlink_config import _git
+from tests.unit.cache.test_git_symlink_config import config_env as config_env
 
 pytestmark = pytest.mark.component
 
@@ -213,6 +215,53 @@ def test_provenance_rejects_wrong_source(
     with pytest.raises(RuntimeError):
         probe.source_provenance(root, "a" * 40)
     assert os.environ["APM_BINARY_PATH"] == "prior-binary"
+
+
+@pytest.mark.parametrize("pin_checkout_lf", [False, True])
+def test_provenance_survives_config_isolation_only_with_bound_checkout_eol(
+    tmp_path: Path,
+    config_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    pin_checkout_lf: bool,
+) -> None:
+    """Real Git reproduces CRLF dirtiness when the parent config is removed."""
+    seed = tmp_path / "seed"
+    _git(config_env, "init", "--quiet", "--template=", str(seed))
+    source = seed / "src" / "apm_cli"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_bytes(b"fixture = True\n")
+    _git(config_env, "-C", str(seed), "add", "src")
+    _git(config_env, "-C", str(seed), "commit", "--quiet", "-m", "Fixture")
+    system_config = Path(config_env["GIT_CONFIG_SYSTEM"])
+    system_config.write_text("[core]\n    autocrlf = true\n", encoding="utf-8")
+    clone_env = dict(config_env)
+    if pin_checkout_lf:
+        clone_env.update(
+            GIT_CONFIG_COUNT="1",
+            GIT_CONFIG_KEY_0="core.autocrlf",
+            GIT_CONFIG_VALUE_0="false",
+        )
+    root = tmp_path / "checkout"
+    _git(clone_env, "clone", "--quiet", "--template=", str(seed), str(root))
+    head = _git(config_env, "-C", str(root), "rev-parse", "HEAD")
+    checked_out = root / "src" / "apm_cli" / "__init__.py"
+    assert checked_out.read_bytes() == (
+        b"fixture = True\n" if pin_checkout_lf else b"fixture = True\r\n"
+    )
+    system_config.write_bytes(b"")
+    stamp = checked_out.stat().st_mtime_ns + 2_000_000_000
+    os.utime(checked_out, ns=(stamp, stamp))
+    python = root / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.with_name("apm.exe").touch()
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(apm_cli, "__file__", str(checked_out))
+    monkeypatch.setenv("APM_BINARY_PATH", "prior")
+    if pin_checkout_lf:
+        assert probe.source_provenance(root, head)["head"] == head
+    else:
+        with pytest.raises(RuntimeError, match="tracked acceptance source is dirty"):
+            probe.source_provenance(root, head)
 
 
 @pytest.mark.parametrize("phase", ["baseline", "mutation", "restored"])
