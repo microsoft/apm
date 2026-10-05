@@ -1575,9 +1575,10 @@
       "keyword": "MUST",
       "section": "8.5.9",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_import_overlap_rejection_clause_persists_in_spec",
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_import_rejects_real_default_same_event_kind_content_overlap",
         "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_overlap_predicate_is_kind_aware_not_event_only"
       ]
     }

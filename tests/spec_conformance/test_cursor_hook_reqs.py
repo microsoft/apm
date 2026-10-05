@@ -202,3 +202,54 @@ def test_cursor_claude_overlap_predicate_is_kind_aware_not_event_only(tmp_path: 
         "two entries for the same event but a\ndifferent handler kind or different handler "
         "content are not an overlap",
     )
+
+
+@pytest.mark.req("req-tg-017")
+def test_cursor_claude_import_rejects_real_default_same_event_kind_content_overlap(
+    tmp_path: Path,
+) -> None:
+    """Real default-predicate proof for req-tg-017's rejection branch.
+
+    The test above (``test_cursor_claude_overlap_predicate_is_kind_aware_not_
+    event_only``) only reaches a rejection by deliberately patching
+    ``_action_keys`` back to a kind-blind mutant; that proves the predicate
+    is load-bearing, but not that the unpatched, as-shipped predicate
+    actually rejects a genuine overlap. This case uses the real nested
+    Claude handler shape (matching ``_nested`` in the native-contract unit
+    test) with the SAME event, SAME handler kind ("command"), and SAME
+    content as the Cursor source hook -- an unambiguous default-production
+    overlap -- and asserts rejection with zero native writes and a
+    byte-preserved Claude import, using the unpatched predicate end to end.
+    """
+    package = _package(
+        tmp_path, {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo shared"}]}]}
+    )
+    project = tmp_path / "project"
+    (project / ".cursor").mkdir(parents=True)
+    claude = project / ".claude/settings.json"
+    _write_json(
+        claude,
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo shared"}],
+                    }
+                ]
+            }
+        },
+    )
+    before = claude.read_bytes()
+
+    from apm_cli.hook_contract import HookContractError
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    with pytest.raises(HookContractError, match="Claude import"):
+        HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["cursor"], package, project)
+
+    assert claude.read_bytes() == before
+    assert list((project / ".cursor").iterdir()) == [], (
+        "a rejected Claude-import overlap MUST NOT write the Cursor-native hook artifact"
+    )

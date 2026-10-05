@@ -550,7 +550,7 @@ def test_retirement_does_not_ignore_user_or_global_hooks(
     } == before
 
 
-# ─── Reused-plan preflight regression (#3129) ────────────────────────────────
+# --- Reused-plan preflight regression (#3129) ------------------------------
 #
 # The up-front `preflight_hooks_for_targets` call and the per-target write
 # boundary inside `_integrate_merged_hooks` used to share a single
@@ -633,6 +633,55 @@ def test_reused_plan_rejects_overlap_in_a_different_project(tmp_path: Path) -> N
         )
 
     assert not (project_b / ".cursor/hooks.json").exists()
+
+
+def test_reused_plan_rejects_overlap_in_a_different_project_before_any_write(
+    tmp_path: Path,
+) -> None:
+    """Switching projects BEFORE the plan's first native write must still reject.
+
+    The sibling case above performs a real write for project_a before
+    switching to project_b, proving reuse-after-use is caught. This case
+    proves the narrower, earlier scenario: the plan only ran its up-front
+    ``preflight_hooks_for_targets`` for project_a -- no native write ever
+    happened there -- before being reused for project_b's own overlapping
+    import. Both project roots must stay exactly as they started.
+    """
+    package = _package(tmp_path, {"PreToolUse": [_nested("echo shared")]})
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+    (project_a / ".cursor").mkdir(parents=True)
+    (project_b / ".cursor").mkdir(parents=True)
+    _write_json(
+        project_b / ".claude/settings.json",
+        {"hooks": {"PreToolUse": [_nested("echo shared")]}},
+    )
+    before_b = (project_b / ".claude/settings.json").read_bytes()
+    plan = DeployableSourcePlan.create(
+        package,
+        [KNOWN_TARGETS["cursor"]],
+        skill_subset=None,
+        hooks_approved=True,
+        canvas_approved=False,
+        skip_bin=True,
+    )
+    integrator = HookIntegrator()
+
+    # Up-front preflight only, against the clean project_a. No native write
+    # for project_a happens anywhere in this test.
+    integrator.preflight_hooks_for_targets(package, project_a, plan)
+
+    # The same plan object -- "preflighted" only against project_a, never
+    # written anywhere yet -- is reused directly against project_b, which
+    # already has an overlapping Claude import.
+    with pytest.raises(HookContractError, match="Claude import"):
+        integrator.integrate_hooks_for_target(
+            KNOWN_TARGETS["cursor"], package, project_b, source_plan=plan
+        )
+
+    assert not (project_a / ".cursor/hooks.json").exists()
+    assert not (project_b / ".cursor/hooks.json").exists()
+    assert (project_b / ".claude/settings.json").read_bytes() == before_b
 
 
 def test_reused_plan_still_succeeds_without_a_conflicting_import(tmp_path: Path) -> None:

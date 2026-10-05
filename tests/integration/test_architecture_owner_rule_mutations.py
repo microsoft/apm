@@ -1440,6 +1440,44 @@ def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> 
     )
 
 
+def test_neutral_hook_contract_guard_rejects_cached_cursor_preflight_gate() -> None:
+    """A lexical "preflight call is present" check cannot catch a cache-gated
+    reintroduction of the #3129 reused-plan bypass: the literal
+    ``preflight_cursor_hooks(`` call stays present in the file whether or
+    not it is wrapped in an ``if not plan.cursor_preflight_done:`` guard.
+    This proves the dedicated token-forbidding sub-check (not just the
+    existing presence check) is the thing that actually catches that
+    specific regression shape.
+    """
+    path = "src/apm_cli/integration/hook_integrator.py"
+    source = _source(path)
+    old = (
+        '        if config.target_key in {"cursor", "claude"}:\n'
+        "            preflight_cursor_hooks(\n"
+    )
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        (
+            '        if config.target_key in {"cursor", "claude"} and not getattr(\n'
+            '            source_plan, "cursor_preflight_done", False\n'
+            "        ):\n"
+            "            preflight_cursor_hooks(\n"
+        ),
+        1,
+    )
+    ast.parse(mutated, filename=path)
+
+    rule_id = "mutation_writes.neutral_hook_contract"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and "cursor_preflight_done" in violation.message
+        for violation in report.violations
+    )
+
+
 @pytest.mark.parametrize(
     ("old", "new"),
     [

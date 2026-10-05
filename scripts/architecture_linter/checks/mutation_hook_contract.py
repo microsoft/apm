@@ -44,6 +44,7 @@ from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import (
     EXEMPT_MARKER,
     checked_facts,
+    forbid_text,
     line_pattern_violations,
     violation,
 )
@@ -77,6 +78,9 @@ _AGENT_PLUGIN_LOADER = "src/apm_cli/agent_plugins/loader.py"
 
 
 _INSTALL_DRIFT = "src/apm_cli/install/drift.py"
+
+
+_DEPLOYABLE_SOURCE_PLAN = "src/apm_cli/install/deployable_source_plan.py"
 
 
 _HOOK_FILE_ROUTING_TARGETS: tuple[str, ...] = (_HOOK_INTEGRATOR, _KIRO_HOOK_INTEGRATOR)
@@ -340,7 +344,11 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
     keys route through ``hook_contract``, per-file routing is not gated by
     dependency targets, merge-hook config writes stay owned by
     ``HookIntegrator``, ownership markers route through ``hook_ownership``,
-    and shared drift projection routes through ``hook_ownership``.
+    shared drift projection routes through ``hook_ownership``, and Cursor
+    import preflight stays unconditional at every native-write call site
+    (#3129: a cached "already preflighted" flag on the plan object must
+    never gate the re-check, because a plan can be reused across projects
+    or after a Claude import file is added mid-install).
     """
     rule_id = "mutation_writes.neutral_hook_contract"
     return (
@@ -349,6 +357,7 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_claude_project_dir(provider, rule_id),
         *_nhc_event_map(provider, rule_id),
         *_nhc_cursor_edge(provider, rule_id),
+        *_nhc_cursor_preflight_unconditional(provider, rule_id),
         *_nhc_contract_vocabulary(provider, rule_id),
         *_nhc_command_keys(provider, rule_id),
         *_nhc_file_routing(provider, rule_id),
@@ -534,6 +543,37 @@ def _nhc_cursor_edge(provider: FactsProvider, rule_id: str) -> tuple[Violation, 
             exempt=False,
         )
     )
+    return tuple(findings)
+
+
+def _nhc_cursor_preflight_unconditional(
+    provider: FactsProvider, rule_id: str
+) -> tuple[Violation, ...]:
+    """Cursor/Claude import preflight must never be gated by a cached flag.
+
+    A lexical "preflight call is present somewhere in the file" check (see
+    ``_nhc_cursor_edge``) cannot distinguish an unconditional preflight call
+    from one wrapped in ``if not plan.cursor_preflight_done:``. This guard
+    forbids the ``cursor_preflight_done`` token outright in the owner files
+    that gate native writes, so a plan-level cache can never reintroduce the
+    reused-plan bypass fixed for #3129 (a plan object reused across projects,
+    or re-checked after a Claude import file is added mid-install, must
+    always re-run the import/native preflight check).
+    """
+    findings: list[Violation] = []
+    for path in (_HOOK_INTEGRATOR, _DEPLOYABLE_SOURCE_PLAN):
+        findings.extend(
+            forbid_text(
+                provider,
+                rule_id=rule_id,
+                path=path,
+                needles=("cursor_preflight_done",),
+                message=(
+                    "Cursor import preflight must stay unconditional; "
+                    "a cached cursor_preflight_done flag must never gate it"
+                ),
+            )
+        )
     return tuple(findings)
 
 
