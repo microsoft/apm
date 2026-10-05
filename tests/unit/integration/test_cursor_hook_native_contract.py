@@ -271,6 +271,66 @@ def test_cursor_install_reinstall_and_remove_preserve_user_hooks(tmp_path: Path)
     assert not path.with_name("apm-hooks.json").exists()
 
 
+def test_cursor_windsurf_widen_then_narrow_retires_owned_windsurf_hooks_only(
+    tmp_path: Path,
+) -> None:
+    """Cursor-only -> Cursor+Windsurf -> Cursor-only lifecycle (#3129 general-
+    delta gap): widening a dependency's targets to also deploy to Windsurf,
+    then narrowing back to Cursor-only, must retire ONLY this package's owned
+    Windsurf entry. The Cursor-native hook must stay untouched throughout, and
+    a pre-existing unowned/user Windsurf hook must survive both the widen and
+    the narrow unchanged.
+    """
+    package = _package(tmp_path, {"PreToolUse": [_nested("echo installed")]})
+    project = tmp_path / "project"
+    (project / ".cursor").mkdir(parents=True)
+    integrator = HookIntegrator()
+    cursor_target = KNOWN_TARGETS["cursor"]
+    windsurf_target = KNOWN_TARGETS["windsurf"]
+
+    # Phase 1: Cursor-only.
+    integrator.integrate_hooks_for_target(cursor_target, package, project)
+    cursor_path = project / ".cursor/hooks.json"
+    cursor_snapshot = cursor_path.read_bytes()
+
+    # A pre-existing, unowned user hook already lives in Windsurf's config
+    # before this package ever touches it.
+    windsurf_path = project / ".windsurf/hooks.json"
+    user_windsurf = {
+        "version": 1,
+        "hooks": {"afterFileEdit": [{"command": "echo user-windsurf"}]},
+    }
+    _write_json(windsurf_path, user_windsurf)
+
+    # Phase 2: widen -- add Windsurf alongside the existing Cursor hook.
+    integrator.integrate_hooks_for_target(windsurf_target, package, project)
+    assert cursor_path.read_bytes() == cursor_snapshot, (
+        "widening to add windsurf must not touch the existing cursor hook"
+    )
+    windsurf_after_widen = json.loads(windsurf_path.read_text())
+    assert windsurf_after_widen["hooks"]["PreToolUse"], (
+        "the package's owned windsurf hook must be installed on widen"
+    )
+    assert (
+        windsurf_after_widen["hooks"]["afterFileEdit"] == user_windsurf["hooks"]["afterFileEdit"]
+    ), "the pre-existing unowned windsurf hook must survive the widen"
+
+    # Phase 3: narrow back -- retire only the owned windsurf entry.
+    stats = integrator.reconcile_package_target_restriction(package, project, [windsurf_target])
+    assert stats["errors"] == 0
+
+    assert cursor_path.read_bytes() == cursor_snapshot, (
+        "narrowing away windsurf must not touch the surviving cursor hook"
+    )
+    windsurf_after_narrow = json.loads(windsurf_path.read_text())
+    assert "PreToolUse" not in windsurf_after_narrow.get("hooks", {}), (
+        "the owned windsurf entry must be retired once windsurf leaves the target set"
+    )
+    assert (
+        windsurf_after_narrow["hooks"]["afterFileEdit"] == user_windsurf["hooks"]["afterFileEdit"]
+    ), "the pre-existing unowned windsurf hook must survive the narrow"
+
+
 def test_reinstall_migrates_only_owned_legacy_events(tmp_path: Path) -> None:
     package = _package(tmp_path, {"PreToolUse": [_nested("echo installed")]})
     project = tmp_path / "project"

@@ -254,8 +254,12 @@ on by default. All matching native and Claude-imported hooks run; native hooks
 do not replace imported hooks. APM therefore refuses overlapping native/import
 actions before deploying the package's primitives. Checks cover planned
 Claude/Cursor sources and existing project, project-local, and user hook
-configs. Same-owner events are treated conservatively even when matchers
-differ; APM does not try to prove arbitrary regexes disjoint.
+configs. "Owner" here means the installing dependency's own declared
+provenance marker for that hook entry (recorded in the sidecar described
+below). Same-owner events -- an event already attributed to the package
+about to install or retain the other side's configuration -- are treated
+conservatively as overlapping even when matchers differ; APM does not try
+to prove arbitrary regexes disjoint.
 
 Choose one hook deployment route per dependency. To reuse existing Claude
 hooks, select `claude` for that dependency and verify third-party imports are

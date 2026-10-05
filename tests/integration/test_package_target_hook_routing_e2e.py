@@ -180,6 +180,116 @@ def _consumer(
     return package
 
 
+def _cursor_windsurf_consumer(
+    scenario: _Scenario,
+    name: str,
+    dependency: dict[str, object],
+) -> LocalPackage:
+    """Author a cursor+windsurf consumer and create both native marker roots.
+
+    Both roots are pre-created up front: windsurf's merge-hook config is
+    ``require_dir=True`` (see ``hook_integrator._MERGE_HOOK_TARGETS``), so a
+    later widen phase that adds windsurf to the package's own targets would
+    otherwise silently skip the write.
+    """
+    package = scenario.consumers.create(
+        name,
+        dependencies=(dependency,),
+        targets=("cursor", "windsurf"),
+    )
+    (package.root / ".cursor").mkdir()
+    (package.root / ".windsurf").mkdir()
+    return package
+
+
+def _repoint_published_package_targets(
+    scenario: _Scenario,
+    published: _PublishedPackage,
+    *,
+    targets: tuple[str, ...],
+) -> _PublishedPackage:
+    """Advance a published package's own ``targets:`` manifest field.
+
+    Generalizes ``_restrict_published_package_to_claude`` to an arbitrary
+    target tuple so the same published-package-target-restriction mechanism
+    (``HookIntegrator.reconcile_package_target_restriction``) can be driven
+    through both a widen and a narrow transition, not just a one-way
+    restriction.
+    """
+    manifest_path = published.repository.worktree / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["targets"] = list(targets)
+    dump_yaml(manifest, manifest_path)
+    commit = scenario.repositories.commit(
+        published.repository,
+        message=f"retarget {published.name} to {list(targets)}",
+    )
+    return _PublishedPackage(
+        name=published.name,
+        repository=published.repository,
+        commit=commit,
+        remote_url=published.remote_url,
+        environment=published.environment,
+    )
+
+
+_MANUAL_WINDSURF_COMMAND = "echo manual-windsurf"
+
+
+def _write_manual_windsurf_hook(project: LocalPackage) -> None:
+    """Author one user-authored Windsurf ``PreToolUse`` entry outside APM provenance.
+
+    Windsurf's merged native shape nests handlers under a matcher group
+    (confirmed against production: ``HookIntegrator.integrate_hooks_for_target``
+    writes the same ``{"matcher": ..., "hooks": [...]}`` grouping Claude uses,
+    not Cursor's flattened entries). Written directly rather than appended to
+    an existing file because the cursor-only install phase never creates
+    ``.windsurf/hooks.json``.
+    """
+    path = project.root / ".windsurf" / "hooks.json"
+    manual_group = {
+        "matcher": "manual",
+        "hooks": [{"type": "command", "command": _MANUAL_WINDSURF_COMMAND}],
+    }
+    document: dict[str, object] = {"hooks": {"PreToolUse": [manual_group]}}
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        existing.setdefault("hooks", {}).setdefault("PreToolUse", []).append(manual_group)
+        document = existing
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+
+def _cursor_windsurf_snapshot(project: LocalPackage) -> LifecycleStateSnapshot:
+    """Capture exact lock, config, and hook ownership state for cursor+windsurf."""
+    return LifecycleStateSnapshot.capture(
+        project.root,
+        targets=("cursor", "windsurf"),
+    )
+
+
+def _windsurf_commands(snapshot: LifecycleStateSnapshot) -> list[str]:
+    """Return exact commands from Windsurf's native nested matcher groups."""
+    state = snapshot.file(".windsurf/hooks.json")
+    if state.kind == "missing":
+        return []
+    document = json.loads(state.content or b"{}")
+    commands: list[str] = []
+    hooks = document.get("hooks", {})
+    assert isinstance(hooks, dict)
+    for entries in hooks.values():
+        assert isinstance(entries, list)
+        for entry in entries:
+            assert isinstance(entry, dict)
+            handlers = entry.get("hooks", [entry])
+            assert isinstance(handlers, list)
+            for handler in handlers:
+                assert isinstance(handler, dict)
+                command = handler.get("command")
+                if isinstance(command, str):
+                    commands.append(command)
+    return commands
+
+
 def _run_success(
     scenario: _Scenario,
     project: LocalPackage,
@@ -520,3 +630,96 @@ def test_failed_restricted_update_preserves_existing_hook_state(
     output = " ".join((result.stdout + result.stderr).split())
     assert "Rejected frontmatter in broken.instructions.md" in output
     assert _snapshot(consumer) == before
+
+
+def test_cursor_windsurf_package_target_widen_then_narrow_retires_owned_windsurf_only(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Installed-CLI widen/narrow: Cursor-only -> Cursor+Windsurf -> Cursor-only.
+
+    Exercises the SAME published-package-target-restriction mechanism as
+    ``test_claude_package_restricts_hooks_across_install_update_and_audit``
+    (``HookIntegrator.reconcile_package_target_restriction``) through a real
+    installed binary, but bidirectionally: a widen that must add the owned
+    Windsurf hook without touching Cursor, followed by a narrow that must
+    retire only the owned Windsurf hook, preserving both the surviving
+    Cursor hook and a pre-existing unowned Windsurf user hook throughout.
+    """
+    scenario = _new_scenario(tmp_path / "cursor-windsurf-transition", apm_binary_path)
+    cursor_only = _publish(scenario, "cursor-windsurf-hooks", targets=("cursor",))
+    consumer = _cursor_windsurf_consumer(
+        scenario,
+        "cursor-windsurf-consumer",
+        cursor_only.dependency,
+    )
+
+    # Phase 1: cursor-only install. Windsurf must stay untouched.
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=cursor_only.environment,
+        scenario_id="cursor-windsurf-cursor-only-install",
+    )
+    phase1 = _cursor_windsurf_snapshot(consumer)
+    assert set(_cursor_commands(phase1)) == set(_EVENT_COMMANDS.values())
+    assert phase1.file(".windsurf/hooks.json").kind == "missing"
+
+    # A pre-existing unowned Windsurf hook must survive both transitions.
+    _write_manual_windsurf_hook(consumer)
+    baseline = _cursor_windsurf_snapshot(consumer)
+    assert _windsurf_commands(baseline) == [_MANUAL_WINDSURF_COMMAND]
+
+    # Phase 2: widen the published package to cursor+windsurf.
+    widened = _repoint_published_package_targets(
+        scenario,
+        cursor_only,
+        targets=("cursor", "windsurf"),
+    )
+    scenario.consumers.replace_apm_dependencies(consumer, (widened.dependency,))
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--update"),
+        environment=widened.environment,
+        scenario_id="cursor-windsurf-widen-update",
+    )
+    phase2 = _cursor_windsurf_snapshot(consumer)
+    assert set(_cursor_commands(phase2)) == set(_EVENT_COMMANDS.values()), (
+        "widening to add windsurf must not touch the existing cursor hooks"
+    )
+    windsurf_after_widen = set(_windsurf_commands(phase2))
+    assert set(_EVENT_COMMANDS.values()) <= windsurf_after_widen, (
+        "the package's owned windsurf hook must be installed on widen"
+    )
+    assert _MANUAL_WINDSURF_COMMAND in windsurf_after_widen, (
+        "the pre-existing unowned windsurf hook must survive the widen"
+    )
+
+    # Phase 3: narrow back to cursor-only. Only the owned windsurf entry
+    # must be retired; cursor and the unowned windsurf entry must survive.
+    narrowed = _repoint_published_package_targets(
+        scenario,
+        widened,
+        targets=("cursor",),
+    )
+    scenario.consumers.replace_apm_dependencies(consumer, (narrowed.dependency,))
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--update"),
+        environment=narrowed.environment,
+        scenario_id="cursor-windsurf-narrow-update",
+    )
+    phase3 = _cursor_windsurf_snapshot(consumer)
+    assert set(_cursor_commands(phase3)) == set(_EVENT_COMMANDS.values()), (
+        "narrowing away windsurf must not touch the surviving cursor hooks"
+    )
+    windsurf_after_narrow = set(_windsurf_commands(phase3))
+    assert not (set(_EVENT_COMMANDS.values()) & windsurf_after_narrow), (
+        "the owned windsurf entries must be retired once windsurf leaves the target set"
+    )
+    assert _MANUAL_WINDSURF_COMMAND in windsurf_after_narrow, (
+        "the pre-existing unowned windsurf hook must survive the narrow"
+    )

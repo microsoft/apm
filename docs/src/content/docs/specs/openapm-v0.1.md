@@ -3001,19 +3001,44 @@ both install orders (Claude-import-first and Cursor-native-first). On a
 detected overlap the implementation MUST reject the write with an actionable
 diagnostic rather than merge, redirect, or broaden either side's accepted
 input, and MUST NOT alter the Claude import's own settings. For the purposes
-of this requirement, "observable overlap" is defined as a non-empty
-intersection, after alias normalization, between the set of (event
-identifier, handler kind, handler content) tuples claimed by the
-Cursor-native configuration and those claimed by the in-effect
-Claude-settings import, where two entries for the same event but a
-different handler kind or different handler content are not an overlap;
-an entry whose declared source package ownership (the installing
-implementation's own internal provenance marker, recorded for later
-reinstall/removal cleanup and never written into the Claude side) is
-already attributed to the installing implementation on one side counts
-as an overlap for that event regardless of handler content. This is an
-APM consumer-side coexistence policy choice, not a bare
-event-identifier-only comparison.
+of this requirement, "observable overlap" is a non-empty intersection, after
+alias normalization, between the set of (event identifier, handler kind,
+handler content) tuples claimed by the Cursor-native configuration and those
+claimed by the in-effect Claude-settings import. Alias normalization maps
+each side's source-declared event identifier to the vocabulary of event
+identifiers this implementation accepts for Cursor-native hooks (see
+[req-tg-016](#req-tg-016)); req-tg-016 leaves that accepted vocabulary
+implementation-defined, so this clause does not assert that req-tg-016
+itself fixes a concrete alias-to-identifier mapping. Two entries for the
+same event identifier but a different handler kind or different handler
+content are not an overlap, since the same event MAY legitimately carry
+distinct, independently-triggered handlers on each side; handler-content
+comparison is a literal-string comparison performed after this
+implementation's existing deployed-package-root substitutions, and it does
+not trim whitespace or infer executable- or matcher-level equivalence
+between differently-formatted handler commands. Declared source package
+ownership is the exception to that content comparison: when the
+installing implementation's own internal provenance marker (recorded for
+later reinstall/removal cleanup and never written into the Claude side)
+already attributes an entry on the Cursor-native side and an entry on the
+Claude-imported side to the SAME source package for the same event, that
+pairing counts as an overlap regardless of handler kind or handler
+content, because that package would otherwise claim two
+independently-activated copies of its own hook for the same event. This
+provenance check and the rest of the tuple comparison both apply
+identically for both install orders; neither is evaluated only for
+Cursor-native-first or only for Claude-import-first. Absence of a
+provenance marker on an entry (for example, because the entry predates
+this implementation's tracking, or an externally edited settings file
+dropped the sidecar) is not itself malformed configuration and is not
+redefined as an overlap; without an established same-package attribution
+on both sides, the event falls back to the ordinary (event identifier,
+handler kind, handler content) tuple comparison like any other entry.
+This implementation's existing fail-closed handling for an actually
+unreadable or structurally invalid configuration document is unrelated to,
+and not triggered by, ordinary marker absence. This is an APM
+consumer-side coexistence policy choice, not a bare event-identifier-only
+comparison.
 
 > **Editorial note.** The event vocabulary, the Claude-to-Cursor event
 > aliases, and the two-key (`version`, `hooks`) top-level shape this

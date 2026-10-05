@@ -245,6 +245,17 @@ def test_cli_install_writer_only_disable_loses_the_rejection_then_restores(
     above FAIL through the real ``apm install`` command, for the expected
     missing-refusal reason -- then restoring the real guard must make a
     fresh real run pass again.
+
+    LOAD-BEARING: this is the test that proves, through the real ``apm
+    install`` CLI command specifically, that the CLI-tier refusal is
+    causally tied to the real per-write guard call rather than to an
+    incidental side effect of the fixture -- using the same
+    baseline/mutant/restored assertion pattern as the service-tier and
+    native-contract mutation tests in this suite. Other tests in the suite
+    (static architecture guards, service-tier mutation tests) also reject
+    deletion of that call; this test's distinct value is proving the
+    causal link survives at the CLI entry point, not that it is the
+    suite's sole detector of the deletion.
     """
     # Baseline sanity check first, with every real guard intact.
     result, project, claude_path, injected_bytes = _run_install_with_late_claude_import(

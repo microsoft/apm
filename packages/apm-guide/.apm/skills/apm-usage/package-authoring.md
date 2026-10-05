@@ -200,8 +200,11 @@ not by silently dropping restrictions. Claude stop aliases preserve the
 unlimited import default with `loop_limit: null`.
 
 Cursor runs all matching native and Claude-imported hooks. APM refuses
-overlapping planned or existing actions, including same-owner events with
-different matchers, rather than assuming imports are disabled. Choose one hook
+overlapping planned or existing actions, including same-owner events (an
+event already attributed, via the installing package's own provenance
+marker, to the package about to install or retain the other side's
+configuration) with different matchers, rather than assuming imports are
+disabled. Choose one hook
 target per dependency: `claude` plus Cursor's existing third-party import, or
 `cursor` with native hooks. APM never changes import settings or redirects a
 Cursor-only dependency into Claude settings. Reinstall migrates matching owned

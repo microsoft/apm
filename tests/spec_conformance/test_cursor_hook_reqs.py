@@ -214,11 +214,15 @@ def test_cursor_claude_overlap_predicate_is_kind_aware_not_event_only(tmp_path: 
     finally:
         preflight_mod._action_keys = real_action_keys
 
+    # Needles below were reflowed for req-tg-017's F2/F6 clarification fold
+    # (alias-normalization scope + both-install-order symmetry wording); the
+    # substring content is unchanged, only the line wrap and an added
+    # "identifier" qualifier after "event" moved.
     assert_spec_contains(
-        "a non-empty\nintersection, after alias normalization, between the set of (event\n"
-        "identifier, handler kind, handler content) tuples",
-        "two entries for the same event but a\ndifferent handler kind or different handler "
-        "content are not an overlap",
+        "is a non-empty intersection, after\nalias normalization, between the set of (event "
+        "identifier, handler kind,\nhandler content) tuples",
+        "Two entries for the\nsame event identifier but a different handler kind or different "
+        "handler\ncontent are not an overlap",
     )
 
 
