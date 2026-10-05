@@ -6,13 +6,14 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apm_cli.hook_contract import HookContractError
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
+from apm_cli.integration import hook_integrator
 from apm_cli.integration.hook_integrator import HookIntegrator, native_hook_config
 from apm_cli.integration.hook_native_formats import inspect_native_hooks
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -733,3 +734,150 @@ def test_reused_plan_preserves_unrelated_user_owned_claude_hooks(tmp_path: Path)
 
     assert result.files_integrated == 1
     assert claude.read_bytes() == before
+
+
+# --- Orchestration-tier (install-pipeline) coverage for the same guarantee -
+#
+# The tests above call ``HookIntegrator.preflight_hooks_for_targets`` and
+# ``integrate_hooks_for_target`` directly. Real installs never do that: the
+# production entry point is ``services.integrate_package_primitives``, which
+# builds the ``DeployableSourcePlan`` itself, runs the up-front preflight,
+# then dispatches each target's write -- all within ONE call. This section
+# proves the guarantee holds through that real orchestration path, and that
+# the per-write re-check inside ``_integrate_merged_hooks`` is load-bearing
+# (not merely decorative) by disabling only it as a negative control.
+#
+# (The CLI/``apm install``-tier case -- going through the ``install`` Click
+# command itself -- is covered separately in
+# ``tests/integration/test_install_cli_cursor_claude_import_recheck_e2e.py``;
+# this section stays scoped to the ``services.integrate_package_primitives``
+# dispatch tier.)
+
+
+def _run_pipeline_with_late_claude_import(
+    tmp_path: Path, label: str
+) -> tuple[HookContractError | None, Path]:
+    """Run one real ``integrate_package_primitives`` call, injecting a
+    conflicting Claude import between the real up-front preflight and the
+    real per-target write (both inside that single orchestrated call).
+
+    No field or integrator is mocked; only the *timing* of the import write
+    is controlled, via a call-through wrapper around
+    ``HookIntegrator.preflight_hooks_for_targets`` so the import lands at the
+    exact real write boundary. Returns the raised ``HookContractError`` (or
+    ``None`` if the write was wrongly allowed) and the project root, so the
+    same assertion can be reused against both a real run and a scoped
+    mutant run.
+    """
+    root = tmp_path / label
+    package = _package(root, {"PreToolUse": [_nested("echo shared")]})
+    project = root / "project"
+    (project / ".cursor").mkdir(parents=True)
+    hook = HookIntegrator()
+    real_preflight = HookIntegrator.preflight_hooks_for_targets
+
+    def _preflight_then_inject_claude_import(
+        self: HookIntegrator, *args: Any, **kwargs: Any
+    ) -> None:
+        real_preflight(self, *args, **kwargs)
+        _write_json(
+            project / ".claude/settings.json",
+            {"hooks": {"PreToolUse": [_nested("echo shared")]}},
+        )
+
+    raised: HookContractError | None = None
+    with patch.object(
+        HookIntegrator, "preflight_hooks_for_targets", _preflight_then_inject_claude_import
+    ):
+        try:
+            integrate_package_primitives(
+                package,
+                project,
+                targets=[KNOWN_TARGETS["cursor"]],
+                force=False,
+                managed_files=None,
+                integrators=IntegratorBundle(
+                    prompt=None,
+                    agent=None,
+                    skill=SkillIntegrator(),
+                    instruction=None,
+                    command=None,
+                    hook=hook,
+                ),
+                diagnostics=DiagnosticCollector(),
+            )
+        except HookContractError as exc:
+            raised = exc
+    return raised, project
+
+
+def _assert_pipeline_rejected_the_late_import(
+    raised: HookContractError | None, project: Path
+) -> None:
+    """The shared regression assertion, reused unmodified against a real run
+    and a scoped-mutant run so the mutant proof exercises the exact same
+    check the baseline must satisfy."""
+    assert raised is not None, (
+        "expected HookContractError for a Claude import appearing mid-install; "
+        "none was raised (missing refusal)"
+    )
+    assert "Claude import" in str(raised)
+    assert not (project / ".cursor/hooks.json").exists(), (
+        "native write must not occur when the rejection fires"
+    )
+
+
+def test_pipeline_rejects_claude_import_appearing_during_a_single_install_call(
+    tmp_path: Path,
+) -> None:
+    """A Claude import written between the real up-front preflight and the
+    real per-target write -- both inside one ``integrate_package_primitives``
+    call -- must still be rejected."""
+    raised, project = _run_pipeline_with_late_claude_import(tmp_path, "baseline")
+    _assert_pipeline_rejected_the_late_import(raised, project)
+
+
+def test_pipeline_control_disabling_only_the_per_write_recheck_loses_the_rejection(
+    tmp_path: Path,
+) -> None:
+    """Mutation control: disabling ONLY the per-write re-check inside
+    ``_integrate_merged_hooks`` (not the up-front preflight, which must keep
+    running for real) must make the SAME regression assertion above FAIL,
+    for the expected missing-refusal reason -- proving that specific call is
+    what enforces the guarantee, not the up-front preflight alone. The
+    disabled state is scoped to one patched method for one call inside this
+    test only; it is never committed and the up-front preflight is never
+    touched.
+    """
+    # Baseline sanity check first, with every real guard intact.
+    raised, project = _run_pipeline_with_late_claude_import(tmp_path, "before")
+    _assert_pipeline_rejected_the_late_import(raised, project)
+
+    real_integrate_merged = HookIntegrator._integrate_merged_hooks
+
+    def _integrate_merged_with_recheck_disabled(self: HookIntegrator, *args: Any, **kwargs: Any):
+        # Disable ONLY the per-write re-check, and only for the duration of
+        # this one real ``_integrate_merged_hooks`` call. The up-front
+        # ``preflight_hooks_for_targets`` call (which runs earlier, outside
+        # this patch's window) is never touched -- it ran for real above.
+        original = hook_integrator.preflight_cursor_hooks
+        hook_integrator.preflight_cursor_hooks = lambda *a, **k: None
+        try:
+            return real_integrate_merged(self, *args, **kwargs)
+        finally:
+            hook_integrator.preflight_cursor_hooks = original
+
+    with patch.object(
+        HookIntegrator, "_integrate_merged_hooks", _integrate_merged_with_recheck_disabled
+    ):
+        mutant_raised, mutant_project = _run_pipeline_with_late_claude_import(tmp_path, "mutant")
+        with pytest.raises(AssertionError, match="missing refusal"):
+            _assert_pipeline_rejected_the_late_import(mutant_raised, mutant_project)
+        # Confirm the assertion failed for the expected reason (the native
+        # write went through), not some unrelated break.
+        assert mutant_raised is None
+        assert (mutant_project / ".cursor/hooks.json").exists()
+
+    # Restored: the real guard is back in place for the next install.
+    restored_raised, restored_project = _run_pipeline_with_late_claude_import(tmp_path, "restored")
+    _assert_pipeline_rejected_the_late_import(restored_raised, restored_project)

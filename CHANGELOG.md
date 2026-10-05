@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
 ### Added
 
-- OpenAPM v0.1 spec: documented the already-shipped Cursor-native hook installation fail-closed conversion validation and Claude-import-coexistence rejection as [req-tg-016] and [req-tg-017] (Section 8.5.9). (#3149)
+- OpenAPM v0.1 spec: documented the Cursor-native hook installation fail-closed conversion validation and Claude-import-coexistence rejection as [req-tg-016] and [req-tg-017] (Section 8.5.9). (#3149)
 
 ## [0.33.0] - 2026-10-02
 

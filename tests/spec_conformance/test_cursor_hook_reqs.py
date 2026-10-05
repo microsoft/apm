@@ -162,7 +162,16 @@ def test_cursor_claude_overlap_predicate_is_kind_aware_not_event_only(tmp_path: 
     project = tmp_path / "project"
     (project / ".cursor").mkdir(parents=True)
     claude = project / ".claude/settings.json"
-    _write_json(claude, {"hooks": {"PreToolUse": [{"type": "prompt", "prompt": "echo shared"}]}})
+    _write_json(
+        claude,
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": "echo shared"}]}
+                ]
+            }
+        },
+    )
     before = claude.read_bytes()
 
     result = HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["cursor"], package, project)
@@ -189,7 +198,16 @@ def test_cursor_claude_overlap_predicate_is_kind_aware_not_event_only(tmp_path: 
         (project2 / ".cursor").mkdir(parents=True)
         _write_json(
             project2 / ".claude/settings.json",
-            {"hooks": {"PreToolUse": [{"type": "prompt", "prompt": "echo shared"}]}},
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "prompt", "prompt": "echo shared"}],
+                        }
+                    ]
+                }
+            },
         )
         with pytest.raises(HookContractError, match="Claude import"):
             HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["cursor"], package2, project2)
