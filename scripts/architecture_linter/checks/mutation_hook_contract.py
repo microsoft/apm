@@ -588,9 +588,7 @@ def _nhc_cursor_preflight_unconditional(
     return tuple(findings)
 
 
-def _nhc_cursor_preflight_call_site(
-    provider: FactsProvider, rule_id: str
-) -> tuple[Violation, ...]:
+def _nhc_cursor_preflight_call_site(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
     """Guard the exact per-write preflight call site structurally.
 
     Looks up ``HookIntegrator._integrate_merged_hooks``, finds its direct
