@@ -20,12 +20,16 @@ pytestmark = [pytest.mark.component, pytest.mark.requires_windows_native_standar
 
 
 @pytest.fixture
-def native_precedence_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def native_precedence_guard(
+    monkeypatch: pytest.MonkeyPatch, record_property: Callable[[str, object], None]
+) -> Iterator[None]:
     """Remove only the local-over-inherited guard for the explicit negative run."""
     mode = os.environ.get("APM_WINDOWS_NATIVE_MUTATION", "")
     if mode not in {"", "drop-local-precedence"}:
         raise ValueError("Unknown native symlink mutation")
     calls = 0
+    changes: list[tuple[str, str, str, str, bool, bool]] = []
+    original_selection = git_env._symlink_entry_wins
     if mode:
 
         def without_local_precedence(
@@ -33,12 +37,29 @@ def native_precedence_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         ) -> bool:
             nonlocal calls
             calls += 1
-            return current is None or candidate.scope == "command"
+            mutant = current is None or candidate.scope == "command"
+            correct = original_selection(current, candidate)
+            if current is not None and mutant != correct:
+                changes.append(
+                    (
+                        current.scope,
+                        current.value,
+                        candidate.scope,
+                        candidate.value,
+                        correct,
+                        mutant,
+                    )
+                )
+            return mutant
 
         monkeypatch.setattr(git_env, "_symlink_entry_wins", without_local_precedence)
     yield
     if mode:
         assert calls > 0, "The native mutation did not reach the production selection helper"
+        record_property("mutation_decisions", json.dumps(changes))
+        assert ("global", "true", "local", "false", True, False) in changes, (
+            "The mutation must actually reject native local false over inherited global true"
+        )
 
 
 @pytest.mark.usefixtures("native_precedence_guard")
@@ -68,6 +89,8 @@ def test_native_standard_user_symlink_fallback(
     try:
         git_env.clone_git_worktree(str(symlink_source), target, env=config_env)
     except subprocess.CalledProcessError as error:
+        if "unable to create symlink AGENTS.md" not in (error.stderr or ""):
+            raise
         pytest.fail(f"{MUTATION_FAILURE}; Git exit {error.returncode}")
 
     assert not (target / "AGENTS.md").is_symlink()
