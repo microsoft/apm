@@ -985,6 +985,15 @@ def _merge_parent_git_config_snapshot(
     )
 
 
+def _symlink_entry_wins(current: GitConfigEntry | None, candidate: GitConfigEntry) -> bool:
+    """Decide whether ``candidate`` should replace the retained core.symlinks entry.
+
+    Command-scope intent always wins over any other scope; otherwise the
+    last entry seen wins, matching Git's own scope-precedence ordering.
+    """
+    return current is None or current.scope != "command" or candidate.scope == "command"
+
+
 def _materialize_git_config_snapshot(
     env: dict[str, str],
     snapshot: _GitConfigSnapshot,
@@ -1011,7 +1020,7 @@ def _materialize_git_config_snapshot(
         if normalized == "core.symlinks":
             # Parent command entries can precede child file entries after
             # merging. Keep command intent above Git init's capability result.
-            if symlinks is None or symlinks.scope != "command" or entry.scope == "command":
+            if _symlink_entry_wins(symlinks, entry):
                 symlinks = entry
             continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
