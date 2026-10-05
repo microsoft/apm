@@ -507,6 +507,24 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "audit-replay-subset-fallback-hardcoded",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "        else project_root / APM_MODULES_DIR\n",
+            '        else project_root / "apm_modules"\n',
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-config-fallback-hardcoded",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "        else project_root / APM_MODULES_DIR,\n",
+            '        else project_root / "apm_modules",\n',
+        ),
+    ),
+    CompoundMutation(
         "audit-replay-subset-error-fail-closed",
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
