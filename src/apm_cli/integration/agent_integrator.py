@@ -423,8 +423,15 @@ class AgentIntegrator(BaseIntegrator):
     # bounds the whole diagnostic's total length.
     _MAX_DROPPED_FIELD_KEY_LEN = 60
 
+    # Native string fields Codex itself recognizes and whose declared value
+    # takes precedence over any APM default. Single source of truth for both
+    # the model-settings extraction loop and the dropped-fields exclusion set
+    # below, so adding a third recognized field only requires one edit here.
+    _CODEX_MODEL_FIELDS = ("model", "model_reasoning_effort")
+    _CODEX_KNOWN_FIELDS = frozenset({"name", "description", "tools", *_CODEX_MODEL_FIELDS})
+
     @staticmethod
-    def _display_dropped_field_key(field: object) -> str:
+    def _display_dropped_field_key(field: str | int | float | bool | None) -> str:
         """Render one dropped frontmatter key name, bounded and ASCII-safe.
 
         Sanitizes control/non-ASCII characters first, then truncates the
@@ -502,7 +509,7 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
-        model_fields = ("model", "model_reasoning_effort")
+        model_fields = AgentIntegrator._CODEX_MODEL_FIELDS
         model_settings: dict[str, str] = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
@@ -534,9 +541,7 @@ class AgentIntegrator(BaseIntegrator):
                     # so hostile frontmatter with many keys does not force
                     # rendering every key just to discard most of them below.
                     dropped_field_names = [
-                        field
-                        for field in fm
-                        if field not in {"name", "description", "tools", *model_fields}
+                        field for field in fm if field not in AgentIntegrator._CODEX_KNOWN_FIELDS
                     ]
                     if dropped_field_names and diagnostics is not None:
                         shown_names = dropped_field_names[

@@ -1372,6 +1372,108 @@ class TestCodexAgentIntegration:
         assert "...(truncated)" in message
         assert len(message) < 300
 
+    @pytest.mark.parametrize(
+        ("key_count", "expect_elision"),
+        [
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN,
+                False,
+                id="at-cap-no-elision",
+            ),
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN + 1,
+                True,
+                id="one-over-cap-elides-one",
+            ),
+        ],
+    )
+    def test_codex_dropped_fields_count_boundary(
+        self, key_count: int, expect_elision: bool
+    ) -> None:
+        """Exercise the exact off-by-one boundary of the count cap.
+
+        The pre-existing coverage only proves bounding works far above the
+        cap (9 keys vs a cap of 5); this proves the cap's own edge: exactly
+        `_MAX_DROPPED_FIELDS_SHOWN` keys must name all of them with no
+        "(and N more)" suffix, while one more key must add exactly that
+        suffix for exactly one elided key.
+        """
+        source = self.root / "boundary-count.agent.md"
+        unsupported = {f"field_{i}": "value" for i in range(key_count)}
+        frontmatter = {"name": "reviewer", **unsupported}
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        message = warnings[0].message
+        shown_keys = list(unsupported)[: AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN]
+        elided_keys = list(unsupported)[AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN :]
+        for key in shown_keys:
+            assert f"'{key}'" in message
+        if expect_elision:
+            assert "(and 1 more)" in message
+            for key in elided_keys:
+                assert f"'{key}'" not in message
+        else:
+            assert "(and" not in message
+            assert not elided_keys
+
+    @pytest.mark.parametrize(
+        ("key_len", "expect_truncation"),
+        [
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN,
+                False,
+                id="at-cap-no-truncation",
+            ),
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN + 1,
+                True,
+                id="one-over-cap-truncates",
+            ),
+        ],
+    )
+    def test_codex_dropped_field_key_length_boundary(
+        self, key_len: int, expect_truncation: bool
+    ) -> None:
+        """Exercise the exact off-by-one boundary of the per-key length cap.
+
+        The pre-existing coverage only proves truncation works far above
+        the cap (20000 chars vs a cap of 60); this proves the cap's own
+        edge: a key exactly `_MAX_DROPPED_FIELD_KEY_LEN` chars long must
+        display whole, while one char longer must be truncated.
+        """
+        source = self.root / "boundary-length.agent.md"
+        key = "k" * key_len
+        frontmatter = {"name": "reviewer", key: "value"}
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        message = warnings[0].message
+        if expect_truncation:
+            assert key not in message
+            assert "...(truncated)" in message
+        else:
+            assert f"'{key}'" in message
+            assert "...(truncated)" not in message
+
     @pytest.mark.parametrize("target_name", _verbatim_copy_agent_targets())
     def test_codex_metadata_change_preserves_other_targets(self, target_name: str) -> None:
         """Codex filtering must not leak into verbatim target deployment."""
