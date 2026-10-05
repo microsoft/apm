@@ -1478,6 +1478,87 @@ def test_neutral_hook_contract_guard_rejects_cached_cursor_preflight_gate() -> N
     )
 
 
+def test_neutral_hook_contract_guard_rejects_removed_preflight_call_site() -> None:
+    """A file-wide ``preflight_cursor_hooks(`` presence check cannot catch
+    the exact per-write call being deleted from
+    ``HookIntegrator._integrate_merged_hooks``: the separate, unrelated
+    upfront ``preflight_hooks_for_targets`` call site leaves that substring
+    present elsewhere in the file even after this one is removed. Only the
+    structural, call-site-specific sub-check catches this regression shape.
+    """
+    path = "src/apm_cli/integration/hook_integrator.py"
+    source = _source(path)
+    old = (
+        '        if config.target_key in {"cursor", "claude"}:\n'
+        "            preflight_cursor_hooks(\n"
+        "                self,\n"
+        "                package_info,\n"
+        "                project_root,\n"
+        "                hook_sources,\n"
+        "                _HOOK_EVENT_MAP,\n"
+        "                user_scope=user_scope,\n"
+        "                retiring_targets=retiring_targets,\n"
+        "            )\n"
+    )
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        '        if config.target_key in {"cursor", "claude"}:\n            pass\n',
+        1,
+    )
+    assert "preflight_cursor_hooks(" in mutated, "unrelated call site must survive the mutation"
+    ast.parse(mutated, filename=path)
+
+    rule_id = "mutation_writes.neutral_hook_contract"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id
+        and "direct, unconditional statement" in violation.message
+        and "preflight_cursor_hooks" in violation.message
+        for violation in report.violations
+    )
+
+
+def test_neutral_hook_contract_guard_rejects_renamed_cache_predicate_rewrap() -> None:
+    """The reused-plan bypass can be reintroduced under any predicate name,
+    not just ``cursor_preflight_done``. Nesting the per-write call in a
+    second conditional -- regardless of what the cache flag is called --
+    must fail the structural call-site check even when the token-ban
+    sub-check has nothing to match.
+    """
+    path = "src/apm_cli/integration/hook_integrator.py"
+    source = _source(path)
+    old = (
+        '        if config.target_key in {"cursor", "claude"}:\n'
+        "            preflight_cursor_hooks(\n"
+    )
+    assert source.count(old) == 1
+    mutated = source.replace(
+        old,
+        (
+            '        if config.target_key in {"cursor", "claude"}:\n'
+            '            if not getattr(source_plan, "_already_rendered_once", False):\n'
+            "                preflight_cursor_hooks(\n"
+        ),
+        1,
+    )
+    assert "cursor_preflight_done" not in mutated
+    ast.parse(mutated, filename=path)
+
+    rule_id = "mutation_writes.neutral_hook_contract"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id
+        and "direct, unconditional statement" in violation.message
+        and "preflight_cursor_hooks" in violation.message
+        for violation in report.violations
+    )
+
+
 @pytest.mark.parametrize(
     ("old", "new"),
     [

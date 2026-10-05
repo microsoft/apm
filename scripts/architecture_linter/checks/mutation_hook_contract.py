@@ -551,14 +551,24 @@ def _nhc_cursor_preflight_unconditional(
 ) -> tuple[Violation, ...]:
     """Cursor/Claude import preflight must never be gated by a cached flag.
 
-    A lexical "preflight call is present somewhere in the file" check (see
-    ``_nhc_cursor_edge``) cannot distinguish an unconditional preflight call
-    from one wrapped in ``if not plan.cursor_preflight_done:``. This guard
-    forbids the ``cursor_preflight_done`` token outright in the owner files
-    that gate native writes, so a plan-level cache can never reintroduce the
-    reused-plan bypass fixed for #3129 (a plan object reused across projects,
-    or re-checked after a Claude import file is added mid-install, must
-    always re-run the import/native preflight check).
+    Two independent sub-checks close the gap a purely lexical "preflight
+    call is present somewhere in the file" check (see ``_nhc_cursor_edge``)
+    cannot see:
+
+    * A token ban on ``cursor_preflight_done`` across the owner files, so a
+      plan-level cache field can never reintroduce the reused-plan bypass
+      fixed for #3129 under that name.
+    * A structural, per-call-site check that the native-write preflight
+      call at the per-target write boundary in ``_integrate_merged_hooks``
+      survives as a direct (unconditional) statement of its owning
+      ``if config.target_key in {...}:`` block -- not removed, and not
+      re-wrapped in a *second*, nested conditional (any cache predicate,
+      regardless of its name, would have to be such a nested ``if``). A
+      file-wide substring check cannot tell a removed/re-gated call at one
+      write boundary from an unrelated surviving call at another (for
+      example the separate upfront ``preflight_hooks_for_targets`` call),
+      because deleting or re-gating one occurrence still leaves the
+      ``preflight_cursor_hooks(`` substring present elsewhere in the file.
     """
     findings: list[Violation] = []
     for path in (_HOOK_INTEGRATOR, _DEPLOYABLE_SOURCE_PLAN):
@@ -574,7 +584,56 @@ def _nhc_cursor_preflight_unconditional(
                 ),
             )
         )
+    findings.extend(_nhc_cursor_preflight_call_site(provider, rule_id))
     return tuple(findings)
+
+
+def _nhc_cursor_preflight_call_site(
+    provider: FactsProvider, rule_id: str
+) -> tuple[Violation, ...]:
+    """Guard the exact per-write preflight call site structurally.
+
+    Looks up ``HookIntegrator._integrate_merged_hooks``, finds its direct
+    ``if config.target_key in {'cursor', 'claude'}:`` statement (the only
+    legitimate conditional around the call -- preflight only applies to
+    those two targets), and requires the ``preflight_cursor_hooks(...)``
+    call to be a direct statement of that ``if`` body. A removed call, or
+    one re-wrapped in any further nested conditional (a cache gate under
+    any name), fails this check even though the ``preflight_cursor_hooks(``
+    substring would still appear elsewhere in the file.
+    """
+    message = (
+        "HookIntegrator._integrate_merged_hooks must call "
+        "preflight_cursor_hooks(...) as a direct, unconditional statement "
+        "of its 'if config.target_key in {cursor, claude}' block -- not "
+        "removed and not re-wrapped in a further (cache) conditional"
+    )
+    index = provider.tree_index(_HOOK_INTEGRATOR)
+    if index is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    function = index.function("HookIntegrator._integrate_merged_hooks")
+    if function is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    target_key_if = next(
+        (
+            stmt
+            for stmt in function.body
+            if isinstance(stmt, ast.If)
+            and ast.unparse(stmt.test) == "config.target_key in {'cursor', 'claude'}"
+        ),
+        None,
+    )
+    if target_key_if is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    has_direct_call = any(
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Call)
+        and ast.unparse(stmt.value.func) == "preflight_cursor_hooks"
+        for stmt in target_key_if.body
+    )
+    if has_direct_call:
+        return ()
+    return (violation(rule_id, _HOOK_INTEGRATOR, message),)
 
 
 def _nhc_command_keys(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
