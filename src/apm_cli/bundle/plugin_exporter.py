@@ -831,6 +831,9 @@ def export_plugin_bundle(
     # 2. Read apm.yml
     apm_yml_path = project_root / "apm.yml"
     package = APMPackage.from_apm_yml(apm_yml_path)
+    from .source_package import require_resource_pack_mode
+
+    require_resource_pack_mode(package)
     pkg_name = package.name
     pkg_version = package.version or "0.0.0"
 

@@ -78,6 +78,38 @@ my-package/
         resource2.md
 ```
 
+## Independent resources (experimental working draft)
+
+Use `resources: [contracts, checks]` for package-owned data that is not an
+activated primitive. Entries select whole nonempty directories recursively,
+not individual files or globs. Paths are package-relative POSIX paths without
+`./`, trailing slashes, overlaps, case aliases, symlinks, or traversal.
+Hidden paths and metadata/cache names (`apm.yml`, `apm.lock`, `apm.lock.yaml`,
+`plugin.json`, `mcp.json`, `apm_modules`, `node_modules`, `__pycache__`, `build`,
+`dist`) are forbidden anywhere in the selection. Select dedicated directories,
+never `.` or broad parents containing secrets. Content is not secret-scanned.
+
+With the original `apm.yml` and a supported `apm.lock.yaml` present:
+
+```bash
+apm pack --format apm --source --archive
+apm unpack --source build/software-factory-1.0.0.zip -o acquired
+```
+
+`acquired` must not exist. Original manifest, lockfile, and resource bytes are
+preserved exactly. The envelope's `pack.bundle_files` hashes the `package/`
+payload; restoration removes that prefix only. Missing/corrupt/extra content
+fails closed; neither `--force` nor `--skip-verify` bypasses verification.
+Final staged bytes must match the original envelope hashes. Directory publication
+requires native atomic no-replace support and fails closed if unavailable;
+destinations created during staging are not replaced.
+No scripts, checks, hooks, primitives, dependencies, or marketplace outputs are
+activated. Directory and tar.gz forms also work; `--dry-run` is read-only.
+There is no new remote acquisition or transitive resource flattening.
+`apm install` and legacy unpack reject source envelopes; plugin/ordinary pack
+reject declared resources instead of dropping them. Omit `$schema`: this is not
+normative OpenAPM and requires a CLI version implementing `--source`.
+
 ## Install-time discovery rules
 
 When `.apm/` exists, `apm pack` sources local primitives and hooks from

@@ -2,6 +2,16 @@
   "version": 1,
   "owners": [
     {
+      "id": "source-package-resources",
+      "decision": "Working-draft resource selection and non-activating APM source-envelope admission",
+      "owner": "models/package_resources.py (parse_resource_roots, collect_package_resources) + bundle/source_package.py (require_resource_pack_mode, reject_source_deployment, restore_source_package)",
+      "selectors": [
+        "src/apm_cli/models/package_resources.py",
+        "src/apm_cli/bundle/source_package.py"
+      ],
+      "guards": ["marketplace-integrations-source-resources"]
+    },
+    {
       "id": "marketplace-tag-pattern",
       "decision": "Marketplace tag-pattern validation and expansion",
       "owner": "marketplace/tag_pattern.py",

@@ -1,12 +1,12 @@
 ---
 title: apm unpack
-description: Extract an APM bundle into a project directory with verification and security scanning.
+description: Restore inert source packages, or extract legacy deployment bundles.
 sidebar:
   order: 18
 ---
 
 :::caution[Deprecated]
-`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the only deploy path for legacy `--format apm` tarballs (see [Behavior](#behavior)).
+Deployment extraction without `--source` is deprecated. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. The experimental `--source` mode below is a separate, non-activating restoration route.
 :::
 
 ## Synopsis
@@ -16,6 +16,28 @@ apm unpack BUNDLE_PATH [OPTIONS]
 ```
 
 ## Description
+
+### Source restoration (experimental)
+
+```bash
+apm unpack --source ./software-factory-1.0.0.zip -o ./acquired
+```
+
+Accepts a directory, ZIP, or tar.gz produced by `apm pack --format apm --source`.
+The output directory must not exist, even if empty. Restores the exact author
+`apm.yml`, `apm.lock.yaml`, and resource paths and bytes after mandatory SHA-256
+verification. Does not install dependencies, activate primitives, run checks or
+hooks, compile, or modify another workspace. No network acquisition is added.
+Missing, corrupt, ambiguous, or unsafe content fails before any output files
+are published. `--dry-run` validates without writing; `--skip-verify` and
+`--force` are rejected. Hashes verify integrity, not publisher authenticity.
+See [source-package rules](../../../producer/pack-a-bundle/#independent-resources-experimental).
+
+Marked source packages cannot be passed to `apm install` or unpacked without
+`--source`. The remaining deployment behavior below applies only without
+`--source`.
+
+### Legacy deployment extraction
 
 `apm unpack` extracts an APM bundle (a `.zip` or legacy `.tar.gz` archive, or an already-unpacked bundle directory) into a target project. It runs the built-in security scan against the bundle contents before writing any files, and -- unless `--skip-verify` is set -- checks that every entry in the bundle's `apm.lock.yaml` `deployed_files` list is actually present in the archive.
 
@@ -38,6 +60,7 @@ governs dependency installs.
 
 | Flag | Default | Description |
 |---|---|---|
+| `--source` | off | Experimental, verified, non-activating restoration into a new directory. Cannot combine with `--force` or `--skip-verify`. |
 | `-o`, `--output PATH` | `.` | Target project directory. Created if it does not exist. |
 | `--skip-verify` | off | Skip the bundle completeness check against the bundle's `apm.lock.yaml`. Useful for partial bundles. |
 | `--dry-run` | off | List files that would be unpacked without writing anything. |

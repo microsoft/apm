@@ -329,6 +329,7 @@ class APMPackage:
         None  # Package content type: instructions, skill, hybrid, or prompts
     )
     includes: str | list[str] | None = None  # Include-only manifest: 'auto' or list of repo paths
+    resources: tuple[str, ...] = ()
 
     # Top-level ``registries:`` block per docs/proposals/registry-api.md §3.1.
     # Maps registry name -> base URL. None when no ``registries:`` block is present.
@@ -465,6 +466,17 @@ class APMPackage:
         from .manifest_contract import negotiate_manifest_contract
 
         manifest_contract = negotiate_manifest_contract(data)
+        resources: tuple[str, ...] = ()
+        if "resources" in data:
+            from .manifest_contract import ManifestContract
+            from .package_resources import parse_resource_roots
+
+            if manifest_contract is not ManifestContract.WORKING_DRAFT:
+                raise ValueError(
+                    "'resources' is experimental working-draft functionality, "
+                    "not part of the selected OpenAPM $schema contract"
+                )
+            resources = parse_resource_roots(data["resources"])
 
         # Required fields
         if "name" not in data:
@@ -614,6 +626,7 @@ class APMPackage:
             canonical_targets=canonical_targets,
             type=pkg_type,
             includes=includes,
+            resources=resources,
             registries=registries,
             default_registry=default_registry,
             manifest_contract=manifest_contract.value,

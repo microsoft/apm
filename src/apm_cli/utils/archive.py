@@ -11,6 +11,7 @@ import contextlib
 import io
 import os
 import shutil
+import stat
 import tarfile
 import uuid
 import zipfile
@@ -24,7 +25,9 @@ import requests
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    source_permission_bits,
     validate_path_segments,
+    validate_portable_relative_path,
 )
 
 MAX_ZIP_ENTRIES = 10_000
@@ -43,6 +46,37 @@ _ErrorT = TypeVar("_ErrorT", bound=Exception)
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
+
+
+class _StrictArchiveInventory:
+    """Reject duplicate, case-aliased, and file/directory-conflicting source members."""
+
+    def __init__(self) -> None:
+        self._paths: dict[str, tuple[str, bool]] = {}
+        self._declared: set[str] = set()
+
+    def admit(self, name: str, *, directory: bool) -> None:
+        from ..agent_plugins.assets import normalized_path_key
+
+        path = name[:-1] if directory and name.endswith("/") else name
+        validate_portable_relative_path(path, context="source archive member")
+        key = normalized_path_key(path)
+        if key in self._declared:
+            raise ValueError(f"Duplicate or case-aliased source archive member: {name}")
+        self._declared.add(key)
+        if len(self._declared) > MAX_ZIP_ENTRIES:
+            raise ValueError(f"Source archive exceeds {MAX_ZIP_ENTRIES} entries")
+        parts = path.split("/")
+        for index in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:index])
+            kind = directory if index == len(parts) else True
+            folded = normalized_path_key(prefix)
+            previous = self._paths.get(folded)
+            if previous is not None and previous != (prefix, kind):
+                raise ValueError(f"Ambiguous source archive path: {name}")
+            self._paths[folded] = (prefix, kind)
+            if len(self._paths) > MAX_ZIP_ENTRIES:
+                raise ValueError(f"Source archive exceeds {MAX_ZIP_ENTRIES} path entries")
 
 
 def validate_archive_format(archive_format: str) -> None:
@@ -193,6 +227,7 @@ def safe_extract_zip(
     max_uncompressed: int = MAX_ZIP_UNCOMPRESSED,
     error_type: type[_ErrorT] = ValueError,
     member_name_transform: Callable[[str], str | None] | None = None,
+    strict: bool = False,
 ) -> list[str]:
     """Safely stream-extract *zf* under *dest_root* with zip-bomb limits.
 
@@ -208,6 +243,7 @@ def safe_extract_zip(
 
     extracted: list[str] = []
     total_uncompressed = 0
+    inventory = _StrictArchiveInventory() if strict else None
     for info in members:
         unix_mode = (info.external_attr >> 16) & 0xFFFF
         if unix_mode and (unix_mode & 0xF000) == 0xA000:
@@ -217,6 +253,15 @@ def safe_extract_zip(
             member_name = member_name_transform(member_name)
         if member_name is None:
             continue
+        if inventory is not None:
+            try:
+                inventory.admit(member_name, directory=info.is_dir())
+                mode_type = stat.S_IFMT(unix_mode)
+                if mode_type not in (0, stat.S_IFDIR if info.is_dir() else stat.S_IFREG):
+                    raise ValueError(f"Nonregular source archive member: {member_name}")
+                source_permission_bits(unix_mode)
+            except ValueError as exc:
+                _raise(error_type, str(exc))
         target = _zip_member_target(member_name, dest_root, error_type=error_type)
         if target is None:
             continue
@@ -240,16 +285,27 @@ def safe_extract_zip(
                 fh.write(chunk)
                 total_uncompressed = next_total
         if unix_mode:
-            os.chmod(target, unix_mode & 0o755)
+            os.chmod(target, unix_mode & (0o777 if strict else 0o755))
         extracted.append(member_name)
     return extracted
 
 
-def _extract_tar_archive(archive: tarfile.TarFile, dest_dir: str) -> list[str]:
+def _extract_tar_archive(
+    archive: tarfile.TarFile, dest_dir: str, *, strict: bool = False
+) -> list[str]:
     """Extract an opened tar archive into *dest_dir* with safety checks."""
     extracted: list[str] = []
     total_size = 0
-    for member in archive.getmembers():
+    inventory = _StrictArchiveInventory() if strict else None
+    for member in archive:
+        if inventory is not None:
+            try:
+                inventory.admit(member.name, directory=member.isdir())
+                if not (member.isdir() or member.isreg()):
+                    raise ValueError(f"Nonregular source archive member: {member.name}")
+                source_permission_bits(member.mode)
+            except ValueError as exc:
+                raise ArchiveError(str(exc)) from exc
         if member.isdir():
             continue
         if member.issym() or member.islnk():
@@ -264,6 +320,8 @@ def _extract_tar_archive(archive: tarfile.TarFile, dest_dir: str) -> list[str]:
             continue
         with src, open(destination, "wb") as dst:
             total_size = _copy_member_within_limit(src, dst, total_size)
+        if strict:
+            os.chmod(destination, member.mode & 0o777)
         extracted.append(member.name)
     return extracted
 
@@ -277,11 +335,11 @@ def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc
 
 
-def _extract_tar_gz_file(path: Path, dest_dir: str) -> list[str]:
+def _extract_tar_gz_file(path: Path, dest_dir: str, *, strict: bool = False) -> list[str]:
     """Extract a tar.gz archive file into *dest_dir* with safety checks."""
     try:
         with tarfile.open(path, mode="r:gz") as archive:
-            return _extract_tar_archive(archive, dest_dir)
+            return _extract_tar_archive(archive, dest_dir, strict=strict)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc
 

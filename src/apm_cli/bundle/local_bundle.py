@@ -275,6 +275,12 @@ def _find_extracted_root(extract_dir: Path) -> Path | None:
     contents land under ``<extract_dir>/<bundle-name>/``.  Falls back to
     *extract_dir* itself if a top-level ``plugin.json`` is found.
     """
+    from .source_package import reject_source_deployment
+
+    reject_source_deployment(extract_dir)
+    for child in extract_dir.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            reject_source_deployment(child)
     if (extract_dir / "plugin.json").is_file():
         return extract_dir
     children = [p for p in extract_dir.iterdir() if p.is_dir()]
@@ -310,7 +316,11 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     except ValueError:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
-    bundle_root = _find_extracted_root(temp_dir)
+    try:
+        bundle_root = _find_extracted_root(temp_dir)
+    except ValueError:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
     if bundle_root is None:
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
@@ -343,6 +353,9 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         return None
 
     if path.is_dir():
+        from .source_package import reject_source_deployment
+
+        reject_source_deployment(path)
         if not (path / "plugin.json").is_file():
             return None
         return _build_info(
@@ -361,7 +374,11 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         except (ArchiveError, OSError):
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
-        bundle_root = _find_extracted_root(temp_dir)
+        try:
+            bundle_root = _find_extracted_root(temp_dir)
+        except ValueError:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
         if bundle_root is None:
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None

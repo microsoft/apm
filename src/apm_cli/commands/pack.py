@@ -36,6 +36,10 @@ Reads apm.yml to decide what to produce:
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
 is embedded in each bundle.
 
+Experimental --source with --format apm preserves declared resources
+and exact author metadata instead. Restore with apm unpack --source;
+source mode never deploys, executes, or builds marketplace artifacts.
+
 Examples:
 
 \b
@@ -184,6 +188,11 @@ def _parse_marketplace_filter(
     help="[Deprecated] Target platform filter. Bundles are now target-agnostic; the consumer's project decides where files land at install time. Value is recorded in pack.target as informational metadata only and is ignored by 'apm install'. The flag will be removed in a future release.",
 )
 @click.option(
+    "--source",
+    is_flag=True,
+    help="Experimental: pack declared resources and exact author metadata without deployment (requires --format apm).",
+)
+@click.option(
     "--archive",
     is_flag=True,
     default=False,
@@ -327,6 +336,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     check_versions,
     check_clean,
     strict_metadata,
+    source,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     effective_dry_run = dry_run or check_clean
@@ -340,6 +350,27 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
+    if source:
+        if bundle_format is not BundleFormat.APM:
+            raise click.UsageError("--source requires --format apm")
+        if any(
+            (
+                force,
+                target,
+                offline,
+                include_prerelease,
+                marketplace_filter,
+                marketplace_path_overrides,
+                legacy_skill_paths,
+                check_versions,
+                check_clean,
+                strict_metadata,
+            )
+        ):
+            raise click.UsageError(
+                "--source cannot combine deployment or marketplace options; "
+                "use only --format apm, --archive, --archive-format, --output, --dry-run, --json, or --verbose"
+            )
 
     # Error when --archive-format is explicitly set but --archive is not.
     if (
@@ -373,7 +404,9 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     # informational metadata only -- consumer-side install resolves the
     # deploy target from the consumer project's context, not from the
     # bundle.
-    if target is None:
+    if source:
+        effective_target = None
+    elif target is None:
         from ..core.target_detection import detect_target
 
         try:
@@ -397,6 +430,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         bundle_archive_format=archive_format,
         bundle_output=Path(output),
         bundle_force=force,
+        bundle_source=source,
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
         marketplace_strict_metadata=strict_metadata,
@@ -623,6 +657,12 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
+            elif sub.kind is OutputKind.BUNDLE and source and sub.payload is not None:
+                envelope["bundle"] = {
+                    "source": True,
+                    "path": str(sub.payload.bundle_path),
+                    "files": sub.payload.files,
+                }
         if drift_metadata_enrichment is not None:
             envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
             metadata_warnings = set(drift_metadata_enrichment.warnings)
@@ -653,11 +693,13 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 target,
                 effective_dry_run,
                 show_zip_migration_notice=(
-                    archive
+                    not source
+                    and archive
                     and archive_format == "zip"
                     and ctx.get_parameter_source("archive_format")
                     is not click.core.ParameterSource.COMMANDLINE
                 ),
+                source=source,
             )
         elif sub.kind is OutputKind.MARKETPLACE:
             if (
@@ -734,6 +776,7 @@ def _render_bundle_result(
     dry_run,
     *,
     show_zip_migration_notice: bool = False,
+    source: bool = False,
 ):
     """Mirror the legacy ``apm pack`` output for the bundle producer."""
     if pack_result is None:
@@ -798,7 +841,13 @@ def _render_bundle_result(
         # project.  Print a copy-pasteable share line so packing creates
         # the social hand-off naturally.
         if pack_result.bundle_path:
-            logger.info(f"Share with: apm install {pack_result.bundle_path}")
+            if source:
+                logger.info(
+                    f"Restore without activation: apm unpack --source "
+                    f"{shlex.quote(str(pack_result.bundle_path))} -o <new-directory>"
+                )
+            else:
+                logger.info(f"Share with: apm install {pack_result.bundle_path}")
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
@@ -877,11 +926,16 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 @click.command(
     name="unpack",
     help=(
-        "[Deprecated] Extract an APM bundle into the current project. "
-        "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
+        "Restore an experimental source package with --source into a new directory. "
+        "Without --source: deprecated deployment extraction; use 'apm install <bundle-path>'."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
+@click.option(
+    "--source",
+    is_flag=True,
+    help="Restore exact source-package bytes to a new --output directory; never deploy or execute.",
+)
 @click.option(
     "-o",
     "--output",
@@ -901,13 +955,14 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
-def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
+def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose, source):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
-    logger.warning(
-        "'apm unpack' is deprecated and will be removed in a future release. "
-        "Use 'apm install <bundle-path>' instead.",
-    )
+    if not source:
+        logger.warning(
+            "'apm unpack' is deprecated and will be removed in a future release. "
+            "Use 'apm install <bundle-path>' instead.",
+        )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
 
@@ -917,10 +972,12 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             skip_verify=skip_verify,
             dry_run=dry_run,
             force=force,
+            source=source,
         )
 
         # Surface bundle metadata and warn on target mismatch
-        _log_bundle_meta(result, Path(output), logger)
+        if not source:
+            _log_bundle_meta(result, Path(output), logger)
 
         if result.canvas_blocked > 0:
             from apm_cli.core.experimental import is_enabled
@@ -960,7 +1017,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             verified_msg = " (verified)" if result.verified else ""
             logger.success(f"Unpacked {len(result.files)} file(s){verified_msg}")
 
-    except (FileNotFoundError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         logger.error(str(exc))
         sys.exit(1)
 

@@ -299,7 +299,21 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             self._flatten_depth -= 1
 
 
-def _bounded_load(stream: Any) -> Any:
+class _UniqueKeySafeLoader(_BoundedSafeLoader):
+    """Bounded loader for integrity documents that cannot tolerate duplicate keys."""
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> dict:
+        self.flatten_mapping(node)
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        try:
+            if len(set(keys)) != len(keys):
+                raise yaml.YAMLError("Duplicate YAML mapping key")
+        except TypeError as exc:
+            raise yaml.YAMLError("YAML mapping keys must be scalar values") from exc
+        return super().construct_mapping(node, deep=deep)
+
+
+def _bounded_load(stream: Any, *, reject_duplicate_keys: bool = False) -> Any:
     """Parse *stream* with the merge-bounded SafeLoader, failing closed.
 
     Centralizes the round-16 bounded-loader entrypoint AND normalizes the
@@ -316,7 +330,8 @@ def _bounded_load(stream: Any) -> Any:
     ``.prompt.md`` -> whole-run DoS) instead of the intended per-file skip.
     """
     try:
-        return yaml.load(stream, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+        loader = _UniqueKeySafeLoader if reject_duplicate_keys else _BoundedSafeLoader
+        return yaml.load(stream, Loader=loader)  # noqa: S506 - SafeLoader subclass
     except yaml.YAMLError:
         raise
     except (ValueError, RecursionError) as exc:
@@ -338,7 +353,7 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
         return _bounded_load(fh)
 
 
-def load_yaml_str(text: str) -> dict[str, Any] | None:
+def load_yaml_str(text: str, *, reject_duplicate_keys: bool = False) -> dict[str, Any] | None:
     """Load YAML from an in-memory string with the bounded SafeLoader.
 
     The string-input twin of :func:`load_yaml`, for callers that already hold
@@ -353,7 +368,7 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     Returns parsed data or ``None`` for empty input. Raises ``yaml.YAMLError``
     on malformed, over-budget, huge-int, or deeply-nested input.
     """
-    return _bounded_load(text)
+    return _bounded_load(text, reject_duplicate_keys=reject_duplicate_keys)
 
 
 def _roundtrip_yaml() -> Any:
