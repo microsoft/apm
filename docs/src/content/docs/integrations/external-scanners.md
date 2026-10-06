@@ -113,11 +113,21 @@ apm audit --external skillspector --external-args "--model gpt-4o --severity hig
 
 For safety, **only an allowlist of safe flag prefixes** is accepted (for
 SkillSpector: `--model`, `--severity`, `--threshold`, `--profile`, `--lang`,
-`--exclude`, `--include`, and similar). Any token that is not allowlisted, that
-looks like a secret (`--token`, `--api-key`, ...), or that points to a path
-outside the working directory is **rejected fail-closed** -- the scan does not
-run. `--external-args` and `--external-llm` both require `--external <name>`;
-used alone they raise a usage error.
+`--exclude`, `--include`, `--baseline`, and similar). Any token that is not
+allowlisted, that looks like a secret (`--token`, `--api-key`, ...), or that
+points to a path outside the working directory is **rejected fail-closed** --
+the scan does not run. `--external-args` and `--external-llm` both require
+`--external <name>`; used alone they raise a usage error.
+
+`--baseline` points SkillSpector at a reviewed suppression baseline. It must
+carry exactly one value, inside the working directory, so a bare `--baseline`
+cannot swallow the first scan target:
+
+```bash
+apm audit --external skillspector --no-external-llm \
+  --external-args "--baseline .skillspector-baseline.yaml" \
+  --format sarif --output reports/skillspector.sarif
+```
 
 :::caution[Policy floor is install-only]
 `allow_args` restrictions in `apm-policy.yml` apply during `apm install`. A bare
