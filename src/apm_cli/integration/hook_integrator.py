@@ -163,7 +163,7 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
     },
-    "cursor": {
+    "cursor": {  # Values must stay within CURSOR_NATIVE_EVENTS.
         "PreToolUse": "preToolUse",
         "PostToolUse": "postToolUse",
         "UserPromptSubmit": "beforeSubmitPrompt",
