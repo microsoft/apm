@@ -168,7 +168,9 @@ def preflight_cursor_hooks(
             if cursor:
                 if document.keys() - {"version", "hooks", "description"}:
                     raise HookContractError(
-                        "unsupported Cursor source fields; no settings were discarded"
+                        "unsupported Cursor source fields "
+                        f"{sorted(document.keys() - {'version', 'hooks', 'description'})!r}; "
+                        "no settings were discarded"
                     )
                 if "description" in document and not isinstance(document["description"], str):
                     raise HookContractError("Cursor source description must be a string")

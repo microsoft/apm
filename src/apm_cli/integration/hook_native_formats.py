@@ -69,6 +69,11 @@ def _cursor_matcher(matcher: str | None, event: str, *, foreign: bool) -> str | 
         "WebSearch": "WebSearch",
     }
     if any(name not in mapping for name in names):
+        if all(name.strip() in mapping for name in names):
+            raise HookContractError(
+                "Claude matcher alternatives contain whitespace; use literal alternatives "
+                "such as 'Bash|Read' instead of 'Bash | Read'"
+            )
         raise HookContractError(
             "Cursor cannot preserve this Claude matcher; regex, Glob and server-qualified "
             "MCP translations are not supported"
@@ -80,8 +85,21 @@ def _cursor_matcher(matcher: str | None, event: str, *, foreign: bool) -> str | 
     return "|".join(dict.fromkeys(mapping[name] for name in names))
 
 
+def _check_cursor_field_types(entry: dict[str, Any]) -> None:
+    """Keep source and rendered field predicates identical across IR conversion."""
+    if "matcher" in entry and not isinstance(entry["matcher"], str):
+        raise HookContractError("Cursor matcher must be a string")
+    for key in ("timeout", "timeoutSec"):
+        if key in entry and (
+            type(entry[key]) not in (int, float) or not math.isfinite(entry[key]) or entry[key] <= 0
+        ):
+            raise HookContractError("Cursor timeout must be a finite positive number of seconds")
+    if "failClosed" in entry and type(entry["failClosed"]) is not bool:
+        raise HookContractError("Cursor failClosed must be a boolean")
+
+
 def _validate_cursor_handler(entry: dict[str, Any], event: str) -> None:
-    """Validate documented native fields without dropping unsupported behavior."""
+    """Validate native output; source-only checks live in _to_cursor_hook_entries."""
     allowed = {
         "type",
         "command",
@@ -94,7 +112,11 @@ def _validate_cursor_handler(entry: dict[str, Any], event: str) -> None:
         "_apm_source",
     }
     if entry.keys() - allowed:
-        raise HookContractError("unsupported Cursor handler fields; no fields were discarded")
+        raise HookContractError(
+            f"unsupported Cursor handler fields {sorted(entry.keys() - allowed)!r}; "
+            "no fields were discarded"
+        )
+    _check_cursor_field_types(entry)
     if "_apm_source" in entry and not isinstance(entry["_apm_source"], str):
         raise HookContractError("invalid Cursor hook ownership metadata")
     kind = entry.get("type", "command")
@@ -106,14 +128,6 @@ def _validate_cursor_handler(entry: dict[str, Any], event: str) -> None:
         raise HookContractError(f"Cursor {kind} handler requires a string {content_key}")
     if "model" in entry and not isinstance(entry["model"], str):
         raise HookContractError("Cursor prompt model must be a string")
-    if "timeout" in entry and (
-        type(entry["timeout"]) not in (int, float)
-        or not math.isfinite(entry["timeout"])
-        or entry["timeout"] <= 0
-    ):
-        raise HookContractError("Cursor timeout must be a finite positive number of seconds")
-    if "failClosed" in entry and type(entry["failClosed"]) is not bool:
-        raise HookContractError("Cursor failClosed must be a boolean")
     if "loop_limit" in entry:
         limit = entry["loop_limit"]
         if event not in {"stop", "subagentStop"} or (
@@ -122,8 +136,6 @@ def _validate_cursor_handler(entry: dict[str, Any], event: str) -> None:
             raise HookContractError(
                 "Cursor loop_limit requires stop/subagentStop and integer or null"
             )
-    if "matcher" in entry and not isinstance(entry["matcher"], str):
-        raise HookContractError("Cursor matcher must be a string")
 
 
 def _to_cursor_hook_entries(
@@ -134,22 +146,16 @@ def _to_cursor_hook_entries(
     Claude import mappings are documented at
     https://cursor.com/docs/reference/third-party-hooks. The bounded adapter
     rejects mappings that lose restrictions instead of imitating lossy import.
+    Check source-only restrictions before IR normalization loses them, then
+    validate rendered output through _validate_cursor_handler.
     """
     if event_name not in CURSOR_NATIVE_EVENTS:
         raise HookContractError(f"unsupported Cursor event {event_name!r}")
     for declaration in hook_handlers({"hooks": {event_name: entries}}):
         raw = declaration.value
-        if "matcher" in raw and not isinstance(raw["matcher"], str):
-            raise HookContractError("Cursor matcher must be a string")
+        _check_cursor_field_types(raw)
         if "timeout" in raw and "timeoutSec" in raw:
             raise HookContractError("Cursor handler must declare only one timeout")
-        for key in ("timeout", "timeoutSec"):
-            if key in raw and (
-                type(raw[key]) not in (int, float) or not math.isfinite(raw[key]) or raw[key] <= 0
-            ):
-                raise HookContractError(
-                    "Cursor timeout must be a finite positive number of seconds"
-                )
         if (
             foreign
             and "/hooks/" in declaration.json_pointer.removeprefix("/hooks/")

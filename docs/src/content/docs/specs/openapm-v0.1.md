@@ -3000,23 +3000,31 @@ extend an observable overlap with that Claude-imported hook configuration, for
 both install orders (Claude-import-first and Cursor-native-first). On a
 detected overlap the implementation MUST reject the write with an actionable
 diagnostic rather than merge, redirect, or broaden either side's accepted
-input, and MUST NOT alter the Claude import's own settings. For the purposes
+input, and MUST NOT alter the Claude import's own settings.
+
+(a) For the purposes
 of this requirement, "observable overlap" is a non-empty intersection, after
 alias normalization, between the set of (event identifier, handler kind,
 handler content) tuples claimed by the Cursor-native configuration and those
-claimed by the in-effect Claude-settings import. Alias normalization maps
+claimed by the in-effect Claude-settings import.
+
+(b) Alias normalization maps
 each side's source-declared event identifier to the vocabulary of event
 identifiers this implementation accepts for Cursor-native hooks (see
 [req-tg-016](#req-tg-016)); req-tg-016 leaves that accepted vocabulary
 implementation-defined, so this clause does not assert that req-tg-016
-itself fixes a concrete alias-to-identifier mapping. Two entries for the
+itself fixes a concrete alias-to-identifier mapping.
+
+(c) Two entries for the
 same event identifier but a different handler kind or different handler
 content are not an overlap, since the same event MAY legitimately carry
 distinct, independently-triggered handlers on each side; handler-content
 comparison is a literal-string comparison performed after this
 implementation's existing deployed-package-root substitutions, and it does
 not trim whitespace or infer executable- or matcher-level equivalence
-between differently-formatted handler commands. Declared source package
+between differently-formatted handler commands.
+
+(d) Declared source package
 ownership is the exception to that content comparison: when the
 installing implementation's own internal provenance marker (recorded for
 later reinstall/removal cleanup and never written into the Claude side)
@@ -3024,10 +3032,14 @@ already attributes an entry on the Cursor-native side and an entry on the
 Claude-imported side to the SAME source package for the same event, that
 pairing counts as an overlap regardless of handler kind or handler
 content, because that package would otherwise claim two
-independently-activated copies of its own hook for the same event. This
+independently-activated copies of its own hook for the same event.
+
+(e) This
 provenance check and the rest of the tuple comparison both apply
 identically for both install orders; neither is evaluated only for
-Cursor-native-first or only for Claude-import-first. Absence of a
+Cursor-native-first or only for Claude-import-first.
+
+(f) Absence of a
 provenance marker on an entry (for example, because the entry predates
 this implementation's tracking, or an externally edited settings file
 dropped the sidecar) is not itself malformed configuration and is not
@@ -3046,7 +3058,7 @@ comparison.
 > third-party-hook reference as published at
 > `https://cursor.com/docs/hooks` and
 > `https://cursor.com/docs/reference/third-party-hooks` (fetched 2026-10-03).
-> As with [req-tg-009]'s target-native capability encodings, these concrete
+> As with [req-tg-009](#req-tg-009)'s target-native capability encodings, these concrete
 > vendor-specific vocabularies are intentionally kept out of the normative
 > text above; a future harness implementing the same Cursor-native capability
 > may accept a different, equally fail-closed vocabulary as the vendor
@@ -3467,6 +3479,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 19| Executable deployment in non-interactive contexts    | [req-sc-014](#req-sc-014)                                          | Consumer-default  |
 | 20| Source-only or symlinked package content materialization | [req-sc-015](#req-sc-015)                                      | Consumer-default  |
 | 21| Native plugin namespace collision or ownership-ledger loss | [req-tg-013](#req-tg-013)                                      | Consumer-default  |
+| 22| Silent hook passthrough or double-activation via native-format conversion | [req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017) | Consumer-default |
 
 For Codex conversion metadata diagnostics, [req-tg-015](#req-tg-015)
 separately constrains field-name display and excludes dropped values.
@@ -4268,7 +4281,7 @@ renumbering of conformance classes.
 | 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 10.7, 10.11, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
 | 0.1.42 (proposed) | 2026-09-30 | Optional deployed-prompt audit capability for PR #2962. Added conditional governance [req-pl-019] and [req-pl-020] in Section 6.8.1, both enumerations, Appendix C, requirements manifest and behavioral conformance coverage. Under Section 9.2 this is a new opt-in conformance capability, not behavior-neutral errata or a reinterpretation of an existing obligation: implementations not claiming it acquire no new required feature. APM claims it; newly discovered prompt findings and incomplete native coverage can newly fail default and CI audits, command-only content remains non-failing, and protected remediation is refused before writes. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 123 -> 125 (120 MUST, 5 SHOULD). |
 | 0.1.43 (proposed) | 2026-10-03 | Codex-native agent model preservation and bounded dropped-metadata diagnostic for PR #3150 (closes #3126). Added [req-tg-015] (Section 8.5.1, consumer MUST): a conforming consumer providing the Codex-native agent conversion capability MUST preserve a source-declared `model` or `model_reasoning_effort` string value in its native top-level placement, MUST leave either field absent when absent from the source, MUST diagnose a non-string value by field name without including that value, and MUST emit a diagnostic bounded on both dropped-field count and per-field name length (never the value) for any other dropped, non-capability-restriction frontmatter field. Under Section 9.2 this is a new opt-in conformance capability scoped to consumers providing the Codex-native agent conversion capability, not behavior-neutral errata: it does not require or imply preservation of any other `config.toml`-native key and does not define behavior for any other conversion target. Implementations not providing Codex-native agent conversion acquire no new required feature. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 125 -> 126 (121 MUST, 5 SHOULD). |
-| 0.1.44 (proposed) | 2026-10-03 | Spec-citation fold for already-accepted Cursor-native hook installation (PR #3149, closes issue #3129's conformance gap). Added [req-tg-016] (Section 8.5.9, consumer MUST): fail-closed validation of out-of-vocabulary events, top-level keys, and handler fields when converting into the Cursor-native hook format. Added [req-tg-017] (Section 8.5.9, consumer MUST): pre-write detection and rejection of a Cursor-native-plus-Claude-import hook overlap, for both install orders, without altering the Claude import's own settings. Both anchors are bound specifically to the already-accepted Cursor-native (and Cursor-native-plus-Claude-import) capability, not a universal target-native or cross-target obligation. Section 8.7, Section 11.3.2, and Appendix C updated. Under Section 9.2 this is a defensive citation of previously unspecified fail-closed/coexistence behavior already shipped and tested in PR #3149, not a new mandatory feature for implementations that do not provide this capability. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 125 -> 127 (122 MUST, 5 SHOULD). Revision label `0.1.43` and requirement id [req-tg-015] are reserved by a concurrent sibling unit on a separate branch and are not assigned here. |
+| 0.1.44 (proposed) | 2026-10-03 | PR #3149 adds two consumer MUSTs in Section 8.5.9: [req-tg-016](#req-tg-016) rejects unsupported Cursor hook vocabulary; [req-tg-017](#req-tg-017) detects overlap with Claude imports before either install order writes, preserving import settings. These cite the accepted Cursor capability, not universal translation or a new mandatory feature (Section 9.2). Section 8.7, Section 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Statement count: 126 -> 128 (123 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

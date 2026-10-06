@@ -632,6 +632,74 @@ def test_failed_restricted_update_preserves_existing_hook_state(
     assert _snapshot(consumer) == before
 
 
+def test_consumer_widen_then_drop_cursor_preserves_user_hooks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An installed CLI retires Cursor, not merely the other target, on contraction."""
+    scenario = _new_scenario(tmp_path / "drop-cursor", apm_binary_path)
+    published = _publish(scenario, "drop-cursor-hooks", targets=("codex", "cursor"))
+    consumer = scenario.consumers.create(
+        "codex-consumer", dependencies=(published.dependency,), targets=("codex",)
+    )
+    (consumer.root / ".codex").mkdir()
+    (consumer.root / ".cursor").mkdir()
+    retained = None
+    for phase, targets in (
+        ("initial", ["codex"]),
+        ("widen", ["codex", "cursor"]),
+        ("narrow", ["codex"]),
+    ):
+        manifest_path = consumer.root / "apm.yml"
+        manifest = load_yaml(manifest_path)
+        manifest["targets"] = targets
+        dump_yaml(manifest, manifest_path)
+        _run_success(
+            scenario,
+            consumer,
+            _INSTALL_ARGS,
+            environment=published.environment,
+            scenario_id=f"drop-cursor-{phase}",
+        )
+        state = LifecycleStateSnapshot.capture(consumer.root, targets=("codex", "cursor"))
+        if phase == "widen":
+            assert _json(state, ".cursor/apm-hooks.json") == _expected_cursor_sidecar(
+                f"{_OWNER}/{published.name}"
+            )
+            assert set(_cursor_commands(state)) == set(_EVENT_COMMANDS.values())
+            assert all(
+                "_apm_source" not in entry
+                for entries in _json(state, ".cursor/hooks.json")["hooks"].values()
+                for entry in entries
+            )
+            _add_manual_cursor_hook(consumer)
+            retained = state.file(".codex/hooks.json")
+        elif phase == "narrow":
+            assert _json(state, ".cursor/hooks.json") == {
+                "version": 1,
+                "hooks": {
+                    "preToolUse": [
+                        {
+                            "matcher": "manual",
+                            "type": "command",
+                            "command": _MANUAL_CURSOR_COMMAND,
+                        }
+                    ]
+                },
+            }
+            assert state.file(".cursor/apm-hooks.json").kind == "missing"
+            assert state.file(".codex/hooks.json") == retained
+    _run_success(
+        scenario,
+        consumer,
+        ("prune",),
+        environment=published.environment,
+        scenario_id="drop-cursor-prune",
+    )
+    assert LifecycleStateSnapshot.capture(consumer.root, targets=("codex", "cursor")).file(
+        ".cursor/hooks.json"
+    ) == state.file(".cursor/hooks.json")
+
+
 def test_cursor_windsurf_package_target_widen_then_narrow_retires_owned_windsurf_only(
     tmp_path: Path,
     apm_binary_path: Path,

@@ -355,10 +355,15 @@ agent a procedure" fits a skill -- and reaches every harness.
 ## Pitfalls
 
 - **Hook event names.** Use the documented
-  [session lifecycle aliases](#session-lifecycle-event-aliases). Unknown names
-  are preserved. An install warning appears only when an unmapped name starts
+  [session lifecycle aliases](#session-lifecycle-event-aliases) for Copilot
+  and Claude. Their unknown names are preserved. An install warning appears
+  only when an unmapped name starts
   with a capital letter or starts lowercase and contains a later capital
-  letter, and that casing conflicts with the target convention.
+  letter, and that casing conflicts with the target convention. Cursor
+  instead rejects unsupported events, fields and restrictions; see
+  [Cursor native hooks](#cursor-native-hooks-and-claude-import). Diagnostics
+  name unsupported fields and identify whitespace in literal matcher
+  alternatives without silently stripping it.
 - **Cursor command frontmatter loss.** Cursor reuses the Claude
   command transformer today, so any prompt-only metadata is dropped
   with a diagnostic. Keep Cursor commands to the preserved key set.
@@ -386,6 +391,7 @@ agent a procedure" fits a skill -- and reaches every harness.
   a Claude+OpenCode package and assume hooks reach both -- they do
   not. The install log notes the skip.
 
-Once your hooks and commands are in place, run `apm install --dry-run`
-to preview what each target will receive, then `apm pack` to bundle.
+Once your hooks and commands are in place, inspect a real installation's
+native configuration, then run `apm pack` to bundle.
+`apm install --dry-run` does not render hook previews.
 See [Compile](../../compile/) and [Pack a bundle](../../pack-a-bundle/).

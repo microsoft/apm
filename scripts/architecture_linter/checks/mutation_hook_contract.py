@@ -522,6 +522,8 @@ def _nhc_cursor_edge(provider: FactsProvider, rule_id: str) -> tuple[Violation, 
             (_HOOK_INTEGRATOR, "preflight_cursor_hooks("),
             (preflight, "_to_cursor_hook_entries("),
             (preflight, "validate_cursor_config(candidate)"),
+            (renderer, "_check_cursor_field_types(raw)"),
+            (renderer, "_check_cursor_field_types(entry)"),
             (services, '"preflight_hooks_for_targets"'),
             (services, "preflight_hooks("),
         ):

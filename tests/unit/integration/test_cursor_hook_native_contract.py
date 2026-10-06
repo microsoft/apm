@@ -10,12 +10,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.hook_contract import HookContractError
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration import hook_integrator
 from apm_cli.integration.hook_integrator import HookIntegrator, native_hook_config
-from apm_cli.integration.hook_native_formats import inspect_native_hooks
+from apm_cli.integration.hook_native_formats import (
+    _to_cursor_hook_entries,
+    inspect_native_hooks,
+    validate_cursor_config,
+)
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -43,6 +48,46 @@ def _package(tmp_path: Path, hooks: dict[str, Any]) -> PackageInfo:
 
 def _nested(command: str, **group: Any) -> dict[str, Any]:
     return {**group, "hooks": [{"type": "command", "command": command, "timeout": 10}]}
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("matcher", 12, "Cursor matcher must be a string"),
+        ("timeout", False, "Cursor timeout must be a finite positive number of seconds"),
+        ("timeout", -1, "Cursor timeout must be a finite positive number of seconds"),
+        ("timeout", float("inf"), "Cursor timeout must be a finite positive number of seconds"),
+        ("failClosed", "true", "Cursor failClosed must be a boolean"),
+    ],
+)
+def test_cursor_source_and_native_field_rejections_agree(
+    field: str, value: object, message: str
+) -> None:
+    """Both consumers exercise the same field predicates across normalization."""
+    entry = {"command": "echo check", field: value}
+    with pytest.raises(HookContractError) as source_error:
+        _to_cursor_hook_entries([entry], "preToolUse")
+    with pytest.raises(HookContractError) as native_error:
+        validate_cursor_config({"version": 1, "hooks": {"preToolUse": [entry]}})
+    assert str(source_error.value) == str(native_error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("hooks", "message"),
+    [
+        ({"PreToolUse": [_nested("echo check", matcher="Bash | Read")]}, "contain whitespace"),
+        ({"preToolUse": [{"command": "echo check", "mysteryField": True}]}, "mysteryField"),
+    ],
+)
+def test_cursor_diagnostic_identifies_invalid_input_before_writes(
+    tmp_path: Path, hooks: dict[str, Any], message: str
+) -> None:
+    package = _package(tmp_path, hooks)
+    project = tmp_path / "project"
+    (project / ".cursor").mkdir(parents=True)
+    with pytest.raises(HookContractError, match=message):
+        HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["cursor"], package, project)
+    assert not list(project.rglob("*.json"))
 
 
 def test_cursor_install_emits_native_events_and_flat_handlers(tmp_path: Path) -> None:
@@ -485,14 +530,17 @@ def test_unapproved_hooks_do_not_enter_cursor_preflight(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("first", ["claude", "cursor"])
+@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "home"])
 def test_explicit_target_contraction_can_choose_one_import_route(
-    tmp_path: Path, first: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first: str, user_scope: bool
 ) -> None:
     package = _package(tmp_path, {"PreToolUse": [_nested("echo shared")]})
-    project = tmp_path / "project"
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    project = home if user_scope else tmp_path / "project"
     (project / ".cursor").mkdir(parents=True)
     hook = HookIntegrator()
-    hook.integrate_hooks_for_target(KNOWN_TARGETS[first], package, project)
+    hook.integrate_hooks_for_target(KNOWN_TARGETS[first], package, project, user_scope=user_scope)
     second = "cursor" if first == "claude" else "claude"
     package.package = APMPackage(name="cursor-gate", version="1.0.0", targets=[second])
     targets = [
@@ -515,6 +563,7 @@ def test_explicit_target_contraction_can_choose_one_import_route(
             hook=hook,
         ),
         diagnostics=DiagnosticCollector(),
+        scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
     )
 
     first_path = project / f".{first}" / ("settings.json" if first == "claude" else "hooks.json")
@@ -533,7 +582,7 @@ def test_cursor_does_not_discard_source_level_settings(tmp_path: Path, field: st
     )
     project = tmp_path / "project"
     (project / ".cursor").mkdir(parents=True)
-    with pytest.raises(HookContractError, match="unsupported Cursor source fields"):
+    with pytest.raises(HookContractError, match=field):
         HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["cursor"], package, project)
     assert not list(project.rglob("*.json"))
 

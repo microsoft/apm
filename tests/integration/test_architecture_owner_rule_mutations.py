@@ -1440,6 +1440,21 @@ def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> 
     )
 
 
+@pytest.mark.parametrize("argument", ["raw", "entry"])
+def test_neutral_hook_contract_guard_rejects_split_cursor_field_validation(argument: str) -> None:
+    """Both source and native-output validation must route through the same predicates."""
+    path = "src/apm_cli/integration/hook_native_formats.py"
+    source = _source(path)
+    call = f"_check_cursor_field_types({argument})"
+    assert source.count(call) == 1
+    mutated = source.replace(call, "pass", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "mutation_writes.neutral_hook_contract"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 def test_neutral_hook_contract_guard_rejects_cached_cursor_preflight_gate() -> None:
     """A lexical "preflight call is present" check cannot catch a cache-gated
     reintroduction of the #3129 reused-plan bypass: the literal

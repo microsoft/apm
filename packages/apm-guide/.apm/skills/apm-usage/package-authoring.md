@@ -184,32 +184,13 @@ hook action under `.kiro/hooks/`.
 For Codex, APM wraps flat command entries in hook groups containing a
 nested `hooks` array in `.codex/hooks.json`.
 
-For Cursor, APM writes version 1 with flat command or prompt handlers.
-The documented Claude aliases map as follows: `PreToolUse` -> `preToolUse`,
-`PostToolUse` -> `postToolUse`, `UserPromptSubmit` -> `beforeSubmitPrompt`,
-`Stop` -> `stop`, `SubagentStop` -> `subagentStop`, `SessionStart` ->
-`sessionStart`, `SessionEnd` -> `sessionEnd`, and `PreCompact` -> `preCompact`.
-Native Cursor events and matchers pass through unchanged.
-
-For Claude tool-use aliases, literal `Bash` maps to `Shell`; `Edit|Write`
-maps to `Write` only when both alternatives are present. `Read`, `Grep`,
-`Task`, `WebFetch`, and `WebSearch` keep their names. Unknown events,
-unrepresentable matchers (including `Glob` and server-qualified MCP patterns),
-platform-specific commands and unsupported handler fields fail before writes,
-not by silently dropping restrictions. Claude stop aliases preserve the
-unlimited import default with `loop_limit: null`.
-
-Cursor runs all matching native and Claude-imported hooks. APM refuses
-overlapping planned or existing actions, including same-owner events (an
-event already attributed, via the installing package's own provenance
-marker, to the package about to install or retain the other side's
-configuration) with different matchers, rather than assuming imports are
-disabled. Choose one hook
-target per dependency: `claude` plus Cursor's existing third-party import, or
-`cursor` with native hooks. APM never changes import settings or redirects a
-Cursor-only dependency into Claude settings. Reinstall migrates matching owned
-legacy Cursor hooks; unrelated user hooks remain intact, and invalid user
-configuration is not overwritten. See the
+For Cursor, APM writes native v1 flat command or prompt handlers using only
+verified aliases. Unsupported fields, restrictions and overlapping Claude
+imports fail before writes; diagnostics name unsupported fields and distinguish
+whitespace in literal matcher alternatives. Choose one hook route per dependency:
+native `cursor`, or `claude` with Cursor's existing import. APM never changes
+import settings. Reinstall and target retirement preserve unrelated user hooks.
+See the
 [Cursor native hooks guide](../../../../../docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import)
 for supported mappings and limitations. Test execution in each harness;
 configuration compatibility does not guarantee equivalent behavior.
