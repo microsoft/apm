@@ -682,6 +682,7 @@ marketplace-integrations-raw-diagnostics
 marketplace-integrations-removed-plugin-lifecycle
 marketplace-integrations-source-admission
 marketplace-integrations-source-parsing
+marketplace-integrations-source-resources
 marketplace-integrations-tag-pattern
 marketplace-integrations-version-precedence
 mutation_writes.copilot_cli_mcp_paths
