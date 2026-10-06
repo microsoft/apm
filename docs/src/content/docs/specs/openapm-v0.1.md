@@ -3066,11 +3066,11 @@ comparison.
 > kind alongside `command`; this note does not assert that the accepted
 > vocabulary covers every hook feature Cursor documents, only that whatever
 > vocabulary an implementation does accept is enforced fail-closed. The
-> rejection in [req-tg-017] is an APM consumer-side safety policy, not a
+> rejection in [req-tg-017](#req-tg-017) is an APM consumer-side safety policy, not a
 > reflection of Cursor's own documented default: the vendor's third-party-hook
 > reference states that when hooks exist in multiple locations "All matching
 > hooks from every source run" (merge, not reject). Likewise, the unknown-key
-> rejection in [req-tg-016] is this implementation's own conservative
+> rejection in [req-tg-016](#req-tg-016) is this implementation's own conservative
 > conversion policy; the cited vendor example shows only `version` and
 > `hooks` as top-level keys but does not itself document the top-level shape
 > as closed to extension.
