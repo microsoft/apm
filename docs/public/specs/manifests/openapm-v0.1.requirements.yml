@@ -460,6 +460,11 @@ requirements:
     section: "8.5.8"
     conformance_class: consumer
     notes: "user-scoped MCP target selection uses a disclosed versioned capability contract, ignores project-only detection signals, applies first-source precedence without fallback, filters mixed sets, and refuses zero-supported selections before user manifest, lockfile, or target-config mutation"
+  - id: req-tg-015
+    keyword: MUST
+    section: "8.5.1"
+    conformance_class: consumer
+    notes: "a conforming consumer providing the Codex-native agent conversion capability preserves a source-declared model or model_reasoning_effort string value in its native top-level placement, leaves either field absent when absent from the source, diagnoses a non-string source value by field name without including that value, and emits a diagnostic bounded on dropped-field count (at least one shown when any are dropped), per-field name length, and ASCII-sanitized field-name display (never the value) for any other dropped, non-capability-restriction frontmatter field"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"

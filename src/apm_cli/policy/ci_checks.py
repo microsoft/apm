@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ..install.drift import DriftFinding
     from ..integration.targets import TargetProfile
     from ..models.apm_package import APMPackage
+    from ..models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -342,8 +343,25 @@ def _check_skill_subset_consistency(
     manifest: APMPackage,
     lock: LockFile,
     project_root: Path,
+    *,
+    prepared_replay: PreparedCiAuditReplay | None = None,
+    prepared_replay_error: str | None = None,
 ) -> CheckResult:
     """Verify skill subsets match the lockfile and real package tree."""
+    from ..constants import APM_MODULES_DIR
+
+    if prepared_replay_error is not None:
+        return CheckResult(
+            name="skill-subset-consistency",
+            passed=False,
+            message=f"replay failed: {prepared_replay_error}",
+            details=[prepared_replay_error],
+        )
+    modules_root = (
+        prepared_replay.modules_root
+        if prepared_replay is not None
+        else project_root / APM_MODULES_DIR
+    )
     mismatches: list[str] = []
     for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
@@ -360,7 +378,7 @@ def _check_skill_subset_consistency(
             )
             continue
         missing = _missing_recorded_skill_subset_paths(
-            project_root,
+            modules_root,
             dep_ref,
             locked_dep.package_type,
             lock_subset,
@@ -388,8 +406,8 @@ def _check_skill_subset_consistency(
 
 
 def _missing_recorded_skill_subset_paths(
-    project_root: Path,
-    dep_ref,
+    modules_root: Path,
+    dep_ref: DependencyReference,
     package_type: str | None,
     subset: list[str],
 ) -> tuple[str, ...]:
@@ -399,7 +417,6 @@ def _missing_recorded_skill_subset_paths(
 
     from types import SimpleNamespace
 
-    from ..constants import APM_MODULES_DIR
     from ..install.outcome import missing_requested_components
     from ..integration.skill_integrator import SkillIntegrator
     from ..models.validation import PackageType
@@ -407,7 +424,7 @@ def _missing_recorded_skill_subset_paths(
     try:
         resolved_package_type = PackageType(package_type) if package_type else None
         package_info = SimpleNamespace(
-            install_path=dep_ref.get_install_path(project_root / APM_MODULES_DIR),
+            install_path=dep_ref.get_install_path(modules_root),
             package_type=resolved_package_type,
         )
         available = SkillIntegrator.available_skill_names(package_info)
@@ -434,7 +451,7 @@ def _check_config_consistency(
         return CheckResult(
             name="config-consistency",
             passed=False,
-            message=f"config-consistency replay failed: {prepared_replay_error}",
+            message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
     view = CurrentMcpConfigView.derive(
@@ -1005,7 +1022,15 @@ def run_baseline_checks(
         return result
 
     # Check 6: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock, project_root)):
+    if _run(
+        _check_skill_subset_consistency(
+            manifest,
+            lock,
+            project_root,
+            prepared_replay=prepared_replay,
+            prepared_replay_error=prepared_replay_error,
+        )
+    ):
         return result
 
     # Check 7: Config consistency (MCP)

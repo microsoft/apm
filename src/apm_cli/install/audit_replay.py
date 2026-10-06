@@ -2,8 +2,9 @@
 
 This module owns the one-shot orchestration that turns a checkout with a
 lockfile but no live ``apm_modules/`` tree into a prepared, lock-pinned scratch
-replay. ``commands/audit.py`` creates the replay once, then both
-``config-consistency`` and ``drift`` consume the same materialized state.
+replay. ``commands/audit.py`` creates the replay once, then
+``skill-subset-consistency``, ``config-consistency`` and ``drift`` consume
+the same materialized state.
 """
 
 from __future__ import annotations
