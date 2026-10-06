@@ -354,7 +354,7 @@ def _check_skill_subset_consistency(
         return CheckResult(
             name="skill-subset-consistency",
             passed=False,
-            message=f"skill-subset-consistency replay failed: {prepared_replay_error}",
+            message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
     modules_root = (
@@ -451,7 +451,7 @@ def _check_config_consistency(
         return CheckResult(
             name="config-consistency",
             passed=False,
-            message=f"config-consistency replay failed: {prepared_replay_error}",
+            message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
     view = CurrentMcpConfigView.derive(

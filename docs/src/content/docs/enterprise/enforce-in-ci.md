@@ -74,8 +74,10 @@ jobs:
 
 `microsoft/apm-action@v1` runs `apm install` by default, so by the time
 `apm audit --ci` runs, the lockfile and deployed files are present.
-That remains the right default for repos that gitignore their deployed
-outputs, because `deployed-files-present` still expects those files on disk.
+Use that default when CI needs to materialize deployed outputs.
+Missing gitignored outputs do not fail `deployed-files-present`, so those
+repos can also use audit-only CI. Without committed deployed bytes, that
+pattern has reduced integrity and drift coverage.
 Make this job a required status check via
 [GitHub Rulesets](../github-rulesets/) and a violating PR cannot merge.
 

@@ -533,7 +533,7 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
             "        return CheckResult(\n"
             '            name="skill-subset-consistency",\n'
             "            passed=False,\n"
-            '            message=f"skill-subset-consistency replay failed: '
+            '            message=f"replay failed: '
             '{prepared_replay_error}",\n'
             "            details=[prepared_replay_error],\n"
             "        )\n"

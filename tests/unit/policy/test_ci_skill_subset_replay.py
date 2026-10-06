@@ -145,11 +145,11 @@ def test_subset_fails_closed_on_prepared_replay_error(
         prepared_replay_error="scratch materialization failed: disk quota exceeded",
     )
 
-    check = next(check for check in result.checks if check.name == "skill-subset-consistency")
-    assert check.passed is False
-    assert check.details == ["scratch materialization failed: disk quota exceeded"]
-    assert "skill-subset-consistency replay failed" in check.message
-    assert "scratch materialization failed: disk quota exceeded" in check.message
+    for check_name in ("skill-subset-consistency", "config-consistency"):
+        check = next(check for check in result.checks if check.name == check_name)
+        assert check.passed is False
+        assert check.details == ["scratch materialization failed: disk quota exceeded"]
+        assert check.message == "replay failed: scratch materialization failed: disk quota exceeded"
 
 
 def test_prepared_tree_does_not_override_manifest_lock_subset_mismatch(

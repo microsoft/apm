@@ -97,6 +97,7 @@ checks selected skills against this lock-pinned tree, not the absent checkout
 dependencies. Invalid selections and manifest/lock mismatches still fail;
 deployed-file integrity and drift checks still inspect the checkout when
 outputs are committed.
+
 Repos that gitignore deployed
 outputs can still use the audit-only pattern: `deployed-files-present`
 skips gitignored paths automatically, so a fresh checkout of a repo that
