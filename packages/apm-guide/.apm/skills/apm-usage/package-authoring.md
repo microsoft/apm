@@ -186,7 +186,7 @@ nested `hooks` array in `.codex/hooks.json`.
 
 For Cursor, APM writes native v1 flat command or prompt handlers using only
 verified aliases. Unsupported fields, restrictions and overlapping Claude
-imports fail before writes; diagnostics name unsupported fields and distinguish
+imports fail before writes; diagnostics name unsupported source-level and handler fields and distinguish
 whitespace in literal matcher alternatives. Choose one hook route per dependency:
 native `cursor`, or `claude` with Cursor's existing import. APM never changes
 import settings. Reinstall and target retirement preserve unrelated user hooks.

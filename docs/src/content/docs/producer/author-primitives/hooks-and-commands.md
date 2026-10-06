@@ -362,7 +362,7 @@ agent a procedure" fits a skill -- and reaches every harness.
   letter, and that casing conflicts with the target convention. Cursor
   instead rejects unsupported events, fields and restrictions; see
   [Cursor native hooks](#cursor-native-hooks-and-claude-import). Diagnostics
-  name unsupported fields and identify whitespace in literal matcher
+  name unsupported source-level and handler fields and identify whitespace in literal matcher
   alternatives without silently stripping it.
 - **Cursor command frontmatter loss.** Cursor reuses the Claude
   command transformer today, so any prompt-only metadata is dropped
