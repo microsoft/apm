@@ -77,7 +77,7 @@ APM preserves Git's detected `core.symlinks` setting and explicit command-scope
 overrides without changing global Git configuration, so a successful checkout
 is not proof that a package requiring real symlinks works (common on non-admin
 Windows accounts). See [Install packages: symlink checkout
-fallback](../../../../../docs/src/content/docs/consumer/install-packages.md#when-things-go-wrong)
+fallback](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong)
 for the full behavior and troubleshooting steps.
 
 ### Custom git ports
