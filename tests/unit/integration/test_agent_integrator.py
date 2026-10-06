@@ -1199,6 +1199,13 @@ class TestCodexAgentIntegration:
             {"model_reasoning_effort": "high"},
             {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
             {"model": 'custom"model\\variant', "model_reasoning_effort": "future-effort"},
+            pytest.param(
+                {
+                    "model": 'gpt-4"\nmalicious = "injected',
+                    "model_reasoning_effort": "high\nnew_key = true",
+                },
+                id="embedded-newlines-are-values",
+            ),
         ],
     )
     def test_codex_native_settings_reach_generated_agent(self, settings: dict[str, str]) -> None:
@@ -1371,6 +1378,10 @@ class TestCodexAgentIntegration:
         assert oversized_key not in message
         assert "...(truncated)" in message
         assert len(message) < 300
+        assert "frontmatter field " in message
+        assert "was dropped" in message
+        assert "remove this field" in warnings[0].detail
+        assert "its setting" in warnings[0].detail
 
     @pytest.mark.parametrize(
         ("key_count", "expect_elision"),

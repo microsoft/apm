@@ -493,9 +493,9 @@ Review the requested change.
 
 Absent settings stay absent. APM does not translate model names, choose
 defaults, or validate model availability or supported effort values.
-Non-string values are dropped with a diagnostic. Other frontmatter,
+Non-string values are dropped with a warning. Other frontmatter,
 including other native Codex settings and a `codex:` block, is dropped
-with a diagnostic; APM provides no arbitrary or namespaced passthrough.
+with a warning; APM provides no arbitrary or namespaced passthrough.
 Remove unnecessary fields or do not rely on their settings in the
 generated agent. `tools` restrictions still cannot be preserved: the
 agent may inherit all project/session MCP servers. Remove `tools` only

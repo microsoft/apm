@@ -154,7 +154,7 @@ def test_codex_agent_native_models_and_dropped_metadata_reach_cli_output(
     assert "[!]" in output
     assert "1 lossy agent compilation warning" in output
     assert "model-reviewer.agent.md" in output
-    assert "fields 'model_verbosity' were dropped" in output
+    assert "field 'model_verbosity' was dropped" in output
     assert "not translated by APM for Codex" in output
     assert "otherwise do not rely on" in output
     assert "field 'tools' was dropped" not in output

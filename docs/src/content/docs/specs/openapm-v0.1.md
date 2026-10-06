@@ -2686,7 +2686,7 @@ intersection are not subject to this gate.
 > companion.
 
 <a id="req-tg-015"></a>
-**[req-tg-015]** A consumer implementation providing the accepted
+**[req-tg-015]** A conforming **consumer** implementation providing the
 Codex-native agent conversion capability MUST preserve a
 source-declared `model` or `model_reasoning_effort` string value in
 its native top-level placement (top-level TOML key) in the generated
@@ -2697,7 +2697,8 @@ preservation of any other `config.toml`-native key, and does not
 define behavior for any other conversion target. A source-declared
 `model` or `model_reasoning_effort` value that is not a YAML string
 scalar is not subject to preservation under this clause, and the
-consumer MUST still emit a diagnostic for it.
+consumer MUST still emit a diagnostic for it. That diagnostic MUST
+identify the field name but MUST NOT include the rejected value.
 
 When that same consumer, converting to the Codex-native format, drops
 a declared frontmatter field that is neither a
@@ -2721,6 +2722,9 @@ is unaffected and continues to apply on its own terms.
 > consumers that already provide Codex-native agent conversion; it does
 > not standardize dropped-metadata handling for any other target, and
 > does not introduce a new vendor-namespaced metadata system.
+> The two fields are native Codex agent settings; their string values
+> are opaque to this specification. This clause does not prescribe
+> TOML field ordering or a cross-target diagnostic-output contract.
 
 #### 8.5.2 Post-install compilation guidance
 
@@ -3375,6 +3379,11 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 19| Executable deployment in non-interactive contexts    | [req-sc-014](#req-sc-014)                                          | Consumer-default  |
 | 20| Source-only or symlinked package content materialization | [req-sc-015](#req-sc-015)                                      | Consumer-default  |
 | 21| Native plugin namespace collision or ownership-ledger loss | [req-tg-013](#req-tg-013)                                      | Consumer-default  |
+
+For Codex conversion metadata diagnostics, [req-tg-015](#req-tg-015)
+separately constrains field-name display and excludes dropped values.
+This diagnostic-safety contract is distinct from row 16's
+capability-scope preservation.
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -4167,7 +4176,7 @@ renumbering of conformance classes.
 | 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
 | 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 10.7, 10.11, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
 | 0.1.42 (proposed) | 2026-09-30 | Optional deployed-prompt audit capability for PR #2962. Added conditional governance [req-pl-019] and [req-pl-020] in Section 6.8.1, both enumerations, Appendix C, requirements manifest and behavioral conformance coverage. Under Section 9.2 this is a new opt-in conformance capability, not behavior-neutral errata or a reinterpretation of an existing obligation: implementations not claiming it acquire no new required feature. APM claims it; newly discovered prompt findings and incomplete native coverage can newly fail default and CI audits, command-only content remains non-failing, and protected remediation is refused before writes. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 123 -> 125 (120 MUST, 5 SHOULD). |
-| 0.1.43 (proposed) | 2026-10-03 | Codex-native agent model preservation and bounded dropped-metadata diagnostic for PR #3150 (closes #3126). Added [req-tg-015] (Section 8.5.1, consumer MUST): a consumer providing the accepted Codex-native agent conversion capability MUST preserve a source-declared `model` or `model_reasoning_effort` string value in its native top-level placement, MUST leave either field absent when absent from the source, and MUST emit a diagnostic bounded on both dropped-field count and per-field name length (never the value) for any other dropped, non-capability-restriction frontmatter field. Under Section 9.2 this is a new opt-in conformance capability scoped to consumers providing the accepted Codex-native agent conversion capability, not behavior-neutral errata: it does not require or imply preservation of any other `config.toml`-native key and does not define behavior for any other conversion target. Implementations not providing Codex-native agent conversion acquire no new required feature. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 125 -> 126 (121 MUST, 5 SHOULD). |
+| 0.1.43 (proposed) | 2026-10-03 | Codex-native agent model preservation and bounded dropped-metadata diagnostic for PR #3150 (closes #3126). Added [req-tg-015] (Section 8.5.1, consumer MUST): a conforming consumer providing the Codex-native agent conversion capability MUST preserve a source-declared `model` or `model_reasoning_effort` string value in its native top-level placement, MUST leave either field absent when absent from the source, MUST diagnose a non-string value by field name without including that value, and MUST emit a diagnostic bounded on both dropped-field count and per-field name length (never the value) for any other dropped, non-capability-restriction frontmatter field. Under Section 9.2 this is a new opt-in conformance capability scoped to consumers providing the Codex-native agent conversion capability, not behavior-neutral errata: it does not require or imply preservation of any other `config.toml`-native key and does not define behavior for any other conversion target. Implementations not providing Codex-native agent conversion acquire no new required feature. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 125 -> 126 (121 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

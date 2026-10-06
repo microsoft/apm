@@ -516,7 +516,6 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
-        model_fields = AgentIntegrator._CODEX_MODEL_FIELDS
         model_settings: dict[str, str] = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
@@ -527,7 +526,7 @@ class AgentIntegrator(BaseIntegrator):
                 if isinstance(fm, dict):
                     name = fm.get("name", name)
                     description = fm.get("description", description)
-                    for field in model_fields:
+                    for field in AgentIntegrator._CODEX_MODEL_FIELDS:
                         if field not in fm:
                             continue
                         if isinstance(fm[field], str):
@@ -562,16 +561,21 @@ class AgentIntegrator(BaseIntegrator):
                         fields_text = ", ".join(shown_fields)
                         if remaining > 0:
                             fields_text += f" (and {remaining} more)"
+                        singular = len(dropped_field_names) == 1
+                        field_label = "field" if singular else "fields"
+                        dropped_verb = "was" if singular else "were"
+                        field_reference = "this field" if singular else "these fields"
+                        setting_reference = "its setting" if singular else "their settings"
                         diagnostics.lossy_agent_compilation(
                             message=(
                                 f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
-                                f"fields {fields_text} were dropped; "
+                                f"{field_label} {fields_text} {dropped_verb} dropped; "
                                 "this metadata is not translated by APM for Codex."
                             ),
                             package=printable_ascii_text(package_name),
                             detail=(
-                                "Fix: remove these fields if unnecessary; otherwise do not rely on "
-                                "their settings in the generated Codex agent."
+                                f"Fix: remove {field_reference} if unnecessary; otherwise do not "
+                                f"rely on {setting_reference} in the generated Codex agent."
                             ),
                         )
                 else:

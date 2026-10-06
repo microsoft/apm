@@ -464,7 +464,7 @@ requirements:
     keyword: MUST
     section: "8.5.1"
     conformance_class: consumer
-    notes: "a consumer providing the accepted Codex-native agent conversion capability preserves a source-declared model or model_reasoning_effort string value in its native top-level placement, leaves either field absent when absent from the source, still diagnoses a non-string source value for either field, and emits a diagnostic bounded on dropped-field count (at least one shown when any are dropped), per-field name length, and ASCII-sanitized field-name display (never the value) for any other dropped, non-capability-restriction frontmatter field"
+    notes: "a conforming consumer providing the Codex-native agent conversion capability preserves a source-declared model or model_reasoning_effort string value in its native top-level placement, leaves either field absent when absent from the source, diagnoses a non-string source value by field name without including that value, and emits a diagnostic bounded on dropped-field count (at least one shown when any are dropped), per-field name length, and ASCII-sanitized field-name display (never the value) for any other dropped, non-capability-restriction frontmatter field"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"
