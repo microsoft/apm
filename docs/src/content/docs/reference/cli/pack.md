@@ -139,6 +139,8 @@ marketplace:
     claude: {}
     codex:
       path: ./build/codex-marketplace.json
+    copilot:
+      path: ./build/copilot-marketplace.json
 ```
 
 ### Preview without writing
@@ -209,9 +211,11 @@ dependencies:
 
 ### Marketplace artifacts
 
-`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
+`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex or `.github/plugin/marketplace.json` for Copilot CLI. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
 
-Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time.
+Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time. Each format also declares a reserved `APM_MARKETPLACE_<FORMAT>_PATH` environment variable name (for example `APM_MARKETPLACE_COPILOT_PATH`); it is validated at startup but not yet consumed by `apm pack`.
+
+The Copilot output's `plugins[].source` is always a relative-path string (never the `{source, url, ref, sha}` object shape Claude/Codex use), so it carries no `ref`/`sha` pin -- only the path. It has no `category` requirement, unlike `codex`.
 
 Remote Claude entries can inherit `description` and `version` from their own
 `apm.yml`. If APM cannot fetch that metadata, normal packing writes the artifact

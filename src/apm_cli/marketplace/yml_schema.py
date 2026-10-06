@@ -250,6 +250,7 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "metadata",
         "build",
         "codex",
+        "copilot",
         "packages",
         "versioning",
     }
@@ -266,6 +267,12 @@ _CLAUDE_KEYS = frozenset(
 )
 
 _CODEX_KEYS = frozenset(
+    {
+        "output",
+    }
+)
+
+_COPILOT_KEYS = frozenset(
     {
         "output",
     }
@@ -322,6 +329,13 @@ class MarketplaceCodexConfig:
     """Codex-specific marketplace output configuration."""
 
     output: str = MARKETPLACE_OUTPUTS["codex"].default_output
+
+
+@dataclass(frozen=True)
+class MarketplaceCopilotConfig:
+    """Copilot-specific marketplace output configuration."""
+
+    output: str = MARKETPLACE_OUTPUTS["copilot"].default_output
 
 
 @dataclass(frozen=True)
@@ -415,6 +429,7 @@ class MarketplaceConfig:
     outputs: tuple[str, ...] = ("claude",)
     claude: MarketplaceClaudeConfig = field(default_factory=MarketplaceClaudeConfig)
     codex: MarketplaceCodexConfig = field(default_factory=MarketplaceCodexConfig)
+    copilot: MarketplaceCopilotConfig = field(default_factory=MarketplaceCopilotConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
@@ -688,6 +703,26 @@ def _parse_codex(raw: Any) -> MarketplaceCodexConfig:
         raise MarketplaceYmlError(str(exc)) from exc
 
     return MarketplaceCodexConfig(output=output)
+
+
+def _parse_copilot(raw: Any) -> MarketplaceCopilotConfig:
+    """Parse and validate the optional ``marketplace.copilot`` block."""
+    if raw is None:
+        return MarketplaceCopilotConfig()
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError("'copilot' must be a mapping")
+    _check_unknown_keys(raw, _COPILOT_KEYS, context="copilot")
+
+    output = raw.get("output", MARKETPLACE_OUTPUTS["copilot"].default_output)
+    if not isinstance(output, str) or not output.strip():
+        raise MarketplaceYmlError("'copilot.output' must be a non-empty string")
+    output = output.strip()
+    try:
+        validate_path_segments(output, context="copilot.output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+
+    return MarketplaceCopilotConfig(output=output)
 
 
 def _parse_outputs(
@@ -1252,11 +1287,15 @@ def _build_config(
     # -- codex output --
     codex = _parse_codex(marketplace_dict.get("codex"))
 
+    # -- copilot output --
+    copilot = _parse_copilot(marketplace_dict.get("copilot"))
+
     # -- Sibling-vs-map conflict detection (A1: sibling wins) --
     # Only fire when the user EXPLICITLY set a sibling block AND the map
     # also has an explicit path. Default/absent sibling is not a conflict.
     has_explicit_claude = marketplace_dict.get("claude") is not None
     has_explicit_codex = marketplace_dict.get("codex") is not None
+    has_explicit_copilot = marketplace_dict.get("copilot") is not None
 
     final_specs_list = list(output_specs)
     for i, spec in enumerate(final_specs_list):
@@ -1266,6 +1305,8 @@ def _build_config(
                 sibling_path = claude.output
             elif spec.name == "codex" and has_explicit_codex and codex.output != spec.path:
                 sibling_path = codex.output
+            elif spec.name == "copilot" and has_explicit_copilot and copilot.output != spec.path:
+                sibling_path = copilot.output
             if sibling_path is not None:
                 warnings_sink.append(
                     f"marketplace.outputs.{spec.name}.path ('{spec.path}') "
@@ -1330,6 +1371,7 @@ def _build_config(
         outputs=outputs,
         claude=claude,
         codex=codex,
+        copilot=copilot,
         metadata=metadata,
         build=build,
         source_base=source_base,

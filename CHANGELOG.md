@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm pack` can emit a GitHub Copilot CLI marketplace output (`.github/plugin/marketplace.json`, selected via `marketplace.outputs: [copilot]`); its `plugins[].source` is always a relative-path string, never the Claude/Codex pin-preserving object shape. Documented in the publish-to-a-marketplace and `apm pack` reference guides. (#2600)
+
 ### Changed
 
 - `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
