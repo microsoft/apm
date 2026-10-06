@@ -33,7 +33,7 @@ APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 92 | 1 | 0 | 0 |
+| Consumer | 94 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 20 | 0 | 0 | 0 |
 
@@ -65,7 +65,7 @@ APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020
 | [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | active | 1 | - |
 | [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 1 | - |
 | [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 3 | - |
-| [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 2 | - |
+| [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 3 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 6 | - |
 | [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | active | 1 | - |
@@ -167,6 +167,8 @@ APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020
 | [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
 | [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 1 | - |
 | [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 1 | - |
+| [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 2 | - |
+| [req-tg-017](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-017) | MUST | 8.5.9 | consumer | active | 3 | - |
 
 ## Waivers
 

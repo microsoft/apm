@@ -36,6 +36,11 @@ APM v0.21.0+ always writes `"version": 1` to `.cursor/hooks.json` on a
 fresh install. Existing files that already contain a `"version"` key are
 left untouched.
 
+If installation instead rejects unsupported Cursor events or reports overlap
+with Claude import, follow the
+[native hook compatibility and one-route guidance](../../producer/author-primitives/hooks-and-commands/#cursor-native-hooks-and-claude-import).
+APM does not overwrite invalid user hooks or change Cursor's import settings.
+
 ---
 
 ### Agent Plugin does not load in Copilot

@@ -184,6 +184,18 @@ hook action under `.kiro/hooks/`.
 For Codex, APM wraps flat command entries in hook groups containing a
 nested `hooks` array in `.codex/hooks.json`.
 
+For Cursor, APM writes native v1 flat command or prompt handlers using only
+verified aliases. Unsupported fields, restrictions and overlapping Claude
+imports fail before writes; diagnostics name unsupported source-level,
+matcher-group and handler fields and distinguish whitespace in literal matcher
+alternatives. Choose one hook route per dependency:
+native `cursor`, or `claude` with Cursor's existing import. APM never changes
+import settings. Reinstall and target retirement preserve unrelated user hooks.
+See the
+[Cursor native hooks guide](../../../../../docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import)
+for supported mappings and limitations. Test execution in each harness;
+configuration compatibility does not guarantee equivalent behavior.
+
 <!-- Keep this table synchronized with docs/src/content/docs/producer/author-primitives/hooks-and-commands.md. -->
 
 ### Session lifecycle event aliases
@@ -194,7 +206,7 @@ nested `hooks` array in `.codex/hooks.json`.
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
 | `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
-Event names absent from this table are preserved unchanged. Only an unmapped
+For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
 an install warning. All-lowercase names such as `stop` pass through silently;
 `stop` is not a native Copilot or Claude event and will not fire.

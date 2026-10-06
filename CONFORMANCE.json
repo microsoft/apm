@@ -303,9 +303,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_target_merge_hook_state_reconciled_fail_safe"
       ]
     },
@@ -1556,12 +1557,37 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_native_model_settings_preserved_and_dropped_metadata_bounded"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-016",
+      "keyword": "MUST",
+      "section": "8.5.9",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_native_fail_closed_conversion_clause_persists_in_spec",
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_native_fail_closed_conversion_is_real_not_prose"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-017",
+      "keyword": "MUST",
+      "section": "8.5.9",
+      "status": "active",
+      "test_count": 3,
+      "tests": [
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_import_overlap_rejection_clause_persists_in_spec",
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_import_rejects_real_default_same_event_kind_content_overlap",
+        "tests/spec_conformance/test_cursor_hook_reqs.py::test_cursor_claude_overlap_predicate_is_kind_aware_not_event_only"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 92,
+      "active": 94,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1585,5 +1611,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 126
+  "total_requirements": 128
 }
