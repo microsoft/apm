@@ -483,10 +483,63 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
-        "audit-replay-config-root",
+        "audit-replay-subset-checkout-root",
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
-        _replace("prepared_replay.modules_root", "prepared_replay.project_root"),
+        _replace(
+            "    modules_root = (\n        prepared_replay.modules_root\n",
+            "    modules_root = (\n        project_root / APM_MODULES_DIR\n",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-config-modules-root",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "        prepared_replay.modules_root\n"
+            "        if prepared_replay is not None\n"
+            "        else project_root / APM_MODULES_DIR,\n"
+            "        trust_transitive_self_defined=True,\n",
+            "        prepared_replay.project_root\n"
+            "        if prepared_replay is not None\n"
+            "        else project_root / APM_MODULES_DIR,\n"
+            "        trust_transitive_self_defined=True,\n",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-subset-fallback-hardcoded",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "        else project_root / APM_MODULES_DIR\n",
+            '        else project_root / "apm_modules"\n',
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-config-fallback-hardcoded",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "        else project_root / APM_MODULES_DIR,\n",
+            '        else project_root / "apm_modules",\n',
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-subset-error-fail-closed",
+        AUDIT_RULE,
+        "src/apm_cli/policy/ci_checks.py",
+        _replace(
+            "    if prepared_replay_error is not None:\n"
+            "        return CheckResult(\n"
+            '            name="skill-subset-consistency",\n'
+            "            passed=False,\n"
+            '            message=f"replay failed: '
+            '{prepared_replay_error}",\n'
+            "            details=[prepared_replay_error],\n"
+            "        )\n"
+            "    modules_root = (\n",
+            "    modules_root = (\n",
+        ),
     ),
     CompoundMutation(
         "uninstall-select-owner",

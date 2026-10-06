@@ -231,6 +231,10 @@ def _is_windows() -> bool:
     return _platform.system() == "Windows"
 
 
+def _is_windows_native_standard_user() -> bool:
+    return _is_windows() and os.environ.get("APM_WINDOWS_NATIVE_STANDARD_USER") == "1"
+
+
 def _has_apm_binary() -> bool:
     return _resolve_apm_binary() is not None
 
@@ -258,6 +262,10 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
         "APM_RUN_INTEGRATION_TESTS=1 not set",
     ),
     "requires_windows": (_is_windows, "Windows required"),
+    "requires_windows_native_standard_user": (
+        _is_windows_native_standard_user,
+        "Capability-qualified native Windows standard-user runner required",
+    ),
     "requires_apm_binary": (
         _has_apm_binary,
         "apm binary not found on PATH (set APM_BINARY_PATH or build via scripts/build-binary.sh)",

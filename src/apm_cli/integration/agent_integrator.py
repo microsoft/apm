@@ -412,6 +412,45 @@ class AgentIntegrator(BaseIntegrator):
         re.DOTALL,
     )
 
+    # Bound the dropped-fields diagnostic to a fixed number of named keys so
+    # hostile/oversized frontmatter (many keys) cannot blow up a single CLI
+    # diagnostic line; the remainder is summarized by count instead of
+    # enumerated.
+    _MAX_DROPPED_FIELDS_SHOWN = 5
+    # Bound each individually-named key to a fixed display length so a
+    # single hostile/oversized key name cannot blow up a single CLI
+    # diagnostic line either; combined with _MAX_DROPPED_FIELDS_SHOWN this
+    # bounds the whole diagnostic's total length.
+    _MAX_DROPPED_FIELD_KEY_LEN = 60
+
+    # Native string fields Codex itself recognizes and whose declared value
+    # takes precedence over any APM default. Single source of truth for both
+    # the model-settings extraction loop and the dropped-fields exclusion set
+    # below, so adding a third recognized field only requires one edit here.
+    _CODEX_MODEL_FIELDS = ("model", "model_reasoning_effort")
+    _CODEX_KNOWN_FIELDS = frozenset({"name", "description", "tools", *_CODEX_MODEL_FIELDS})
+
+    @staticmethod
+    def _display_dropped_field_key(field: object) -> str:
+        """Render one dropped frontmatter key name, bounded and ASCII-safe.
+
+        ``field`` stays ``object`` (not a narrower union) because the YAML
+        frontmatter loader (``load_yaml_str``) accepts the full YAML 1.1 key
+        domain, including ``datetime.date`` (bare ``2026-10-05:`` keys) and
+        ``bytes`` (``!!binary`` keys) -- neither representable by a small
+        str/int/float/bool/None union. ``str(field)`` below covers all of
+        them uniformly.
+
+        Sanitizes control/non-ASCII characters first, then truncates the
+        *displayed* key (never the full value) so a single oversized key
+        name cannot blow up the diagnostic line.
+        """
+        text = printable_ascii_text(str(field))
+        max_len = AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN
+        if len(text) > max_len:
+            text = text[:max_len] + "...(truncated)"
+        return text
+
     @staticmethod
     def _warn_codex_unverified_scope(
         diagnostics: DiagnosticCollector | None,
@@ -463,8 +502,8 @@ class AgentIntegrator(BaseIntegrator):
     ) -> None:
         """Transform an ``.agent.md`` file to Codex ``.toml`` format.
 
-        Parses YAML frontmatter for ``name`` and ``description``, uses
-        the markdown body as ``developer_instructions``.
+        Preserves ``name``, ``description``, and native model settings;
+        uses the markdown body as ``developer_instructions``.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -477,6 +516,7 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        model_settings: dict[str, str] = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
@@ -486,6 +526,58 @@ class AgentIntegrator(BaseIntegrator):
                 if isinstance(fm, dict):
                     name = fm.get("name", name)
                     description = fm.get("description", description)
+                    for field in AgentIntegrator._CODEX_MODEL_FIELDS:
+                        if field not in fm:
+                            continue
+                        if isinstance(fm[field], str):
+                            model_settings[field] = fm[field]
+                        elif diagnostics is not None:
+                            diagnostics.lossy_agent_compilation(
+                                message=(
+                                    f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                    f"field '{field}' must be a string and was dropped."
+                                ),
+                                package=printable_ascii_text(package_name),
+                                detail=(
+                                    f"Fix: set '{field}' to a string in the source agent, "
+                                    "then rerun 'apm install'."
+                                ),
+                            )
+                    # Collect only the raw dropped keys here (no formatting)
+                    # so hostile frontmatter with many keys does not force
+                    # rendering every key just to discard most of them below.
+                    dropped_field_names = [
+                        field for field in fm if field not in AgentIntegrator._CODEX_KNOWN_FIELDS
+                    ]
+                    if dropped_field_names and diagnostics is not None:
+                        shown_names = dropped_field_names[
+                            : AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN
+                        ]
+                        remaining = len(dropped_field_names) - len(shown_names)
+                        shown_fields = [
+                            f"'{AgentIntegrator._display_dropped_field_key(field)}'"
+                            for field in shown_names
+                        ]
+                        fields_text = ", ".join(shown_fields)
+                        if remaining > 0:
+                            fields_text += f" (and {remaining} more)"
+                        singular = len(dropped_field_names) == 1
+                        field_label = "field" if singular else "fields"
+                        dropped_verb = "was" if singular else "were"
+                        field_reference = "this field" if singular else "these fields"
+                        setting_reference = "its setting" if singular else "their settings"
+                        diagnostics.lossy_agent_compilation(
+                            message=(
+                                f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                f"{field_label} {fields_text} {dropped_verb} dropped; "
+                                "this metadata is not translated by APM for Codex."
+                            ),
+                            package=printable_ascii_text(package_name),
+                            detail=(
+                                f"Fix: remove {field_reference} if unnecessary; otherwise do not "
+                                f"rely on {setting_reference} in the generated Codex agent."
+                            ),
+                        )
                 else:
                     AgentIntegrator._warn_codex_unverified_scope(
                         diagnostics,
@@ -513,6 +605,7 @@ class AgentIntegrator(BaseIntegrator):
         doc = {
             "name": name,
             "description": description,
+            **model_settings,
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))

@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
+
 ### Fixed
 
+- Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
 - `apm install --frozen` no longer writes `apm.lock.yaml`, which req-lk-006
   requires it to leave untouched. It previously deployed files and rewrote the
   lockfile to claim them, so a committed lockfile that under-recorded the
