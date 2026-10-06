@@ -186,6 +186,7 @@ export default defineConfig({
 					label: 'Author a package (Producer)',
 					items: [
 						{ label: 'Overview', slug: 'producer' },
+						{ label: 'Source vs installed', slug: 'producer/source-vs-installed' },
 						{
 							label: 'Author primitives',
 							items: [
