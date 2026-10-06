@@ -41,6 +41,7 @@ def pack_bundle(
     dry_run: bool = False,
     force: bool = False,
     logger=None,
+    source: bool = False,
 ) -> PackResult:
     """Create a self-contained bundle from installed APM dependencies.
 
@@ -68,6 +69,20 @@ def pack_bundle(
         ValueError: If deployed files referenced in the lockfile are missing on disk.
     """
     bundle_format = coerce_bundle_format(fmt)
+    if source:
+        from .source_package import pack_source_package
+
+        if bundle_format is not BundleFormat.APM:
+            raise ValueError("Source packages require 'apm pack --format apm --source'")
+        if force:
+            raise ValueError("--source cannot use --force; choose a new output path")
+        return pack_source_package(
+            project_root,
+            output_dir,
+            archive=archive,
+            archive_format=archive_format,
+            dry_run=dry_run,
+        )
 
     if bundle_format is BundleFormat.AGENT_PLUGIN:
         from .agent_plugin_exporter import export_agent_plugin_bundle
@@ -109,6 +124,9 @@ def pack_bundle(
     is_hybrid_root = apm_yml_path.exists() and skill_md_path.exists()
     try:
         package = APMPackage.from_apm_yml(apm_yml_path)
+        from .source_package import require_resource_pack_mode
+
+        require_resource_pack_mode(package)
         pkg_name = package.name
         pkg_version = package.version or "0.0.0"
         from apm_cli.models.apm_package import package_target_selection

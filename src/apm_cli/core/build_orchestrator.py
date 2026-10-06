@@ -47,6 +47,7 @@ class BuildOptions:
     bundle_archive_format: str = "zip"
     bundle_output: Path | None = None
     bundle_force: bool = False
+    bundle_source: bool = False
     # Marketplace-only options
     marketplace_offline: bool = False
     marketplace_include_prerelease: bool = False
@@ -126,8 +127,9 @@ class BundleProducer:
                 dry_run=options.dry_run,
                 force=options.bundle_force,
                 logger=logger,
+                source=options.bundle_source,
             )
-        except (FileNotFoundError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             raise BuildError(str(exc)) from exc
 
         outputs: list[Path] = []
@@ -464,7 +466,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
             raise BuildError(f"{apm_yml_path} must be a YAML mapping at the top level.")
         data = loaded or {}
 
-    if data and data.get("dependencies") is not None:
+    if data and (data.get("dependencies") is not None or "resources" in data):
         out.add(OutputKind.BUNDLE)
     if data and data.get("marketplace"):
         out.add(OutputKind.MARKETPLACE)
@@ -516,7 +518,9 @@ class BuildOrchestrator:
         )
 
     def run(self, options: BuildOptions, logger: Any = None) -> BuildResult:
-        outputs_needed = detect_outputs(options.apm_yml_path)
+        outputs_needed = (
+            {OutputKind.BUNDLE} if options.bundle_source else detect_outputs(options.apm_yml_path)
+        )
         if not outputs_needed:
             raise BuildError(
                 "apm.yml has neither 'dependencies:' nor 'marketplace:' "

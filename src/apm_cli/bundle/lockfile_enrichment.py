@@ -187,6 +187,7 @@ def enrich_lockfile_for_pack(
     *,
     bundle_files: dict[str, str] | None = None,
     packed_at: str | None = None,
+    source: bool = False,
 ) -> str:
     """Create an enriched copy of the lockfile YAML with a ``pack:`` section.
 
@@ -252,6 +253,8 @@ def enrich_lockfile_for_pack(
             packed_at if packed_at is not None else datetime.now(timezone.utc).isoformat()
         ),
     }
+    if source:
+        pack_meta["source"] = True
     if all_mappings:
         # Record the source prefixes that were remapped so consumers know the
         # bundle paths differ from the original lockfile.  Use the canonical

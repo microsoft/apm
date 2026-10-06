@@ -53,6 +53,7 @@ target:        <enum | list<enum>>
 type:          <enum>
 scripts:       <map<string, string>>
 includes:      <enum | list<string>>
+resources:     <list<string>>            # experimental; working draft only
 registries:    <map<string, RegistryEntry> & {default?: <string>}>
 dependencies:
   apm:         <list<ApmDependency>>
@@ -345,6 +346,20 @@ Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
 For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
 
 ---
+
+### 3.12. `resources` (experimental)
+
+An optional, non-empty list of dedicated package-relative **directory** roots
+for independent data, such as `resources: [contracts, checks]`. It is available
+only in the working draft (omit `$schema`), not normative OpenAPM.
+Unlike `includes`, it does not select deployable primitives or authorize
+execution. Roots must be nonoverlapping, portable POSIX paths with no globs,
+traversal, `.` root, hidden paths, or metadata/cache directories.
+
+Only `apm pack --format apm --source` represents these resources; ordinary
+pack and both plugin formats reject them. `apm unpack --source` restores their
+exact bytes and author metadata into a new directory, without activation.
+See [selection and restoration rules](../../producer/pack-a-bundle/#independent-resources-experimental).
 
 ## 4. Dependencies
 

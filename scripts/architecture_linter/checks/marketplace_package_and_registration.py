@@ -428,7 +428,95 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+_RID_RESOURCES = "marketplace-integrations-source-resources"
+_RESOURCE_OWNER = "src/apm_cli/models/package_resources.py"
+_SOURCE_OWNER = "src/apm_cli/bundle/source_package.py"
+
+
+def _check_source_resources(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep selection, integrity, and non-activation admission on their owners."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    for owner, definitions in (
+        (_RESOURCE_OWNER, ("parse_resource_roots", "collect_package_resources")),
+        (
+            _SOURCE_OWNER,
+            ("require_resource_pack_mode", "reject_source_deployment", "restore_source_package"),
+        ),
+    ):
+        for name in definitions:
+            findings.extend(
+                _forbid_scan(
+                    provider,
+                    inv,
+                    _RID_RESOURCES,
+                    _src_python(provider, exclude={owner}),
+                    re.compile(rf"^def {name}\("),
+                    f"{name} must remain owned by {owner}",
+                    exempt=False,
+                )
+            )
+    seams = {
+        _APM_PACKAGE: ("resources = parse_resource_roots(",),
+        _RESOURCE_OWNER: (
+            "inventory.collect_component(directory)",
+            "validate_portable_relative_path(",
+        ),
+        _SOURCE_OWNER: (
+            "collect_package_resources(",
+            "verify_bundle_integrity(root, metadata)",
+            "inventory.open_verified_asset(asset)",
+            "enrich_lockfile_for_pack(",
+        ),
+        "src/apm_cli/bundle/packer.py": (
+            "pack_source_package(",
+            "require_resource_pack_mode(package)",
+        ),
+        "src/apm_cli/bundle/plugin_exporter.py": ("require_resource_pack_mode(package)",),
+        "src/apm_cli/bundle/agent_plugin_exporter.py": ("require_resource_pack_mode(package)",),
+        "src/apm_cli/bundle/unpacker.py": (
+            "restore_source_package(",
+            "reject_source_deployment(source_dir)",
+        ),
+        "src/apm_cli/bundle/local_bundle.py": (
+            "reject_source_deployment(path)",
+            "reject_source_deployment(extract_dir)",
+        ),
+        "src/apm_cli/models/format_detection.py": ("reject_source_deployment(package_path)",),
+    }
+    for path, needles in seams.items():
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_RESOURCES,
+                path,
+                needles,
+                "Source-resource consumers must route through the canonical owner",
+            )
+        )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_RESOURCES,
+            (_SOURCE_OWNER, _RESOURCE_OWNER),
+            re.compile(r"subprocess|from .*install\.|from .*integration\.|from .*compilation\."),
+            "Source-package operations must not activate or integrate content",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_RESOURCES,
+        group=GROUP,
+        guard_ids=(_RID_RESOURCES,),
+        description="Source-resource selection and non-activation stay on canonical owners.",
+        check=_check_source_resources,
+    ),
     Rule(
         id=_RID_CONSTRUCTION,
         group=GROUP,

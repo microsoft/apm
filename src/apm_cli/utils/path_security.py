@@ -30,6 +30,27 @@ class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
 
 
+def source_permission_bits(mode: int) -> int:
+    """Admit ordinary source-file permissions, never set-ID or sticky bits."""
+    if mode & 0o7000:
+        raise ValueError("Source-package files cannot carry special permission bits")
+    return mode & 0o777
+
+
+def validate_portable_relative_path(value: str, *, context: str = "path") -> None:
+    """Require an unambiguous relative POSIX path, including on Windows."""
+    if len(value.encode("utf-8")) > 4096 or len(value.split("/")) > 128:
+        raise PathTraversalError(f"Invalid {context}: path exceeds the length or depth limit")
+    validate_path_segments(value, context=context, reject_empty=True)
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    reserved.update(f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(10))
+    if not value or any(ord(char) < 32 or char in '\\<>:"|?*' for char in value):
+        raise PathTraversalError(f"Invalid {context}: use a portable relative POSIX path")
+    for part in value.split("/"):
+        if part.endswith((".", " ")) or part.split(".")[0].upper() in reserved:
+            raise PathTraversalError(f"Invalid {context}: non-portable path segment {part!r}")
+
+
 def decode_url_path_segments(
     raw_path: str,
     *,
