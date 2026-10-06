@@ -20,6 +20,7 @@ from apm_cli.install.primitive_classification import (
 )
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.primitives.models import resolve_user_invocable
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -428,7 +429,14 @@ class AgentIntegrator(BaseIntegrator):
     # the model-settings extraction loop and the dropped-fields exclusion set
     # below, so adding a third recognized field only requires one edit here.
     _CODEX_MODEL_FIELDS = ("model", "model_reasoning_effort")
-    _CODEX_KNOWN_FIELDS = frozenset({"name", "description", "tools", *_CODEX_MODEL_FIELDS})
+    # 'user-invocable' and its 'visibility' alias are recognized-but-lossy:
+    # they get their own dedicated diagnostic via _warn_user_invocable_dropped
+    # (with the actionable 'cannot be guaranteed' hint), so they must be
+    # excluded here to avoid a second, generic dropped-fields warning for the
+    # same key.
+    _CODEX_KNOWN_FIELDS = frozenset(
+        {"name", "description", "tools", "user-invocable", "visibility", *_CODEX_MODEL_FIELDS}
+    )
 
     @staticmethod
     def _display_dropped_field_key(field: object) -> str:
@@ -489,6 +497,52 @@ class AgentIntegrator(BaseIntegrator):
             detail=(
                 "Fix: remove 'tools' if unrestricted access is intentional; "
                 "otherwise do not use the generated agent with Codex."
+            ),
+        )
+
+    @staticmethod
+    def _warn_user_invocable_dropped(
+        fm,
+        source: Path,
+        target_name: str,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Warn that a target renderer cannot carry programmatic-only status.
+
+        No-ops when diagnostics are unavailable, the frontmatter is not a
+        mapping, or the agent resolves as user-invocable (the default). The
+        single interpretation authority is resolve_user_invocable(), shared
+        with the parser, so the model and the integrator agree on meaning:
+        the source may have set 'user-invocable: false' directly or only the
+        'visibility: internal' alias.
+
+        The emitted diagnostic is a warning (lossy compilation), not an error:
+        the agent is still deployed, but this renderer cannot encode the
+        source's programmatic-only intent, so that semantic cannot be
+        guaranteed after the render. The APM source frontmatter remains the
+        authority; operators who must keep the agent out of a user-facing
+        picker should not generate/deploy it for this target, or should
+        prefer a target that preserves 'user-invocable'.
+        """
+        if diagnostics is None:
+            return
+        if not isinstance(fm, dict):
+            return
+        if resolve_user_invocable(fm):
+            return
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"{target_name} agent {printable_ascii_text(source.name)}: user-invocability "
+                "(resolved from 'user-invocable' or the 'visibility: internal' alias) cannot be "
+                "represented in this target format; programmatic-only semantics cannot be "
+                "guaranteed after this lossy render."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "The APM source agent remains the authority for user-invocability. Mitigation: "
+                "do not generate/deploy this agent for this target if it must stay out of a "
+                "user-facing agent picker, or prefer a target that preserves 'user-invocable'."
             ),
         )
 
@@ -593,6 +647,9 @@ class AgentIntegrator(BaseIntegrator):
                         source,
                         package_name,
                     )
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Codex", diagnostics, package_name
+                )
             except yaml.YAMLError:
                 AgentIntegrator._warn_codex_unverified_scope(
                     diagnostics,
@@ -747,6 +804,10 @@ class AgentIntegrator(BaseIntegrator):
                 if "tools" in out_fm:
                     out_fm_ordered["tools"] = out_fm["tools"]
                 out_fm = out_fm_ordered
+
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Kiro", diagnostics, package_name
+                )
 
         if out_fm:
             fm_text = yaml_to_str(out_fm)

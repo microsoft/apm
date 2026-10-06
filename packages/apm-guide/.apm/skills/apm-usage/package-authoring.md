@@ -474,6 +474,15 @@ instructions: |
 ---
 ```
 
+Optional `user-invocable: false` (boolean, default `true`) marks the agent
+as programmatic-only: it is reachable through another agent's `handoffs:`
+but excluded from the user-facing agent picker. `visibility: internal` is
+an accepted alias (the canonical field wins if both are set). Verbatim
+targets (Copilot, Claude, Cursor, OpenCode, Grok) carry the field through
+unchanged. Codex and Kiro cannot represent it, so APM emits an install-time
+warning naming the agent instead of silently dropping it -- the APM source
+stays the authority for user-invocability.
+
 #### Codex target: native model settings
 
 Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,

@@ -172,6 +172,15 @@ for...
 | `tools` | optional | Whitelist of tools the persona may call |
 | `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
+| `user-invocable` | optional | `false` marks the agent as programmatic-only: reachable via another agent's `handoffs:` but excluded from the user-facing agent picker. Defaults to `true`. `visibility: internal` is an accepted alias |
+
+Set `user-invocable: false` (or the `visibility: internal` alias) when
+an agent exists only to be handed off to and should never appear in a
+harness's agent picker. Verbatim targets (Copilot, Claude, Grok Build,
+Cursor, OpenCode) carry the field through unchanged. Codex and Kiro
+cannot represent it, so `apm install` emits a warning naming the agent
+instead of silently dropping it -- the APM source agent stays the
+authority for user-invocability.
 
 `model` and `tools` reach Copilot, Claude, Grok Build, Cursor, and OpenCode
 verbatim. Kiro receives `description`, `model`, and `tools` only;
