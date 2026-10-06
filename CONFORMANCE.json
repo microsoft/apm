@@ -1544,12 +1544,23 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_user_scoped_mcp_target_selection_ignores_project_signals"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-015",
+      "keyword": "MUST",
+      "section": "8.5.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_codex_native_model_settings_preserved_and_dropped_metadata_bounded"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 91,
+      "active": 92,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1573,5 +1584,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 125
+  "total_requirements": 126
 }

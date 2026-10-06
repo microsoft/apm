@@ -474,6 +474,34 @@ instructions: |
 ---
 ```
 
+#### Codex target: native model settings
+
+Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
+`description`, and the Markdown body as `developer_instructions`.
+String `model` and `model_reasoning_effort` frontmatter values are
+preserved as top-level TOML keys:
+
+```markdown
+---
+name: reviewer
+description: Reviews code
+model: gpt-5.6-sol
+model_reasoning_effort: high
+---
+Review the requested change.
+```
+
+Absent settings stay absent. APM does not translate model names, choose
+defaults, or validate model availability or supported effort values.
+Non-string values are dropped with a warning. Other frontmatter,
+including other native Codex settings and a `codex:` block, is dropped
+with a warning; APM provides no arbitrary or namespaced passthrough.
+Remove unnecessary fields or do not rely on their settings in the
+generated agent. `tools` restrictions still cannot be preserved: the
+agent may inherit all project/session MCP servers. Remove `tools` only
+if unrestricted access is intentional; otherwise do not use the generated
+agent with Codex.
+
 #### OpenCode target: frontmatter constraints
 
 OpenCode (`target: opencode`, deploys to `.opencode/agents/`) parses

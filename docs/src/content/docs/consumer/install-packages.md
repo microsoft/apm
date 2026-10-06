@@ -206,6 +206,18 @@ For the full flag reference, run `apm install --help` or see
 
 ## When things go wrong
 
+- **Symlink checkout fallback.** If a checked-out file contains only a short
+  relative path (for example `../shared/config.yml`) instead of real content,
+  Git substituted a plain-text fallback for a symlink it could not create.
+  APM preserves Git's detected `core.symlinks` setting instead of letting an
+  inherited global value override it; this capability check is not
+  Windows-specific, but Windows non-admin accounts are the common case
+  without symlink-creation rights. Explicit command-scope Git settings still
+  take precedence; APM does not change your global Git configuration. A
+  successful checkout therefore does not guarantee that a package requiring
+  real symlinks works -- see "Skipped symlinked agent source" below for the
+  related install-time check on agent sources. Use a package that ships real
+  source files, or a symlink-capable environment.
 - **Critical security finding.** Install aborts with the offending
   characters and file path. Patch upstream when you can; use
   `--force` only when you can document the exception.

@@ -93,21 +93,7 @@
     "defer_v0_2": {
       "type": "array",
       "description": "Architectural work bound to a reserved slot in a future major. Each entry MUST cite the existing reserved-slot section anchor in the artifact (e.g. 'sec.4.8 workspaces reserved', 'sec.10.12 publisher attestations reserved').",
-      "items": {
-        "allOf": [
-          { "$ref": "#/definitions/fold_item" },
-          {
-            "type": "object",
-            "required": ["reserved_slot_anchor"],
-            "properties": {
-              "reserved_slot_anchor": {
-                "type": "string",
-                "description": "Section / anchor in the current artifact that already reserves space for this work."
-              }
-            }
-          }
-        ]
-      }
+      "items": { "$ref": "#/definitions/fold_item_with_reserved_slot" }
     },
     "reject": {
       "type": "array",
@@ -147,6 +133,23 @@
         "spec_section": { "type": "string", "description": "Section / appendix / req-XXX anchor where the patch lands." },
         "patch_instruction": { "type": "string", "description": "Concrete mechanical instruction the drafter applies. ASCII only. MUST NOT add any forbidden vendor / foundation token to the artifact." },
         "success_criterion": { "type": "string", "description": "Verifiable post-fold check (grep, schema validation, or anchor count)." }
+      }
+    },
+    "fold_item_with_reserved_slot": {
+      "type": "object",
+      "description": "Same shape as fold_item plus a required reserved_slot_anchor. Inlined (not composed via allOf over fold_item) because Draft 7 has no unevaluatedProperties: an allOf branch's own additionalProperties:false would otherwise reject the sibling branch's reserved_slot_anchor key. The five base properties are intentionally duplicated here, not $ref-shared, to keep this a single closed object; test_shared_fold_item_properties_structurally_identical guards against the two copies drifting apart.",
+      "required": ["id", "theme", "spec_section", "patch_instruction", "success_criterion", "reserved_slot_anchor"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^F[1-9][0-9]*$" },
+        "theme": { "type": "string", "description": "Convergent-theme id this fold addresses (e.g. T1, T2), or 'standalone' if not part of a clustered theme." },
+        "spec_section": { "type": "string", "description": "Section / appendix / req-XXX anchor where the patch lands." },
+        "patch_instruction": { "type": "string", "description": "Concrete mechanical instruction the drafter applies. ASCII only. MUST NOT add any forbidden vendor / foundation token to the artifact." },
+        "success_criterion": { "type": "string", "description": "Verifiable post-fold check (grep, schema validation, or anchor count)." },
+        "reserved_slot_anchor": {
+          "type": "string",
+          "description": "Section / anchor in the current artifact that already reserves space for this work."
+        }
       }
     }
   }
