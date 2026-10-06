@@ -22,7 +22,7 @@ from ..utils.path_security import (
     source_permission_bits,
     validate_portable_relative_path,
 )
-from ..utils.yaml_io import load_yaml_str
+from ..utils.yaml_io import load_yaml, load_yaml_str
 from .formats import BundleFormat
 from .lockfile_enrichment import enrich_lockfile_for_pack
 
@@ -86,8 +86,15 @@ def reject_source_deployment(root: Path) -> None:
     path = root / LOCKFILE_NAME
     if not path.exists() and not path.is_symlink():
         return
-    data, _ = _read_mapping(AssetInventory(root), path)
-    pack = data.get("pack")
+    # Admission only probes the marker. Do not apply source-only metadata
+    # size/duplicate-key restrictions to otherwise valid legacy packages.
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Bundle source marker metadata must be a regular file")
+    try:
+        data = load_yaml(path)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Cannot inspect bundle source marker: {exc}") from exc
+    pack = data.get("pack") if isinstance(data, dict) else None
     if isinstance(pack, dict) and "source" in pack:
         raise ValueError(
             "Source packages cannot be deployed or installed. "

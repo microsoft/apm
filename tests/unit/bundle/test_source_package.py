@@ -231,6 +231,24 @@ def test_source_marker_blocks_declarative_plugin_admission(author: Path) -> None
         detect_package_type(bundle)
 
 
+def test_source_probe_preserves_legacy_metadata_semantics(tmp_path: Path) -> None:
+    bundle = tmp_path / "legacy"
+    bundle.mkdir()
+    (bundle / "plugin.json").write_text('{"name": "legacy"}')
+    (bundle / "apm.lock.yaml").write_text(
+        "lockfile_version: '1'\n"
+        "defaults: &base {format: apm}\n"
+        "pack:\n  <<: *base\n  format: claude-plugin\n"
+        + "# padding for an ordinary legacy lock "
+        + "x" * (4 * 1024 * 1024)
+        + "\n"
+    )
+    detected = detect_local_bundle(bundle)
+    assert detected is not None
+    assert detected.package_id == "legacy"
+    assert detected.lockfile["pack"]["format"] == "claude-plugin"
+
+
 @pytest.mark.parametrize("metadata", ["apm.yml", "apm.lock.yaml"])
 def test_exact_metadata_names_and_presence_are_required(author: Path, metadata: str) -> None:
     (author / metadata).rename(author / metadata.upper())
