@@ -167,7 +167,9 @@ def _to_cursor_hook_entries(
     result: list[dict[str, Any]] = []
     for binding in _entries_to_ir(entries, event_name).bindings:
         if binding.metadata:
-            raise HookContractError("unsupported Cursor matcher-group fields")
+            raise HookContractError(
+                f"unsupported Cursor matcher-group fields {sorted(binding.metadata)!r}"
+            )
         matcher = _cursor_matcher(binding.matcher, event_name, foreign=foreign)
         for handler in binding.handlers:
             if handler.platform != "all":

@@ -77,6 +77,10 @@ def test_cursor_source_and_native_field_rejections_agree(
     [
         ({"PreToolUse": [_nested("echo check", matcher="Bash | Read")]}, "contain whitespace"),
         ({"preToolUse": [{"command": "echo check", "mysteryField": True}]}, "mysteryField"),
+        (
+            {"PreToolUse": [{**_nested("echo check", matcher="Bash"), "mysteryGroupField": True}]},
+            "mysteryGroupField",
+        ),
     ],
 )
 def test_cursor_diagnostic_identifies_invalid_input_before_writes(
