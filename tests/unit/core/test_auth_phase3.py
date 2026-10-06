@@ -23,6 +23,7 @@ Focuses on:
 from __future__ import annotations
 
 import os
+import subprocess
 from threading import Thread
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +31,7 @@ import pytest
 
 from apm_cli.core import azure_cli as _azure_cli_mod
 from apm_cli.core.auth import (
+    AdoAuthChainExhaustedError,
     AuthContext,
     AuthResolver,
     BearerFallbackOutcome,
@@ -736,6 +738,240 @@ class TestTryWithFallbackCredentialChain:
 
                 with pytest.raises(RuntimeError, match="fail"):
                     resolver.try_with_fallback("github.com", _op)
+
+    def test_ado_rejected_bearer_falls_back_to_repository_credential(self) -> None:
+        provider = MagicMock()
+        provider.is_available.return_value = True
+        provider.get_bearer_token.return_value = "eyJ" + "x" * 120
+        attempts: list[tuple[str | None, dict[str, str]]] = []
+
+        def _op(token, env):
+            attempts.append((token, env))
+            if token == "gcm-token":
+                return "ok"
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+            result = resolver.try_with_fallback(
+                "dev.azure.com",
+                _op,
+                org="contoso",
+                path="contoso/platform/tools",
+            )
+
+        assert result == "ok"
+        assert [token for token, _env in attempts] == [
+            provider.get_bearer_token.return_value,
+            "gcm-token",
+        ]
+        credential_fill.assert_called_once_with(
+            "dev.azure.com",
+            port=None,
+            path="contoso/platform/tools",
+        )
+        gcm_env = attempts[-1][1]
+        count = int(gcm_env.get("GIT_CONFIG_COUNT", "0"))
+        pairs = [
+            (gcm_env[f"GIT_CONFIG_KEY_{i}"], gcm_env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(count)
+        ]
+        assert any(
+            key == "http.extraheader" and value.startswith("Authorization: Basic ")
+            for key, value in pairs
+        )
+
+    def test_ado_wrapped_git_stderr_falls_back_to_repository_credential(self) -> None:
+        inner = subprocess.CalledProcessError(
+            128,
+            ["git", "clone"],
+            stderr=b"fatal: unable to access: The requested URL returned error: 401",
+        )
+        wrapped = RuntimeError("git clone failed")
+        wrapped.__cause__ = inner
+        attempts: list[str | None] = []
+
+        def _op(token, _env):
+            attempts.append(token)
+            if token == "gcm-token":
+                return "ok"
+            raise wrapped
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+            result = resolver.try_with_fallback("dev.azure.com", _op, path="org/proj/_git/repo")
+
+        assert result == "ok"
+        assert attempts[-1] == "gcm-token"
+        credential_fill.assert_called_once()
+
+    def test_ado_tf401_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("TF401019: The Git repository does not exist")
+
+            with pytest.raises(RuntimeError, match="TF401019"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
+
+    def test_ado_empty_fill_logs_and_wraps_terminal_error(self) -> None:
+        logs: list[str] = []
+
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError, match="git credential fill"):
+                resolver.try_with_fallback(
+                    "dev.azure.com",
+                    _op,
+                    verbose_callback=logs.append,
+                )
+
+        assert any("returned no credential" in line for line in logs)
+        assert any("wrapping exhausted-chain error" in line for line in logs)
+
+    def test_ado_server_exhausted_omits_az_login(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {"ADO_HOST": "ado.example.com"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError) as raised:
+                resolver.try_with_fallback("ado.example.com", _op)
+
+        message = str(raised.value)
+        assert "git credential fill" in message
+        assert "ADO_APM_PAT" in message
+        assert "az login" not in message
+        assert "ADO_APM_PAT was" not in message
+
+    def test_ado_services_exhausted_names_only_attempted_steps(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError) as raised:
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        message = str(raised.value)
+        assert "ADO_APM_PAT and git credential fill were rejected" in message
+        assert "az CLI bearer" not in message
+        assert "az login" in message
+
+    def test_ado_fill_non_auth_failure_is_not_wrapped(self) -> None:
+        def _op(token, _env):
+            if token == "gcm-token":
+                raise RuntimeError("network timeout")
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(RuntimeError, match="network timeout") as raised:
+                resolver.try_with_fallback("dev.azure.com", _op)
+        assert type(raised.value) is RuntimeError
+        assert not isinstance(raised.value, AdoAuthChainExhaustedError)
+
+    def test_ado_fill_auth_failure_is_wrapped(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError, match="git credential fill"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+    def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("network timeout")
+
+            with pytest.raises(RuntimeError, match="network timeout"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

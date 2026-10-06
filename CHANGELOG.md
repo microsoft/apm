@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` shortens dependency-staging paths by 68 characters to avoid Windows `MAX_PATH` failures in deep checkouts. This does not guarantee arbitrary long-path support. (by @MohammedAlkindi, closes #2896, #2941)
 - Dependency updates preserve marketplace provenance so `plugin@marketplace` uninstall aliases keep working in project and global scope. (by @mfroembgen, #2949)
 - `apm audit` drift replay now discovers root-local primitives with the same source scope as a normal install, rather than treating the scratch deployment directory as the project root. (#3021)
+- Azure DevOps Git clones now retry path-scoped `git credential fill` (Git Credential Manager) after `ADO_APM_PAT` and `az` bearer fail, so Windows GCM-backed marketplace and package installs can succeed without a PAT. Auth-failure detection reads git stderr on wrapped clone errors and does not treat Azure DevOps `TF401xxx` codes as HTTP 401. - by @mheeaxa (#2610)
 
 ### Security
 
