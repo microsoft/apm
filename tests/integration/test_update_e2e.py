@@ -6,7 +6,8 @@ Validates the full pipeline against a real GitHub package:
 
 * `apm update --dry-run` resolves, renders a plan, and writes nothing.
 * `apm update --yes` after install with no manifest changes is a no-op.
-* `apm install --frozen` succeeds against an in-sync lockfile.
+* `apm install --frozen` succeeds against an in-sync lockfile and leaves
+  `apm.lock.yaml` byte-identical (req-lk-006's no-rewrite clause).
 * `apm install --frozen` exits non-zero when lockfile is missing.
 * `apm install --frozen` exits non-zero when manifest declares a dep
   not present in the lockfile.
@@ -97,16 +98,28 @@ class TestUpdateE2E:
 
 class TestFrozenE2E:
     def test_frozen_succeeds_against_in_sync_lockfile(self, temp_project, apm_binary_path):
+        """Exit 0 *and* `apm.lock.yaml` untouched -- req-lk-006's no-rewrite clause.
+
+        The unit suite proves the write is withheld at the chokepoint, but
+        it stops at the pipeline boundary.  Byte-identity is asserted here,
+        through the real binary against a real package, because a rewrite
+        that happens anywhere else in the pipeline would still exit 0.
+        """
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
 
         first = _run_apm(apm_binary_path, ["install"], temp_project)
         assert first.returncode == 0, first.stderr
+        lockfile = temp_project / "apm.lock.yaml"
+        before = lockfile.read_bytes()
 
         # Re-run with --frozen on the same manifest+lockfile.
         result = _run_apm(apm_binary_path, ["install", "--frozen"], temp_project)
 
         assert result.returncode == 0, (
             f"Frozen install failed on in-sync project:\n{result.stdout}\n{result.stderr}"
+        )
+        assert lockfile.read_bytes() == before, (
+            "--frozen rewrote apm.lock.yaml; it must never write it (req-lk-006)"
         )
 
     def test_frozen_fails_when_lockfile_missing(self, temp_project, apm_binary_path):
