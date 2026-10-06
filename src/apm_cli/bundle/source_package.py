@@ -11,11 +11,16 @@ import yaml
 
 from ..agent_plugins.assets import AssetInventory
 from ..agent_plugins.ir import AgentPluginAsset
-from ..deps.lockfile import LOCKFILE_NAME, LockFile, require_supported_lockfile_version
+from ..deps.lockfile import (
+    LEGACY_LOCKFILE_NAME,
+    LOCKFILE_NAME,
+    LockFile,
+    require_supported_lockfile_version,
+)
 from ..models.apm_package import APMPackage
 from ..models.package_resources import collect_package_resources
 from ..utils.archive import projected_archive_path, write_tar_archive, write_zip_archive
-from ..utils.atomic_io import write_text_lf
+from ..utils.atomic_io import publish_directory_noreplace, write_text_lf
 from ..utils.path_security import (
     ensure_path_within,
     has_symlink_component,
@@ -83,23 +88,24 @@ def require_resource_pack_mode(package: APMPackage, *, source: bool = False) -> 
 def reject_source_deployment(root: Path) -> None:
     """Block a marked source envelope before any deployable-format admission."""
     root = root.resolve()
-    path = root / LOCKFILE_NAME
-    if not path.exists() and not path.is_symlink():
-        return
     # Admission only probes the marker. Do not apply source-only metadata
     # size/duplicate-key restrictions to otherwise valid legacy packages.
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("Bundle source marker metadata must be a regular file")
-    try:
-        data = load_yaml(path)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Cannot inspect bundle source marker: {exc}") from exc
-    pack = data.get("pack") if isinstance(data, dict) else None
-    if isinstance(pack, dict) and "source" in pack:
-        raise ValueError(
-            "Source packages cannot be deployed or installed. "
-            "Use 'apm unpack --source <bundle> -o <new-directory>' to restore inert bytes."
-        )
+    for name in (LOCKFILE_NAME, LEGACY_LOCKFILE_NAME):
+        path = root / name
+        if not path.exists() and not path.is_symlink():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("Bundle source marker metadata must be a regular file")
+        try:
+            data = load_yaml(path)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Cannot inspect bundle source marker: {exc}") from exc
+        pack = data.get("pack") if isinstance(data, dict) else None
+        if isinstance(pack, dict) and "source" in pack:
+            raise ValueError(
+                "Source packages cannot be deployed or installed. "
+                "Use 'apm unpack --source <bundle> -o <new-directory>' to restore inert bytes."
+            )
 
 
 def _require_new_destination(destination: Path) -> None:
@@ -112,7 +118,11 @@ def _require_new_destination(destination: Path) -> None:
 
 
 def _copy_assets(
-    inventory: AssetInventory, assets: tuple[AgentPluginAsset, ...], destination: Path
+    inventory: AssetInventory,
+    assets: tuple[AgentPluginAsset, ...],
+    destination: Path,
+    *,
+    expected_hashes: dict[str, str],
 ) -> None:
     from .local_bundle import verify_bundle_integrity
 
@@ -132,9 +142,7 @@ def _copy_assets(
             if source.read(1):
                 raise ValueError(f"Source-package file grew while copying: {asset.path}")
         target.chmod(mode)
-    errors = verify_bundle_integrity(
-        destination, {"pack": {"bundle_files": {asset.path: asset.sha256 for asset in assets}}}
-    )
+    errors = verify_bundle_integrity(destination, {"pack": {"bundle_files": expected_hashes}})
     if errors:
         raise ValueError("Source-package copy failed integrity verification: " + "; ".join(errors))
 
@@ -175,8 +183,9 @@ def pack_source_package(
     with tempfile.TemporaryDirectory(prefix=".apm-source-", dir=output_dir) as temporary:
         staged = Path(temporary) / name
         staged.mkdir()
-        _copy_assets(inventory, assets, staged / _PAYLOAD)
-        hashes = {f"{_PAYLOAD}/{asset.path}": asset.sha256 for asset in assets}
+        payload_hashes = {asset.path: asset.sha256 for asset in assets}
+        _copy_assets(inventory, assets, staged / _PAYLOAD, expected_hashes=payload_hashes)
+        hashes = {f"{_PAYLOAD}/{path}": digest for path, digest in payload_hashes.items()}
         write_text_lf(
             staged / LOCKFILE_NAME,
             enrich_lockfile_for_pack(
@@ -185,14 +194,13 @@ def pack_source_package(
         )
         # Revalidate staged bytes before publishing either representation.
         _verify_source_package(staged)
-        _require_new_destination(destination)
         if archive:
             staged_archive = projected_archive_path(Path(temporary), name, archive_format)
             writer = write_tar_archive if archive_format == "tar.gz" else write_zip_archive
             writer(staged, staged_archive)
             os.link(staged_archive, destination)
         else:
-            staged.rename(destination)
+            publish_directory_noreplace(staged, destination)
     return result
 
 
@@ -233,7 +241,7 @@ def _verify_source_package(
     if errors:
         raise ValueError("Source-package integrity verification failed: " + "; ".join(errors))
     _, inventory, assets = _source_inventory(root / _PAYLOAD)
-    if set(files) != {f"{_PAYLOAD}/{asset.path}" for asset in assets}:
+    if files != {f"{_PAYLOAD}/{asset.path}": asset.sha256 for asset in assets}:
         raise ValueError("Source-package inventory does not match declared resources and metadata")
     return pack, inventory, assets
 
@@ -252,11 +260,13 @@ def restore_source_package(root: Path, output: Path, *, dry_run: bool) -> Unpack
     )
     if dry_run:
         return result
+    payload_hashes = {
+        asset.path: pack["bundle_files"][f"{_PAYLOAD}/{asset.path}"] for asset in assets
+    }
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".apm-restore-", dir=output.parent) as temporary:
         staged = Path(temporary) / "payload"
         staged.mkdir()
-        _copy_assets(inventory, assets, staged)
-        _require_new_destination(output)
-        staged.rename(output)
+        _copy_assets(inventory, assets, staged, expected_hashes=payload_hashes)
+        publish_directory_noreplace(staged, output)
     return result

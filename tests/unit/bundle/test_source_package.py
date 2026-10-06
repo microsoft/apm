@@ -16,9 +16,10 @@ from apm_cli.bundle.local_bundle import detect_local_bundle
 from apm_cli.bundle.packer import pack_bundle
 from apm_cli.bundle.unpacker import unpack_bundle
 from apm_cli.commands.pack import pack_cmd, unpack_cmd
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.manifest_contract import OPENAPM_V01_SCHEMA_URI
-from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml, load_yaml_str
 from tests.utils.source_package import make_source_package
 
 pytestmark = pytest.mark.component
@@ -231,11 +232,12 @@ def test_source_marker_blocks_declarative_plugin_admission(author: Path) -> None
         detect_package_type(bundle)
 
 
-def test_source_probe_preserves_legacy_metadata_semantics(tmp_path: Path) -> None:
+@pytest.mark.parametrize("lock_name", ["apm.lock.yaml", "apm.lock"])
+def test_source_probe_preserves_legacy_metadata_semantics(tmp_path: Path, lock_name: str) -> None:
     bundle = tmp_path / "legacy"
     bundle.mkdir()
     (bundle / "plugin.json").write_text('{"name": "legacy"}')
-    (bundle / "apm.lock.yaml").write_text(
+    (bundle / lock_name).write_text(
         "lockfile_version: '1'\n"
         "defaults: &base {format: apm}\n"
         "pack:\n  <<: *base\n  format: claude-plugin\n"
@@ -246,7 +248,47 @@ def test_source_probe_preserves_legacy_metadata_semantics(tmp_path: Path) -> Non
     detected = detect_local_bundle(bundle)
     assert detected is not None
     assert detected.package_id == "legacy"
-    assert detected.lockfile["pack"]["format"] == "claude-plugin"
+    preview = unpack_bundle(bundle, tmp_path / "unused", dry_run=True)
+    assert preview.pack_meta["format"] == "claude-plugin"
+    assert preview.verified
+    assert not (tmp_path / "unused").exists()
+
+
+@pytest.mark.parametrize("lock_name", ["apm.lock.yaml", "apm.lock"])
+@pytest.mark.parametrize("other_lock", [False, True])
+@pytest.mark.parametrize("admission", ["unpack", "local", "plugin"])
+def test_all_source_marker_names_block_deployment(
+    tmp_path: Path, lock_name: str, other_lock: bool, admission: str
+) -> None:
+    from apm_cli.models.validation import detect_package_type
+
+    bundle = tmp_path / "marked"
+    bundle.mkdir()
+    deployed = ".github/instructions/source-only.instructions.md"
+    (bundle / deployed).parent.mkdir(parents=True)
+    (bundle / deployed).write_text("must remain inert\n")
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="example/package", resolved_commit="abc123", deployed_files=[deployed]
+        )
+    )
+    metadata = load_yaml_str(lock.to_yaml())
+    metadata["pack"] = {"format": "apm", "source": True}
+    dump_yaml(metadata, bundle / lock_name)
+    if other_lock:
+        other_name = "apm.lock" if lock_name == "apm.lock.yaml" else "apm.lock.yaml"
+        dump_yaml({"lockfile_version": "1"}, bundle / other_name)
+    (bundle / "plugin.json").write_text('{"name": "marked-plugin"}')
+    output = tmp_path / "consumer"
+    with pytest.raises(ValueError, match="cannot be deployed"):
+        if admission == "unpack":
+            unpack_bundle(bundle, output)
+        elif admission == "local":
+            detect_local_bundle(bundle)
+        else:
+            detect_package_type(bundle)
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("metadata", ["apm.yml", "apm.lock.yaml"])
@@ -387,6 +429,97 @@ def test_copy_race_fails_before_publishing(author: Path, monkeypatch) -> None:
     with pytest.raises(ValueError, match="copy failed integrity"):
         unpack_bundle(bundle, output, source=True)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reinventory_cannot_replace_envelope_hash_authority(
+    author: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    from apm_cli.agent_plugins.assets import AssetInventory
+    from apm_cli.agent_plugins.ir import AgentPluginAsset
+    from apm_cli.bundle import source_package
+
+    bundle = _pack(author).bundle_path
+    original_inventory = source_package._source_inventory
+
+    def mutate_then_inventory(
+        root: Path,
+    ) -> tuple[APMPackage, AssetInventory, tuple[AgentPluginAsset, ...]]:
+        (root / "contracts/phase-0.contract.md").write_bytes(
+            b"CHANGED AFTER ENVELOPE VERIFICATION\n"
+        )
+        return original_inventory(root)
+
+    monkeypatch.setattr(source_package, "_source_inventory", mutate_then_inventory)
+    output = author.parent / "restored"
+    with pytest.raises(ValueError, match="inventory does not match"):
+        unpack_bundle(bundle, output, source=True, dry_run=dry_run)
+    assert not output.exists()
+    assert list(output.parent.glob(".apm-restore-*")) == []
+
+
+@pytest.mark.parametrize("operation", ["pack", "restore"])
+def test_directory_publication_preserves_racing_empty_destination(
+    author: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    from apm_cli.bundle import source_package
+
+    bundle = _pack(author).bundle_path if operation == "restore" else None
+    output = (
+        author.parent / "restored"
+        if operation == "restore"
+        else author.parent / "dist/software-factory-1.0.0"
+    )
+    original_publish = source_package.publish_directory_noreplace
+    occupied_inodes = []
+
+    def occupy_then_publish(source: Path, destination: Path) -> None:
+        assert destination == output
+        destination.mkdir()
+        occupied_inodes.append(destination.stat().st_ino)
+        original_publish(source, destination)
+
+    monkeypatch.setattr(source_package, "publish_directory_noreplace", occupy_then_publish)
+    with pytest.raises(FileExistsError):
+        if operation == "restore":
+            assert bundle is not None
+            unpack_bundle(bundle, output, source=True)
+        else:
+            _pack(author)
+    assert occupied_inodes == [output.stat().st_ino]
+    assert list(output.iterdir()) == []
+    assert list(output.parent.glob(".apm-*")) == []
+
+
+@pytest.mark.parametrize("archive_format", ["zip", "tar.gz"])
+@pytest.mark.parametrize("occupied_kind", ["file", "directory"])
+def test_archive_publication_preserves_racing_destination(
+    author: Path, monkeypatch: pytest.MonkeyPatch, archive_format: str, occupied_kind: str
+) -> None:
+    from apm_cli.bundle import source_package
+
+    output = author.parent / "dist" / f"software-factory-1.0.0.{archive_format}"
+    original_link = os.link
+    occupied_inodes = []
+
+    def occupy_then_link(source: Path, destination: Path) -> None:
+        assert destination == output
+        if occupied_kind == "directory":
+            destination.mkdir()
+        else:
+            destination.write_bytes(b"consumer-owned")
+        occupied_inodes.append(destination.stat().st_ino)
+        original_link(source, destination)
+
+    monkeypatch.setattr(source_package.os, "link", occupy_then_link)
+    with pytest.raises(FileExistsError):
+        _pack(author, archive=True, archive_format=archive_format)
+    assert occupied_inodes == [output.stat().st_ino]
+    if occupied_kind == "directory":
+        assert list(output.iterdir()) == []
+    else:
+        assert output.read_bytes() == b"consumer-owned"
+    assert list(output.parent.glob(".apm-source-*")) == []
 
 
 @pytest.mark.parametrize("archive_format", ["zip", "tar.gz"])

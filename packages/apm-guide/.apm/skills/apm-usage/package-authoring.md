@@ -100,6 +100,9 @@ apm unpack --source build/software-factory-1.0.0.zip -o acquired
 preserved exactly. The envelope's `pack.bundle_files` hashes the `package/`
 payload; restoration removes that prefix only. Missing/corrupt/extra content
 fails closed; neither `--force` nor `--skip-verify` bypasses verification.
+Final staged bytes must match the original envelope hashes. Directory publication
+requires native atomic no-replace support and fails closed if unavailable;
+destinations created during staging are not replaced.
 No scripts, checks, hooks, primitives, dependencies, or marketplace outputs are
 activated. Directory and tar.gz forms also work; `--dry-run` is read-only.
 There is no new remote acquisition or transitive resource flattening.

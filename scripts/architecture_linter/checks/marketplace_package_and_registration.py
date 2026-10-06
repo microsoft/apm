@@ -431,6 +431,7 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
 _RID_RESOURCES = "marketplace-integrations-source-resources"
 _RESOURCE_OWNER = "src/apm_cli/models/package_resources.py"
 _SOURCE_OWNER = "src/apm_cli/bundle/source_package.py"
+_ATOMIC_OWNER = "src/apm_cli/utils/atomic_io.py"
 
 
 def _check_source_resources(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -439,6 +440,7 @@ def _check_source_resources(provider: FactsProvider) -> tuple[Violation, ...]:
     findings: list[Violation] = []
     for owner, definitions in (
         (_RESOURCE_OWNER, ("parse_resource_roots", "collect_package_resources")),
+        (_ATOMIC_OWNER, ("publish_directory_noreplace",)),
         (
             _SOURCE_OWNER,
             ("require_resource_pack_mode", "reject_source_deployment", "restore_source_package"),
@@ -465,6 +467,10 @@ def _check_source_resources(provider: FactsProvider) -> tuple[Violation, ...]:
         _SOURCE_OWNER: (
             "collect_package_resources(",
             "verify_bundle_integrity(root, metadata)",
+            'destination, {"pack": {"bundle_files": expected_hashes}}',
+            "for name in (LOCKFILE_NAME, LEGACY_LOCKFILE_NAME):",
+            "publish_directory_noreplace(staged, destination)",
+            "publish_directory_noreplace(staged, output)",
             "inventory.open_verified_asset(asset)",
             "enrich_lockfile_for_pack(",
         ),
@@ -500,6 +506,17 @@ def _check_source_resources(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_RESOURCES,
+            (_SOURCE_OWNER,),
+            re.compile(r"\.rename\(|os\.replace\("),
+            "Source-directory publication must use the atomic no-replace owner",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_RESOURCES,
             (_SOURCE_OWNER, _RESOURCE_OWNER),
             re.compile(r"subprocess|from .*install\.|from .*integration\.|from .*compilation\."),
             "Source-package operations must not activate or integrate content",
@@ -513,7 +530,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id=_RID_RESOURCES,
         group=GROUP,
-        guard_ids=(_RID_RESOURCES,),
+        guard_ids=(_RID_RESOURCES, "marketplace-integrations-exclusive-directory-publication"),
         description="Source-resource selection and non-activation stay on canonical owners.",
         check=_check_source_resources,
     ),

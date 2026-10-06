@@ -117,6 +117,8 @@ author files, including the original lockfile; restoration removes only this
 envelope prefix. Hashes detect corruption, not publisher authenticity: obtain
 the archive and any external checksum from a trusted source. Missing, changed,
 extra, ambiguous, or unsupported-version metadata fails before restoration.
+Final staged bytes are checked against the original envelope hashes before
+publication, not against hashes recomputed from potentially changed input.
 Metadata documents are limited to 4 MiB each; the shared asset inventory allows
 at most 10,000 budgeted entries and 512 MiB in aggregate.
 Portable paths are limited to 4,096 UTF-8 bytes and 128 segments.
@@ -129,10 +131,14 @@ Directory output and `--archive-format tar.gz` are also supported. `--dry-run`
 performs the same admission and integrity checks without writing. `--force` and
 `--skip-verify` cannot bypass source verification, and occupied outputs are
 never replaced.
+Directory publication requires native atomic no-replace support; unavailable
+platform or filesystem capabilities fail closed. A destination created while
+staging is also left untouched.
 
 This route packages only the author's declared resources, not dependency
 resources or installed primitives. It adds no remote acquisition operation.
 `apm install` and ordinary `apm unpack` reject marked source envelopes.
+Renaming the marker lockfile to legacy `apm.lock` does not enable deployment.
 Ordinary pack and plugin formats reject manifests declaring resources rather
 than silently dropping them; `includes` remains primitive selection.
 This extension is not normative OpenAPM: omit `$schema` to select the working

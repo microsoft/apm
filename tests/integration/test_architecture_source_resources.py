@@ -21,6 +21,26 @@ RULE = "marketplace-integrations-source-resources"
         ("models/format_detection.py", "reject_source_deployment(package_path)", "pass"),
         ("bundle/source_package.py", "verify_bundle_integrity(root, metadata)", "[]"),
         (
+            "bundle/source_package.py",
+            '{"pack": {"bundle_files": expected_hashes}}',
+            '{"pack": {"bundle_files": {}}}',
+        ),
+        (
+            "bundle/source_package.py",
+            "(LOCKFILE_NAME, LEGACY_LOCKFILE_NAME)",
+            "(LOCKFILE_NAME,)",
+        ),
+        (
+            "bundle/source_package.py",
+            "publish_directory_noreplace(staged, destination)",
+            "staged.rename(destination)",
+        ),
+        (
+            "bundle/source_package.py",
+            "publish_directory_noreplace(staged, output)",
+            "staged.rename(output)",
+        ),
+        (
             "models/package_resources.py",
             "from pathlib import Path",
             "from pathlib import Path\nimport subprocess",
