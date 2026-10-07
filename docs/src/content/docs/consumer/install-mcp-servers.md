@@ -241,7 +241,7 @@ user-scope MCP config (for example, Copilot CLI to
 `$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
 `~/.copilot/mcp-config.json`; Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
-non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
+non-whitespace absolute path (both for installation and stale server cleanup). Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or
 `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`,
