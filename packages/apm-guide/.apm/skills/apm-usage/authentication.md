@@ -4,6 +4,39 @@
 
 CLI bootstrap/update metadata recovery is separate from package authentication. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and bounded anonymous retry, and [mirror migration](https://microsoft.github.io/apm/getting-started/installation/#enterprise-bootstrap-mirror-mode) for final-endpoint configuration.
 
+## GitHub MCP authentication
+
+MCP authentication is separate from repository authentication below. For a
+recognized GitHub MCP server, the first nonempty variable wins:
+`GITHUB_COPILOT_PAT`, `GITHUB_TOKEN`, `GITHUB_APM_PAT`, then
+`GITHUB_PERSONAL_ACCESS_TOKEN`. No per-org or credential-helper fallback runs.
+Runtime-capable targets write the selected variable's native reference;
+literal-only targets retain their existing token behavior.
+
+A nonempty string manifest `Authorization` value wins, regardless of header-name
+casing. Registry headers alone do not disable automatic authentication.
+Reinstalling the same declaration does not automatically repair existing
+credentials. Follow [Repairing existing credentials](https://microsoft.github.io/apm/consumer/install-mcp-servers/#repairing-existing-credentials)
+to preserve custom fields, use environment references and rotate exposed
+credentials.
+See [GitHub MCP token injection](https://microsoft.github.io/apm/consumer/install-mcp-servers/#token-injection-github-mcp-server).
+
+## Getting a token
+
+```bash
+# Check for, and set up, a working credential for a host
+apm auth github.com
+
+# Also validate the credential against the host's REST API
+apm auth gitlab.com --check
+
+# Export the resolved token into the current shell
+eval "$(apm auth github.com --export)"
+```
+
+`apm auth` does not register a marketplace or install anything; it only
+resolves or helps you create a token for `HOST`.
+
 ## Token precedence chain
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.

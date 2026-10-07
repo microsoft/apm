@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
+from ..utils.diagnostics import printable_ascii_text
 from .content_scanner import ScanFinding
 
 if TYPE_CHECKING:
     from ..core.deployment_ledger import DeploymentOwnerViolation
+    from .file_scanner import CoverageEntry
 
 
 def relative_path_for_report(file_path: str) -> str:
@@ -22,6 +26,24 @@ def relative_path_for_report(file_path: str) -> str:
         except ValueError:
             return p.name
     return file_path.replace("\\", "/")
+
+
+def finding_location(finding: ScanFinding) -> str:
+    """Distinguish physical source positions from decoded structured prompt offsets."""
+    offset = f"{finding.line}:{finding.column}"
+    return f"{finding.pointer} (decoded {offset})" if finding.pointer else offset
+
+
+def _markdown_cell(value: str) -> str:
+    """Render untrusted labels as printable, literal Markdown table content."""
+    return re.sub(r"([\\`*_{}\[\]<>()|#!&])", r"\\\1", printable_ascii_text(value))
+
+
+def _markdown_code(value: str) -> str:
+    """Keep filename code spans literal even when the filename contains backticks."""
+    value = printable_ascii_text(value).replace("|", "\\|")
+    delimiter = "`" * (1 + max((len(run) for run in re.findall(r"`+", value)), default=0))
+    return f"{delimiter} {value} {delimiter}" if "`" in value else f"{delimiter}{value}{delimiter}"
 
 
 # SARIF schema version
@@ -84,6 +106,7 @@ def findings_to_json(
     files_scanned: int,
     exit_code: int,
     owner_violations: tuple[DeploymentOwnerViolation, ...] = (),
+    coverage: tuple[CoverageEntry, ...] = (),
 ) -> dict:
     """Convert scan findings to APM's JSON report format."""
     all_findings = [f for ff in findings_by_file.values() for f in ff]
@@ -98,27 +121,68 @@ def findings_to_json(
         "info": sum(1 for f in all_findings if f.severity == "info"),
     }
 
-    items = []
-    for finding in all_findings:
-        items.append(
-            {
-                "severity": finding.severity,
-                "file": relative_path_for_report(finding.file),
-                "line": finding.line,
-                "column": finding.column,
-                "codepoint": finding.codepoint,
-                "category": finding.category,
-                "description": finding.description,
-            }
-        )
+    items = [finding_to_json(finding) for finding in all_findings]
     items.extend(_owner_json(violation) for violation in owner_violations)
 
-    return {
+    report = {
         "version": "1",
         "passed": exit_code == 0,
         "exit_code": exit_code,
         "summary": summary,
         "findings": items,
+    }
+    if coverage:
+        report["coverage"] = {
+            "complete": not any(entry.status == "incomplete" for entry in coverage),
+            "primitives": [asdict(entry) for entry in coverage],
+        }
+    return report
+
+
+def finding_to_json(finding: ScanFinding) -> dict[str, Any]:
+    """Serialize one finding without conflating decoded and physical coordinates."""
+    return {
+        "severity": finding.severity,
+        "file": relative_path_for_report(finding.file),
+        **(
+            {
+                "coordinate_space": "decoded-prompt",
+                "decoded_line": finding.line,
+                "decoded_column": finding.column,
+            }
+            if finding.pointer
+            else {"line": finding.line, "column": finding.column}
+        ),
+        "codepoint": finding.codepoint,
+        "category": finding.category,
+        "description": finding.description,
+        **({"pointer": finding.pointer} if finding.pointer else {}),
+    }
+
+
+def finding_to_sarif(finding: ScanFinding) -> dict[str, Any]:
+    """Use the actual prompt artifact and never invent physical native offsets."""
+    return {
+        "ruleId": _rule_id(finding.category),
+        "level": _SEVERITY_MAP.get(finding.severity, "note"),
+        "message": {"text": f"{finding.description} ({finding.codepoint})"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": relative_path_for_report(finding.file)},
+                    **(
+                        {"region": {"startLine": finding.line, "startColumn": finding.column}}
+                        if not finding.pointer
+                        else {}
+                    ),
+                }
+            }
+        ],
+        "properties": {
+            "codepoint": finding.codepoint,
+            "category": finding.category,
+            **({"pointer": finding.pointer} if finding.pointer else {}),
+        },
     }
 
 
@@ -126,6 +190,7 @@ def findings_to_sarif(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
     owner_violations: tuple[DeploymentOwnerViolation, ...] = (),
+    coverage: tuple[CoverageEntry, ...] = (),
 ) -> dict:
     """Convert scan findings to SARIF 2.1.0 format.
 
@@ -160,31 +225,7 @@ def findings_to_sarif(
         }
 
     # Build results
-    results = []
-    for finding in all_findings:
-        result: dict[str, Any] = {
-            "ruleId": _rule_id(finding.category),
-            "level": _SEVERITY_MAP.get(finding.severity, "note"),
-            "message": {"text": f"{finding.description} ({finding.codepoint})"},
-            "locations": [
-                {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                            "uri": relative_path_for_report(finding.file),
-                        },
-                        "region": {
-                            "startLine": finding.line,
-                            "startColumn": finding.column,
-                        },
-                    }
-                }
-            ],
-            "properties": {
-                "codepoint": finding.codepoint,
-                "category": finding.category,
-            },
-        }
-        results.append(result)
+    results = [finding_to_sarif(finding) for finding in all_findings]
     for violation in owner_violations:
         locator = violation.locator
         results.append(
@@ -219,6 +260,30 @@ def findings_to_sarif(
             }
         )
 
+    coverage_errors = [entry for entry in coverage if entry.status == "incomplete"]
+    if coverage_errors:
+        seen_rules["apm/audit/incomplete-coverage"] = {
+            "id": "apm/audit/incomplete-coverage",
+            "shortDescription": {"text": "Incomplete primitive prompt coverage"},
+        }
+        for entry in coverage_errors:
+            results.append(
+                {
+                    "ruleId": "apm/audit/incomplete-coverage",
+                    "level": "error",
+                    "message": {
+                        "text": f"{entry.diagnostic}; review format or file access and rerun audit."
+                    },
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": relative_path_for_report(entry.file)},
+                            }
+                        }
+                    ],
+                    "properties": {"pointer": entry.pointer},
+                }
+            )
     return {
         "$schema": _SARIF_SCHEMA,
         "version": _SARIF_VERSION,
@@ -234,9 +299,14 @@ def findings_to_sarif(
                 "results": results,
                 "invocations": [
                     {
-                        "executionSuccessful": True,
+                        "executionSuccessful": not coverage_errors,
                         "properties": {
                             "filesScanned": files_scanned,
+                            **(
+                                {"primitiveCoverage": [asdict(entry) for entry in coverage]}
+                                if coverage
+                                else {}
+                            ),
                         },
                     }
                 ],
@@ -249,20 +319,21 @@ def write_report(report: dict, output_path: Path) -> None:
     """Write a report dict (JSON or SARIF) to a file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False) + "\n",
+        json.dumps(report, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
 
 
 def serialize_report(report: dict) -> str:
     """Serialize a report dict to a JSON string (for stdout)."""
-    return json.dumps(report, indent=2, ensure_ascii=False)
+    return json.dumps(report, indent=2, ensure_ascii=True)
 
 
 def findings_to_markdown(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
     owner_violations: tuple[DeploymentOwnerViolation, ...] = (),
+    coverage: tuple[CoverageEntry, ...] = (),
 ) -> str:
     """Convert scan findings to GitHub-Flavored Markdown.
 
@@ -270,11 +341,33 @@ def findings_to_markdown(
     """
     all_findings = [f for ff in findings_by_file.values() for f in ff]
 
-    if not all_findings and not owner_violations:
+    coverage_lines: list[str] = []
+    if coverage:
+        coverage_lines = [
+            "",
+            "### Primitive coverage",
+            "",
+            "Discovery does not establish ownership or verify a hash.",
+            "",
+            "| File / field | Tracking | Prompt check | Detail |",
+            "|--------------|----------|--------------|--------|",
+        ]
+        for entry in coverage:
+            values = (
+                entry.file + entry.pointer,
+                "recorded-file" if entry.tracked else "untracked",
+                entry.status,
+                entry.diagnostic or "",
+            )
+            coverage_lines.append(
+                "| " + " | ".join(_markdown_cell(value) for value in values) + " |"
+            )
+    incomplete = any(entry.status == "incomplete" for entry in coverage)
+    if not all_findings and not owner_violations and not incomplete:
         return (
             f"## APM Audit Report\n\n"
             f"**Clean** - no security findings across {files_scanned} files.\n"
-        )
+        ) + "\n".join(coverage_lines)
 
     critical = sum(1 for f in all_findings if f.severity == "critical") + len(owner_violations)
     warning = sum(1 for f in all_findings if f.severity == "warning")
@@ -307,6 +400,13 @@ def findings_to_markdown(
         "",
         summary,
     ]
+    if incomplete:
+        lines.extend(
+            [
+                "",
+                "**Incomplete coverage** - review the reported format or file access and rerun audit.",
+            ]
+        )
     if owner_violations:
         lines.extend(
             [
@@ -336,18 +436,21 @@ def findings_to_markdown(
         )
         for finding in sorted_findings:
             severity = finding.severity.upper()
-            escaped_desc = finding.description.replace("|", "\\|")
+            escaped_desc = _markdown_cell(finding.description)
             lines.append(
-                f"| {severity} | `{relative_path_for_report(finding.file)}` | "
-                f"{finding.line}:{finding.column} | `{finding.codepoint}` | "
+                f"| {severity} | {_markdown_code(relative_path_for_report(finding.file))} | "
+                f"{_markdown_cell(finding_location(finding))} | `{finding.codepoint}` | "
                 f"{escaped_desc} |"
             )
         lines.extend(
             [
                 "",
-                "Run `apm audit --strip` to remove flagged characters.",
+                "Review structured prompt fields manually; use `apm audit --strip` only for eligible regular documents."
+                if any(not entry.strippable and entry.status == "checked" for entry in coverage)
+                else "Run `apm audit --strip` to remove flagged characters.",
             ]
         )
+    lines.extend(coverage_lines)
     lines.append("")
 
     return "\n".join(lines)

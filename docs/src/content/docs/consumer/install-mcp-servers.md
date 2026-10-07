@@ -131,6 +131,17 @@ never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
 
+Claude Code is the one target whose entries are merged key by key rather
+than replaced, so keys APM does not manage (a hand-authored OAuth block, for
+example) survive a reinstall. The keys describing a transport are not among
+them: an entry is rewritten to carry only the transport its declaration names,
+so redeclaring a server from `http` to `stdio` drops the previous `url` and
+`headers` instead of leaving both transports on one entry. This cleanup also
+repairs older mixed entries, but only when APM writes that server. An unchanged
+self-defined declaration with matching lock state can skip the write; repeating
+that install does not automatically repair a mixed entry. Rewriting an unchanged,
+valid entry preserves its field order.
+
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
@@ -154,6 +165,13 @@ unresolved required entries fail closed.
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
+
+For OpenCode, set the top-level `enabled` field on an MCP dependency to pass a
+value unchanged into that server's `opencode.json` entry. If omitted, APM keeps
+the existing `true` default. APM does not validate or coerce explicit values;
+OpenCode interprets them. Other targets ignore this OpenCode-only field.
+Reinstall applies changes to `enabled`, including its JSON type; removing
+the field restores `true`. OpenCode remains project-only.
 
 ## How `targets:` gates which configs get written
 
@@ -276,13 +294,19 @@ etc.) are rejected with exit code 2.
 
 ## Token injection: GitHub MCP server
 
-APM does not template arbitrary environment variables into MCP config
-files (your harness does that at runtime). It does inject one
-specific credential automatically:
+For Cursor, env-var references are written using Cursor's native
+`${env:NAME}` syntax, so referenced secret values are resolved by Cursor
+when it starts the MCP server and are not written into the project-local
+`.cursor/mcp.json`. Explicit static values in `mcp.env` remain static and
+are written as authored; keep secrets out of those values.
 
-When the Copilot CLI adapter writes a remote MCP config and the
-server is identified as the GitHub MCP server, APM resolves a token
-and adds an `Authorization: Bearer <token>` header.
+APM translates supported environment-variable references using each
+target's native syntax. It also injects one specific GitHub credential
+automatically when the server is recognized as the GitHub MCP server:
+
+When an adapter using the shared GitHub auth path writes a remote MCP
+config and the server is identified as the GitHub MCP server, APM selects
+a token source and applies the target's auth behavior described below.
 
 The server is identified as "GitHub" only when it satisfies **both** of
 these narrow checks
@@ -299,15 +323,35 @@ This is a parsed-host allowlist on hostname, not a substring check.
 A URL like `https://github.com.evil.example` does not match because
 the parsed hostname is `github.com.evil.example`, not `github.com`.
 
-The token is resolved from this chain (first non-empty wins):
+The token is selected from this chain (first non-empty wins):
 
 1. `GITHUB_COPILOT_PAT`
 2. `GITHUB_TOKEN`
 3. `GITHUB_APM_PAT`
 4. `GITHUB_PERSONAL_ACCESS_TOKEN` (Copilot CLI compat)
 
-If none are set, no header is injected and the server is written
-without auth -- you will get an unauthenticated request at runtime.
+If the manifest declares a nonempty string `Authorization` value (case-insensitive header name),
+that explicit value takes precedence over automatic GitHub authentication.
+Registry-provided headers alone do not disable automatic authentication.
+For Copilot and Cursor, this also applies to dictionary-shaped headers
+accepted from a custom registry: manifest overrides retain their priority.
+This compatibility does not certify the custom response against an upstream
+registry schema.
+Environment references are translated according to the target's interpolation
+rules. This MCP selection is environment-only: it does not use repository
+authentication's per-org variables or credential helpers.
+
+For a target that supports runtime environment substitution, automatic
+GitHub auth writes a target-native reference to the selected variable
+(for example, `${GITHUB_TOKEN}` or `${env:GITHUB_TOKEN}`); the resolved
+credential value is not written into the generated config. Literal-only
+targets keep their existing automatic-token behavior. If none of the
+listed variables is set, no automatic header is added.
+
+Reinstalling the same declaration does not automatically repair credentials
+already written to runtime config. Follow
+[Repairing existing credentials](#repairing-existing-credentials) to preserve
+custom settings and rotate exposed credentials.
 For other authenticated remote servers, set headers explicitly with
 `--header Authorization="Bearer ${MY_TOKEN}"`.
 
@@ -323,6 +367,24 @@ Re-run `apm install --mcp NAME ...` against an existing entry:
 | Existing `NAME`, different config, CI | Refuses with exit 2. Re-run with `--force`. |
 
 Use `--dry-run` to preview the manifest change without writing.
+
+### Repairing existing credentials
+
+First replace any authored static credential in `apm.yml` with an environment
+reference. Otherwise regenerating the entry writes that static value again.
+Follow the target's [interpolation rules](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+when making variables available and editing its config.
+
+For Cursor, replace only the affected header or `env` values in
+`.cursor/mcp.json` with `${env:NAME}` references. Preserve the authorization
+scheme, for example `Bearer ${env:GITHUB_TOKEN}`, and make the variable
+available to Cursor. Keep all other fields and servers, and inspect the diff.
+An ordinary reinstall of the same declaration does not perform this repair.
+
+If you instead regenerate an entry, save its custom fields first, remove only
+that server entry, reinstall, and restore those fields without restoring the
+old credential. Do not delete the whole config file. Rotate any credential
+exposed in a committed or shared config; editing the file does not revoke it.
 
 ## Sibling commands
 

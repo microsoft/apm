@@ -168,7 +168,7 @@ def _make_refs_for_test_generator() -> list[RemoteRef]:
     ]
 
 
-def _ref_side_effect(owner_repo: str) -> list[RemoteRef]:
+def _ref_side_effect(owner_repo: str, remote_url: str | None = None) -> list[RemoteRef]:
     """Return appropriate refs based on owner/repo slug."""
     mapping = {
         "acme/code-reviewer": _make_refs_for_code_reviewer(),
@@ -211,7 +211,7 @@ def mock_ref_resolver_golden():
     """Patch RefResolver so code-reviewer resolves to v2.1.0 and
     test-generator to v1.0.3 -- the exact SHAs in the golden fixture."""
 
-    def _golden_side_effect(owner_repo: str) -> list[RemoteRef]:
+    def _golden_side_effect(owner_repo: str, remote_url: str | None = None) -> list[RemoteRef]:
         if owner_repo == "acme/code-reviewer":
             return [
                 RemoteRef(

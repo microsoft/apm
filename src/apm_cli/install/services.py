@@ -350,6 +350,8 @@ def integrate_package_primitives(  # noqa: PLR0913
         hooks_approved=_hooks_approved,
         canvas_approved=_canvas_approved or is_first_party,
         skip_bin=_skip_bin,
+        diagnostics=diagnostics,
+        package_name=package_name,
         plugin_bin_deployable=_plugin_bin_deployable(
             package_info,
             targets,
@@ -396,14 +398,7 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
-    warn_unsupported_primitives(
-        package_info,
-        package_name,
-        targets,
-        ctx,
-        diagnostics,
-        logger,
-    )
+    warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
 
     def _log_integration(msg):
         if logger:
@@ -420,6 +415,16 @@ def integrate_package_primitives(  # noqa: PLR0913
         "canvas": integrators.canvas,
         "skills": integrators.skill,
     }
+
+    preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
+    if _hooks_approved and callable(preflight_hooks):
+        preflight_hooks(
+            package_info,
+            project_root,
+            source_plan,
+            user_scope=scope is InstallScope.USER,
+            retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
+        )
 
     # Validate every converted instruction target before any primitive kind can
     # write. A rejected instruction must not leave prompts, agents, commands,
@@ -498,6 +503,11 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
+                # Mirror retiring_targets (#3129) so a fallback preflight isn't
+                # misflagged as an import-coexistence conflict on retirement.
+                _call_kwargs["retiring_targets"] = frozenset(
+                    t.name for t in target_selection.excluded_targets
+                )
             # Canvas integration: always pass is_first_party.  Approval
             # is enforced by the gate above (canvas already skipped if
             # not approved and not is_first_party), so here we always

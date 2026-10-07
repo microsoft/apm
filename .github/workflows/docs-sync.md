@@ -44,6 +44,8 @@ description: Per-PR documentation impact panel; posts a single advisory recommen
 #    ref (default main) and accepts any PR number. Useful if a
 #    maintainer needs to re-run without touching labels.
 on:
+  # Keep activation read-only while retaining compiler revocation checks.
+  report-blocked-version: false
   pull_request_target:
     types: [labeled]
   workflow_dispatch:
@@ -86,6 +88,12 @@ imports:
       target: copilot
       packages:
         - microsoft/apm#main
+
+steps:
+  - name: Setup Ruby
+    uses: ruby/setup-ruby@v1.323.0
+    with:
+      ruby-version: 'ruby-3.3'
 
 tools:
   github:

@@ -431,28 +431,24 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, [])
 
-    def test_exception_returns_empty_with_warning(self):
-        """When APMPackage.from_apm_yml raises, returns [] with a warning."""
+    def test_invalid_metadata_does_not_become_empty_discovery(self):
+        """A parser failure must reach the consumer's error handling."""
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         with patch(
             "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
             side_effect=RuntimeError("bad"),
         ):
-            import io
-            from contextlib import redirect_stdout
-
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                result = get_dependency_declaration_order(self.tmp)
-            self.assertEqual(result, [])
-            self.assertIn("Warning", buf.getvalue())
+            with self.assertRaisesRegex(RuntimeError, "bad"):
+                get_dependency_declaration_order(self.tmp)
 
     def test_dependency_with_alias_uses_alias(self):
         """Dependency with alias uses the alias as the installed path."""
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/my-alias"
         mock_dep.alias = "my-alias"
         mock_dep.is_virtual = False
         mock_package = MagicMock()
@@ -475,6 +471,8 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/owner/repo/subdir"
         mock_dep.alias = None
         mock_dep.is_virtual = True
         mock_dep.repo_url = "owner/repo"
@@ -501,6 +499,8 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/owner/my-coll"
         mock_dep.alias = None
         mock_dep.is_virtual = True
         mock_dep.repo_url = "owner/repo"
@@ -528,6 +528,10 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = (
+            Path(self.tmp) / "apm_modules/org/project/repo/subdir"
+        )
         mock_dep.alias = None
         mock_dep.is_virtual = True
         mock_dep.repo_url = "org/project/repo"
@@ -554,6 +558,8 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/org/project/my-coll"
         mock_dep.alias = None
         mock_dep.is_virtual = True
         mock_dep.repo_url = "org/project/repo"
@@ -581,6 +587,8 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/subdir"
         mock_dep.alias = None
         mock_dep.is_virtual = True
         mock_dep.repo_url = "singlepart"
@@ -607,6 +615,8 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/my-coll"
         mock_dep.alias = None
         mock_dep.is_virtual = True
         mock_dep.repo_url = "singlepart"
@@ -653,6 +663,8 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
             "    source: registry\n"
         )
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/owner/direct-dep"
         mock_dep.alias = None
         mock_dep.is_virtual = False
         mock_dep.repo_url = "owner/direct-dep"
@@ -752,6 +764,8 @@ class TestLocalBundleStagedSlugs(unittest.TestCase):
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
         mock_dep = MagicMock()
+        mock_dep.is_marketplace = False
+        mock_dep.get_install_path.return_value = Path(self.tmp) / "apm_modules/shared-name"
         mock_dep.alias = "shared-name"
         mock_dep.is_virtual = False
         mock_package = MagicMock()

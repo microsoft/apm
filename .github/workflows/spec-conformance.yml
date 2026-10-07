@@ -37,7 +37,7 @@ jobs:
           # resolve the merge-base against origin/main. Without this the
           # gate's unresolvable-merge-base branch becomes reachable in CI.
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       - name: Orphan check (anchors == manifest == Appendix C == markers)
         run: uv run --frozen --extra dev python -m tests.spec_conformance.orphan_check

@@ -99,6 +99,14 @@ Per-primitive scan paths for `apm install`:
 | agent | `.apm/agents/` | Yes: `*.agent.md` at root |
 | skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
+Own-project and Git-backed package installs skip symlinked agent source
+files and directories, including `.apm/agents -> ../agents`.
+`apm install` warns with the skipped source path. Use real files and
+directories under `.apm/agents/` or real `*.agent.md` files at root, then
+rerun `apm install`. Local-path dependencies (`./...` or `../...`) still work:
+contained symlinks are validated and copied as real files into
+`apm_modules/` before agent discovery.
+
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
 `apm pack` and `apm install`.
@@ -173,6 +181,21 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+For Codex, APM wraps flat command entries in hook groups containing a
+nested `hooks` array in `.codex/hooks.json`.
+
+For Cursor, APM writes native v1 flat command or prompt handlers using only
+verified aliases. Unsupported fields, restrictions and overlapping Claude
+imports fail before writes; diagnostics name unsupported source-level,
+matcher-group and handler fields and distinguish whitespace in literal matcher
+alternatives. Choose one hook route per dependency:
+native `cursor`, or `claude` with Cursor's existing import. APM never changes
+import settings. Reinstall and target retirement preserve unrelated user hooks.
+See the
+[Cursor native hooks guide](../../../../../docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import)
+for supported mappings and limitations. Test execution in each harness;
+configuration compatibility does not guarantee equivalent behavior.
+
 <!-- Keep this table synchronized with docs/src/content/docs/producer/author-primitives/hooks-and-commands.md. -->
 
 ### Session lifecycle event aliases
@@ -183,7 +206,7 @@ hook action under `.kiro/hooks/`.
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
 | `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
-Event names absent from this table are preserved unchanged. Only an unmapped
+For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
 an install warning. All-lowercase names such as `stop` pass through silently;
 `stop` is not a native Copilot or Claude event and will not fire.
@@ -336,15 +359,21 @@ tags: [security, validation]
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
 (`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
-way to specify multiple patterns, as it is portably expanded into target-specific
-YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
-Claude, Cursor, Windsurf, Kiro, and Antigravity.
+way to specify multiple patterns, as it is portably expanded into
+target-specific YAML arrays/lists (under `paths:` / `globs:` /
+`fileMatchPattern:`) across Claude, Windsurf, Kiro, and Antigravity.
+For Cursor, APM emits one comma-joined scalar rather than a YAML list
+(`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
+characters are escaped. Descriptions keep printable non-ASCII text readable
+and are quoted when needed to preserve their value.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed
 placement and target-native installation. Use a sequence when its source
 readability matters. To match a literal comma in a filename, escape it as
-`\,`.
+`\,`. APM preserves pattern boundaries when re-joining, including the
+escape in Cursor's scalar. Cursor's documentation does not specify
+literal-comma matching; verify such patterns in your Cursor version.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
@@ -456,6 +485,34 @@ instructions: |
   - Performance
 ---
 ```
+
+#### Codex target: native model settings
+
+Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
+`description`, and the Markdown body as `developer_instructions`.
+String `model` and `model_reasoning_effort` frontmatter values are
+preserved as top-level TOML keys:
+
+```markdown
+---
+name: reviewer
+description: Reviews code
+model: gpt-5.6-sol
+model_reasoning_effort: high
+---
+Review the requested change.
+```
+
+Absent settings stay absent. APM does not translate model names, choose
+defaults, or validate model availability or supported effort values.
+Non-string values are dropped with a warning. Other frontmatter,
+including other native Codex settings and a `codex:` block, is dropped
+with a warning; APM provides no arbitrary or namespaced passthrough.
+Remove unnecessary fields or do not rely on their settings in the
+generated agent. `tools` restrictions still cannot be preserved: the
+agent may inherit all project/session MCP servers. Remove `tools` only
+if unrestricted access is intentional; otherwise do not use the generated
+agent with Codex.
 
 #### OpenCode target: frontmatter constraints
 
@@ -805,10 +862,12 @@ Schema rules:
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
   `https://host.tld/path/to/repo[.git]` (full URL with two or more path
-  segments). Non-default hosts
-  resolve auth via the standard APM token chain
-  (`docs/getting-started/authentication.md`); the default-host token is
-  never forwarded.
+  segments). APM never embeds tokens in the source URL. During online
+  validation (`apm marketplace check`), source resolution follows the
+  standard auth rules in `docs/getting-started/authentication.md`:
+  default-host shorthand uses the configured default host, and explicit
+  hosts resolve through that host class's auth path. Offline checks
+  resolve no credentials.
 - `versioning.strategy` is optional. When present, it is consumed by
   the `apm pack --check-versions` release gate to enforce alignment
   between each local package's `version:` field and the marketplace

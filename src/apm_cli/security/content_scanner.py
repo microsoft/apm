@@ -27,6 +27,7 @@ class ScanFinding:
     severity: str  # "critical", "warning", "info"
     category: str  # e.g. "tag-character", "bidi-override", "zero-width"
     description: str
+    pointer: str | None = None
 
 
 # Each entry: (range_start, range_end, severity, category, description)

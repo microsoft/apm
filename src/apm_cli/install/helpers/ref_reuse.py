@@ -12,7 +12,7 @@ once per repo instead of once per dep.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -423,13 +423,19 @@ def annotate_update_plan_refs(
     downloader: GitHubPackageDownloader,
     *,
     update_refs: bool,
+    failed_keys: Collection[str] = (),
 ) -> list[DependencyReference]:
-    """Resolve Git refs needed by the update plan through the downloader owner."""
+    """Resolve Git refs needed by the update plan through the downloader owner.
+
+    Dependencies listed in ``failed_keys`` already failed resolution and
+    are skipped so their original diagnostic is not masked by a re-query.
+    """
     if not update_refs:
         return deps_to_install
     for dep_ref in deps_to_install:
         if (
-            getattr(dep_ref, "resolved_reference", None) is not None
+            dep_ref.get_unique_key() in failed_keys
+            or getattr(dep_ref, "resolved_reference", None) is not None
             or dep_ref.is_local
             or getattr(dep_ref, "source", None) == "registry"
             or getattr(dep_ref, "artifactory_prefix", None)

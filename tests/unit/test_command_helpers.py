@@ -18,6 +18,7 @@ from apm_cli.commands._helpers import (
     _check_and_notify_updates,
     _check_orphaned_packages,
     _expand_with_ancestors,
+    _find_orphaned_packages,
     _get_default_script,
     _list_available_scripts,
     _load_apm_config,
@@ -496,17 +497,8 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         assert "org/my-package" not in orphaned
         assert "org/old-package" in orphaned
 
-    def test_real_orphan_at_owner_repo_with_sibling_subdir_dep(self, tmp_path, monkeypatch):
-        """Regression: a real installed ``owner/repo`` package on disk MUST
-        still be flagged as orphaned even when a sibling subdirectory dep
-        ``owner/repo/.apm/skills/foo`` is declared in apm.yml.
-
-        Previously, ancestor expansion blindly added ``owner/repo`` to the
-        expected set whenever a subdir dep referenced it, silently
-        suppressing detection of a genuinely orphaned standalone package
-        that shared the same ``owner/repo`` filesystem root. ``apm prune``
-        is a safety command -- it must NEVER silently miss a real orphan.
-        """
+    def test_recognized_root_with_needed_subdir_is_not_orphaned(self, tmp_path, monkeypatch):
+        """Warnings must not recommend deleting a root containing a needed child."""
         monkeypatch.chdir(tmp_path)
 
         # Declare ONLY the subdirectory dep. The standalone owner/repo
@@ -523,9 +515,7 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         )
 
         apm_modules = tmp_path / "apm_modules"
-        # Real installed standalone package at owner/repo (with apm.yml AND
-        # .apm marker). This is a genuine orphan -- nothing in apm.yml
-        # declares the whole repo as a dep.
+        # The undeclared containing package must remain for its needed child.
         pkg_dir = apm_modules / "owner" / "repo"
         pkg_dir.mkdir(parents=True)
         (pkg_dir / "apm.yml").write_text("name: repo\nversion: 1.0.0", encoding="utf-8")
@@ -536,11 +526,25 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
 
         orphaned = _check_orphaned_packages()
-        assert "owner/repo" in orphaned, (
-            "Real orphan at owner/repo must be flagged even when a "
-            "sibling subdirectory dep shares the same root; got: "
-            f"{orphaned}"
-        )
+        assert orphaned == []
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("separator", ["/", "\\"])
+def test_orphan_selector_uses_segment_bounded_paths(separator: str) -> None:
+    """Normalize Windows tokens without confusing adjacent roots with descendants."""
+    expected = {
+        "alias/skills/child".replace("/", separator),
+        "owner/bundle".replace("/", separator),
+    }
+    installed = ["alias", "alias-other", "owner/bundle/skills/embedded", "owner/bundle-other"]
+    assert _find_orphaned_packages(installed, expected) == ["alias-other", "owner/bundle-other"]
+
+
+@pytest.mark.parametrize("invalid", ["owner/../repo", "owner/./repo"])
+def test_orphan_selector_invalid_tokens_do_not_protect_ancestors(invalid: str) -> None:
+    """Malformed tokens cannot widen retention beyond an exact match."""
+    assert _find_orphaned_packages(["owner", "owner/repo"], {invalid}) == ["owner", "owner/repo"]
 
 
 # ---------------------------------------------------------------------------

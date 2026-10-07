@@ -11,6 +11,8 @@ import pytest
 
 from apm_cli.cache.git_cache import CachePruneError, GitCache
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 
 @pytest.mark.parametrize("ref", ["main", "release/v1", "v1.0"])
@@ -55,6 +57,39 @@ def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Pat
     with patch.object(L2BareRevParse, "_rev_parse", return_value="a" * 40) as bare:
         assert L2BareRevParse(cache).try_resolve(dependency, "main") is None
     bare.assert_not_called()
+
+
+@pytest.mark.parametrize("receipt_state", ["valid", "absent", "corrupt"])
+def test_receipt_precedence_with_actual_stale_bare_reference(
+    tmp_path: Path, receipt_state: str
+) -> None:
+    """An actual stale Git branch cannot replace a present or corrupt receipt."""
+    from apm_cli.deps.tiered_ref_resolver import L2BareRevParse
+    from apm_cli.models.apm_package import DependencyReference
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "fixture", base_env=dict(os.environ))
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    repository = repositories.create("receipt-history")
+    payload = repository.worktree / "payload.txt"
+    payload.write_text("old\n", encoding="ascii")
+    old_commit = repositories.commit(repository, message="Old observation")
+    cache = GitCache(tmp_path / "cache")
+    dependency = DependencyReference.parse("owner/repo#main")
+    url = dependency.to_github_url()
+    bare = cache._db_root / cache_shard_key(url)
+    shutil.copytree(repository.origin, bare)
+    payload.write_text("current\n", encoding="ascii")
+    current_commit = repositories.commit(repository, message="Current observation")
+    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    if receipt_state != "absent":
+        cache.remember_resolved_ref(url, "main", current_commit.sha)
+        if receipt_state == "corrupt":
+            cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
+    expected = {"valid": current_commit.sha, "absent": old_commit.sha, "corrupt": None}
+    assert L2BareRevParse(cache).try_resolve(dependency, "main") == expected[receipt_state]
+    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
 
 
 @pytest.mark.windows_compat

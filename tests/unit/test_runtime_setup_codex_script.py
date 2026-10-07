@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from tests.utils.runtime_setup_codex import (
+    SETUP_SCRIPT,
     TEST_VERSION,
     codex_platform_name,
     run_setup,
@@ -236,3 +238,52 @@ def test_setup_codex_rejects_malformed_digest_format(tmp_path: Path, codex_platf
     assert result.returncode != 0
     assert "did not include a valid SHA-256 digest" in output
     assert not (tmp_path / "home" / ".apm" / "runtimes" / "codex").exists()
+
+
+@pytest.mark.parametrize("mode", ["success", "failed", "missing"])
+def test_runtime_download_without_curl(tmp_path: Path, mode: str) -> None:
+    """Keep wget success, failure cleanup, and missing-tool errors explicit."""
+    destination = tmp_path / "archive"
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            """
+source "$1"
+command() {
+    if [[ "$2" == curl || "$MODE" == missing ]]; then
+        return 1
+    fi
+    builtin command "$@"
+}
+wget() {
+    printf 'fixture archive' > "$4"
+    [[ "$MODE" == success ]]
+}
+download_file "https://example.invalid/archive" "$2" "fixture archive"
+echo "download accepted"
+""",
+            "test-runtime-download",
+            str(SETUP_SCRIPT.with_name("setup-common.sh")),
+            str(destination),
+        ],
+        env={**os.environ, "MODE": mode},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    if mode == "success":
+        assert result.returncode == 0, output
+        assert destination.read_bytes() == b"fixture archive"
+        assert "download accepted" in output
+    else:
+        assert result.returncode != 0
+        assert not destination.exists()
+        assert "download accepted" not in output
+        if mode == "failed":
+            assert "[x] Failed to download fixture archive." in output
+            assert "Check your connection and retry." in output
+        else:
+            assert "Neither curl nor wget is available. Please install one of them." in output

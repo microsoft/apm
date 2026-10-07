@@ -9,12 +9,16 @@ import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..deps.lockfile import resolve_lockfile_path_for_read
+from ..primitives.discovery import get_dependency_declaration_order
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
-from ..utils.paths import resolve_base_and_source_dirs
+from ..utils.path_security import ensure_path_within, validate_path_segments
+from ..utils.paths import portable_link_relpath, resolve_base_and_source_dirs
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
 from .footer import build_generation_footer
+from .link_resolver import UnifiedLinkResolver
 from .template_builder import build_attributed_instructions
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
@@ -80,6 +84,7 @@ class ClaudeFormatter:
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
+        self.link_resolver = UnifiedLinkResolver(self.source_dir)
 
     def format_distributed(
         self,
@@ -104,6 +109,15 @@ class ClaudeFormatter:
             config = config or {}
             source_attribution = config.get("source_attribution", True)
             skip_instructions = config.get("skip_instructions", False)
+
+            # Reset any previous state so contexts from earlier compile passes
+            # can't leak into later calls and rewrite links incorrectly.
+            self.link_resolver.context_registry.clear()
+
+            # Register context/memory fragments so embedded links to them
+            # (e.g. ".context.md") resolve to their actual on-disk location,
+            # mirroring the AGENTS.md distributed compiler.
+            self.link_resolver.register_contexts(primitives)
 
             # Generate Claude placements from the placement map
             placements = self._generate_placements(
@@ -230,35 +244,55 @@ class ClaudeFormatter:
         return placements
 
     def _collect_dependencies(self) -> builtins.list[str]:
-        """Collect @import paths for apm_modules dependencies.
+        """Import installed package-root memory, independent of path depth."""
+        installed_root = self.source_dir
+        modules_root = installed_root / "apm_modules"
+        if not modules_root.exists() and not modules_root.is_symlink():
+            installed_root = self.base_dir
+            modules_root = installed_root / "apm_modules"
+        ensure_path_within(modules_root, installed_root)
+        if not modules_root.is_dir():
+            return []
 
-        Returns:
-            List[str]: List of @import paths for dependencies.
-        """
-        dependencies = []
-        apm_modules_dir = self.base_dir / "apm_modules"
-
-        if not apm_modules_dir.is_dir():
-            return dependencies
-
-        # Scan for CLAUDE.md files in apm_modules
-        # Structure: apm_modules/{owner}/{package}/CLAUDE.md
-        for owner_dir in apm_modules_dir.iterdir():
-            if not owner_dir.is_dir() or owner_dir.name.startswith("."):
-                continue
-
-            for package_dir in owner_dir.iterdir():
-                if not package_dir.is_dir() or package_dir.name.startswith("."):
+        metadata_paths = (
+            self.source_dir / "apm.yml",
+            resolve_lockfile_path_for_read(installed_root, read_only=True),
+        )
+        if any(path.exists() or path.is_symlink() for path in metadata_paths):
+            relative_roots = get_dependency_declaration_order(
+                str(self.source_dir), installation_root=installed_root
+            )
+            package_roots = []
+            for relative in relative_roots:
+                validate_path_segments(relative, context="installed dependency path")
+                package_roots.append(modules_root / relative)
+        else:
+            # Preserve legacy, metadata-free owner/package trees without guessing
+            # that arbitrary deeper documentation directories are packages.
+            package_roots = []
+            for owner_dir in modules_root.iterdir():
+                if owner_dir.name.startswith("."):
                     continue
+                ensure_path_within(owner_dir, modules_root)
+                if owner_dir.is_dir():
+                    package_roots.extend(
+                        path for path in owner_dir.iterdir() if not path.name.startswith(".")
+                    )
 
-                claude_md_path = package_dir / "CLAUDE.md"
-                if not claude_md_path.is_file():
-                    continue
-
-                # Build the @import path
-                import_path = f"@apm_modules/{owner_dir.name}/{package_dir.name}/CLAUDE.md"
-                dependencies.append(import_path)
-
+        dependencies: builtins.set[str] = set()
+        for package_root in package_roots:
+            ensure_path_within(package_root, modules_root)
+            claude_path = package_root / "CLAUDE.md"
+            ensure_path_within(claude_path, package_root)
+            if claude_path.is_file():
+                relative = portable_link_relpath(claude_path, self.base_dir)
+                if relative is None:
+                    raise ValueError(
+                        f"Cannot link dependency CLAUDE.md from {modules_root} to "
+                        f"{self.base_dir} across filesystem drives. "
+                        "Compile to an output directory on the selected module store's drive."
+                    )
+                dependencies.add(f"@{relative}")
         return sorted(dependencies)
 
     def _generate_claude_content(
@@ -340,7 +374,21 @@ class ClaudeFormatter:
         if source_attribution:
             sections.extend(build_generation_footer())
 
-        return "\n".join(sections)
+        content = "\n".join(sections)
+
+        # Resolve context/memory links (".context.md", ".memory.md") to their
+        # actual on-disk location, mirroring the AGENTS.md distributed
+        # compiler (distributed_compiler.py). Without this, embedded
+        # relative links are emitted verbatim -- correct only when CLAUDE.md
+        # happens to live in the same directory as their source file, and
+        # broken for any dependency-sourced or non-root placement.
+        content = self.link_resolver.resolve_links_for_compilation(
+            content=content,
+            source_file=placement.claude_path.parent,
+            compiled_output=placement.claude_path,
+        )
+
+        return content
 
     def _compile_stats(
         self, placements: builtins.list[ClaudePlacement], primitives: PrimitiveCollection

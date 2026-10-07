@@ -41,6 +41,19 @@ USER_SCOPE_DISCLOSURE = {
         "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
     ),
 }
+DEPLOYED_PROMPT_AUDIT = (
+    "APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020), "
+    "subject to the pending Section 9.3 amendment process, not adopted-spec approval. "
+    "APM's own Consumer deployment implementation supplies the definitions: "
+    "project and user scopes follow TargetProfile deployment roots and PrimitiveMapping "
+    "formats, including shared native hook settings via native_hook_config. "
+    "The target-by-target locations, supported formats, prompt applicability and exclusions "
+    "are published in docs/src/content/docs/reference/cli/audit.md. "
+    "ContentScanner checks hidden or suspicious Unicode code points that may conceal "
+    "instructions, not semantic prompt-injection detection; a clean result is not a "
+    "guarantee that prompt text is safe. App SQLite state and unrelated transcripts are "
+    "excluded. Detection does not grant execution, ownership or remediation authority."
+)
 
 
 def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
@@ -155,6 +168,7 @@ def build_json() -> dict:
         "total_requirements": len(entries),
         "summary_by_class": summary,
         "consumer_user_scope": USER_SCOPE_DISCLOSURE,
+        "optional_features": {"deployed-prompt-audit": DEPLOYED_PROMPT_AUDIT},
         "requirements": entries,
     }
 
@@ -203,6 +217,8 @@ def build_md(doc: dict) -> str:
         "Local paths, marketplace identities, and every other host remain "
         "case-sensitive. Policy matching and repository identity use the same "
         "rule (req-rs-016 clause 3; req-pl-018).\n\n"
+        "## Optional deployed-prompt audit\n\n"
+        f"{doc['optional_features']['deployed-prompt-audit']}\n\n"
     )
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"

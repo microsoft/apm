@@ -352,13 +352,19 @@ def _target_command_hook(command: str) -> dict:
 
     ``SessionStart`` and a trivial command survive event normalization across
     every merge harness, so the command string is a reliable per-file marker
-    regardless of a target's casing/matcher conventions.
+    regardless of a target's casing/matcher conventions. The matcher is the
+    wildcard ``"*"`` rather than an arbitrary word: ``SessionStart`` is not a
+    tool-use event, so Cursor's native contract only has a verified
+    translation for wildcard/empty matchers on non-tool lifecycle events
+    (see ``_cursor_matcher``); a non-wildcard placeholder would be rejected
+    by Cursor's strict preflight while being semantically meaningless for
+    every other harness too, so the wildcard is the correct value here, not
+    a weakening of this test's actual regression (per-target file routing
+    isolation, asserted below).
     """
     return {
         "hooks": {
-            "SessionStart": [
-                {"matcher": "startup", "hooks": [{"type": "command", "command": command}]}
-            ],
+            "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": command}]}],
         }
     }
 
@@ -400,7 +406,20 @@ def _write_divergent_pair(package_path: Path, first: str, second: str) -> dict[s
 
 @pytest.mark.parametrize(
     ("first", "second"),
-    [(a, b) for i, a in enumerate(_MERGE_HARNESSES) for b in _MERGE_HARNESSES[i + 1 :]],
+    [
+        (a, b)
+        for i, a in enumerate(_MERGE_HARNESSES)
+        for b in _MERGE_HARNESSES[i + 1 :]
+        # claude+cursor is intentionally excluded from this "any two harnesses
+        # diverge independently" matrix: Cursor's native/Claude-import
+        # coexistence preflight correctly refuses two per-target files that
+        # both declare the same event for this specific pair (same-event
+        # double-activation risk), unlike every other harness pair. That
+        # refusal is the PR's own feature and is covered directly by
+        # test_cursor_hook_native_contract.py's overlap tests, not by this
+        # generic routing-isolation matrix.
+        if {a, b} != {"claude", "cursor"}
+    ],
 )
 def test_divergent_hook_files_route_per_target_under_multi_dep_targets(
     tmp_path: Path, first: str, second: str

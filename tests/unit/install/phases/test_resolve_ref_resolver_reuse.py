@@ -826,3 +826,24 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer(monkeypatch)
         "Authorization:",
         "Bearer",
     ]
+
+
+def test_update_plan_annotation_skips_deps_that_already_failed_resolution() -> None:
+    from apm_cli.install.helpers.ref_reuse import annotate_update_plan_refs
+
+    failed = DependencyReference.parse("owner/failed#^9.0.0")
+    healthy = DependencyReference.parse("owner/healthy#main")
+    downloader = MagicMock()
+    downloader.resolve_git_reference.return_value = "resolved"
+
+    result = annotate_update_plan_refs(
+        [failed, healthy],
+        downloader,
+        update_refs=True,
+        failed_keys={failed.get_unique_key()},
+    )
+
+    assert result == [failed, healthy]
+    downloader.resolve_git_reference.assert_called_once_with(healthy)
+    assert getattr(failed, "resolved_reference", None) is None
+    assert healthy.resolved_reference == "resolved"

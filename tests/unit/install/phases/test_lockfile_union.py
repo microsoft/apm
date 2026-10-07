@@ -223,6 +223,31 @@ class TestCurrentInstallGovernance:
         assert ".agents/skills/" in file_prefixes
         assert ".agents/" not in file_prefixes
 
+    def test_bounded_governance_partitions_dedicated_roots(self):
+        from apm_cli.install.manifest_reconcile import install_governance
+
+        file_prefixes, _ = install_governance([_known("claude"), _known("codex")], bounded=True)
+
+        assert ".claude/skills/" in file_prefixes
+        assert ".claude/hooks/" in file_prefixes
+        assert ".codex/hooks.json" in file_prefixes
+        assert ".agents/skills/" in file_prefixes
+        assert ".claude/" not in file_prefixes
+        assert ".codex/" not in file_prefixes
+
+    def test_bounded_governance_keeps_generated_files_under_dedicated_roots(self):
+        from apm_cli.install.manifest_reconcile import install_governance
+
+        target = SimpleNamespace(
+            name="stub",
+            root_dir=".stub",
+            primitives={"skills": SimpleNamespace(subdir="skills", extension="/SKILL.md")},
+            generated_files=("index.json",),
+        )
+        file_prefixes, _ = install_governance([target], bounded=True)
+
+        assert file_prefixes == {".stub/skills/", ".stub/index.json"}
+
     def test_shared_root_filename_governance_requires_exact_match(self):
         from apm_cli.install.manifest_reconcile import union_preserving
 

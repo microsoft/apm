@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -243,7 +244,19 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
+        # A qualified lookup never searches the implicit Windows cwd. Python
+        # before 3.12 needs explicit PATHEXT candidates for qualified commands.
         candidate = shutil.which(str(directory / name))
+        if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
+            extensions = os.environ.get("PATHEXT") or (
+                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+            )
+            for extension in extensions.split(os.pathsep):
+                if not extension.startswith(".") or any(c in extension for c in "/\\:"):
+                    continue
+                candidate = shutil.which(str(directory / f"{name}{extension}"))
+                if candidate is not None:
+                    break
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
@@ -972,6 +985,15 @@ def _merge_parent_git_config_snapshot(
     )
 
 
+def _symlink_entry_wins(current: GitConfigEntry | None, candidate: GitConfigEntry) -> bool:
+    """Decide whether ``candidate`` should replace the retained core.symlinks entry.
+
+    Command-scope intent always wins over any other scope; otherwise the
+    last entry seen wins, matching Git's own scope-precedence ordering.
+    """
+    return current is None or current.scope != "command" or candidate.scope == "command"
+
+
 def _materialize_git_config_snapshot(
     env: dict[str, str],
     snapshot: _GitConfigSnapshot,
@@ -992,8 +1014,15 @@ def _materialize_git_config_snapshot(
         else None
     )
     retained: list[tuple[str, str]] = []
+    symlinks: GitConfigEntry | None = None
     for entry in snapshot.entries:
         normalized = entry.key.lower()
+        if normalized == "core.symlinks":
+            # Parent command entries can precede child file entries after
+            # merging. Keep command intent above Git init's capability result.
+            if _symlink_entry_wins(symlinks, entry):
+                symlinks = entry
+            continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
         if normalized == "include.path" or (
@@ -1016,6 +1045,9 @@ def _materialize_git_config_snapshot(
             if auth_fence.suppress_helpers and _is_credential_helper_key(normalized):
                 continue
         retained.append((entry.key, entry.value))
+
+    if symlinks is not None:
+        retained.append(("core.symlinks", symlinks.value))
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:

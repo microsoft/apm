@@ -17,12 +17,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from git import RemoteProgress
 
+from apm_cli.cache.git_cache import GitCache
 from apm_cli.deps.github_downloader import (
     GitHubPackageDownloader,
     GitProgressReporter,
     _close_repo,
     _debug,
 )
+from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_ref_resolver
 from apm_cli.models.apm_package import (
     DependencyReference,
     GitReferenceType,
@@ -114,6 +116,144 @@ def downloader() -> GitHubPackageDownloader:
     auth._token_manager = MagicMock()
     auth._token_manager.get_token_for_purpose.return_value = None
     return GitHubPackageDownloader(auth_resolver=auth)
+
+
+@pytest.mark.parametrize("anonymous_first", [True, False])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "locked-match",
+        "locked-sibling",
+        "locked-stale-provider",
+        "locked-unrelated-stale-provider",
+        "current-api",
+        "current-legacy",
+        "sha-passthrough",
+        "failed-resolution",
+        "mismatched-repository",
+        "mismatched-ref",
+        "mismatched-sha",
+        "failed-checkout",
+    ],
+)
+def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    downloader: GitHubPackageDownloader,
+    anonymous_first: bool,
+    case: str,
+) -> None:
+    """A real resolver and receipt store agree across both checkout auth routes."""
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    old_sha, prior_sha, current_sha = "a" * 40, "b" * 40, "c" * 40
+    dependency = _make_dep()
+    stale_provider = case in {"locked-stale-provider", "locked-unrelated-stale-provider"}
+    if stale_provider:
+        monkeypatch.setenv("GITHUB_HOST", "code.example.com")
+        dependency = _make_dep(host="code.example.com")
+    cache = GitCache(tmp_path / "cache")
+    original_url = dependency.to_github_url()
+    cache.remember_resolved_ref(original_url, "main", prior_sha)
+    downloader.auth_resolver.uses_public_github_anonymous_first.return_value = anonymous_first
+    downloader.auth_resolver.try_with_fallback.side_effect = lambda host, operation, **kwargs: (
+        operation(None, {})
+    )
+    downloader._cache_git_env = MagicMock(return_value={})
+    downloader._refs = MagicMock()
+    downloader._refs.resolve_commit_sha_for_ref.return_value = (
+        None if case in {"current-legacy", "failed-resolution"} else current_sha
+    )
+    downloader._refs.resolve.return_value = _make_resolved(commit=current_sha)
+    if case == "failed-resolution":
+        downloader._refs.resolve.side_effect = RuntimeError("fixture remote unavailable")
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=cache,
+        freshness_policy=(
+            RefFreshnessPolicy.LOCKED_OR_CURRENT
+            if case.startswith("locked-")
+            else RefFreshnessPolicy.CURRENT_REMOTE
+        ),
+    )
+    assert resolver is not None
+    downloader._tiered_resolver = resolver
+    if stale_provider:
+        seeded = DependencyReference(
+            repo_url=(
+                dependency.repo_url if case == "locked-stale-provider" else "removed/package"
+            ),
+            host="code.example.com",
+            host_type="gitlab",
+            reference="main",
+        )
+        assert resolver.seed(seeded, "main", old_sha) is False
+        assert resolver._lock_seeds == {}
+    elif case.startswith("locked-"):
+        seeded = (
+            dependency
+            if case == "locked-match"
+            else _make_dep(virtual_path="skills/sibling", is_virtual=True)
+        )
+        assert resolver.seed(seeded, "main", old_sha)
+    if case == "sha-passthrough":
+        dependency = _make_dep(reference=old_sha)
+    if case == "failed-resolution":
+        with pytest.raises(RuntimeError, match="fixture remote unavailable"):
+            resolver.resolve(dependency)
+        assert resolver.remotely_resolved(dependency, current_sha) is False
+        assert cache.read_resolved_ref(original_url, "main") == (True, prior_sha)
+        return
+    resolved = downloader.resolve_git_reference(dependency)
+    expected_sha = old_sha if case in {"locked-match", "sha-passthrough"} else current_sha
+    assert resolved.resolved_commit == expected_sha
+    if case == "locked-match":
+        downloader._refs.resolve_commit_sha_for_ref.assert_not_called()
+        downloader._refs.resolve.assert_not_called()
+    if case == "locked-sibling":
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        assert resolver.resolve(seeded).resolved_commit == old_sha
+        assert resolver.remotely_resolved(seeded, old_sha) is False
+    if stale_provider:
+        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.resolve.assert_not_called()
+    if case == "mismatched-repository":
+        dependency = _make_dep(repo_url="other/repository")
+    elif case == "mismatched-ref":
+        dependency = _make_dep(reference="other")
+    elif case == "mismatched-sha":
+        expected_sha = old_sha
+    url = dependency.to_github_url()
+    before_receipt = cache.read_resolved_ref(url, dependency.reference)
+    authorized = case in {"current-api", "current-legacy", "failed-checkout"}
+    assert resolver.remotely_resolved(dependency, expected_sha) is authorized
+
+    def checkout(*args: object, **kwargs: object) -> Path:
+        assert cache.read_resolved_ref(url, dependency.reference) == before_receipt
+        if case == "failed-checkout":
+            raise RuntimeError("fixture checkout failed")
+        return tmp_path
+
+    with patch.object(cache, "get_checkout", side_effect=checkout) as get_checkout:
+        if case == "failed-checkout":
+            with pytest.raises(RuntimeError, match="fixture checkout failed"):
+                downloader._persistent_cache_checkout(
+                    cache, dependency, url, expected_sha, locked_sha=expected_sha
+                )
+        else:
+            assert (
+                downloader._persistent_cache_checkout(
+                    cache, dependency, url, expected_sha, locked_sha=expected_sha
+                )
+                == tmp_path
+            )
+        get_checkout.assert_called_once()
+    assert cache.read_resolved_ref(url, dependency.reference) == (
+        (True, current_sha) if case in {"current-api", "current-legacy"} else before_receipt
+    )
+    assert cache.read_resolved_ref(original_url, "main") == (
+        True,
+        current_sha if case in {"current-api", "current-legacy"} else prior_sha,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
+import tomllib
+
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import (
@@ -12,6 +15,7 @@ from apm_cli.utils.diagnostics import (
     CATEGORY_WARNING,
     DiagnosticCollector,
 )
+from apm_cli.utils.yaml_io import yaml_to_str
 
 
 class TestAgentIntegrator:
@@ -1093,6 +1097,26 @@ class TestOpenCodeAgentIntegration:
         assert result["errors"] == 0
 
 
+def _verbatim_copy_agent_targets() -> list[str]:
+    """Non-codex, non-kiro targets whose agent deploy is a verbatim copy.
+
+    Derived from ``KNOWN_TARGETS`` (instead of a hardcoded literal list) so a
+    future verbatim-copy target is automatically covered by the Codex-leakage
+    regression test below. ``codex_agent`` is this suite's own transform;
+    ``kiro_agent`` renders/filters the markdown body and is not byte-identical
+    to the source, so both are excluded on purpose, as are targets with no
+    ``agents`` primitive mapping at all (they never reach the copy path).
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return sorted(
+        name
+        for name, profile in KNOWN_TARGETS.items()
+        if (mapping := profile.primitives.get("agents")) is not None
+        and mapping.format_id not in {"codex_agent", "kiro_agent"}
+    )
+
+
 class TestCodexAgentIntegration:
     """Tests for Codex TOML agent transformation."""
 
@@ -1166,6 +1190,330 @@ class TestCodexAgentIntegration:
         source = Path("/fake/test.agent.md")
         filename = integrator.get_target_filename_for_target(source, "pkg", codex)
         assert filename == "test.toml"
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {},
+            {"model": "gpt-5.6-sol"},
+            {"model_reasoning_effort": "high"},
+            {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+            {"model": 'custom"model\\variant', "model_reasoning_effort": "future-effort"},
+            pytest.param(
+                {
+                    "model": 'gpt-4"\nmalicious = "injected',
+                    "model_reasoning_effort": "high\nnew_key = true",
+                },
+                id="embedded-newlines-are-values",
+            ),
+        ],
+    )
+    def test_codex_native_settings_reach_generated_agent(self, settings: dict[str, str]) -> None:
+        """Preserve supplied strings at TOML top level without inventing defaults."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        frontmatter = {"name": "reviewer", "description": "Review code", **settings}
+        (agents_dir / "reviewer.agent.md").write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+        assert result.target_paths == [target]
+        assert tomllib.loads(target.read_text(encoding="utf-8")) == {
+            "name": "reviewer",
+            "description": "Review code",
+            "developer_instructions": "Review changes.",
+            **settings,
+        }
+        assert diagnostics.by_category() == {}
+
+    @pytest.mark.parametrize("field", ["model", "model_reasoning_effort"])
+    @pytest.mark.parametrize("value", [None, False, 7, ["high"], {"value": "high"}])
+    def test_codex_non_string_settings_are_diagnosed(self, field: str, value: object) -> None:
+        """Do not stringify invalid YAML shapes or silently drop null settings."""
+        source = self.root / "invalid-setting.agent.md"
+        source.write_text(
+            f"---\n{yaml_to_str({'name': 'reviewer', field: value})}---\nReview changes.\n",
+            encoding="utf-8",
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        assert tomllib.loads(target.read_text(encoding="utf-8")) == {
+            "name": "reviewer",
+            "description": "",
+            "developer_instructions": "Review changes.",
+        }
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        assert field in warnings[0].message
+        assert "must be a string" in warnings[0].message
+        assert "was dropped" in warnings[0].message
+        assert "source agent" in warnings[0].detail
+        assert "apm install" in warnings[0].detail
+
+    def test_codex_unsupported_metadata_is_diagnosed_without_passthrough(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Name dropped fields without claiming Codex lacks their native semantics."""
+        source = self.root / "metadata.agent.md"
+        unsupported = {
+            "model_reasoning_summary": "detailed",
+            "model_verbosity": "low",
+            "personality": "friendly",
+            "service_tier": "fast",
+            # req: a malformed/control-character key must land inside the
+            # shown range (not only the elided tail) so sanitization of a
+            # *displayed* key name is actually exercised by this test.
+            "bad\x1b[31m\nkey": "do-not-print-values",
+            "codex": {"model": "do-not-passthrough"},
+            "developer_instructions": "Do not replace the Markdown body.",
+            "color": "cyan",
+            7: "non-string-key",
+        }
+        frontmatter = {
+            "name": "reviewer",
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "high",
+            "tools": [],
+            **unsupported,
+        }
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="evil\x1b[31mpkg\nnext"
+        )
+
+        assert tomllib.loads(target.read_text(encoding="utf-8")) == {
+            "name": "reviewer",
+            "description": "",
+            "developer_instructions": "Review changes.",
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "high",
+        }
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 2
+        metadata_warning = next(
+            warning for warning in warnings if "not translated by APM" in warning.message
+        )
+        # req: the dropped-fields list is bounded (AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN)
+        # so hostile/oversized frontmatter cannot blow up a single diagnostic line. 9
+        # unsupported keys are supplied; only the first 5 are named, the rest are summarized.
+        shown, elided = list(unsupported)[:5], list(unsupported)[5:]
+        assert len(elided) == 4
+        for field in shown:
+            if isinstance(field, str) and field.isidentifier():
+                assert f"'{field}'" in metadata_warning.message
+        # req: the malformed/control-character key is in the shown range (see
+        # reordering above); its sanitized form must be named, never the raw
+        # control bytes.
+        assert "'bad?[31m?key'" in metadata_warning.message
+        for field in elided:
+            assert f"'{field}'" not in metadata_warning.message
+        assert f"(and {len(elided)} more)" in metadata_warning.message
+        assert "were dropped" in metadata_warning.message
+        assert "otherwise do not rely on" in metadata_warning.detail
+        # req: an individually oversized key name is also bounded
+        # (AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN), independent of the
+        # fixed-count cap above, so a single hostile key cannot blow up the
+        # diagnostic line either.
+        assert len(metadata_warning.message) < 600
+        tools_warning = next(warning for warning in warnings if "field 'tools'" in warning.message)
+        assert "project/session MCP servers" in tools_warning.message
+
+        diagnostics.render_summary()
+        output = capsys.readouterr().out
+        assert "[!]" in output
+        assert "metadata.agent.md" in output
+        assert "do-not-print-values" not in output
+        assert "\x1b" not in output
+        assert "pkg\nnext" not in output
+        assert all(character in "\n\r\t" or 32 <= ord(character) <= 126 for character in output)
+
+    def test_codex_dropped_field_with_oversized_key_name_is_bounded(self) -> None:
+        """A single hostile/oversized key name must not blow up the diagnostic.
+
+        The fixed-count cap (_MAX_DROPPED_FIELDS_SHOWN) alone does not bound
+        an individual key's *length*; a frontmatter with as few as one
+        unsupported key but a very long name must still produce a bounded
+        message.
+        """
+        source = self.root / "oversized-key.agent.md"
+        oversized_key = "x" * 20_000
+        frontmatter = {"name": "reviewer", oversized_key: "value"}
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        message = warnings[0].message
+        # req: the displayed key itself is truncated, not merely the number
+        # of named keys; the raw 20000-char key must never appear whole.
+        assert oversized_key not in message
+        assert "...(truncated)" in message
+        assert len(message) < 300
+        assert "frontmatter field " in message
+        assert "was dropped" in message
+        assert "remove this field" in warnings[0].detail
+        assert "its setting" in warnings[0].detail
+
+    @pytest.mark.parametrize(
+        ("key_count", "expect_elision"),
+        [
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN,
+                False,
+                id="at-cap-no-elision",
+            ),
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN + 1,
+                True,
+                id="one-over-cap-elides-one",
+            ),
+        ],
+    )
+    def test_codex_dropped_fields_count_boundary(
+        self, key_count: int, expect_elision: bool
+    ) -> None:
+        """Exercise the exact off-by-one boundary of the count cap.
+
+        The pre-existing coverage only proves bounding works far above the
+        cap (9 keys vs a cap of 5); this proves the cap's own edge: exactly
+        `_MAX_DROPPED_FIELDS_SHOWN` keys must name all of them with no
+        "(and N more)" suffix, while one more key must add exactly that
+        suffix for exactly one elided key.
+        """
+        source = self.root / "boundary-count.agent.md"
+        unsupported = {f"field_{i}": "value" for i in range(key_count)}
+        frontmatter = {"name": "reviewer", **unsupported}
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        message = warnings[0].message
+        shown_keys = list(unsupported)[: AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN]
+        elided_keys = list(unsupported)[AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN :]
+        for key in shown_keys:
+            assert f"'{key}'" in message
+        if expect_elision:
+            assert "(and 1 more)" in message
+            for key in elided_keys:
+                assert f"'{key}'" not in message
+        else:
+            assert "(and" not in message
+            assert not elided_keys
+
+    @pytest.mark.parametrize(
+        ("key_len", "expect_truncation"),
+        [
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN,
+                False,
+                id="at-cap-no-truncation",
+            ),
+            pytest.param(
+                AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN + 1,
+                True,
+                id="one-over-cap-truncates",
+            ),
+        ],
+    )
+    def test_codex_dropped_field_key_length_boundary(
+        self, key_len: int, expect_truncation: bool
+    ) -> None:
+        """Exercise the exact off-by-one boundary of the per-key length cap.
+
+        The pre-existing coverage only proves truncation works far above
+        the cap (20000 chars vs a cap of 60); this proves the cap's own
+        edge: a key exactly `_MAX_DROPPED_FIELD_KEY_LEN` chars long must
+        display whole, while one char longer must be truncated.
+        """
+        source = self.root / "boundary-length.agent.md"
+        key = "k" * key_len
+        frontmatter = {"name": "reviewer", key: "value"}
+        source.write_text(
+            f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
+        )
+        target = self.root / "reviewer.toml"
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source, target, diagnostics=diagnostics, package_name="test-pkg"
+        )
+
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        message = warnings[0].message
+        if expect_truncation:
+            assert key not in message
+            assert "...(truncated)" in message
+        else:
+            assert f"'{key}'" in message
+            assert "...(truncated)" not in message
+
+    @pytest.mark.parametrize("target_name", _verbatim_copy_agent_targets())
+    def test_codex_metadata_change_preserves_other_targets(self, target_name: str) -> None:
+        """Codex filtering must not leak into verbatim target deployment."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.root / "package"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        content = (
+            "---\nname: reviewer\nmodel: native-model\nmodel_reasoning_effort: high\n"
+            "model_verbosity: low\n---\nReview changes.\n"
+        )
+        source = agents_dir / "reviewer.agent.md"
+        source.write_text(content, encoding="utf-8")
+        profile = KNOWN_TARGETS[target_name]
+        (self.root / profile.root_dir).mkdir(exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            profile,
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        assert result.target_paths[0].read_text(encoding="utf-8") == content
+        assert source.read_text(encoding="utf-8") == content
+        assert diagnostics.by_category() == {}
 
     def test_codex_agent_tools_scope_emits_lossy_compilation_warning(self, capsys):
         """Codex installs must not silently discard agent tool restrictions."""

@@ -39,6 +39,18 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
 
+## Git and GitHub CLI discovery
+
+APM resolves `git` and `gh` from explicit `PATH` directories outside the
+current repository or APM project. Project-local executables and symlinks
+resolving back into that project are excluded. On Windows, discovery also
+checks `PATHEXT` extensions such as `.EXE`, including on Python 3.10 and 3.11,
+without adding the current directory to the search.
+
+This check applies to APM's executable selection, not to searches performed
+internally by external tools. Keep project-controlled directories off your
+inherited `PATH`.
+
 ## HTTPS transport trust
 
 APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.
@@ -197,7 +209,13 @@ This prevents lockfile membership from shrinking silently. Shared merge-hook
 targets and sidecars remain exempt because APM merges into user-owned files
 rather than claiming them.
 
-A whole-project scan checks **every regular file under the deploy trees your targets govern** for hidden Unicode, not only files recorded in `apm.lock.yaml`. Hash verification and positional `PACKAGE` scans remain lockfile-scoped because they need recorded ownership. Source content under `.apm/` is not added by the deploy-tree walk; install-time scanning owns that surface, while any `.apm/` path already recorded in the lockfile remains covered.
+A whole-project scan discovers **recognized primitive filenames and patterns**
+from resolved target profiles, unioned with recorded paths in `apm.lock.yaml`.
+Both paths apply the same prompt/non-prompt distinction, including shared native
+settings. Hash verification and positional `PACKAGE` scans remain
+lockfile-scoped. Source content under `.apm/` is not added by discovery;
+install-time scanning owns that surface, while recorded prompt documents remain
+covered.
 
 CI and remediation are separate commands because `--ci` and `--strip` are mutually exclusive:
 
@@ -220,6 +238,17 @@ Both bare `apm audit` and `apm audit --ci` fail closed on stale canonical
 deployment owners; see
 [Baseline CI checks](../../reference/baseline-checks/#deployment-ledger-owners)
 for the boundary and remediation.
+
+Automatic audit separates discovery from prompt checks. It inventories
+recognized hook definitions, including untracked entries in shared native
+settings, but scans only documented prompt fields and prompt documents.
+Commands, executables and unrelated settings are not prompt content; hooks
+are never executed. Transcripts, history and caches are not walked.
+Unreadable or unsupported recognized content exits nonzero with incomplete
+coverage, not an unsafe-content verdict. File tracking does not establish
+entry ownership or a hash baseline. Shared/structured settings and external
+roots are not automatically rewritten by `--strip`; review them manually.
+See [Discovery and prompt coverage](../../reference/cli/audit/#discovery-and-prompt-coverage).
 
 :::tip[External scanners (Experimental)]
 `apm audit` can also ingest findings from **third-party SARIF scanners** (Semgrep, CodeQL, NVIDIA SkillSpector, etc.) so a single audit run reports both APM's native findings and external tool results. See [External scanners](../../integrations/external-scanners/) for setup.
@@ -565,8 +594,39 @@ For an org standardizing on APM:
 - Publish an `apm-policy.yml` from your `<org>/.github` repo with an allow list and an MCP transport restriction. See [Governance Guide](../governance-guide/).
 - Require signed commits on the source repos APM pulls from -- this is where the trust chain bottoms out.
 - Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
-- Forbid `allow_insecure: true` via the policy allow list, except where an air-gapped mirror demands it.
-- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- APM assumes env-var indirection (`GITHUB_TOKEN: ${GITHUB_TOKEN}`) but does not enforce it. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
+- Treat insecure transport as a separate CI control. `apm-policy.yml` has no
+  dedicated `allow_insecure` field: `dependencies.allow` and
+  `dependencies.deny` match scheme-blind, host-blind canonical package identities
+  (for example `owner/repo`, not `github.com/owner/repo`). Policy patterns cannot
+  restrict host identity and cannot distinguish `http://` from `https://` for the
+  same package path. Reject committed
+  `allow_insecure: true` entries and prohibit `--allow-insecure` and
+  `--allow-insecure-host` in standard CI; review both explicit gates for any
+  air-gapped exception. `registry_source.allow_non_registry` is a separate
+  source-routing control, not an insecure-transport setting.
+- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- Cursor preserves explicitly authored static values, while env-var references use Cursor's native runtime interpolation. APM does not detect whether a static value is sensitive. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
+
+A restrictive dependency policy is still valuable, but it is identity-based,
+not transport-aware:
+
+```yaml
+# apm-policy.yml
+name: contoso-security
+version: "1.0"
+enforcement: block
+
+dependencies:
+  allow:
+    - "contoso/approved-agent-config"
+    - "microsoft/*"
+```
+
+This example blocks every unlisted package identity regardless of transport; it
+does **not** enforce HTTPS for the two allowed patterns. See the
+[HTTP dependency two-gate model](#http-insecure-dependencies),
+[dependency pattern matching](../policy-reference/#pattern-matching), and the
+[`registry_source` policy](../../reference/policy-schema/#registry_source) for
+the three distinct controls.
 
 ## Frequently asked questions
 

@@ -94,10 +94,13 @@ class TestDirectDepFailLoud:
             """Simulate the integrate phase setting the failure flag."""
             ctx.direct_dep_failed = True
 
+        def _fake_targets_run(ctx: InstallContext) -> None:
+            ctx.integrators["skill"] = MagicMock()
+
         with (
             patch("apm_cli.install.phases.integrate.run", side_effect=_fake_integrate_run),
             patch("apm_cli.install.phases.resolve.run"),
-            patch("apm_cli.install.phases.targets.run"),
+            patch("apm_cli.install.phases.targets.run", side_effect=_fake_targets_run),
             patch("apm_cli.install.phases.download.run"),
             pytest.raises(DirectDependencyError),
         ):

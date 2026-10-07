@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 
 from ...core.token_manager import GitHubTokenManager
+from ...models.dependency.mcp import TrustedEnvLiteral
+from .base import _stringify_env_literal
 from .copilot import CopilotClientAdapter
 
 
@@ -29,11 +31,43 @@ class CursorClientAdapter(CopilotClientAdapter):
     target_name: str = "cursor"
     mcp_servers_key: str = "mcpServers"
 
-    # Cursor's mcp.json runtime-substitution support has not yet been
-    # individually audited (see #1152). Pin to the legacy install-time
-    # resolution behaviour so this adapter is unchanged by the Copilot
-    # security fix; revisit in a follow-up.
-    _supports_runtime_env_substitution: bool = False
+    # APM normalizes Cursor env, args, and headers to ${env:NAME}, not command/url.
+    # Keep manifest env references native in the project-local config, so
+    # those referenced values are not baked into the file. Explicit mcp.env
+    # literals remain literal below; shared GitHub token injection is separate.
+    _supports_runtime_env_substitution: bool = True
+
+    def _format_runtime_env_placeholder(self, name: str) -> str:
+        """Return Cursor's native env-var placeholder syntax."""
+        return "${env:" + name + "}"
+
+    def _resolve_environment_variables(
+        self,
+        env_vars: dict[str, object] | list[dict[str, object]],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Translate explicit env references while preserving authored literals.
+
+        APM's shared translate-mode dict resolver treats ordinary string
+        values as candidates for environment substitution. In Cursor's
+        project-local config, an explicit static value must keep its authored
+        value; only recognized references are rewritten for Cursor.
+        """
+        if not isinstance(env_vars, dict):
+            return super()._resolve_environment_variables(env_vars, env_overrides)
+
+        resolved: dict[str, str] = {}
+        self._last_env_placeholder_keys = set()
+        for name, value in env_vars.items():
+            if not name or value is None:
+                continue
+            if isinstance(value, TrustedEnvLiteral):
+                resolved[name] = value
+            elif isinstance(value, str):
+                resolved[name] = self._resolve_env_variable(name, value, env_overrides)
+            else:
+                resolved[name] = _stringify_env_literal(value)
+        return resolved
 
     # ------------------------------------------------------------------ #
     # Auth-header injection override (for testability)
@@ -42,14 +76,21 @@ class CursorClientAdapter(CopilotClientAdapter):
     def _apply_auth_and_headers(
         self, config, remote, server_info, env_overrides, runtime_label="Cursor"
     ):
-        """Inject GitHub token and registry-supplied headers into *config*.
+        """Merge registry headers without persisting a resolved GitHub token.
 
         Overrides the parent to supply ``GitHubTokenManager`` from *this*
         module's namespace, allowing tests to patch
-        ``apm_cli.adapters.client.cursor.GitHubTokenManager`` correctly.
+        ``apm_cli.adapters.client.cursor.GitHubTokenManager`` correctly. Cursor
+        reads project-local config, so GitHub credentials must be supplied as
+        runtime environment references rather than resolved during install.
         """
         self._apply_auth_and_headers_impl(
-            config, remote, server_info, env_overrides, runtime_label, GitHubTokenManager
+            config,
+            remote,
+            server_info,
+            env_overrides,
+            runtime_label,
+            GitHubTokenManager,
         )
 
     def get_config_path(self):

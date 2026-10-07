@@ -16,11 +16,16 @@ class MCPConflictDetector:
         """
         self.adapter = runtime_adapter
 
-    def check_server_exists(self, server_reference: str) -> bool:
+    def check_server_exists(
+        self, server_reference: str, server_info: dict[str, Any] | None = None
+    ) -> bool:
         """Check if a server already exists in the configuration.
 
         Args:
             server_reference: Server reference to check (e.g., 'github', 'io.github.github/github-mcp-server').
+            server_info: Registry entry already resolved by the caller. When
+                given, it is used instead of querying the adapter's registry,
+                which may differ from a per-dependency custom registry.
 
         Returns:
             True if server already exists, False otherwise.
@@ -29,8 +34,11 @@ class MCPConflictDetector:
 
         # Try to get server info from registry for UUID comparison
         try:
-            server_info = self.adapter.registry_client.find_server_by_reference(server_reference)
-            if server_info and "id" in server_info:
+            if server_info is None:
+                server_info = self.adapter.registry_client.find_server_by_reference(
+                    server_reference
+                )
+            if server_info and server_info.get("id"):
                 server_uuid = server_info["id"]
 
                 # Check if any existing server has the same UUID
@@ -40,6 +48,14 @@ class MCPConflictDetector:
                         and existing_config.get("id") == server_uuid
                     ):
                         return True
+            elif server_info:
+                # MCP Registry v0.1 entries carry no stable id; match by name
+                # without further registry lookups.
+                names = {server_reference}
+                if isinstance(server_info.get("x-github"), dict):
+                    names.add(server_info["x-github"].get("name"))
+                names.add(server_info.get("name"))
+                return any(name in existing_servers for name in names if isinstance(name, str))
         except Exception:
             # If registry lookup fails, fall back to canonical name comparison
             canonical_name = self.get_canonical_server_name(server_reference)

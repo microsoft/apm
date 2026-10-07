@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from ..core.auth import AuthResolver
     from ..core.command_logger import InstallLogger
     from ..core.target_detection import EffectiveTargetDecision
+    from .context import InstallContext
 
 
 # CRITICAL: Shadow Python builtins that share names with Click commands.
@@ -96,6 +97,18 @@ def _run_phase(name: str, phase, ctx):
         elapsed = time.perf_counter() - started
         with contextlib.suppress(Exception):
             logger.verbose_detail(f"Phase: {name} -> {elapsed:.3f}s")
+
+
+def _run_integration_phase(ctx: InstallContext) -> None:
+    """Bound durable ownership reads to integration, before lockfile persistence."""
+    from .phases import integrate as _integrate_phase
+
+    with (
+        contextlib.nullcontext()
+        if ctx.lockfile_only
+        else ctx.integrators["skill"].ownership_snapshot()
+    ):
+        _run_phase("integrate", _integrate_phase, ctx)
 
 
 def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
@@ -382,6 +395,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     lockfile_only: bool = False,
     trust_bin: bool | None = None,
     transaction: InstallTransaction | None = None,
+    frozen: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -505,6 +519,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         source_root=source_root,
         apm_package=apm_package,
         update_refs=update_refs,
+        frozen=frozen,
         verbose=verbose,
         only_packages=only_packages,
         force=force,
@@ -782,10 +797,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         ctx.managed_files = managed_files
         ctx.installed_packages = installed_packages
 
-        from .phases import integrate as _integrate_phase
-
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
-        _run_phase("integrate", _integrate_phase, ctx)
+        _run_integration_phase(ctx)
 
         # Fail-loud: if any direct dependency failed validation or
         # download, render the diagnostic summary and raise so the

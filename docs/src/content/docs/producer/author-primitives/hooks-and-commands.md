@@ -50,7 +50,7 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
 | `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
-Event names absent from this table are preserved unchanged. Only an unmapped
+For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
 an install warning. All-lowercase names such as `stop` pass through silently;
 `stop` is not a native Copilot or Claude event and will not fire.
@@ -196,9 +196,89 @@ Supported targets and where the integrator writes:
 APM parses the source into vendor-neutral hook intent, then each target
 integrator renders its native schema. Flat command entries become Claude's
 required `{ "matcher": "*", "hooks": [...] }` entries in
-`.claude/settings.json`. Kiro receives its current v1 standalone schema:
+`.claude/settings.json`. For Codex, flat command entries become intermediate
+hook groups containing a nested `hooks` array in `.codex/hooks.json`. Kiro
+receives its current v1 standalone schema:
 `{ "version": "v1", "hooks": [{ "name", "trigger", "matcher", "action" }] }`.
 Kiro trigger names are PascalCase and command timeouts remain in seconds.
+
+### Cursor native hooks and Claude import
+
+Cursor requires `{"version": 1, "hooks": {...}}` with flat handlers.
+APM accepts native Cursor event names and these documented Claude aliases:
+
+| Claude source | Cursor native event |
+|---------------|---------------------|
+| `PreToolUse` | `preToolUse` |
+| `PostToolUse` | `postToolUse` |
+| `UserPromptSubmit` | `beforeSubmitPrompt` |
+| `Stop` | `stop` |
+| `SubagentStop` | `subagentStop` |
+| `SessionStart` | `sessionStart` |
+| `SessionEnd` | `sessionEnd` |
+| `PreCompact` | `preCompact` |
+
+For example, a Claude `PreToolUse` group with matcher `Bash` becomes:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {"type": "command", "command": ".cursor/hooks/my-package/hooks/check.sh", "matcher": "Shell", "timeout": 10}
+    ]
+  }
+}
+```
+
+Native Cursor spellings keep native matcher values unchanged. For the Claude
+`PreToolUse` and `PostToolUse` aliases, APM translates literal tool alternatives:
+`Bash` becomes `Shell`; `Read`, `Grep`, `Task`, `WebFetch`, and `WebSearch` keep
+their names. `Edit|Write` becomes `Write`; either one alone is rejected because
+Cursor combines both operations. Missing matchers and the unrestricted `""`,
+`*`, and `.*` forms remain unrestricted.
+
+APM rejects unknown events, other translated regexes, `Glob`, server-qualified
+MCP matchers, and non-unrestricted matchers on other Claude aliases rather
+than broadening their reach. It also rejects platform-specific commands,
+unsupported handler fields/types, and invalid timeouts. Source documents may
+contain `hooks`, optional `version: 1`, and a descriptive `description` string;
+other source-level settings are rejected rather than silently discarded. Command and prompt
+handlers retain native fields such as `failClosed`, `model`, and `loop_limit`.
+Claude `Stop` and `SubagentStop` aliases get `loop_limit: null` to preserve the
+documented unlimited import default rather than Cursor's native default of five.
+Native Cursor hooks keep their own defaults.
+
+Cursor's **Include Third-Party Plugins, Skills, and Other Configs** setting is
+on by default. All matching native and Claude-imported hooks run; native hooks
+do not replace imported hooks. APM therefore refuses overlapping native/import
+actions before deploying the package's primitives. Checks cover planned
+Claude/Cursor sources and existing project, project-local, and user hook
+configs. "Owner" here means the installing dependency's own declared
+provenance marker for that hook entry (recorded in the sidecar described
+below). Same-owner events -- an event already attributed to the package
+about to install or retain the other side's configuration -- are treated
+conservatively as overlapping even when matchers differ; APM does not try
+to prove arbitrary regexes disjoint.
+
+Choose one hook deployment route per dependency. To reuse existing Claude
+hooks, select `claude` for that dependency and verify third-party imports are
+enabled in Cursor. To use native-only events such as `beforeReadFile`, author
+Cursor-native hooks and select `cursor`. APM neither changes import settings
+nor writes Claude configuration for a Cursor-only dependency. Different
+scripts can still have overlapping behavior; test them in the actual harness.
+
+Reinstall migrates matching APM-owned legacy Cursor entries and keeps unrelated
+user hooks. Switching a dependency to one route can retire its old project
+route; it does not remove user hooks or matching hooks in another scope.
+Invalid or unsupported user configuration is rejected without being
+overwritten. Target-specific files retain the existing filename-routing rules;
+this repair does not add per-file target declarations or dry-run hook previews.
+
+These mappings follow the [Cursor hook reference](https://cursor.com/docs/hooks)
+and [third-party hook reference](https://cursor.com/docs/reference/third-party-hooks).
+They are configuration compatibility, not a guarantee of identical execution
+semantics. Cloud Cursor agents support command hooks only.
 
 Copilot hook files are namespaced with the source package name to avoid
 collisions across installed deps; bundled scripts land alongside under
@@ -275,10 +355,15 @@ agent a procedure" fits a skill -- and reaches every harness.
 ## Pitfalls
 
 - **Hook event names.** Use the documented
-  [session lifecycle aliases](#session-lifecycle-event-aliases). Unknown names
-  are preserved. An install warning appears only when an unmapped name starts
+  [session lifecycle aliases](#session-lifecycle-event-aliases) for Copilot
+  and Claude. Their unknown names are preserved. An install warning appears
+  only when an unmapped name starts
   with a capital letter or starts lowercase and contains a later capital
-  letter, and that casing conflicts with the target convention.
+  letter, and that casing conflicts with the target convention. Cursor
+  instead rejects unsupported events, fields and restrictions; see
+  [Cursor native hooks](#cursor-native-hooks-and-claude-import). Diagnostics
+  name unsupported source-level, matcher-group and handler fields and identify
+  whitespace in literal matcher alternatives without silently stripping it.
 - **Cursor command frontmatter loss.** Cursor reuses the Claude
   command transformer today, so any prompt-only metadata is dropped
   with a diagnostic. Keep Cursor commands to the preserved key set.
@@ -306,6 +391,7 @@ agent a procedure" fits a skill -- and reaches every harness.
   a Claude+OpenCode package and assume hooks reach both -- they do
   not. The install log notes the skip.
 
-Once your hooks and commands are in place, run `apm install --dry-run`
-to preview what each target will receive, then `apm pack` to bundle.
+Once your hooks and commands are in place, inspect a real installation's
+native configuration, then run `apm pack` to bundle.
+`apm install --dry-run` does not render hook previews.
 See [Compile](../../compile/) and [Pack a bundle](../../pack-a-bundle/).

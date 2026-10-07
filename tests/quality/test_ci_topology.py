@@ -63,7 +63,7 @@ REQUIRED_SHARD_ROOTS = (
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 6
+LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 8
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -491,10 +491,10 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
         "selecting zero tests"
     )
     worker_flags = [token for token in tokens if token.startswith(("-n", "--numprocesses"))]
-    assert worker_flags == ["-n"], "lifecycle-smoke must use two bounded xdist workers"
+    assert worker_flags == ["-n"], "lifecycle-smoke must use four bounded xdist workers"
     worker_index = tokens.index("-n")
-    assert tokens[worker_index : worker_index + 2] == ["-n", "2"], (
-        "lifecycle-smoke must use two bounded xdist workers"
+    assert tokens[worker_index : worker_index + 2] == ["-n", "4"], (
+        "lifecycle-smoke must use four bounded xdist workers"
     )
     assert [token for token in tokens if token.startswith("--dist")] == ["--dist"], (
         "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
@@ -789,10 +789,11 @@ def test_lifecycle_smoke_e2e_flag_dropped_fails(
         "",
         "-n 0 --dist loadgroup",
         "-n auto --dist loadgroup",
+        "-n 2 --dist loadgroup",
         "-n 3 --dist loadgroup",
-        "-n 2 --dist worksteal",
-        "-n 2 --dist loadgroup --numprocesses=auto",
-        "-n 2 --dist loadgroup --dist=load",
+        "-n 4 --dist worksteal",
+        "-n 4 --dist loadgroup --numprocesses=auto",
+        "-n 4 --dist loadgroup --dist=load",
     ],
 )
 def test_lifecycle_smoke_parallelism_drift_fails(
@@ -800,7 +801,7 @@ def test_lifecycle_smoke_parallelism_drift_fails(
 ) -> None:
     """Keep the runtime budget without dropping grouping or allowing unbounded workers."""
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("-n 2 --dist loadgroup", parallel_args)
+    step["run"] = step["run"].replace("-n 4 --dist loadgroup", parallel_args)
 
     with pytest.raises(AssertionError, match=r"workers|loadgroup"):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)

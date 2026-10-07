@@ -18,6 +18,7 @@ from ...core.target_catalog import target_all_exclusion_help, target_help_fragme
 from ...core.target_detection import TargetParamType
 from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
+from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
     _expand_with_ancestors,
@@ -232,6 +233,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # GitHub: owner/repo or owner/virtual-pkg-name (2 levels)
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
     declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
+    physical_to_logical: dict[str, str] = {}
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():
@@ -242,6 +244,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 source = _deps_list_source_label(
                     dep.host, is_local=dep.is_local, lockfile_source=dep.source
                 )
+                if dep.alias is not None:
+                    install_path = dep.get_install_path(apm_modules_path)
+                    physical_key = install_path.relative_to(apm_modules_path).as_posix()
+                    dep_key = dep.get_canonical_dependency_string()
+                    physical_to_logical[physical_key] = dep_key
+                    declared_sources[dep_key] = source
+                    continue
                 is_ado = dep.is_azure_devops() and len(repo_parts) >= 3
                 is_gh = len(repo_parts) >= 2
 
@@ -273,6 +282,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
+    except PathTraversalError:
+        raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
 
@@ -283,18 +294,20 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Key orphan/insecure state on the logical id and remember each physical
     # slot -> logical id so the scan below can report the logical name instead
     # of leaking the hash slot into user-facing output.
-    physical_to_logical: dict[str, str] = {}
     try:
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Local deps: key on the logical lockfile identity
-                # (``repo_url``) and map the physical install slot back to it.
-                if dep.source == "local":
+                # Local slots and explicit aliases retain their logical lockfile identity.
+                if dep.source == "local" or dep.alias is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = dep.repo_url
+                    dep_key = (
+                        dep.repo_url
+                        if dep.source == "local"
+                        else dep.get_canonical_dependency_string()
+                    )
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
@@ -305,6 +318,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
+    except PathTraversalError:
+        raise
     except Exception:
         pass  # Continue without lockfile if it can't be read
 
@@ -314,7 +329,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # First pass: collect valid candidate paths for ancestor-aware orphan check.
     scanned_candidates = []
     for candidate in apm_modules_path.rglob("*"):
-        if not candidate.is_dir() or candidate.name.startswith("."):
+        if candidate.is_symlink() or not candidate.is_dir():
+            continue
+        if candidate.name.startswith(".") and candidate.parent != apm_modules_path:
             continue
         has_apm_yml = (candidate / APM_YML_FILENAME).exists()
         has_skill_md = (candidate / SKILL_MD_FILENAME).exists()
@@ -324,7 +341,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         if not has_apm_yml and not has_skill_md and not has_plugin_manifest:
             continue
         rel_parts = candidate.relative_to(apm_modules_path).parts
-        if len(rel_parts) < 2:
+        if len(rel_parts) < 2 and "/".join(rel_parts) not in physical_to_logical:
             continue
         # Skip sub-skills inside .apm/ directories -- they belong to the parent package
         if ".apm" in rel_parts:

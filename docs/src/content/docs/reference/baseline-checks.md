@@ -118,8 +118,8 @@ the [policy schema](../policy-schema/).
 
 ### `skill-subset-consistency`
 
-- **What it verifies.** That each `skills:` selection in `apm.yml` matches the `skill_subset` recorded in the lockfile, and that every recorded skill path exists in the resolved package tree.
-- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset`, or a recorded subset path no longer maps to a deployable skill in the installed package.
+- **What it verifies.** That each `skills:` selection in `apm.yml` matches the `skill_subset` recorded in the lockfile, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
+- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset`, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
 - **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
 
 ### `config-consistency`
@@ -130,11 +130,11 @@ the [policy schema](../policy-schema/).
 
 ### `content-integrity`
 
-- **What it verifies.** Two signals across every deployed file (including local `.apm/` content via the synthesized self-entry), each with the scope its evidence allows:
-  1. Critical hidden Unicode (tag characters, bidi overrides, variation selectors 17-256, and similar steganographic markers), over **every file under the deploy trees the project's targets govern**. This signal needs no recorded baseline, so it is deliberately not limited to `deployed_files` -- otherwise a deployed file the lockfile omits would be exempt from scanning for as long as it stayed unrecorded.
+- **What it verifies.** Two independent signals, including local `.apm/` deployments recorded through the synthesized self-entry:
+  1. Critical hidden Unicode in recognized prompt documents and decoded native prompt fields. Discovery uses each resolved target's filenames and primitive patterns, including untracked files and shared hook settings. Recorded paths use the same applicability rules: tracking a command or script does not turn it into prompt text. Hook definitions remain visible even when their command-only content is not applicable to Unicode prompt checks. Session transcripts, history, caches, command strings and referenced executables are not scanned. See [Discovery and prompt coverage](../cli/audit/#discovery-and-prompt-coverage) for the format boundaries.
   2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against.
-- **Fails when.** Any deployed file contains a critical Unicode finding or its hash no longer matches the lockfile entry. Missing files are intentionally not reported here -- `deployed-files-present` owns that signal. Symlinks and entries without a recorded hash are skipped.
-- **Remediation.** Run `apm audit --strip` to clean Unicode findings, and `apm install` to restore hash-drifted files. Both may be needed.
+- **Fails when.** An applicable prompt contains critical Unicode, recognized content is unreadable or unsupported (incomplete coverage), a recorded hash differs, or a legacy hash lacks canonical ownership metadata. Missing files are reported by `deployed-files-present`; unrecorded files have no hash baseline. Existing path and symlink protections still apply.
+- **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files. Discovery does not grant ownership or permission to rewrite user configuration.
 
 ### `includes-consent`
 
@@ -153,7 +153,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 

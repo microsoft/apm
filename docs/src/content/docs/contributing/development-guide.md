@@ -500,3 +500,13 @@ The workflow distinguishes three modes:
 
 These checks cannot detect every semantic drift. Choosing the appropriate
 mode remains a human decision; the harness exposes the choice, not the answer.
+
+The same limit applies to the `apm-spec-guardian` skill's review panel. Its
+synthesizer-return schema validates that a `defer_v0_2` entry's
+`reserved_slot_anchor` field is **present and of type string** -- a
+structural, type-only check. It does not verify that the cited anchor is one of
+the spec's actual reserved-for-v0.2 sections (for example Section 4.8
+workspaces, Section 7.9 version withdrawal, Section 10.12 publisher
+attestations, or Appendix B). Confirming that a cited anchor genuinely
+reserves the space it claims remains a human/panel judgment, not something
+schema validation can substitute for.

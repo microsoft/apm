@@ -29,8 +29,9 @@ already exists — OpenCode support is opt-in.
 import json
 import os
 from pathlib import Path
+from typing import Any
 
-from ...models.dependency.mcp import _EXTRA_DENYLIST
+from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
 from .copilot import CopilotClientAdapter
 
 
@@ -55,7 +56,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         """Return the path to ``opencode.json`` in the repository root."""
         return str(self.project_root / "opencode.json")
 
-    def update_config(self, config_updates, enabled=True):
+    def update_config(self, config_updates, enabled: Any = True):
         """Merge *config_updates* into the ``mcp`` section of ``opencode.json``.
 
         The ``.opencode/`` directory must already exist; if it does not, this
@@ -94,7 +95,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         self,
         server_url,
         server_name=None,
-        enabled=True,
+        enabled: Any = True,
         env_overrides=None,
         server_info_cache=None,
         runtime_vars=None,
@@ -120,7 +121,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             config_key = self._determine_config_key(server_url, server_name)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            self.update_config({config_key: server_config}, enabled=enabled)
+            self.update_config(
+                {config_key: server_config},
+                enabled=opencode_enabled_value(server_info, enabled),
+            )
 
             print(f"Successfully configured MCP server '{config_key}' for OpenCode")
             return True
@@ -130,7 +134,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             return False
 
     @staticmethod
-    def _to_opencode_format(copilot_entry: dict, enabled: bool = True) -> dict:
+    def _to_opencode_format(copilot_entry: dict, enabled: Any = True) -> dict:
         """Convert a Copilot-format server config to OpenCode format.
 
         Copilot: ``{"command": "npx", "args": ["-y", "pkg"], "env": {...}}``

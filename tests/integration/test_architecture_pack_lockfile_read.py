@@ -35,6 +35,24 @@ def test_bundle_lockfile_reads_have_one_registered_owner() -> None:
     assert report.violations == ()
 
 
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("and not new_path.is_symlink()", "and True"),
+        ("legacy_path.exists() or legacy_path.is_symlink()", "legacy_path.exists()"),
+        ("not path.exists() and not path.is_symlink()", "not path.exists()"),
+    ],
+)
+def test_lockfile_owner_preserves_present_symlink_metadata(before: str, after: str) -> None:
+    source = (ROOT / OWNER).read_text(encoding="utf-8")
+    assert source.count(before) == 1
+    report = run_selected_rules(
+        ROOT, (RULE_ID,), source_overrides={OWNER: source.replace(before, after)}
+    )
+    assert report.failures == ()
+    assert any(v.rule_id == RULE_ID for v in report.violations)
+
+
 def test_lockfile_read_rule_rejects_disabled_read_only_guard() -> None:
     """The registered rule catches a migration restored under read-only mode."""
     source = (ROOT / OWNER).read_text(encoding="utf-8")

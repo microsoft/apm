@@ -44,6 +44,7 @@ from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import (
     EXEMPT_MARKER,
     checked_facts,
+    forbid_text,
     line_pattern_violations,
     violation,
 )
@@ -77,6 +78,9 @@ _AGENT_PLUGIN_LOADER = "src/apm_cli/agent_plugins/loader.py"
 
 
 _INSTALL_DRIFT = "src/apm_cli/install/drift.py"
+
+
+_DEPLOYABLE_SOURCE_PLAN = "src/apm_cli/install/deployable_source_plan.py"
 
 
 _HOOK_FILE_ROUTING_TARGETS: tuple[str, ...] = (_HOOK_INTEGRATOR, _KIRO_HOOK_INTEGRATOR)
@@ -340,7 +344,11 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
     keys route through ``hook_contract``, per-file routing is not gated by
     dependency targets, merge-hook config writes stay owned by
     ``HookIntegrator``, ownership markers route through ``hook_ownership``,
-    and shared drift projection routes through ``hook_ownership``.
+    shared drift projection routes through ``hook_ownership``, and Cursor
+    import preflight stays unconditional at every native-write call site
+    (#3129: a cached "already preflighted" flag on the plan object must
+    never gate the re-check, because a plan can be reused across projects
+    or after a Claude import file is added mid-install).
     """
     rule_id = "mutation_writes.neutral_hook_contract"
     return (
@@ -348,6 +356,8 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_rewrite_scope(provider, rule_id),
         *_nhc_claude_project_dir(provider, rule_id),
         *_nhc_event_map(provider, rule_id),
+        *_nhc_cursor_edge(provider, rule_id),
+        *_nhc_cursor_preflight_unconditional(provider, rule_id),
         *_nhc_contract_vocabulary(provider, rule_id),
         *_nhc_command_keys(provider, rule_id),
         *_nhc_file_routing(provider, rule_id),
@@ -495,6 +505,135 @@ def _nhc_contract_vocabulary(provider: FactsProvider, rule_id: str) -> tuple[Vio
             exempt_marker=EXEMPT_MARKER,
         )
     )
+
+
+def _nhc_cursor_edge(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Keep Cursor rendering and import preflight on the canonical native edge."""
+    renderer = "src/apm_cli/integration/hook_native_formats.py"
+    preflight = "src/apm_cli/integration/hook_cursor_preflight.py"
+    services = "src/apm_cli/install/services.py"
+    facts, failures = _read_required(
+        provider, rule_id, (renderer, preflight, _HOOK_INTEGRATOR, services)
+    )
+    findings: list[Violation] = list(failures)
+    if not failures:
+        for path, required in (
+            (_HOOK_INTEGRATOR, "entries = _to_cursor_hook_entries("),
+            (_HOOK_INTEGRATOR, "preflight_cursor_hooks("),
+            (preflight, "_to_cursor_hook_entries("),
+            (preflight, "validate_cursor_config(candidate)"),
+            (renderer, "_check_cursor_field_types(raw)"),
+            (renderer, "_check_cursor_field_types(entry)"),
+            (services, '"preflight_hooks_for_targets"'),
+            (services, "preflight_hooks("),
+        ):
+            findings.extend(
+                _require(
+                    _has_fixed(facts[path], required),
+                    rule_id,
+                    path,
+                    "Cursor hooks must use canonical rendering and import preflight before writes",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(renderer,)),
+            pattern=r"^(CURSOR_NATIVE_EVENTS\s*[:=]|def _to_cursor_hook_entries\()",
+            message="Cursor native hook contract must have one renderer owner",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
+def _nhc_cursor_preflight_unconditional(
+    provider: FactsProvider, rule_id: str
+) -> tuple[Violation, ...]:
+    """Cursor/Claude import preflight must never be gated by a cached flag.
+
+    Two independent sub-checks close the gap a purely lexical "preflight
+    call is present somewhere in the file" check (see ``_nhc_cursor_edge``)
+    cannot see:
+
+    * A token ban on ``cursor_preflight_done`` across the owner files, so a
+      plan-level cache field can never reintroduce the reused-plan bypass
+      fixed for #3129 under that name.
+    * A structural, per-call-site check that the native-write preflight
+      call at the per-target write boundary in ``_integrate_merged_hooks``
+      survives as a direct (unconditional) statement of its owning
+      ``if config.target_key in {...}:`` block -- not removed, and not
+      re-wrapped in a *second*, nested conditional (any cache predicate,
+      regardless of its name, would have to be such a nested ``if``). A
+      file-wide substring check cannot tell a removed/re-gated call at one
+      write boundary from an unrelated surviving call at another (for
+      example the separate upfront ``preflight_hooks_for_targets`` call),
+      because deleting or re-gating one occurrence still leaves the
+      ``preflight_cursor_hooks(`` substring present elsewhere in the file.
+    """
+    findings: list[Violation] = []
+    for path in (_HOOK_INTEGRATOR, _DEPLOYABLE_SOURCE_PLAN):
+        findings.extend(
+            forbid_text(
+                provider,
+                rule_id=rule_id,
+                path=path,
+                needles=("cursor_preflight_done",),
+                message=(
+                    "Cursor import preflight must stay unconditional; "
+                    "a cached cursor_preflight_done flag must never gate it"
+                ),
+            )
+        )
+    findings.extend(_nhc_cursor_preflight_call_site(provider, rule_id))
+    return tuple(findings)
+
+
+def _nhc_cursor_preflight_call_site(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Guard the exact per-write preflight call site structurally.
+
+    Looks up ``HookIntegrator._integrate_merged_hooks``, finds its direct
+    ``if config.target_key in {'cursor', 'claude'}:`` statement (the only
+    legitimate conditional around the call -- preflight only applies to
+    those two targets), and requires the ``preflight_cursor_hooks(...)``
+    call to be a direct statement of that ``if`` body. A removed call, or
+    one re-wrapped in any further nested conditional (a cache gate under
+    any name), fails this check even though the ``preflight_cursor_hooks(``
+    substring would still appear elsewhere in the file.
+    """
+    message = (
+        "HookIntegrator._integrate_merged_hooks must call "
+        "preflight_cursor_hooks(...) as a direct, unconditional statement "
+        "of its 'if config.target_key in {cursor, claude}' block -- not "
+        "removed and not re-wrapped in a further (cache) conditional"
+    )
+    index = provider.tree_index(_HOOK_INTEGRATOR)
+    if index is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    function = index.function("HookIntegrator._integrate_merged_hooks")
+    if function is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    target_key_if = next(
+        (
+            stmt
+            for stmt in function.body
+            if isinstance(stmt, ast.If)
+            and ast.unparse(stmt.test) == "config.target_key in {'cursor', 'claude'}"
+        ),
+        None,
+    )
+    if target_key_if is None:
+        return (violation(rule_id, _HOOK_INTEGRATOR, message),)
+    has_direct_call = any(
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Call)
+        and ast.unparse(stmt.value.func) == "preflight_cursor_hooks"
+        for stmt in target_key_if.body
+    )
+    if has_direct_call:
+        return ()
+    return (violation(rule_id, _HOOK_INTEGRATOR, message),)
 
 
 def _nhc_command_keys(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:

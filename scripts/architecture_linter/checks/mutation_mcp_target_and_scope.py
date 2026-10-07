@@ -500,8 +500,16 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
         _require(
             _has_fixed(
                 facts_by_path[_MCP_MODEL],
-                '_HARNESS_EXTRA_ALIASES = frozenset({"enabled", "environment", '
-                '"http_headers", "id"})',
+                "_HARNESS_EXTRA_ALIASES = frozenset(\n"
+                "    {\n"
+                '        "bearer_token_env_var",\n'
+                '        "enabled",\n'
+                '        "env_http_headers",\n'
+                '        "environment",\n'
+                '        "http_headers",\n'
+                '        "id",\n'
+                "    }\n"
+                ")",
             ),
             rule_id,
             _MCP_MODEL,
@@ -539,6 +547,70 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
             rule_id,
             _MCP_OPENCODE,
             "OpenCode translation must derive exclusions from the canonical denylist",
+        )
+    )
+    return tuple(findings)
+
+
+def _check_opencode_enabled_intent(provider: FactsProvider) -> Iterable[Violation]:
+    """OpenCode consumers must retain the model's presence and trust boundary."""
+    rule_id = "mutation_writes.opencode_enabled_intent"
+    integrator = "src/apm_cli/integration/mcp_integrator.py"
+    required = {
+        _MCP_MODEL: (
+            'OPENCODE_ENABLED_KEY = "_apm_opencode_enabled"',
+            "return intent.value if isinstance(intent, OpenCodeEnabled) else default",
+            'if ("enabled" in current) != ("enabled" in stored):',
+            'json.dumps(current["enabled"], sort_keys=True)',
+            'stored["enabled"], sort_keys=True',
+            "return self.enabled is not _ENABLED_UNSET",
+            "server_info.pop(OPENCODE_ENABLED_KEY, None)",
+            "server_info[OPENCODE_ENABLED_KEY] = OpenCodeEnabled(self.enabled)",
+            'enabled=d.get("enabled", _ENABLED_UNSET)',
+            'if self.has_enabled:\n            result["enabled"] = self.enabled',
+        ),
+        integrator: (
+            "from apm_cli.models.dependency.mcp import opencode_enabled_matches",
+            "not opencode_enabled_matches(current_config, stored)",
+        ),
+        _MCP_OPENCODE: (
+            "from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value",
+            "enabled=opencode_enabled_value(server_info, enabled)",
+        ),
+    }
+    facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "OpenCode enabled intent must retain the canonical model contract",
+                )
+            )
+    findings.extend(
+        _require(
+            _count_regex_lines(
+                facts_by_path[integrator], r"^\s+dep\.apply_opencode_enabled\(info\)$"
+            )
+            == 2,
+            rule_id,
+            integrator,
+            "Both self-defined and registry overlays must use the enabled owner",
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_MODEL,)),
+            pattern=r"_apm_opencode_enabled|^\s*(?:def opencode_enabled_|class OpenCodeEnabled)",
+            message="OpenCode enabled vocabulary and decisions belong to the MCP model",
+            exempt=False,
         )
     )
     return tuple(findings)
@@ -657,6 +729,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-mcp-passthrough-denylist",),
         description="MCP passthrough filtering must route through the base adapter denylist.",
         check=_check_mcp_passthrough_denylist,
+    ),
+    Rule(
+        id="mutation_writes.opencode_enabled_intent",
+        group=GROUP,
+        guard_ids=("hooks-integrations-opencode-enabled-intent",),
+        description="OpenCode enabled presence and trust must route through the MCP model.",
+        check=_check_opencode_enabled_intent,
     ),
     Rule(
         id="mutation_writes.jetbrains_mcp_path",
