@@ -158,7 +158,7 @@ class CommandLogger:
         if count <= 0:
             return
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
+        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
@@ -558,7 +558,7 @@ class InstallLogger(CommandLogger):
             return
         self._stale_cleaned_total += count
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
+        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
 
     def orphan_cleanup(self, count: int):
         """Log post-install orphan-file cleanup outcome at default verbosity.
