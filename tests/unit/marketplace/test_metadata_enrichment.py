@@ -391,6 +391,109 @@ def test_pack_check_clean_certifies_manifestless_skill_with_version_range(
     ]
 
 
+@pytest.mark.parametrize("transport", ["raw", "rest"])
+@pytest.mark.parametrize(
+    "skill_body",
+    [
+        pytest.param(b"# Skill without frontmatter\n", id="missing-frontmatter"),
+        pytest.param(
+            b"---\nname: brainstorming\ndescription: [unterminated\n---\n",
+            id="malformed-yaml",
+        ),
+        pytest.param(
+            b"---\nname: brainstorming\ndescription: Valid skill\n",
+            id="unclosed-frontmatter",
+        ),
+        pytest.param(b"---\n- brainstorming\n- Valid skill\n---\n", id="sequence-frontmatter"),
+        pytest.param(b"---\nbrainstorming\n---\n", id="scalar-frontmatter"),
+        pytest.param(b"---\n---\n", id="empty-frontmatter"),
+        pytest.param(b"---\ndescription: Valid skill\n---\n", id="missing-name"),
+        pytest.param(b"---\nname: brainstorming\n---\n", id="missing-description"),
+        *[
+            pytest.param(
+                f"---\n{field}: {value}\n{other_field}: Valid skill\n---\n".encode(),
+                id=f"{field}-{case}",
+            )
+            for field, other_field in [
+                ("name", "description"),
+                ("description", "name"),
+            ]
+            for case, value in [
+                ("null", "null"),
+                ("number", "42"),
+                ("boolean", "true"),
+                ("list", "[brainstorming]"),
+                ("mapping", "{text: brainstorming}"),
+                ("empty", '""'),
+                ("blank", '" \\t "'),
+            ]
+        ],
+    ],
+)
+def test_pack_check_clean_rejects_invalid_manifestless_skill_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transport: str,
+    skill_body: bytes,
+) -> None:
+    """Invalid remote skill content stays failed through parsing and the clean gate."""
+    _write_manifestless_range_config(tmp_path)
+    requested_skills: list[urllib.parse.ParseResult] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        *,
+        timeout: int,
+    ) -> BytesIO:
+        """Serve invalid skill content after the manifest's expected 404."""
+        assert timeout == 5
+        parsed = urllib.parse.urlparse(request.full_url)
+        if parsed.path.endswith("/SKILL.md"):
+            requested_skills.append(parsed)
+            if transport == "raw" or parsed.hostname == "api.github.com":
+                return BytesIO(skill_body)
+        elif not parsed.path.endswith("/apm.yml"):
+            raise AssertionError(f"unexpected metadata URL path: {parsed.path}")
+        raise urllib.error.HTTPError(
+            url=request.full_url,
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setenv("GITHUB_APM_PAT", "test-token")
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", _resolved_range_refs)
+    monkeypatch.setattr("apm_cli.marketplace.builder.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.chdir(tmp_path)
+
+    checked = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
+
+    assert checked.exit_code == 4, checked.output
+    payload = json.loads(checked.output)
+    assert payload["metadata_enrichment"]["certifiable"] is False
+    assert len(payload["metadata_enrichment"]["outcomes"]) == 1
+    outcome = payload["metadata_enrichment"]["outcomes"][0]
+    assert outcome["package"] == "brainstorming"
+    assert outcome["status"] == "failed"
+    assert payload["drift"]["outputs"][0]["status"] == "uncertifiable"
+    assert payload["errors"][0]["code"] == "marketplace_metadata_uncertifiable"
+    assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+    if transport == "raw":
+        assert any(
+            parsed.hostname == "raw.githubusercontent.com"
+            and parsed.path == f"/obra/superpowers/{'a' * 40}/skills/brainstorming/SKILL.md"
+            for parsed in requested_skills
+        )
+    else:
+        assert any(
+            parsed.hostname == "api.github.com"
+            and parsed.path == "/repos/obra/superpowers/contents/skills/brainstorming/SKILL.md"
+            and parsed.query == f"ref={'a' * 40}"
+            for parsed in requested_skills
+        )
+
+
 def test_pack_check_clean_rejects_missing_manifestless_skill_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
