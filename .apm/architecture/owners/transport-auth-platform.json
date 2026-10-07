@@ -151,6 +151,13 @@
       "guards": ["transport-platform-revision-pin-outcome"]
     },
     {
+      "id": "ls-remote-tag-commits",
+      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike",
+      "owner": "deps/git_remote_ops.py (tag_commit_shas); consumers: parse_ls_remote_output and marketplace/ref_resolver.py",
+      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py"],
+      "guards": ["transport-platform-ls-remote-tag-commits"]
+    },
+    {
       "id": "git-semver-preflight-resolution",
       "decision": "Git semver preflight eligibility and resolution",
       "owner": "install/helpers/ref_reuse.py (is_git_semver_resolution_eligible / maybe_resolve_git_semver)",

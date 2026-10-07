@@ -12,6 +12,12 @@ from scripts.architecture_linter.checks.transport_cache_identity import RULES as
 from scripts.architecture_linter.checks.transport_gitlab_sparse import (
     RULES as _GITLAB_SPARSE_RULES,
 )
+from scripts.architecture_linter.checks.transport_ls_remote_tags import (
+    COLLECTORS as _LS_REMOTE_TAG_COLLECTORS,
+)
+from scripts.architecture_linter.checks.transport_ls_remote_tags import (
+    RULES as _LS_REMOTE_TAG_RULES,
+)
 from scripts.architecture_linter.checks.transport_network_and_runtime import (
     COLLECTORS as _NETWORK_COLLECTORS,
 )
@@ -38,6 +44,7 @@ RULES = (
     + _SPARSE_RULES
     + _GITLAB_SPARSE_RULES
     + _REVISION_PIN_RULES
+    + _LS_REMOTE_TAG_RULES
     + _NETWORK_RULES
 )
 COLLECTORS = (
@@ -45,6 +52,7 @@ COLLECTORS = (
     + _CACHE_COLLECTORS
     + _SPARSE_COLLECTORS
     + _REVISION_PIN_COLLECTORS
+    + _LS_REMOTE_TAG_COLLECTORS
     + _NETWORK_COLLECTORS
 )
 

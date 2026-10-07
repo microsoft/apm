@@ -1054,6 +1054,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Host-qualified reference parsing loses its canonical coordinate owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-ls-remote-tag-commits",
+        rule_id="transport-platform-ls-remote-tag-commits",
+        path="src/apm_cli/marketplace/ref_resolver.py",
+        old="            if refname not in commits:",
+        new='            if refname.endswith("^{}"):',
+        intent="The marketplace parser interprets peeled ^{} records outside tag_commit_shas.",
+    ),
+    MutationCase(
         guard_id="transport-platform-marketplace-package-remote",
         rule_id="transport-platform-marketplace-package-remote",
         path="src/apm_cli/marketplace/resolver.py",
