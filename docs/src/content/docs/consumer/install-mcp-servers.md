@@ -156,12 +156,12 @@ unresolved required entries fail closed.
 | GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
-| Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
+| Cursor | `.cursor/mcp.json` (project, only if `.cursor/` exists) or `~/.cursor/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
-| OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
+| OpenCode | `opencode.json` (project, only if `.opencode/` exists) or `~/.config/opencode/opencode.json` (`-g`) | both | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
@@ -171,7 +171,18 @@ value unchanged into that server's `opencode.json` entry. If omitted, APM keeps
 the existing `true` default. APM does not validate or coerce explicit values;
 OpenCode interprets them. Other targets ignore this OpenCode-only field.
 Reinstall applies changes to `enabled`, including its JSON type; removing
-the field restores `true`. OpenCode remains project-only.
+the field restores `true`.
+
+Global Cursor and OpenCode installs preserve personal servers, including names
+also declared by a package. Reinstall and pruning use per-target APM ownership;
+changing a direct `--mcp` target cleans the previously owned target before
+retiring its ownership record. If a user config is unreadable, contains JSONC,
+has a non-object server map, or uses a symlink below the home directory, APM
+warns and fails without rewriting it, even on a no-op reinstall. Fix the
+reported config and rerun the original command with `--global` and the same
+`--target` selection. A home-directory alias itself remains supported.
+If retarget cleanup fails after the new target was written, both deployments
+remain recorded as APM-owned until a successful retry removes the old entry.
 
 ## How `targets:` gates which configs get written
 
@@ -244,7 +255,8 @@ user-scope MCP config (for example, Copilot CLI to
 non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or
-`~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`,
+`~/.codex/config.toml` otherwise, Cursor to `~/.cursor/mcp.json`, OpenCode to
+`~/.config/opencode/opencode.json`, Gemini CLI to `~/.gemini/settings.json`,
 Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
 `$HERMES_HOME/config.yaml` whenever selected explicitly (or
 `~/.hermes/config.yaml` when unset or blank), Windsurf to
@@ -254,13 +266,16 @@ When the user-scope manifest declares a `targets:` field (or the CLI passes
 `--target`), only the matching runtimes receive the config write. When no CLI
 target, user-scope manifest target, or saved `apm config target` restricts
 targets, all detected user-scope-capable runtimes are configured.
-Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped with a warning
+The workspace-only VS Code target is skipped with a warning
 when a mixed target set also contains a global-capable runtime. If none of the
 selected targets supports user scope, the command exits `2` before changing the
 user manifest, lockfile, or runtime configuration. The direct command creates
 or updates `~/.apm/apm.yml`; it does not fall back to the current project's
 manifest. With `--dry-run`, it previews the user-scope entry and runtime
 targets without creating that manifest, lockfile, or runtime configuration.
+APM leaves an existing Cursor or OpenCode config untouched and reports that
+target as failed when it cannot parse the file as JSON (for example, OpenCode
+JSONC comments) or when its user-scope path runs through a symlink.
 
 ## stdio vs HTTP servers
 

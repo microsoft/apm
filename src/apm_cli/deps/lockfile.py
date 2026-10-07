@@ -5,6 +5,7 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -165,6 +166,11 @@ def _normalized_mcp_provenance(
         server: sorted(owners) if isinstance(owners, list) else owners
         for server, owners in sorted(provenance.items())
     }
+
+
+def _json_identity(value: Any) -> str:
+    """Serialize *value* so JSON type changes (``1`` vs ``true``) compare unequal."""
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def _normalize_lockfile_host_type(raw: Any) -> str | None:
@@ -1164,7 +1170,10 @@ class LockFile:
                 return False
         if sorted(self.mcp_servers) != sorted(other.mcp_servers):
             return False
-        if self.mcp_configs != other.mcp_configs:
+        # Python equality treats ``1`` and ``True`` as equal, which would keep a
+        # stale drift baseline after a type-only change such as OpenCode's
+        # ``enabled``.
+        if _json_identity(self.mcp_configs) != _json_identity(other.mcp_configs):
             return False
         if (
             self.mcp_target_servers != other.mcp_target_servers

@@ -96,6 +96,20 @@ def _patch_mcp_install(
     return mock_integrator_cls, mock_manager
 
 
+def _install_claude_only(
+    runtime: str,
+    servers: list[str],
+    *_args: object,
+    installed_servers: set[str],
+    **_kwargs: object,
+) -> bool:
+    """Model successful writes separately from the aggregate install outcome."""
+    if runtime != "claude":
+        return False
+    installed_servers.update(servers)
+    return True
+
+
 def test_self_defined_partial_runtime_failure_is_explicit() -> None:
     """A selected runtime failure must not be hidden by a sibling success."""
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -115,7 +129,7 @@ def test_self_defined_partial_runtime_failure_is_explicit() -> None:
         patch.object(
             MCPIntegrator,
             "_install_for_runtime",
-            side_effect=lambda runtime, *_args, **_kwargs: runtime == "claude",
+            side_effect=_install_claude_only,
         ) as install_runtime,
         pytest.raises(RuntimeError, match=r"managed-server \(intellij\)"),
     ):
@@ -137,7 +151,8 @@ def test_self_defined_partial_runtime_failure_is_explicit() -> None:
     assert managed == {"claude": {"managed-server"}}
     logger.error.assert_any_call(
         "MCP configuration failed for selected runtime(s): managed-server (intellij). "
-        "Fix the failed runtime MCP config and rerun apm install."
+        "Fix the failed runtime MCP config and rerun the original install command, "
+        "retaining --global and any --target selection."
     )
 
 
@@ -159,7 +174,7 @@ def test_registry_group_partial_runtime_failure_is_explicit() -> None:
         patch.object(
             MCPIntegrator,
             "_install_for_runtime",
-            side_effect=lambda runtime, *_args, **_kwargs: runtime == "claude",
+            side_effect=_install_claude_only,
         ) as install_runtime,
         pytest.raises(RuntimeError, match=r"managed-server \(intellij\)"),
     ):
@@ -184,7 +199,8 @@ def test_registry_group_partial_runtime_failure_is_explicit() -> None:
     assert managed == {"claude": {"managed-server"}}
     logger.error.assert_any_call(
         "MCP configuration failed for selected runtime(s): managed-server (intellij). "
-        "Fix the failed runtime MCP config and rerun apm install."
+        "Fix the failed runtime MCP config and rerun the original install command, "
+        "retaining --global and any --target selection."
     )
 
 

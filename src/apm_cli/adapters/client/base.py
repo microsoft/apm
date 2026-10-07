@@ -1,5 +1,6 @@
 """Base adapter interface for MCP clients."""
 
+import json
 import os
 import re
 from abc import ABC, abstractmethod
@@ -8,7 +9,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_warning
+from ...utils.path_security import has_symlink_component
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -395,6 +398,69 @@ class MCPClientAdapter(ABC):
     def get_current_config(self):
         """Get the current MCP configuration."""
         pass
+
+    def validate_config_for_install(self) -> bool:
+        """Allow adapters to refuse unsafe configs before existing-server shortcuts."""
+        return True
+
+    def _read_json_config_for_update(self, config_path: Path) -> dict | None:
+        """Return the JSON object at *config_path* before a merge-and-write.
+
+        A missing or blank file yields ``{}``.  Returns ``None`` after a
+        warning when rewriting the file could lose data, so the caller skips
+        the write: the existing content is not a JSON object (for example
+        JSONC comments), or a user-scope path runs through a symlink, which
+        stale cleanup refuses to rewrite later.
+        """
+        if self.user_scope and has_symlink_component(Path.home(), config_path):
+            _rich_warning(
+                f"Skipped {config_path}: APM does not write MCP config through "
+                "symlinks. Replace the symlink or configure this server manually.",
+                symbol="warning",
+            )
+            return None
+        try:
+            raw = config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except (OSError, UnicodeError) as exc:
+            _rich_warning(
+                f"Could not read {config_path}: {exc} -- skipping config write",
+                symbol="warning",
+            )
+            return None
+        if not raw.strip():
+            return {}
+        try:
+            config = json.loads(raw)
+        except json.JSONDecodeError:
+            config = None
+        if not isinstance(config, dict):
+            _rich_warning(
+                f"Could not parse {config_path} as a JSON object -- skipping config "
+                "write to avoid data loss (comments and trailing commas are not "
+                "preserved); fix the file or add this server manually",
+                symbol="warning",
+            )
+            return None
+        if self.mcp_servers_key in config and not isinstance(config[self.mcp_servers_key], dict):
+            _rich_warning(
+                f"Could not parse {config_path}: {self.mcp_servers_key} must be "
+                "a JSON object -- skipping config write to avoid data loss",
+                symbol="warning",
+            )
+            return None
+        return config
+
+    @staticmethod
+    def _write_json_config(config_path: Path, config: dict) -> None:
+        """Atomically write *config* as JSON and keep the file owner-only.
+
+        Entries can carry env values resolved at install time.
+        """
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(config_path, json.dumps(config, indent=2), new_file_mode=0o600)
+        os.chmod(config_path, 0o600)
 
     @abstractmethod
     def configure_mcp_server(

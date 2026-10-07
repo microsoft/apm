@@ -124,7 +124,7 @@ def _missing_consumers(
             continue
         if not _has_fixed(facts, needle):
             findings.append(violation(rule_id, path, message))
-    return findings
+    return tuple(findings)
 
 
 def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
@@ -237,6 +237,19 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 rule_id,
                 _APM_PACKAGE,
                 "canonical target projection must return the target/targets shape",
+            )
+        )
+    for fragment in (
+        ").validate_config_for_install()",
+        "_raise_strict_config_failures(unsafe_runtimes, console=console, logger=logger)",
+        "_validate_target_configs(\n        target_runtimes,",
+    ):
+        findings.extend(
+            _require(
+                _has_fixed(install_facts, fragment),
+                rule_id,
+                _MCP_INSTALL,
+                "Selected MCP targets must delegate safe-config preflight before no-op detection",
             )
         )
     return findings
@@ -577,6 +590,7 @@ def _check_opencode_enabled_intent(provider: FactsProvider) -> Iterable[Violatio
             "from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value",
             "enabled=opencode_enabled_value(server_info, enabled)",
         ),
+        _MCP_OWNERSHIP: ("opencode_enabled_matches(existing[name], expected)",),
     }
     facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
     findings: list[Violation] = list(failures)

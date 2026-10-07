@@ -123,6 +123,7 @@ class TestRunMcpIntegrationInstallBranch:
                 mcp_deps=[dep],
                 old_mcp_servers={"io.github.acme/orphan-server"},
                 old_mcp_configs={"io.github.acme/orphan-server": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"io.github.acme/orphan-server"}},
                 project_root=tmp_path,
             )
         )
@@ -130,6 +131,84 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.remove_stale.assert_called_once()
         stale_arg = mock_mcp.remove_stale.call_args.args[0]
         assert stale_arg == {"io.github.acme/orphan-server"}
+
+    @patch(_PATCH_TARGET)
+    def test_ownerless_lockfile_cleans_stale_servers_from_targeted_runtimes(
+        self, mock_mcp, tmp_path: Path
+    ):
+        """A lockfile from before per-target ownership names no runtime for a stale server."""
+        dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={"io.github.acme/orphan-server"},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=False,
+                target_decision=EffectiveTargetDecision("claude", "apm config target"),
+                project_root=tmp_path,
+            )
+        )
+
+        mock_mcp.remove_stale.assert_called_once()
+        assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan-server"}
+        assert mock_mcp.remove_stale.call_args.args[1] == "claude"
+
+    @patch(_PATCH_TARGET)
+    def test_ownerless_user_scope_lockfile_keeps_unowned_servers(self, mock_mcp, tmp_path: Path):
+        """User-level configs hold entries APM never wrote, so cleanup needs recorded ownership."""
+        dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={"io.github.acme/orphan-server"},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=False,
+                target_decision=EffectiveTargetDecision("claude", "apm config target"),
+                user_scope=True,
+                project_root=tmp_path,
+            )
+        )
+
+        mock_mcp.remove_stale.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_explicit_runtime_keeps_ownership_recorded_for_that_runtime(
+        self, mock_mcp, tmp_path: Path
+    ):
+        """--runtime vscode must not move VS Code ownership to the key the target decision names."""
+        name = "io.github.acme/server"
+        dep = MCPDependency(name=name, transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {name}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={name},
+                old_mcp_target_servers={"vscode": {name}},
+                runtime="vscode",
+                target_decision=EffectiveTargetDecision("copilot", "apm config target"),
+                project_root=tmp_path,
+            )
+        )
+
+        assert mock_mcp.install.call_args.kwargs["managed_target_servers"] == {"vscode": {name}}
+        mock_mcp.remove_stale.assert_not_called()
 
     @patch(_PATCH_TARGET)
     def test_forwards_apm_config_targets_key_when_declared(self, mock_mcp, tmp_path: Path):

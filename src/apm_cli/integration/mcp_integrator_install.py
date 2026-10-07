@@ -305,6 +305,7 @@ def _install_registry_group(  # noqa: PLR0913
                 successful_runtimes: list[str] = []
                 failed_runtimes: list[str] = []
                 for rt in target_runtimes:
+                    installed_servers: set[str] = set()
                     if verbose:
                         logger.verbose_detail(f"Configuring {rt}...")
                     if MCPIntegrator._install_for_runtime(
@@ -316,10 +317,16 @@ def _install_registry_group(  # noqa: PLR0913
                         project_root=project_root,
                         user_scope=user_scope,
                         logger=logger,
-                        replace_existing=is_update,
+                        replace_existing=is_update
+                        and (
+                            managed_target_servers is None
+                            or dep in managed_target_servers.get(rt, set())
+                        ),
+                        installed_servers=installed_servers,
                     ):
                         successful_runtimes.append(rt)
-                        _record_managed_server(managed_target_servers, rt, dep)
+                        if dep in installed_servers:
+                            _record_managed_server(managed_target_servers, rt, dep)
                     else:
                         failed_runtimes.append(rt)
 
@@ -354,6 +361,29 @@ def _install_registry_group(  # noqa: PLR0913
     return configured_count
 
 
+def _validate_target_configs(
+    target_runtimes: list[str],
+    *,
+    project_root: Path | None,
+    user_scope: bool,
+    console: Any,
+    logger: Any,
+) -> None:
+    """Validate native configs before no-op detection or retarget side effects."""
+    if not user_scope:
+        return
+    from apm_cli.factory import ClientFactory
+
+    unsafe_runtimes = [
+        rt
+        for rt in target_runtimes
+        if not ClientFactory.create_client(
+            rt, project_root=project_root, user_scope=user_scope
+        ).validate_config_for_install()
+    ]
+    _raise_strict_config_failures(unsafe_runtimes, console=console, logger=logger)
+
+
 def _record_managed_server(
     managed_target_servers: dict[str, set[str]] | None,
     runtime: str,
@@ -376,7 +406,8 @@ def _raise_strict_config_failures(
     message = (
         "MCP configuration failed for selected runtime(s): "
         + ", ".join(failed_installations)
-        + ". Fix the failed runtime MCP config and rerun apm install."
+        + ". Fix the failed runtime MCP config and rerun the original install command, "
+        "retaining --global and any --target selection."
     )
     if console:
         console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
@@ -430,11 +461,14 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
     to a binary/directory probe when optional deps are unavailable.
     """
     from apm_cli.integration.mcp_integrator import _is_vscode_available
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
-    # Directory-signal opt-in runtimes: name -> required project dir.
+    # Directory-signal opt-in runtimes: name -> required dir under the scope
+    # root.  OpenCode's user root (~/.config/opencode) differs from its
+    # project marker, so its signal comes from the target profile.
     dir_signal = {
         "cursor": ".cursor",
-        "opencode": ".opencode",
+        "opencode": KNOWN_TARGETS["opencode"].effective_root(user_scope),
         "gemini": ".gemini",
         "windsurf": ".windsurf",
         "kiro": ".kiro",
@@ -507,12 +541,14 @@ def _discover_installed_runtimes_fallback(
     project_root_path, _is_vscode_available, *, user_scope: bool
 ) -> list[str]:
     """Binary/directory-only runtime probe used when adapters fail to import."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
     installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
     if _is_vscode_available(project_root=project_root_path):
         installed_runtimes.append("vscode")
     for name, signal in (
         ("cursor", ".cursor"),
-        ("opencode", ".opencode"),
+        ("opencode", KNOWN_TARGETS["opencode"].effective_root(user_scope)),
         ("gemini", ".gemini"),
         ("windsurf", ".windsurf"),
         ("kiro", ".kiro"),
@@ -910,7 +946,7 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, JetBrains Copilot)"
+                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, JetBrains Copilot)"
             )
             return None
 
@@ -1009,6 +1045,7 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
+            installed_servers: set[str] = set()
             if verbose:
                 logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
             if MCPIntegrator._install_for_runtime(
@@ -1019,10 +1056,16 @@ def _install_self_defined_deps(
                 project_root=project_root,
                 user_scope=user_scope,
                 logger=logger,
-                replace_existing=is_update,
+                replace_existing=is_update
+                and (
+                    managed_target_servers is None
+                    or dep.name in managed_target_servers.get(rt, set())
+                ),
+                installed_servers=installed_servers,
             ):
                 successful_runtimes.append(rt)
-                _record_managed_server(managed_target_servers, rt, dep.name)
+                if dep.name in installed_servers:
+                    _record_managed_server(managed_target_servers, rt, dep.name)
             else:
                 failed_runtimes.append(rt)
 
@@ -1203,6 +1246,13 @@ def run_mcp_install(  # noqa: PLR0913
             )
         return 0
 
+    _validate_target_configs(
+        target_runtimes,
+        project_root=project_root,
+        user_scope=user_scope,
+        console=console,
+        logger=logger,
+    )
     if managed_target_servers is not None:
         from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
