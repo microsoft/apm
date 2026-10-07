@@ -24,7 +24,7 @@ from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
-from .build_id import has_valid_build_id, stabilize_build_id
+from .build_id import has_build_id_line, has_valid_build_id, stabilize_build_id
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
@@ -1759,7 +1759,7 @@ class AgentsCompiler:
             if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
                 result.stats.setdefault("copilot_root_instructions_removed", 0)
                 return result
-            if not has_valid_build_id(existing):
+            if has_build_id_line(existing) and not has_valid_build_id(existing):
                 result.warnings.append(
                     f"Retained {portable_relpath(output_path, self.base_dir)}: "
                     "the generated marker is present, but the Build ID does not match "

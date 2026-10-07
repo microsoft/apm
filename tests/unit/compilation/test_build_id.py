@@ -9,8 +9,12 @@ import re
 
 import pytest  # noqa: F401
 
-from apm_cli.compilation.build_id import has_valid_build_id, stabilize_build_id
-from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
+from apm_cli.compilation.build_id import (
+    has_build_id_line,
+    has_valid_build_id,
+    stabilize_build_id,
+)
+from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER, BUILD_ID_PLACEHOLDER
 
 _HASH_LINE_RE = re.compile(r"^<!-- Build ID: [a-f0-9]{12} -->$")
 
@@ -109,3 +113,12 @@ def test_only_placeholder_line():
 
     assert BUILD_ID_PLACEHOLDER not in result
     assert _HASH_LINE_RE.match(result.splitlines()[0])
+
+
+def test_has_build_id_line_distinguishes_presence_from_validity():
+    valid = stabilize_build_id(f"# A\n{BUILD_ID_PLACEHOLDER}\nbody\n")
+
+    assert has_build_id_line(valid)
+    assert has_build_id_line(valid + "edited\n")
+    assert not has_build_id_line("# A\nbody\n")
+    assert not has_build_id_line(f"{AGENTS_MD_GENERATED_MARKER}\n# Legacy content\n")

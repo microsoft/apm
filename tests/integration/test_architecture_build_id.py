@@ -30,7 +30,7 @@ def test_compiler_routes_build_id_creation_and_verification_to_owner() -> None:
         for node in owner.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert {"stabilize_build_id", "has_valid_build_id"} <= owner_functions
+    assert {"stabilize_build_id", "has_valid_build_id", "has_build_id_line"} <= owner_functions
 
     imported = {
         alias.name
@@ -43,8 +43,8 @@ def test_compiler_routes_build_id_creation_and_verification_to_owner() -> None:
         for node in ast.walk(consumer)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
-    assert {"stabilize_build_id", "has_valid_build_id"} <= imported
-    assert {"stabilize_build_id", "has_valid_build_id"} <= called
+    assert {"stabilize_build_id", "has_valid_build_id", "has_build_id_line"} <= imported
+    assert {"stabilize_build_id", "has_valid_build_id", "has_build_id_line"} <= called
     assert "_has_valid_build_id" not in {
         node.name for node in ast.walk(consumer) if isinstance(node, ast.FunctionDef)
     }
@@ -71,8 +71,9 @@ def test_build_id_owner_and_semantic_guard_are_registered() -> None:
 def test_build_id_guard_rejects_parallel_hashing() -> None:
     source = CONSUMER.read_text(encoding="utf-8")
     mutated = source.replace(
-        "if not has_valid_build_id(existing):",
-        "if not has_valid_build_id(existing):\n                hashlib.sha256(b'parallel').hexdigest()",
+        "if has_build_id_line(existing) and not has_valid_build_id(existing):",
+        "if has_build_id_line(existing) and not has_valid_build_id(existing):\n"
+        "                hashlib.sha256(b'parallel').hexdigest()",
     )
     assert mutated != source
 
