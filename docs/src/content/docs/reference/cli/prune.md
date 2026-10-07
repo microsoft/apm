@@ -36,6 +36,14 @@ dependency list nor needed by a retained package. This preserves transitive
 dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
+GitHub owner and repository names are compared case-insensitively: changing
+`microsoft/apm` to `Microsoft/APM` does not orphan the installed package.
+Prune preserves its existing directory spelling; it does not rename packages.
+Case-sensitive hosts, local paths, aliases, and paths inside repositories
+retain their existing casing rules. Ambiguous case-equivalent directories
+cause an error before cleanup; inspect the duplicates and run `apm install`
+after keeping the intended package.
+
 Recognized roots under `apm_modules/`, including manifestless `SKILL.md`
 packages, are managed installation content. Pruning an eligible root removes
 its contents, including manually copied packages and personal files. Keep
