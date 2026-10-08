@@ -302,6 +302,21 @@
         "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_valid_bundle_activates_and_reloads",
         "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_invalid_bundle_preserves_state"
       ]
+    },
+    {
+      "issue": 3179,
+      "fixed_in": "Unreleased",
+      "summary": "Local shared-root skill rows persisted without a target were never reconciled after a rename, deletion or target removal.",
+      "failure_modes": ["cleanup", "ownership", "idempotency"],
+      "properties": ["ownership.preserve_unowned", "idempotency.byte_stable", "routing.authorized_targets_only", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_local_skill_rename_delete_and_target_drop_reconcile_shared_root",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_shared_root_file_survives_until_its_last_target_claim_leaves",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_target_only_install_keeps_unprocessed_sibling_claims",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_unattributed_local_rows_contract_and_preserve_user_state",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_target_only_install_keeps_claims_whose_recorded_target_left",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_deleting_all_local_content_cleans_its_deployments"
+      ]
     }
   ],
   "lifecycle_contracts": [

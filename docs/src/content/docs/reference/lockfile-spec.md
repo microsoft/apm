@@ -162,7 +162,7 @@ runtime entry -- with its full ownership history:
 | Field | Type | Notes |
 |---|---|---|
 | `kind` | string | Locator storage form: `project-relative`, `target-relative`, or `uri` (e.g. an MCP server entry). |
-| `target` | string | Deploy target name (`copilot`, `claude`, `mcp`, etc.). |
+| `target` | string | Deploy target name (`copilot`, `claude`, `mcp`, etc.), or `legacy` when the row was recorded without one. See [unattributed rows](#unattributed-rows). |
 | `value` | string | The path (relative to its `kind`) or URI value. |
 | `runtime` | string or null | Runtime scoping the row, when applicable (e.g. an MCP client name). |
 | `scope` | string | Install scope, typically `project`. |
@@ -186,6 +186,10 @@ per-dependency `deployed_files`/`deployed_file_hashes` and the top-level
 legacy views of the same ledger -- older tooling that only reads the flat
 fields still sees a consistent projection. Author neither view by hand; both
 are written by `apm install`, `apm prune`, and related commands.
+
+### Unattributed rows
+
+`legacy` rows are usually shared-root files such as `.agents/skills/`, and APM attributes them by path. An error-free install that declares `targets:` and runs all of them removes a `legacy` row an active target governs but no longer produces; a file row needs a recorded content hash. Rows for local-bundle output, and directories containing it, are kept. Bundle output recorded without `local-bundle` ownership looks like installed output and is removed the same way.
 
 ## Per-entry fields
 

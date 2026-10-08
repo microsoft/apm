@@ -953,6 +953,12 @@ class InstallLogger(CommandLogger):
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
             )
+        elif stale_cleaned > 0:
+            file_noun = "file" if stale_cleaned == 1 else "files"
+            _rich_success(
+                f"Cleaned {stale_cleaned} stale {file_noun}{timing_suffix}.",
+                symbol="sparkles",
+            )
         else:
             _rich_info(
                 f"No changes -- install state already up to date{timing_suffix}.",

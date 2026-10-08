@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from apm_cli.commands.install import InstallLogger
+    from apm_cli.deps.lockfile import LockFile
 
 
 def render_and_exit(
@@ -22,6 +24,7 @@ def render_and_exit(
     plan: ProspectiveInstallPlan,
     update: bool,
     apm_dir: Path,
+    local_cleanup_pending: Callable[[LockFile], bool] | None = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -99,9 +102,15 @@ def render_and_exit(
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
-    if selected_apm_dependencies:
+    cleanup_pending = False
+    if not selected_apm_dependencies and local_cleanup_pending and _dryrun_lock:
+        try:
+            cleanup_pending = local_cleanup_pending(_dryrun_lock)
+        except (KeyError, TypeError, ValueError) as exc:  # malformed ledger state
+            logger.verbose_detail(f"Local cleanup preview skipped: {exc}")
+    if selected_apm_dependencies or cleanup_pending:
         logger.dry_run_notice(
-            "Per-package stale-file cleanup (renames within a package) is "
-            "not previewed -- it requires running integration. Run without "
-            "--dry-run to apply."
+            "Stale-file cleanup (renames within a package or in the project's "
+            ".apm/ content) is not previewed -- it requires running "
+            "integration. Run without --dry-run to apply."
         )

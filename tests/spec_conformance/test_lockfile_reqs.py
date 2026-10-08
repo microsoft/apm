@@ -677,6 +677,78 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
     )
 
 
+@pytest.mark.req("req-lk-020")
+def test_lockfile_keeps_shared_root_paths_another_declared_target_governs(tmp_path: Path) -> None:
+    """A shared-root path stays while another declared target governs it (#3179).
+
+    Its recorded target (codex) has left the manifest, and a ``--target
+    claude`` run does not process copilot. Copilot still governs the
+    ``.agents/skills`` partition, so the path is attributable to a declared
+    target and preserved. Once no declared target governs it, it is removed.
+    """
+    from apm_cli.core.deployment_state import (
+        DeploymentLedger,
+        DeploymentLocator,
+        DeploymentRecord,
+        LocatorKind,
+    )
+    from apm_cli.install.manifest_reconcile import (
+        declared_target_profiles,
+        reconcile_deployed_block,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+    from apm_cli.utils.content_hash import compute_file_hash
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    shared = ".agents/skills/shared/SKILL.md"
+    deployed = tmp_path / shared
+    deployed.parent.mkdir(parents=True)
+    deployed.write_text("shared", encoding="utf-8")
+    recorded = compute_file_hash(deployed)
+    locator = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="codex",
+        value=shared,
+        runtime=None,
+        scope="project",
+    )
+    ledger = DeploymentLedger(
+        records={
+            locator.key: DeploymentRecord(
+                locator=locator, owners=(".",), active_owner=".", content_hash=recorded
+            )
+        }
+    )
+
+    def reconcile(manifest: str) -> list[str]:
+        (tmp_path / "apm.yml").write_text(manifest, encoding="utf-8")
+        active: list[TargetProfile] = [KNOWN_TARGETS["claude"]]
+        files, _hashes = reconcile_deployed_block(
+            project_root=tmp_path,
+            dep_key="<local .apm/>",
+            current_files=[],
+            current_hashes={},
+            prior_files=[shared],
+            prior_hashes={shared: recorded},
+            active_targets=active,
+            declared_targets=declared_target_profiles(tmp_path),
+            diagnostics=DiagnosticCollector(),
+            prior_ledger=ledger,
+        )
+        return files
+
+    assert reconcile("targets:\n  - claude\n  - copilot\n") == [shared]
+    assert deployed.exists()
+    assert reconcile("targets:\n  - claude\n") == []
+    assert not deployed.exists()
+
+    assert_spec_contains(
+        "(b) another declared target",
+        "shared deploy roots\nare partitioned by the filename patterns",
+        "MUST remove a prior path attributable to\nnone of those targets",
+    )
+
+
 class TestFinalLockfileTargetContraction:
     """req-lk-020 coverage for the final-lockfile deployed-file owner.
 

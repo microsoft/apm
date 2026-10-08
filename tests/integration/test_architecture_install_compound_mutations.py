@@ -387,18 +387,53 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         CONTRACTION_RULE,
         "src/apm_cli/install/phases/post_deps_local.py",
         _replace(
-            "    _files, _hashes = reconcile_deployed_block(",
+            "    _files, _hashes, _ledger = reconcile_deployed_block(",
             "    remove_stale_deployed_files(set(), ctx.project_root)\n"
-            "    _files, _hashes = reconcile_deployed_block(",
+            "    _files, _hashes, _ledger = reconcile_deployed_block(",
         ),
+    ),
+    CompoundMutation(
+        "contraction-post-local-lossy-persistence",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/phases/post_deps_local.py",
+        _replace("        provenance=_ledger,\n", ""),
+    ),
+    CompoundMutation(
+        "contraction-lockfile-lossy-local-carry-forward",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/phases/lockfile.py",
+        _replace(
+            "                provenance=DeploymentLedgerCodec.from_lockfile(self.ctx.existing_lockfile),\n",
+            "",
+        ),
+    ),
+    CompoundMutation(
+        "contraction-post-local-null-provenance",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/phases/post_deps_local.py",
+        _replace("        provenance=_ledger,\n", "        provenance=None,\n"),
+    ),
+    CompoundMutation(
+        "contraction-post-local-empty-provenance",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/phases/post_deps_local.py",
+        _replace(
+            "        provenance=_ledger,\n", "        provenance=DeploymentLedger(records={}),\n"
+        ),
+    ),
+    CompoundMutation(
+        "contraction-post-local-unordered-targets",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/phases/post_deps_local.py",
+        _replace("        current_targets=ctx.targets or (),\n", ""),
     ),
     CompoundMutation(
         "contraction-post-local-route",
         CONTRACTION_RULE,
         "src/apm_cli/install/phases/post_deps_local.py",
         _replace(
-            "    _files, _hashes = reconcile_deployed_block(",
-            "    _files, _hashes = reconcile_deployed_block_disabled(",
+            "    _files, _hashes, _ledger = reconcile_deployed_block(",
+            "    _files, _hashes, _ledger = reconcile_deployed_block_disabled(",
         ),
     ),
     CompoundMutation(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,6 +40,7 @@ _LEGACY_USER_TARGET_PREFIXES = {
     ".copilot/": "copilot",
 }
 _LOCAL_BUNDLE_OWNER = "local-bundle"
+UNATTRIBUTED_TARGET = "legacy"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
 _SHA256_PREFIX = "sha256:"
 _LOWER_HEX = frozenset("0123456789abcdef")
@@ -64,14 +65,19 @@ class DeploymentCleanupSnapshot:
     hashes: dict[str, str]
 
 
-def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
-    """Reject imperative provenance without one canonical SHA-256 digest."""
+def _is_canonical_bundle_hash(content_hash: str | None) -> bool:
+    """Return whether *content_hash* is one canonical ``sha256:<hex>`` digest."""
     digest = (
         content_hash.removeprefix(_SHA256_PREFIX)
         if isinstance(content_hash, str) and content_hash.startswith(_SHA256_PREFIX)
         else ""
     )
-    if len(digest) != 64 or any(character not in _LOWER_HEX for character in digest):
+    return len(digest) == 64 and all(character in _LOWER_HEX for character in digest)
+
+
+def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
+    """Reject imperative provenance without one canonical SHA-256 digest."""
+    if not _is_canonical_bundle_hash(content_hash):
         raise ValueError(
             f"Local bundle deployment {path!r} requires a canonical sha256:<hex> content hash"
         )
@@ -338,10 +344,37 @@ class DeploymentLedgerCodec:
         owner: str,
         files: list[str],
         hashes: dict[str, str],
+        *,
+        provenance: DeploymentLedger | None = None,
+        current_targets: Sequence[TargetProfile] = (),
     ) -> None:
-        """Update one compatibility ownership view and invalidate its projection."""
+        """Update one compatibility ownership view and invalidate its projection.
+
+        Pass ``provenance`` when *lockfile* lacks these paths' concrete targets
+        or bundle provenance, as a freshly built lockfile does; shared-root
+        paths would otherwise rebuild unattributed and never prove stale.
+        A concrete locator for one of *current_targets* wins, the lockfile's
+        own first, so attribution stays with the install that chose it.
+        Bundle paths stay unattributed so no target can sweep them.
+        """
         prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        preferred: dict[str, DeploymentLocator] = {}
+        if provenance is not None:
+            owned = set(files)
+            provenance_bundles = DeploymentLedgerCodec.local_bundle_values(provenance) & owned
+            # Malformed provenance is dropped, as a rebuild without it would.
+            prior_bundle_paths |= {
+                path for path in provenance_bundles if _is_canonical_bundle_hash(hashes.get(path))
+            }
+            preferred = DeploymentLedgerCodec._preferred_locators(
+                owned
+                - DeploymentLedgerCodec.local_bundle_scope(
+                    owned, prior_bundle_paths | provenance_bundles
+                ),
+                (prior_ledger, provenance),
+                {getattr(target, "name", None) for target in current_targets},
+            )
         if owner == ".":
             lockfile.local_deployed_files = list(files)
             lockfile.local_deployed_file_hashes = dict(hashes)
@@ -353,7 +386,34 @@ class DeploymentLedgerCodec:
             lockfile,
             prior_bundle_paths,
             prior_ledger=prior_ledger,
+            preferred_locators=preferred,
         )
+
+    @staticmethod
+    def _preferred_locators(
+        values: Collection[str],
+        sources: Sequence[DeploymentLedger],
+        current: Collection[str | None],
+    ) -> dict[str, DeploymentLocator]:
+        """Choose one concrete project-relative locator per value in *values*.
+
+        A current target wins, then the earlier source, then the locator key.
+        """
+        candidates = sorted(
+            (
+                (rank, record.locator)
+                for rank, source in enumerate(sources)
+                for record in source.records.values()
+                if record.locator.value in values
+                and record.locator.kind == LocatorKind.PROJECT_RELATIVE
+                and record.locator.target != UNATTRIBUTED_TARGET
+            ),
+            key=lambda item: (item[1].target not in current, item[0], item[1].key),
+        )
+        preferred: dict[str, DeploymentLocator] = {}
+        for _rank, locator in candidates:
+            preferred.setdefault(locator.value, locator)
+        return preferred
 
     @staticmethod
     def replace_legacy_owners(
@@ -409,14 +469,41 @@ class DeploymentLedgerCodec:
     def local_bundle_paths(lockfile: LockFile) -> frozenset[str]:
         """Return paths whose active provenance is an imperative local bundle."""
         ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
-        paths: set[str] = set()
         for record in ledger.records.values():
-            if record.active_owner != _LOCAL_BUNDLE_OWNER:
-                continue
-            path = DeploymentLedgerCodec.legacy_value(record.locator)
-            _require_local_bundle_hash(path, record.content_hash)
-            paths.add(path)
-        return frozenset(paths)
+            if record.active_owner == _LOCAL_BUNDLE_OWNER:
+                _require_local_bundle_hash(
+                    DeploymentLedgerCodec.legacy_value(record.locator), record.content_hash
+                )
+        return DeploymentLedgerCodec.local_bundle_values(ledger)
+
+    @staticmethod
+    def authored_local_paths(lockfile: LockFile) -> frozenset[str]:
+        """Return project-owned local paths an install, not a bundle, deployed."""
+        return frozenset(lockfile.local_deployed_files) - DeploymentLedgerCodec.local_bundle_values(
+            DeploymentLedgerCodec.from_lockfile(lockfile)
+        )
+
+    @staticmethod
+    def local_bundle_values(ledger: DeploymentLedger) -> frozenset[str]:
+        """Return local-bundle values without validating their hashes, for classification."""
+        return frozenset(
+            DeploymentLedgerCodec.legacy_value(record.locator)
+            for record in ledger.records.values()
+            if record.active_owner == _LOCAL_BUNDLE_OWNER
+        )
+
+    @staticmethod
+    def local_bundle_scope(values: Collection[str], bundles: Collection[str]) -> frozenset[str]:
+        """Return *values* that are bundle paths or directories containing one.
+
+        Sweeping a skill directory removes everything under it, so a directory
+        that holds bundle output is as protected as the bundle file itself.
+        """
+        covered: set[str] = set()
+        for bundle in bundles:
+            parts = bundle.split("/")
+            covered.update("/".join(parts[:end]) for end in range(1, len(parts) + 1))
+        return frozenset(value for value in values if value in covered)
 
     @staticmethod
     def replace_mcp_target_servers(
@@ -459,9 +546,13 @@ class DeploymentLedgerCodec:
         )
 
     @staticmethod
-    def invalidate_legacy_projection(lockfile: LockFile) -> None:
+    def invalidate_legacy_projection(
+        lockfile: LockFile,
+        prior_bundle_paths: frozenset[str] | None = None,
+    ) -> None:
         """Invalidate compatibility rows while preserving imperative provenance."""
-        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        if prior_bundle_paths is None:
+            prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
         lockfile.deployment_ledger = DeploymentLedger(records={})
         lockfile._deployments_present = False
         if prior_bundle_paths:
@@ -493,8 +584,7 @@ class DeploymentLedgerCodec:
                 frozenset(renamed_bundle_paths),
             )
         else:
-            lockfile.deployment_ledger = DeploymentLedger(records={})
-            lockfile._deployments_present = False
+            DeploymentLedgerCodec.invalidate_legacy_projection(lockfile, prior_bundle_paths)
 
     @staticmethod
     def _rebuild_from_legacy(
@@ -502,6 +592,7 @@ class DeploymentLedgerCodec:
         prior_bundle_paths: frozenset[str],
         *,
         prior_ledger: DeploymentLedger | None = None,
+        preferred_locators: dict[str, DeploymentLocator] | None = None,
     ) -> None:
         """Rebuild compatibility rows and restore surviving bundle provenance."""
         lockfile.deployment_ledger = DeploymentLedger(records={})
@@ -531,16 +622,21 @@ class DeploymentLedgerCodec:
                         locator.scope,
                     )
                 )
-                if previous is None:
+                preferred = (
+                    (preferred_locators or {}).get(locator.value)
+                    if locator.kind == LocatorKind.PROJECT_RELATIVE
+                    else None
+                )
+                if previous is None and preferred is None:
                     records[locator.key] = record
                     continue
                 active_owner = (
                     previous.active_owner
-                    if previous.active_owner in record.owners
+                    if previous is not None and previous.active_owner in record.owners
                     else record.active_owner
                 )
                 preserved = DeploymentRecord(
-                    locator=previous.locator,
+                    locator=preferred or previous.locator,
                     owners=record.owners,
                     active_owner=active_owner,
                     content_hash=record.content_hash,
@@ -776,7 +872,7 @@ class DeploymentLedgerCodec:
                         for prefix, name in _LEGACY_TARGET_PREFIXES.items()
                         if value.startswith(prefix)
                     ),
-                    "legacy",
+                    UNATTRIBUTED_TARGET,
                 )
             kind = LocatorKind.PROJECT_RELATIVE
         return DeploymentLocator(

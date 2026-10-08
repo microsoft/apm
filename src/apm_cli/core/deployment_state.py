@@ -100,6 +100,8 @@ class DeploymentIntent:
     authoritative_targets: bool
     dry_run: bool = False
     generic_governed_values: frozenset[str] | None = None
+    unprocessed_claims: frozenset[str] = frozenset()
+    """Values a declared target this run did not process still governs."""
 
 
 @dataclass(frozen=True)
@@ -412,6 +414,7 @@ class DeploymentReconciler:
             and target in self.target_profiles
             and target not in intent.declared_targets
             and target not in intent.active_targets
+            and record.locator.value not in intent.unprocessed_claims
         )
 
     @staticmethod

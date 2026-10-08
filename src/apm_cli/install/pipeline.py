@@ -481,7 +481,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         _early_lockfile and any(k != _SELF_KEY for k in _early_lockfile.dependencies)
     )
 
-    from .helpers.no_work import is_no_work_install
+    from .helpers.no_work import is_no_work_install, retained_local_work
 
     if is_no_work_install(
         all_apm_deps=all_apm_deps,
@@ -572,7 +572,12 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     finally:
         ctx.tui.__exit__()
 
-    if not ctx.deps_to_install and not ctx.root_has_local_primitives and not _has_orphan_deps:
+    if (
+        not ctx.deps_to_install
+        and not ctx.root_has_local_primitives
+        and not _has_orphan_deps
+        and not retained_local_work(ctx, _early_lockfile, lockfile_only)
+    ):
         if logger:
             logger.nothing_to_install(
                 lockfile_present=_early_lockfile is not None,

@@ -12,7 +12,7 @@ import pytest
 
 from apm_cli.install.deployed_paths import skill_bundle_file_entries
 from apm_cli.integration.cleanup import (
-    _is_skill_directory_entry,
+    is_skill_directory_entry,
     remove_stale_deployed_files,
 )
 from apm_cli.utils.content_hash import compute_file_hash
@@ -37,40 +37,40 @@ def _make_file(root: Path, rel: str, content: str = "hello\n") -> Path:
 
 
 # ------------------------------------------------------------------
-# _is_skill_directory_entry
+# is_skill_directory_entry
 # ------------------------------------------------------------------
 
 
 class TestIsSkillDirectoryEntry:
     def test_standard_agents_skill(self):
-        assert _is_skill_directory_entry(".agents/skills/my-skill")
+        assert is_skill_directory_entry(".agents/skills/my-skill")
 
     def test_github_skills(self):
-        assert _is_skill_directory_entry(".github/skills/coding-lint")
+        assert is_skill_directory_entry(".github/skills/coding-lint")
 
     def test_claude_skills(self):
-        assert _is_skill_directory_entry(".claude/skills/my-tool")
+        assert is_skill_directory_entry(".claude/skills/my-tool")
 
     def test_cursor_skills(self):
-        assert _is_skill_directory_entry(".cursor/skills/helper")
+        assert is_skill_directory_entry(".cursor/skills/helper")
 
     def test_too_short_rejected(self):
-        assert not _is_skill_directory_entry("skills/name")
+        assert not is_skill_directory_entry("skills/name")
 
     def test_skills_root_rejected(self):
-        assert not _is_skill_directory_entry(".agents/skills")
+        assert not is_skill_directory_entry(".agents/skills")
 
     def test_subdir_within_skill_rejected(self):
-        assert not _is_skill_directory_entry(".agents/skills/my-skill/scripts")
+        assert not is_skill_directory_entry(".agents/skills/my-skill/scripts")
 
     def test_non_skill_directory(self):
-        assert not _is_skill_directory_entry(".github/instructions")
+        assert not is_skill_directory_entry(".github/instructions")
 
     def test_prompts_dir_rejected(self):
-        assert not _is_skill_directory_entry(".github/prompts")
+        assert not is_skill_directory_entry(".github/prompts")
 
     def test_no_skills_component(self):
-        assert not _is_skill_directory_entry(".github/agents/my-agent")
+        assert not is_skill_directory_entry(".github/agents/my-agent")
 
 
 # ------------------------------------------------------------------
