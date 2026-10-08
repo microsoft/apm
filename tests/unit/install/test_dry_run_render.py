@@ -6,13 +6,20 @@ orphan preview, dev_apm_deps, and the dry-run notice / success message.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.presentation.dry_run import render_and_exit as _render_and_exit
 from apm_cli.models.dependency.reference import DependencyReference
+
+
+def _raise(_lock: object) -> bool:
+    raise ValueError("malformed ledger")
 
 
 def render_and_exit(**kwargs) -> None:
@@ -542,6 +549,35 @@ class TestDryRunNoticeAndSuccess:
             )
 
         logger.dry_run_notice.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("predicate", "shown"),
+        [(lambda _lock: True, True), (lambda _lock: False, False), (_raise, False)],
+        ids=["cleanup-pending", "nothing-pending", "unreadable-ledger"],
+    )
+    def test_dry_run_notice_follows_local_cleanup_predicate(
+        self, tmp_path: Path, predicate: Callable[[object], bool], shown: bool
+    ) -> None:
+        """Pending local cleanup triggers the notice; a failing predicate never fails a preview."""
+        logger = _make_logger()
+
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
+            patch("apm_cli.drift.detect_orphans", return_value=[]),
+        ):
+            render_and_exit(
+                logger=logger,
+                should_install_apm=True,
+                apm_deps=[],
+                mcp_deps=[],
+                dev_apm_deps=[],
+                should_install_mcp=False,
+                update=False,
+                apm_dir=tmp_path,
+                local_cleanup_pending=predicate,
+            )
+
+        assert logger.dry_run_notice.called is shown
 
     def test_renderer_leaves_completion_summary_to_caller(self, tmp_path: Path) -> None:
         """The command lifecycle owns the one final dry-run summary."""

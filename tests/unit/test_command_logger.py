@@ -421,6 +421,15 @@ class TestInstallLogger:
         # Cleanup parenthetical must appear before any timing/terminator.
         assert msg.index("(5 stale files cleaned)") < len(msg) - 2
 
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_cleanup_only_install_reports_what_it_removed(self, mock_success, mock_info) -> None:
+        """A run that only cleans stale files must not claim nothing changed."""
+        logger = InstallLogger()
+        logger.install_summary(apm_count=0, mcp_count=0, stale_cleaned=4)
+        assert mock_success.call_args[0][0] == "Cleaned 4 stale files."
+        mock_info.assert_not_called()
+
     @patch("apm_cli.core.command_logger._rich_success")
     def test_install_summary_no_stale_no_suffix(self, mock_success):
         logger = InstallLogger()

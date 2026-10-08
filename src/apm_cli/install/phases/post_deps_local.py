@@ -109,7 +109,7 @@ def run(ctx: InstallContext) -> None:
             logger.cleanup_skipped_user_edit(skipped, "<local .apm/>")
         logger.stale_cleanup("<local .apm/>", len(cleanup.deleted))
 
-    _files, _hashes = reconcile_deployed_block(
+    _files, _hashes, _ledger = reconcile_deployed_block(
         project_root=ctx.project_root,
         dep_key="<local .apm/>",
         current_files=_current_files,
@@ -123,11 +123,19 @@ def run(ctx: InstallContext) -> None:
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
         current_run_trusted=not _local_had_errors,
+        include_ledger=True,
         user_scope=is_user_scope(getattr(ctx, "scope", None)),
     )
 
     DeploymentLedgerCodec.replace_context_local_files(ctx, sorted(_files))
-    DeploymentLedgerCodec.replace_legacy_owner(_persist_lock, ".", sorted(_files), _hashes)
+    DeploymentLedgerCodec.replace_legacy_owner(
+        _persist_lock,
+        ".",
+        sorted(_files),
+        _hashes,
+        provenance=_ledger,
+        current_targets=ctx.targets or (),
+    )
     if logger and _ghost_count:
         noun = "entry" if _ghost_count == 1 else "entries"
         logger.info(f"Repaired {_ghost_count} inactive-target local lockfile {noun}")

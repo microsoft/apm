@@ -653,6 +653,315 @@ def test_legacy_owner_update_preserves_canonical_shared_root_locator() -> None:
     assert records[0].locator.target == "copilot"
 
 
+def test_legacy_owner_update_adopts_reconciled_shared_root_locator() -> None:
+    """A reconciled locator replaces the prior unattributed shared-root target."""
+    path = ".agents/skills/demo/SKILL.md"
+    lockfile = LockFile()
+    lockfile.local_deployed_files = [path]
+    lockfile.local_deployed_file_hashes = {path: "sha256:demo"}
+    concrete = _locator(path, target="copilot")
+    reconciled = DeploymentLedger(
+        records={
+            concrete.key: DeploymentRecord(
+                locator=concrete,
+                owners=(".",),
+                active_owner=".",
+                content_hash="sha256:demo",
+            )
+        }
+    )
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        ".",
+        [path],
+        {path: "sha256:demo"},
+        provenance=reconciled,
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert len(records) == 1
+    assert records[0].locator.target == "copilot"
+    assert records[0].owners == (".",)
+
+
+def test_legacy_owner_update_adopts_only_the_reconciled_locator() -> None:
+    """A co-owned path keeps its active owner, and unattributed locators never win."""
+    path = ".agents/skills/shared/SKILL.md"
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="owner/dep",
+            deployed_files=[path],
+            deployed_file_hashes={path: "sha256:demo"},
+        )
+    )
+    lockfile.local_deployed_files = [path]
+    lockfile.local_deployed_file_hashes = {path: "sha256:demo"}
+    unattributed = _locator(path, target="legacy")
+    lockfile.deployment_ledger = DeploymentLedger(
+        records={
+            unattributed.key: DeploymentRecord(
+                locator=unattributed,
+                owners=(".", "owner/dep"),
+                active_owner="owner/dep",
+                content_hash="sha256:demo",
+            )
+        }
+    )
+    lockfile._deployments_present = True
+    concrete = _locator(path, target="copilot")
+    reconciled = DeploymentLedger(
+        records={
+            locator.key: DeploymentRecord(
+                locator=locator,
+                owners=("legacy",),
+                active_owner="legacy",
+                content_hash="sha256:demo",
+            )
+            for locator in (concrete, unattributed)
+        }
+    )
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        ".",
+        [path],
+        {path: "sha256:demo"},
+        provenance=reconciled,
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert len(records) == 1
+    assert records[0].locator.target == "copilot"
+    assert records[0].active_owner == "owner/dep"
+
+
+@pytest.mark.parametrize("current", ["codex", "copilot"])
+def test_legacy_owner_provenance_prefers_a_current_target(current: str) -> None:
+    """With several concrete locators for one path, the current run's target wins."""
+    path = ".agents/skills/demo/SKILL.md"
+    lockfile = LockFile()
+    lockfile.local_deployed_files = [path]
+    lockfile.local_deployed_file_hashes = {path: "sha256:demo"}
+    provenance = DeploymentLedger(
+        records={
+            locator.key: DeploymentRecord(
+                locator=locator,
+                owners=(".",),
+                active_owner=".",
+                content_hash="sha256:demo",
+            )
+            for locator in (_locator(path, target="codex"), _locator(path, target="copilot"))
+        }
+    )
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        ".",
+        [path],
+        {path: "sha256:demo"},
+        provenance=provenance,
+        current_targets=[_target(current, f".{current}")],
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert [record.locator.target for record in records] == [current]
+
+
+def test_legacy_owner_provenance_keeps_a_fresh_current_target_on_shared_paths() -> None:
+    """Old provenance never overrides a co-owned row this run already attributed."""
+    path = ".agents/skills/shared/SKILL.md"
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="owner/dep",
+            deployed_files=[path],
+            deployed_file_hashes={path: "sha256:demo"},
+        )
+    )
+    fresh = _locator(path, target="codex")
+    old = _locator(path, target="copilot")
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(
+            records={
+                fresh.key: DeploymentRecord(
+                    locator=fresh,
+                    owners=("owner/dep",),
+                    active_owner="owner/dep",
+                    content_hash="sha256:demo",
+                )
+            }
+        ),
+        lockfile,
+    )
+    provenance = DeploymentLedger(
+        records={
+            old.key: DeploymentRecord(
+                locator=old,
+                owners=(".", "owner/dep"),
+                active_owner="owner/dep",
+                content_hash="sha256:demo",
+            )
+        }
+    )
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        ".",
+        [path],
+        {path: "sha256:demo"},
+        provenance=provenance,
+        current_targets=[_target("claude", ".claude"), _target("codex", ".codex")],
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert [record.locator.target for record in records] == ["codex"]
+
+
+def test_legacy_owner_drops_malformed_carried_bundle_provenance() -> None:
+    """A malformed carried-forward bundle hash degrades to a plain row instead of raising."""
+    bundled = ".agents/skills/bundled/SKILL.md"
+    marked = _locator(bundled, target="legacy")
+    provenance = DeploymentLedger(
+        records={
+            marked.key: DeploymentRecord(
+                locator=marked,
+                owners=(".", "local-bundle"),
+                active_owner="local-bundle",
+                content_hash="sha256:not-canonical",
+            )
+        }
+    )
+    lockfile = LockFile()
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        ".",
+        [bundled],
+        {bundled: "sha256:not-canonical"},
+        provenance=provenance,
+    )
+
+    assert DeploymentLedgerCodec.local_bundle_paths(lockfile) == frozenset()
+    assert lockfile.local_deployed_files == [bundled]
+
+
+def test_legacy_owner_provenance_restores_dependency_locators() -> None:
+    """Provenance also restores concrete locators for a dependency owner's files."""
+    path = ".agents/skills/dep/SKILL.md"
+    lockfile = LockFile()
+    lockfile.add_dependency(LockedDependency(repo_url="owner/dep"))
+    concrete = _locator(path, target="copilot")
+    provenance = DeploymentLedger(
+        records={
+            concrete.key: DeploymentRecord(
+                locator=concrete,
+                owners=("owner/dep",),
+                active_owner="owner/dep",
+                content_hash="sha256:dep",
+            )
+        }
+    )
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        lockfile,
+        "owner/dep",
+        [path],
+        {path: "sha256:dep"},
+        provenance=provenance,
+    )
+
+    records = tuple(lockfile.deployment_ledger.records.values())
+    assert [(record.locator.target, record.owners) for record in records] == [
+        ("copilot", ("owner/dep",))
+    ]
+
+
+def test_renaming_a_local_path_keeps_other_bundle_provenance() -> None:
+    """Renaming an authored path must not demote unrelated bundle rows."""
+    authored = ".github/skills/demo/SKILL.md"
+    bundled = ".agents/skills/bundled/SKILL.md"
+    lockfile = LockFile()
+    lockfile.local_deployed_files = [authored]
+    lockfile.local_deployed_file_hashes = {authored: "sha256:authored"}
+    DeploymentLedgerCodec.record_local_bundle_files(
+        lockfile, [bundled], {bundled: f"sha256:{'b' * 64}"}
+    )
+
+    DeploymentLedgerCodec.rename_local_deployed_path(
+        lockfile, authored, ".agents/skills/demo/SKILL.md"
+    )
+
+    rebuilt = LockFile.from_yaml(lockfile.to_yaml())
+    assert DeploymentLedgerCodec.local_bundle_paths(rebuilt) == frozenset({bundled})
+
+
+def test_legacy_owner_provenance_is_scoped_to_the_owner_files() -> None:
+    """Carried-forward provenance restores local rows without touching dependency rows."""
+    dependency_path = ".agents/skills/dep/SKILL.md"
+    bundled = ".agents/skills/bundled/SKILL.md"
+    bundle_hash = f"sha256:{'b' * 64}"
+    existing = LockFile()
+    existing.add_dependency(
+        LockedDependency(
+            repo_url="owner/dep",
+            deployed_files=[dependency_path],
+            deployed_file_hashes={dependency_path: "sha256:dep"},
+        )
+    )
+    DeploymentLedgerCodec.record_local_bundle_files(existing, [bundled], {bundled: bundle_hash})
+    stale = _locator(dependency_path, target="copilot")
+    provenance = DeploymentLedger(
+        records={
+            **existing.deployment_ledger.records,
+            stale.key: DeploymentRecord(
+                locator=stale,
+                owners=("owner/dep",),
+                active_owner="owner/dep",
+                content_hash="sha256:dep",
+            ),
+        }
+    )
+    fresh = LockFile()
+    fresh.add_dependency(
+        LockedDependency(
+            repo_url="owner/dep",
+            deployed_files=[dependency_path],
+            deployed_file_hashes={dependency_path: "sha256:dep"},
+        )
+    )
+    current = _locator(dependency_path, target="codex")
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(
+            records={
+                current.key: DeploymentRecord(
+                    locator=current,
+                    owners=("owner/dep",),
+                    active_owner="owner/dep",
+                    content_hash="sha256:dep",
+                )
+            }
+        ),
+        fresh,
+    )
+
+    DeploymentLedgerCodec.replace_legacy_owner(
+        fresh,
+        ".",
+        [bundled],
+        {bundled: bundle_hash},
+        provenance=provenance,
+    )
+
+    targets = {
+        record.locator.value: record.locator.target
+        for record in fresh.deployment_ledger.records.values()
+    }
+    assert targets[dependency_path] == "codex"
+    assert DeploymentLedgerCodec.local_bundle_paths(fresh) == frozenset({bundled})
+
+
 def test_local_bundle_provenance_round_trips_beside_authored_local_files() -> None:
     authored = ".github/instructions/authored.instructions.md"
     bundled = ".agents/skills/bundled/SKILL.md"

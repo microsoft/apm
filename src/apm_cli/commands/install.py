@@ -1772,6 +1772,17 @@ def _install_apm_packages(ctx, outcome):
     should_install_apm = ctx.install_mode != InstallMode.MCP
     should_install_mcp = ctx.install_mode != InstallMode.APM
 
+    from apm_cli.install.helpers.no_work import local_rows_need_reconciling
+
+    def _local_cleanup_pending(lockfile: "LockFile | None") -> bool:
+        return should_install_apm and local_rows_need_reconciling(
+            lockfile,
+            ctx.project_root,
+            apm_package,
+            target=ctx.target or ctx.runtime,
+            scope=ctx.scope,
+        )
+
     if ctx.dry_run:
         prospective_plan = ProspectiveInstallPlan.from_apm_package(
             apm_package,
@@ -1813,6 +1824,7 @@ def _install_apm_packages(ctx, outcome):
             plan=prospective_plan,
             update=ctx.update,
             apm_dir=ctx.apm_dir,
+            local_cleanup_pending=_local_cleanup_pending,
         )
         return (*prospective_plan.dependency_counts, None)
 
@@ -1859,6 +1871,7 @@ def _install_apm_packages(ctx, outcome):
         has_any_apm_deps
         or _project_has_root_primitives(_cli_project_root)
         or _has_orphan_deps_in_lock
+        or _local_cleanup_pending(_existing_lock)
     ):
         if not APM_DEPS_AVAILABLE:
             logger.error("APM dependency system not available")
