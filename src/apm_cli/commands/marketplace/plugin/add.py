@@ -36,6 +36,7 @@ from . import (
 )
 @click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
+@click.option("--category", default=None, help="Marketplace-owned package category")
 @click.option("--tags", default=None, help="Comma-separated tags")
 @click.option("--include-prerelease", is_flag=True, help="Include prerelease versions")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
@@ -48,6 +49,7 @@ def add(
     ref,
     subdir,
     tag_pattern,
+    category,
     tags,
     include_prerelease,
     no_verify,
@@ -85,6 +87,7 @@ def add(
             ref=ref,
             subdir=subdir,
             tag_pattern=tag_pattern,
+            category=category,
             tags=parsed_tags,
             include_prerelease=include_prerelease,
         )

@@ -202,8 +202,8 @@ marketplace:
 Add and edit packages without leaving the shell:
 
 ```bash
-apm marketplace package add acme-org/another-pkg --version "^2.0.0"
-apm marketplace package set example-package --version "^1.2.0"
+apm marketplace package add acme-org/another-pkg --version "^2.0.0" --category productivity
+apm marketplace package set example-package --version "^1.2.0" --category developer-tools
 apm marketplace package remove pinned-package
 ```
 
