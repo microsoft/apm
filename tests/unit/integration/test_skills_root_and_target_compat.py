@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from apm_cli.install.deployed_paths import skill_summary_paths
-from apm_cli.install.target_filter import package_allows_target, resolve_effective_package_targets
+from apm_cli.install.target_filter import (
+    explicit_target_failure,
+    package_allows_target,
+    resolve_effective_package_targets,
+)
 from apm_cli.integration.cleanup import _is_skill_directory_entry
 from apm_cli.integration.skill_support import build_skill_ownership_maps
 from apm_cli.integration.targets import KNOWN_TARGETS, skills_root_prefixes
@@ -111,8 +116,6 @@ class TestSkillRootConsumers:
 def _selection(
     targets: list[str],
     declared: list[str] | None,
-    *,
-    explicit: bool = False,
 ) -> tuple:
     diagnostics = DiagnosticCollector()
     package = APMPackage(name="pkg", version="1.0.0", targets=declared)
@@ -122,7 +125,6 @@ def _selection(
         package,
         diagnostics,
         "pkg",
-        explicit_targets=explicit,
     )
     return selection, diagnostics
 
@@ -153,36 +155,70 @@ class TestAgentSkillsCompatibility:
         assert [t.name for t in selection.targets] == ["grok-bot"]
 
 
+def _node(name: str, declared: list[str] | None, *children: SimpleNamespace) -> SimpleNamespace:
+    node = SimpleNamespace(
+        package=APMPackage(name=name, version="1.0.0", targets=declared),
+        dependency_ref=SimpleNamespace(target_subset=None, get_unique_key=lambda: name),
+        children=list(children),
+    )
+    return node
+
+
+def _profiles(*names: str) -> list:
+    return [KNOWN_TARGETS[name] for name in names]
+
+
 class TestAllTargetsFilteredOut:
-    def test_explicit_request_records_error_with_hint(self) -> None:
-        selection, diagnostics = _selection(["grok-bot"], ["cursor"], explicit=True)
+    def test_no_overlap_is_always_a_warning(self) -> None:
+        selection, diagnostics = _selection(["grok-bot"], ["cursor"])
 
         assert selection.targets == ()
-        assert diagnostics.count_for_package("pkg", CATEGORY_ERROR) == 1
-        assert diagnostics.count_for_package("pkg", CATEGORY_WARNING) == 0
-        entry = next(d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR)
-        assert "[cursor]" in entry.message
-        assert "[grok-bot]" in entry.message
-        assert entry.detail.startswith("Install with --target cursor, or ask the package author")
-        assert "add grok-bot to its targets" in entry.detail
-        assert entry.message.isascii()
-        assert entry.detail.isascii()
-
-    def test_auto_detected_targets_stay_a_warning(self) -> None:
-        _, diagnostics = _selection(["grok-bot"], ["cursor"], explicit=False)
-
         assert diagnostics.count_for_package("pkg", CATEGORY_ERROR) == 0
         assert diagnostics.count_for_package("pkg", CATEGORY_WARNING) == 1
 
-    def test_partial_overlap_never_errors(self) -> None:
-        selection, diagnostics = _selection(["grok-bot", "cursor"], ["cursor"], explicit=True)
+    def test_partial_overlap_never_warns(self) -> None:
+        selection, diagnostics = _selection(["grok-bot", "cursor"], ["cursor"])
 
         assert [t.name for t in selection.targets] == ["cursor"]
         assert diagnostics.count_for_package("pkg", CATEGORY_ERROR) == 0
         assert diagnostics.count_for_package("pkg", CATEGORY_WARNING) == 0
 
-    def test_hint_mentions_agent_skills_acceptance(self) -> None:
-        _, diagnostics = _selection(["claude"], ["agent-skills"], explicit=True)
+    def test_failure_when_no_package_deploys(self) -> None:
+        only = _node("pkg", ["cursor"])
 
-        entry = next(d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR)
-        assert "Skills-only targets accept packages that declare agent-skills" in entry.detail
+        message = explicit_target_failure(_profiles("grok-bot"), [only], [])
+
+        assert message is not None
+        assert "[cursor]" in message and "[grok-bot]" in message
+        assert "Install with --target cursor, or ask the package author" in message
+        assert "add grok-bot to its targets" in message
+        assert message.isascii()
+
+    def test_no_failure_when_any_package_deploys(self) -> None:
+        child = _node("child", ["cursor"])
+        parent = _node("parent", None, child)
+
+        assert explicit_target_failure(_profiles("grok-bot"), [parent, child], []) is None
+
+    def test_failure_when_named_package_subtree_is_dead(self) -> None:
+        good = _node("good", None)
+        bad = _node("bad", ["cursor"], _node("bad-child", ["cursor"]))
+        nodes = [good, bad, *bad.children]
+
+        assert explicit_target_failure(_profiles("grok-bot"), nodes, [good]) is None
+        message = explicit_target_failure(_profiles("grok-bot"), nodes, [good, bad])
+        assert message is not None and message.startswith("bad declares targets [cursor]")
+
+    def test_named_package_with_live_child_is_not_a_failure(self) -> None:
+        parent = _node("parent", ["cursor"], _node("child", None))
+
+        assert (
+            explicit_target_failure(_profiles("grok-bot"), [parent, *parent.children], [parent])
+            is None
+        )
+
+    def test_hint_mentions_agent_skills_acceptance(self) -> None:
+        message = explicit_target_failure(_profiles("claude"), [_node("pkg", ["agent-skills"])], [])
+
+        assert message is not None
+        assert "Skills-only targets accept packages that declare agent-skills" in message

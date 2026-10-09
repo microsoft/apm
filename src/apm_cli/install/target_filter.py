@@ -101,7 +101,6 @@ def resolve_effective_package_targets(
     package_source: object,
     diagnostics: DiagnosticCollector | None,
     package_name: str,
-    explicit_targets: bool = False,
 ) -> EffectivePackageTargets:
     """Intersect active, consumer-authorized, and package-declared targets.
 
@@ -110,12 +109,9 @@ def resolve_effective_package_targets(
     Package metadata never activates a target absent from either upstream set.
     An omitted declaration and the legacy ``all`` spelling add no restriction.
 
-    When the package declaration leaves nothing to deploy to, the outcome
-    depends on how the targets were chosen: an explicit ``--target`` request
-    (*explicit_targets*) is an error, because the user asked for a deployment
-    that cannot happen and a silent exit 0 hides it. Auto-detected or
-    configured targets stay a warning, since the package legitimately serves
-    only some of the project's tools.
+    A declaration that leaves nothing to deploy to only warns here; whether an
+    explicit ``--target`` request must fail is decided once per install by
+    :func:`explicit_target_failure`.
     """
     active_targets = tuple(targets)
     if diagnostics is None:
@@ -163,22 +159,14 @@ def resolve_effective_package_targets(
     ):
         requested = ", ".join(sorted(package_allowed))
         authorized = ", ".join(sorted(target.name for target in consumer_targets))
-        if explicit_targets:
-            diagnostics.error(
-                f"Package declares targets [{requested}] but you requested [{authorized}]; "
-                "nothing was deployed",
-                package=package_name,
-                detail=_no_target_hint(declared_targets, consumer_targets[0].name),
-            )
-        else:
-            diagnostics.warn(
-                f"Package targets [{requested}] do not overlap authorized active targets; skipping",
-                package=package_name,
-                detail=(
-                    f"authorized targets: [{authorized}]; enable a declared target "
-                    "or choose a compatible dependency"
-                ),
-            )
+        diagnostics.warn(
+            f"Package targets [{requested}] do not overlap authorized active targets; skipping",
+            package=package_name,
+            detail=(
+                f"authorized targets: [{authorized}]; enable a declared target "
+                "or choose a compatible dependency"
+            ),
+        )
 
     effective_names = {target.name for target in effective_targets}
     return EffectivePackageTargets(
@@ -192,3 +180,72 @@ def resolve_effective_package_targets(
         package_allowed_targets=package_allowed,
         package_restriction_active=package_restriction_active,
     )
+
+
+def explicit_target_failure(
+    targets: list[TargetProfile],
+    nodes: list,
+    root_nodes: list,
+) -> str | None:
+    """Return an error message when an explicit ``--target`` would deploy nothing.
+
+    *nodes* are every resolved dependency node; *root_nodes* are the packages
+    the user named on the command line (empty for a whole-manifest install).
+    Fails when no package has an effective target, or when a named package and
+    its whole dependency subtree have none. Pure: it reads declared targets
+    only, so it can run before any primitive is written.
+    """
+    if not targets:
+        return None
+
+    def _declared_and_effective(node: object) -> tuple[list[str], bool]:
+        package = getattr(node, "package", None)
+        if package is None:
+            return [], True
+        selection = resolve_effective_package_targets(
+            targets,
+            getattr(node.dependency_ref, "target_subset", None),
+            package,
+            None,
+            "",
+        )
+        deployable = bool(selection.targets) or not selection.package_restriction_active
+        return list(selection.package_declared_targets), deployable
+
+    def _subtree(root: object) -> list:
+        seen: set[int] = set()
+        stack = [root]
+        ordered = []
+        while stack:
+            current = stack.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            ordered.append(current)
+            stack.extend(getattr(current, "children", ()))
+        return ordered
+
+    requested = targets[0].name
+    for root in root_nodes:
+        members = _subtree(root)
+        if not any(_declared_and_effective(member)[1] for member in members):
+            declared = _declared_and_effective(root)[0]
+            return _failure_message(root, declared, targets, requested)
+    if nodes and not any(_declared_and_effective(node)[1] for node in nodes):
+        root = nodes[0]
+        return _failure_message(root, _declared_and_effective(root)[0], targets, requested)
+    return None
+
+
+def _failure_message(
+    node: object, declared: list[str], targets: list[TargetProfile], requested: str
+) -> str:
+    name = node.dependency_ref.get_unique_key()
+    wanted = ", ".join(sorted(target.name for target in targets))
+    shown = ", ".join(sorted(declared)) or "none"
+    message = (
+        f"{name} declares targets [{shown}] but you requested [{wanted}]; nothing was deployed"
+    )
+    if declared:
+        message += f"\n{_no_target_hint(declared, requested)}"
+    return message

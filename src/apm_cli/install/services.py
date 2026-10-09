@@ -304,7 +304,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         package_info,
         diagnostics,
         package_name,
-        explicit_targets=_targets_explicitly_requested(ctx),
     )
     targets = list(target_selection.targets)
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)

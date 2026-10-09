@@ -233,6 +233,7 @@ class TestPackageTargetCompatibility:
     ) -> None:
         pkg = _plain_folder_package(tmp_path / "src", targets=["cursor"])
         project = _project(tmp_path)
+        before = _snapshot(project)
 
         result = _apm(["install", str(pkg), "--target", "grok-bot"], project, monkeypatch)
 
@@ -240,8 +241,57 @@ class TestPackageTargetCompatibility:
         output = " ".join(result.output.split())
         assert "declares targets [cursor]" in output
         assert "requested [grok-bot]" in output
-        assert "--target" in output
+        assert "Install with --target cursor" in output
         assert not (project / "agent-data").exists()
+        assert _snapshot(project) == before
+
+    @pytest.mark.parametrize("target", ["grok-bot", "claude"])
+    def test_transitive_no_overlap_warns_and_deploys_parent(
+        self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch, target: str
+    ) -> None:
+        src = tmp_path / "src"
+        child = _plain_folder_package(src, "child-skill", targets=["cursor"])
+        parent = _plain_folder_package(src, "parent")
+        data = yaml.safe_load((parent / "apm.yml").read_text(encoding="utf-8"))
+        data["dependencies"] = {"apm": [str(child)]}
+        (parent / "apm.yml").write_text(yaml.dump(data), encoding="utf-8")
+        project = _project(tmp_path)
+
+        result = _apm(["install", str(parent), "--target", target], project, monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        assert "do not overlap authorized active targets" in " ".join(result.output.split())
+        lock_files = _lock_deployed(project)
+        if target == "grok-bot":
+            assert (project / "agent-data" / "workflows" / "parent" / "SKILL.md").is_file()
+            assert "agent-data/workflows/parent" in " ".join(lock_files)
+            assert not (project / "agent-data" / "workflows" / "child-skill").exists()
+        else:
+            assert (project / ".claude" / "skills" / "parent" / "SKILL.md").is_file()
+            assert not (project / ".claude" / "skills" / "child-skill").exists()
+        assert not any("child-skill" in f for f in lock_files)
+        lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+        assert any("parent" in dep.get("local_path", "") for dep in lock["dependencies"])
+
+    def test_named_package_subtree_without_overlap_fails_before_writes(
+        self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = tmp_path / "src"
+        good = _plain_folder_package(src, "good-skill")
+        bad = _plain_folder_package(src, "bad-skill", targets=["cursor"])
+        project = _project(tmp_path)
+        before = _snapshot(project)
+
+        result = _apm(
+            ["install", str(good), str(bad), "--target", "grok-bot"], project, monkeypatch
+        )
+
+        assert result.exit_code != 0, result.output
+        output = " ".join(result.output.split())
+        assert "declares targets [cursor]" in output
+        assert "Install with --target cursor" in output
+        assert not (project / "agent-data").exists()
+        assert _snapshot(project) == before
 
     def test_partial_overlap_stays_a_success(
         self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
