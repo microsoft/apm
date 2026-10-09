@@ -69,12 +69,30 @@ def filter_targets_for_dependency(
     return filtered_targets, allowed_dep_targets, True
 
 
+# A package declaring this target ships portable, cross-client skills.
+CROSS_CLIENT_SKILLS_TARGET = "agent-skills"
+
+
+def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]) -> bool:
+    """Return whether a package's declared targets admit *target*.
+
+    A declaration of ``agent-skills`` describes cross-client skills, so it also
+    admits every skills-only target (derived from the profile, never by name):
+    only the skills primitive deploys there, which is exactly what the package
+    declared.
+    """
+    if target.name in package_allowed:
+        return True
+    return CROSS_CLIENT_SKILLS_TARGET in package_allowed and target.skills_only
+
+
 def resolve_effective_package_targets(
     targets: list[TargetProfile],
     dep_target_subset: list[str] | None,
     package_source: object,
     diagnostics: DiagnosticCollector | None,
     package_name: str,
+    explicit_targets: bool = False,
 ) -> EffectivePackageTargets:
     """Intersect active, consumer-authorized, and package-declared targets.
 
@@ -82,6 +100,13 @@ def resolve_effective_package_targets(
     targets may narrow that set, and package targets may narrow it again.
     Package metadata never activates a target absent from either upstream set.
     An omitted declaration and the legacy ``all`` spelling add no restriction.
+
+    When the package declaration leaves nothing to deploy to, the outcome
+    depends on how the targets were chosen: an explicit ``--target`` request
+    (*explicit_targets*) is an error, because the user asked for a deployment
+    that cannot happen and a silent exit 0 hides it. Auto-detected or
+    configured targets stay a warning, since the package legitimately serves
+    only some of the project's tools.
     """
     active_targets = tuple(targets)
     if diagnostics is None:
@@ -114,7 +139,9 @@ def resolve_effective_package_targets(
     package_restriction_active = bool(declared_targets) and "all" not in declared_targets
     package_allowed = frozenset(declared_targets) if package_restriction_active else frozenset()
     effective_targets = (
-        tuple(target for target in consumer_targets if target.name in package_allowed)
+        tuple(
+            target for target in consumer_targets if package_allows_target(target, package_allowed)
+        )
         if package_restriction_active
         else consumer_targets
     )
@@ -127,14 +154,25 @@ def resolve_effective_package_targets(
     ):
         requested = ", ".join(sorted(package_allowed))
         authorized = ", ".join(sorted(target.name for target in consumer_targets))
-        diagnostics.warn(
-            f"Package targets [{requested}] do not overlap authorized active targets; skipping",
-            package=package_name,
-            detail=(
-                f"authorized targets: [{authorized}]; enable a declared target "
-                "or choose a compatible dependency"
-            ),
-        )
+        if explicit_targets:
+            diagnostics.error(
+                f"Package declares targets [{requested}] but you requested [{authorized}]; "
+                "nothing was deployed",
+                package=package_name,
+                detail=(
+                    f"Use --target with one of [{requested}], or ask the package author "
+                    f"to add '{consumer_targets[0].name}' to its 'targets:' list"
+                ),
+            )
+        else:
+            diagnostics.warn(
+                f"Package targets [{requested}] do not overlap authorized active targets; skipping",
+                package=package_name,
+                detail=(
+                    f"authorized targets: [{authorized}]; enable a declared target "
+                    "or choose a compatible dependency"
+                ),
+            )
 
     effective_names = {target.name for target in effective_targets}
     return EffectivePackageTargets(

@@ -28,6 +28,7 @@ from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundar
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
+from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .exec_gate import check_executable_approval
 from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
 from .exec_gate import resolve_bin_skip as _resolve_bin_skip
@@ -204,6 +205,12 @@ def _warn_target_reconcile_failure(
     )
 
 
+def _targets_explicitly_requested(ctx: InstallContext | None) -> bool:
+    """Return True only when the active targets came from ``--target``."""
+    decision = getattr(ctx, "target_decision", None)
+    return getattr(decision, "source", None) == "--target flag"
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -297,6 +304,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         package_info,
         diagnostics,
         package_name,
+        explicit_targets=_targets_explicitly_requested(ctx),
     )
     targets = list(target_selection.targets)
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
@@ -624,35 +632,9 @@ def integrate_package_primitives(  # noqa: PLR0913
         trust_bin=trust_bin,
         source_plan=source_plan,
     )
-    _skill_target_dirs: set = builtins.set()
-    for tp in skill_result.target_paths:
-        try:
-            rel = tp.relative_to(project_root)
-            if rel.parts:
-                _skill_target_dirs.add(rel.parts[0])
-        except ValueError:
-            from apm_cli.integration.targets import target_name_for_locator
-
-            owner = next(
-                (
-                    target
-                    for target in targets
-                    if target.managed_deploy_root is not None
-                    and tp.is_relative_to(target.managed_deploy_root)
-                ),
-                None,
-            )
-            locator_name = target_name_for_locator(_deployed_path_entry(tp, project_root, targets))
-            _skill_target_dirs.add(
-                owner.name
-                if owner is not None
-                else locator_name
-                if locator_name is not None
-                else "external"
-            )
-    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
-    if not _skill_target_paths:
-        _skill_target_paths = ["skills/"]
+    _skill_target_paths = _skill_summary_paths(
+        skill_result.target_paths, project_root, targets
+    ) or ["skills/"]
     _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1

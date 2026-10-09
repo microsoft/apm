@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- New `grok-bot` install target deploys skill packages to `agent-data/workflows/<skill-name>/` for Grok Bot at project and user (`--global`) scope. (#3106)
+- New `grok-bot` install target deploys skill packages to `agent-data/workflows/<skill-name>/` for Grok Bot at project and user (`--global`) scope; packages declaring `agent-skills` are accepted by skills-only targets, and `--target` fails when it filters out every target for a package. (#3106)
 
 ### Changed
 
