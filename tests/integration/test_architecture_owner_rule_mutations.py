@@ -502,6 +502,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Resolution staging owner drops a mandatory replacement-activation method.",
     ),
     MutationCase(
+        guard_id="install-deployment-skills-root-derivation",
+        rule_id="install-deployment-skills-root-derivation",
+        path="src/apm_cli/integration/skill_integrator.py",
+        old="target_skills_root = project_root / target.skills_rel_root",
+        new='target_skills_root = project_root / target.root_dir / "skills"',
+        intent="Skill integration re-derives the skills root instead of using the target profile.",
+    ),
+    MutationCase(
         guard_id="install-deployment-source-plan",
         rule_id="install-deployment-source-plan",
         path="src/apm_cli/install/services.py",

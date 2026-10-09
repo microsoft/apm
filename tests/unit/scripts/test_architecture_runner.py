@@ -657,6 +657,7 @@ install-deployment-require-hashes-enforcement
 install-deployment-resolution-replacement
 install-deployment-resolver-queue-dedup
 install-deployment-skill-subset-tokens
+install-deployment-skills-root-derivation
 install-deployment-source-plan
 install-deployment-target-file-contraction
 install-deployment-uninstall-reachability

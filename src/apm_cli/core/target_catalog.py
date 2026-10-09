@@ -22,6 +22,8 @@ class TargetCapability:
     compile_family: str | None
     runtimes: tuple[str, ...]
     commands: frozenset[str]
+    meta_target: bool = False
+    accepts_agent_skills_packages: bool = False
 
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
@@ -39,6 +41,8 @@ def _capability(
     primitive_profile: str | None = None,
     compile_family: str | None = None,
     runtimes: tuple[str, ...] = (),
+    meta_target: bool = False,
+    accepts_agent_skills_packages: bool = False,
 ) -> TargetCapability:
     """Create catalog data shared by all target-selecting commands."""
     return TargetCapability(
@@ -53,6 +57,8 @@ def _capability(
         compile_family=compile_family,
         runtimes=runtimes,
         commands=_TARGET_COMMANDS,
+        meta_target=meta_target,
+        accepts_agent_skills_packages=accepts_agent_skills_packages,
     )
 
 
@@ -104,13 +110,19 @@ def _build_target_catalog(
 TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
     (
         _capability(
-            "copilot",
-            "GitHub Copilot native .github configuration",
-            aliases=("vscode", "agents"),
-            in_all=True,
-            primitive_profile="copilot",
-            compile_family="vscode",
-            runtimes=("copilot", "vscode", "agents"),
+            "agent-skills",
+            "Cross-client native .agents skills configuration",
+            explicit_only=True,
+            primitive_profile="agent-skills",
+            meta_target=True,
+        ),
+        _capability(
+            "antigravity",
+            "Antigravity native .agents configuration",
+            aliases=("agy",),
+            explicit_only=True,
+            primitive_profile="antigravity",
+            compile_family="agents",
         ),
         _capability(
             "claude",
@@ -120,24 +132,38 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="claude",
         ),
         _capability(
+            "codex",
+            "Codex native .codex and .agents configuration",
+            in_all=True,
+            primitive_profile="codex",
+            compile_family="agents",
+        ),
+        _capability(
+            "copilot",
+            "GitHub Copilot native .github configuration",
+            aliases=("vscode", "agents"),
+            in_all=True,
+            primitive_profile="copilot",
+            compile_family="vscode",
+            runtimes=("copilot", "vscode", "agents"),
+        ),
+        _capability(
+            "copilot-app",
+            "GitHub Copilot desktop app native workflow configuration",
+            experimental_flag="copilot_app",
+            primitive_profile="copilot-app",
+        ),
+        _capability(
+            "copilot-cowork",
+            "Microsoft 365 Copilot Cowork native skills configuration",
+            experimental_flag="copilot_cowork",
+            primitive_profile="copilot-cowork",
+        ),
+        _capability(
             "cursor",
             "Cursor native .cursor configuration",
             in_all=True,
             primitive_profile="cursor",
-            compile_family="agents",
-        ),
-        _capability(
-            "kiro",
-            "Kiro native .kiro configuration",
-            in_all=True,
-            primitive_profile="kiro",
-            compile_family="agents",
-        ),
-        _capability(
-            "opencode",
-            "OpenCode native .opencode configuration",
-            in_all=True,
-            primitive_profile="opencode",
             compile_family="agents",
         ),
         _capability(
@@ -146,6 +172,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="gemini",
             compile_family="gemini",
+        ),
+        _capability(
+            "grok-bot",
+            "Grok Bot native agent-data/workflows skills configuration",
+            explicit_only=True,
+            primitive_profile="grok-bot",
+            accepts_agent_skills_packages=True,
         ),
         _capability(
             "grok-build",
@@ -162,57 +195,11 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             primitive_profile="grok-cloud",
         ),
         _capability(
-            "antigravity",
-            "Antigravity native .agents configuration",
-            aliases=("agy",),
-            explicit_only=True,
-            primitive_profile="antigravity",
-            compile_family="agents",
-        ),
-        _capability(
-            "codex",
-            "Codex native .codex and .agents configuration",
-            in_all=True,
-            primitive_profile="codex",
-            compile_family="agents",
-        ),
-        _capability(
-            "windsurf",
-            "Windsurf native .windsurf and .agents configuration",
-            in_all=True,
-            primitive_profile="windsurf",
-            compile_family="agents",
-        ),
-        _capability(
-            "agent-skills",
-            "Cross-client native .agents skills configuration",
-            explicit_only=True,
-            primitive_profile="agent-skills",
-        ),
-        _capability(
-            "openclaw",
-            "OpenClaw native skills configuration",
-            experimental_flag="openclaw",
-            primitive_profile="openclaw",
-        ),
-        _capability(
             "hermes",
             "Hermes native skills and MCP configuration",
             explicit_only=True,
             primitive_profile="hermes",
             compile_family="agents",
-        ),
-        _capability(
-            "copilot-cowork",
-            "Microsoft 365 Copilot Cowork native skills configuration",
-            experimental_flag="copilot_cowork",
-            primitive_profile="copilot-cowork",
-        ),
-        _capability(
-            "copilot-app",
-            "GitHub Copilot desktop app native workflow configuration",
-            experimental_flag="copilot_app",
-            primitive_profile="copilot-app",
         ),
         _capability(
             "intellij",
@@ -221,6 +208,33 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             primitive_profile="copilot",
             compile_family="agents",
             runtimes=("intellij",),
+        ),
+        _capability(
+            "kiro",
+            "Kiro native .kiro configuration",
+            in_all=True,
+            primitive_profile="kiro",
+            compile_family="agents",
+        ),
+        _capability(
+            "openclaw",
+            "OpenClaw native skills configuration",
+            experimental_flag="openclaw",
+            primitive_profile="openclaw",
+        ),
+        _capability(
+            "opencode",
+            "OpenCode native .opencode configuration",
+            in_all=True,
+            primitive_profile="opencode",
+            compile_family="agents",
+        ),
+        _capability(
+            "windsurf",
+            "Windsurf native .windsurf and .agents configuration",
+            in_all=True,
+            primitive_profile="windsurf",
+            compile_family="agents",
         ),
     )
 )

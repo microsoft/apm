@@ -313,15 +313,14 @@ def copy_skill_to_target(
     for target in targets:
         if not target.supports("skills"):
             continue
-        skills_mapping = target.primitives["skills"]
-        effective_root = skills_mapping.deploy_root or target.root_dir
+        skills_rel_root = target.skills_rel_root
 
         # Skip if target dir does not exist and auto_create is disabled
         target_root_dir = target_base / target.root_dir
         if not target.auto_create and not target_root_dir.is_dir():
             continue
 
-        skill_dir = target_base / effective_root / "skills" / skill_name
+        skill_dir = target_base / skills_rel_root / skill_name
 
         # Security: reject traversal in skill name and validate containment.
         # The containment check resolves the *base* (which may sit behind a
@@ -351,7 +350,7 @@ def copy_skill_to_target(
                 f"Skill directory '{skill_dir}' resolves to '{resolved_skill_dir}' "
                 f"which is outside the project root '{resolved_project}'"
             )
-        ensure_path_within(skill_dir, target_base / effective_root / "skills")
+        ensure_path_within(skill_dir, target_base / skills_rel_root)
 
         # Dedup: skip if same resolved path already deployed.
         resolved = skill_dir.resolve()
@@ -1108,9 +1107,6 @@ class SkillIntegrator(BaseIntegrator):
                 continue
 
             is_primary = primary_skill_md is None  # first successful target owns result/diagnostics
-            skills_mapping = target.primitives["skills"]
-            # Static targets still need the effective root for the containment guard below.
-            effective_root = skills_mapping.deploy_root or target.root_dir
             target_skill_dir = self._target_skill_dir(target, project_root, skill_name)
 
             # Security: validate name + containment + symlink rejection.
@@ -1126,7 +1122,7 @@ class SkillIntegrator(BaseIntegrator):
                     f"Skill destination {target_skill_dir} is a symlink -- refusing to deploy"
                 )
             if target.resolved_deploy_root is None:
-                ensure_path_within(target_skill_dir, project_root / effective_root / "skills")
+                ensure_path_within(target_skill_dir, project_root / target.skills_rel_root)
 
             # Dedup: skip if same resolved path already deployed.
             resolved = target_skill_dir.resolve()
@@ -1172,7 +1168,7 @@ class SkillIntegrator(BaseIntegrator):
                         except ValueError:
                             # Dynamic-root targets (cowork): directory is
                             # outside the project tree.
-                            rel_prefix = "skills"
+                            rel_prefix = target.skills_subdir
                         rel_path = f"{rel_prefix}/{skill_name}"
                         # Issue 1: package= should identify the package causing the
                         # collision (current_key), not the skill name, so render_summary()
@@ -1332,9 +1328,7 @@ class SkillIntegrator(BaseIntegrator):
             if not target.supports("skills"):
                 continue
 
-            skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skills_root = project_root / effective_root / "skills"
+            target_skills_root = project_root / target.skills_rel_root
 
             # Dedup: skip if same resolved skills root already processed.
             resolved_root = target_skills_root.resolve()
@@ -1771,13 +1765,12 @@ class SkillIntegrator(BaseIntegrator):
         deployed: list[Path] = []
 
         for target in claude_targets:
-            effective_root = target.primitives["skills"].deploy_root or target.root_dir
             target_root_dir = project_root / target.root_dir
             if not target.auto_create and not target_root_dir.is_dir():
                 continue
 
-            skill_base = project_root / effective_root / "skills" / skill_name
-            rel_prefix = f"{effective_root}/skills/{skill_name}"
+            skill_base = project_root / target.skills_rel_root / skill_name
+            rel_prefix = f"{target.skills_rel_root}/{skill_name}"
             deployed.extend(self._deploy_bin_files(bin_dir, skill_base, rel_prefix, force, logger))
             manifest = self._deploy_plugin_manifest(
                 package_info.install_path, skill_base, rel_prefix, force, logger
@@ -1940,9 +1933,7 @@ class SkillIntegrator(BaseIntegrator):
                 if COWORK_LOCKFILE_PREFIX not in skill_prefixes:
                     skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
                 continue
-            sm = t.primitives["skills"]
-            effective_root = sm.deploy_root or t.root_dir
-            skill_prefixes.append(f"{effective_root}/skills/")
+            skill_prefixes.append(f"{t.skills_rel_root}/")
         skill_prefix_tuple = tuple(skill_prefixes)
 
         if managed_files is not None:
@@ -2045,7 +2036,6 @@ class SkillIntegrator(BaseIntegrator):
             if not t.supports("skills"):
                 continue
             sm = t.primitives["skills"]
-            effective_root = sm.deploy_root or t.root_dir
 
             # Special guard for cross-tool deploy_root (.agents/)
             # Only clean if the owning target dir exists
@@ -2053,7 +2043,7 @@ class SkillIntegrator(BaseIntegrator):
                 if not (project_root / t.root_dir).is_dir():
                     continue
 
-            skills_dir = project_root / effective_root / "skills"
+            skills_dir = project_root / t.skills_rel_root
 
             # Dedup: skip if same resolved skills dir already cleaned.
             resolved_skills = skills_dir.resolve()

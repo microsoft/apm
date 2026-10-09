@@ -321,6 +321,91 @@ class TestTargetsJsonOutput:
         meta = next(r for r in data if r.get("target") == "agent-skills")
         assert meta["status"] == "active"
 
+    def test_json_all_includes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
+        """grok-bot is a stable explicit-only target, surfaced only via --all."""
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("claude", "CLAUDE.md")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json", "--all"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        grok_bot = [r for r in data if r.get("target") == "grok-bot"]
+        assert len(grok_bot) == 1
+        assert grok_bot[0]["deploy_dir"] == "agent-data/"
+        assert grok_bot[0]["meta_target"] is False
+
+    def test_json_all_lists_catalog_explicit_only_targets(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Stable explicit-only targets appear under --all; experimental ones do not."""
+        from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("claude", "CLAUDE.md")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json", "--all"])
+        assert result.exit_code == 0, result.output
+        rows = {r["target"]: r for r in json.loads(result.output)}
+
+        expected = {
+            "agent-skills": (".agents/", True),
+            "antigravity": (".agents/", False),
+            "grok-bot": ("agent-data/", False),
+            "hermes": (".agents/", False),
+        }
+        for name, (deploy_dir, meta) in expected.items():
+            assert rows[name]["deploy_dir"] == deploy_dir
+            assert rows[name]["meta_target"] is meta
+        for name, cap in TARGET_CAPABILITIES.items():
+            if cap.experimental_flag:
+                assert name not in rows
+
+    def test_json_without_all_excludes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("claude", "CLAUDE.md")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json"])
+        data = json.loads(result.output)
+        assert not any(r.get("target") == "grok-bot" for r in data)
+
+    def test_json_all_grok_bot_active_when_in_active(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """grok-bot shows 'active' when explicitly resolved (e.g. via --target)."""
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=_resolved(["grok-bot"]),
+            ),
+            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json", "--all"])
+        data = json.loads(result.output)
+        grok_bot = next(r for r in data if r.get("target") == "grok-bot")
+        assert grok_bot["status"] == "active"
+
     def test_json_inactive_target_has_null_source(self, runner: CliRunner, tmp_path: Path) -> None:
         with (
             patch("apm_cli.core.target_detection.resolve_targets", return_value=_resolved([])),

@@ -1616,8 +1616,8 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["codex"]) == "codex"
         assert _resolve_compile_target(["windsurf"]) == "windsurf"
         # Multi-element AGENTS.md-only list collapses to a representative bare
-        # target according to deterministic catalog ordering.
-        assert _resolve_compile_target(["opencode", "codex"]) == "opencode"
+        # target according to deterministic catalog ordering (alphabetical).
+        assert _resolve_compile_target(["opencode", "codex"]) == "codex"
         assert _resolve_compile_target(["codex", "windsurf"]) == "codex"
 
     @pytest.mark.parametrize(

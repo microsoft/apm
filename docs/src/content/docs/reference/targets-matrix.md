@@ -32,6 +32,7 @@ see [Primitive types](../primitive-types/).
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 | hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
+| grok-bot        | `agent-data/` (`~/agent-data/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
@@ -97,10 +98,10 @@ user-scope `mcp.json`. That global signal does not auto-select file-primitive
 deployment. When `intellij` is selected explicitly, package file primitives use
 the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
-`agent-skills` and `hermes` are canonical target keys; `antigravity` and
-`hermes` are explicit-only for auto-detection. All are available with `--target` and can be listed in a
-project's `apm.yml` `targets:` field so contributors running plain `apm
-install` pick them up automatically.
+`agent-skills`, `antigravity`, `hermes` and `grok-bot` are stable explicit-only
+targets: never auto-detected and excluded from `all`. Select them with
+`--target` or list them in a project's `apm.yml` `targets:` field so
+contributors running plain `apm install` pick them up automatically.
 
 `copilot-cowork`, `copilot-app`, `grok-cloud`, and `openclaw` are
 experimental targets that require `apm experimental enable <name>` before use.
@@ -308,6 +309,35 @@ Hermes Agent.
   - mcp: `$HERMES_HOME/config.yaml` under the `mcp_servers:` block
   - compiled instructions: `AGENTS.md`
 - **Compile behavior.** `apm compile --target hermes` emits `AGENTS.md`.
+
+## grok-bot
+
+Grok Bot agent skills deployment.
+
+- **Detection.** Never auto-detected. Select with `--target grok-bot` or list
+  it in `apm.yml`.
+- **Deploy directory.** `agent-data/` at project scope; `~/agent-data/` at
+  user scope (`--global`).
+- **Supported primitives.** skills only.
+- **Package `targets:`.** Packages that declare `agent-skills` are also accepted by
+  `grok-bot`. With an explicit `--target`, the install fails only when no
+  dependency has a compatible target, or when a package named on the command
+  line and its whole subtree have none; other filtered dependencies warn.
+- **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
+  `~/agent-data/workflows/<name>/SKILL.md` (user).
+- **Recommended install.** For a live Grok Bot, use
+  `apm install --target grok-bot --global`. Grok Bot reads skills from
+  `~/agent-data/workflows/`; a project-scope install only lands in
+  `./agent-data/workflows/` under the current folder.
+- **Use case.** Deploys skill packages so Grok Bot reads them directly from
+  `agent-data/workflows/` without a manual copy or symlink from
+  `.agents/skills/` or `apm_modules`.
+- **Commit posture.** `agent-data/` is a project-visible directory like
+  `.claude/` or `.cursor/`, not a cache -- commit it (or `.gitignore` it
+  deliberately) the same way you would any other target's deploy root.
+- **Security model.** Skill deployment reuses the same `BaseIntegrator`
+  collision- and path-containment checks as `hermes` and `agent-skills`;
+  deployed files cannot escape the `agent-data/workflows/` subtree.
 
 ## grok-build
 

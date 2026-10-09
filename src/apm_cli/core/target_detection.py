@@ -63,18 +63,19 @@ def agents_alias_was_detected() -> bool:
 
 # Valid target values (internal canonical form)
 TargetType = Literal[
-    "vscode",
-    "claude",
-    "cursor",
-    "opencode",
-    "codex",
-    "gemini",
-    "antigravity",
-    "grok-build",
-    "windsurf",
-    "kiro",
     "agent-skills",
+    "antigravity",
+    "claude",
+    "codex",
+    "cursor",
+    "gemini",
+    "grok-bot",
+    "grok-build",
     "hermes",
+    "kiro",
+    "opencode",
+    "vscode",
+    "windsurf",
     "all",
     "minimal",
 ]
@@ -104,20 +105,21 @@ REASON_NO_TARGET_FOLDER = "no target folder found"
 
 # User-facing target values (includes aliases accepted by CLI)
 UserTargetType = Literal[
-    "copilot",
-    "vscode",
-    "agents",
-    "claude",
-    "cursor",
-    "opencode",
-    "codex",
-    "gemini",
-    "antigravity",
-    "grok-build",
-    "windsurf",
-    "kiro",
     "agent-skills",
+    "agents",
+    "antigravity",
+    "claude",
+    "codex",
+    "copilot",
+    "cursor",
+    "gemini",
+    "grok-bot",
+    "grok-build",
     "hermes",
+    "kiro",
+    "opencode",
+    "vscode",
+    "windsurf",
     "all",
     "minimal",
 ]
@@ -163,6 +165,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "explicit --target flag"
         elif explicit_target == "kiro":
             return "kiro", "explicit --target flag"
+        elif explicit_target == "grok-bot":
+            return "grok-bot", "explicit --target flag"
         elif explicit_target == "grok-build":
             return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
@@ -192,6 +196,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "apm.yml target"
         elif config_target == "kiro":
             return "kiro", "apm.yml target"
+        elif config_target == "grok-bot":
+            return "grok-bot", "apm.yml target"
         elif config_target == "grok-build":
             return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
@@ -409,19 +415,20 @@ def get_target_description(target: UserTargetType) -> str:
     # Normalize aliases to internal value for lookup
     normalized = "vscode" if target in ("copilot", "agents") else target
     descriptions = {
-        "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
-        "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
-        "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
-        "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
-        "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
-        "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
-        "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
-        "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
-        "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
-        "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
+        "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
+        "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
+        "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
+        "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
+        "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "grok-bot": "agent-data/workflows/ (project) or ~/agent-data/workflows/ (--global) -- skills only, explicit --target only",
+        "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
+        "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
+        "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
+        "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
+        "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
+        "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }

@@ -69,6 +69,35 @@ def filter_targets_for_dependency(
     return filtered_targets, allowed_dep_targets, True
 
 
+# A package declaring this target ships portable, cross-client skills.
+CROSS_CLIENT_SKILLS_TARGET = "agent-skills"
+
+
+def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]) -> bool:
+    """Return whether a package's declared targets admit *target*.
+
+    A declaration of ``agent-skills`` describes cross-client skills, so it also
+    admits targets whose catalog capability sets ``accepts_agent_skills_packages``
+    (currently ``grok-bot``): only the skills primitive deploys there, which is
+    exactly what the package declared.
+    """
+    if target.name in package_allowed:
+        return True
+    return (
+        CROSS_CLIENT_SKILLS_TARGET in package_allowed
+        and target.capability.accepts_agent_skills_packages
+    )
+
+
+def _no_target_hint(declared: list[str], requested: str) -> str:
+    """Actionable hint for a package left with no deployable requested target."""
+    names = ", ".join(sorted(declared))
+    hint = f"Install with --target {sorted(declared)[0]}, or ask the package author to add {requested} to its targets (declared: {names})."
+    if CROSS_CLIENT_SKILLS_TARGET in declared:
+        hint += f" The grok-bot target accepts packages that declare {CROSS_CLIENT_SKILLS_TARGET}."
+    return hint
+
+
 def resolve_effective_package_targets(
     targets: list[TargetProfile],
     dep_target_subset: list[str] | None,
@@ -82,6 +111,10 @@ def resolve_effective_package_targets(
     targets may narrow that set, and package targets may narrow it again.
     Package metadata never activates a target absent from either upstream set.
     An omitted declaration and the legacy ``all`` spelling add no restriction.
+
+    A declaration that leaves nothing to deploy to only warns here; whether an
+    explicit ``--target`` request must fail is decided once per install by
+    :func:`explicit_target_failure`.
     """
     active_targets = tuple(targets)
     if diagnostics is None:
@@ -114,7 +147,9 @@ def resolve_effective_package_targets(
     package_restriction_active = bool(declared_targets) and "all" not in declared_targets
     package_allowed = frozenset(declared_targets) if package_restriction_active else frozenset()
     effective_targets = (
-        tuple(target for target in consumer_targets if target.name in package_allowed)
+        tuple(
+            target for target in consumer_targets if package_allows_target(target, package_allowed)
+        )
         if package_restriction_active
         else consumer_targets
     )
@@ -148,3 +183,72 @@ def resolve_effective_package_targets(
         package_allowed_targets=package_allowed,
         package_restriction_active=package_restriction_active,
     )
+
+
+def explicit_target_failure(
+    targets: list[TargetProfile],
+    nodes: list,
+    root_nodes: list,
+) -> str | None:
+    """Return an error message when an explicit ``--target`` would deploy nothing.
+
+    *nodes* are every resolved dependency node; *root_nodes* are the packages
+    the user named on the command line (empty for a whole-manifest install).
+    Fails when no package has an effective target, or when a named package and
+    its whole dependency subtree have none. Pure: it reads declared targets
+    only, so it can run before any primitive is written.
+    """
+    if not targets:
+        return None
+
+    def _declared_and_effective(node: object) -> tuple[list[str], bool]:
+        package = getattr(node, "package", None)
+        if package is None:
+            return [], True
+        selection = resolve_effective_package_targets(
+            targets,
+            getattr(node.dependency_ref, "target_subset", None),
+            package,
+            None,
+            "",
+        )
+        deployable = bool(selection.targets) or not selection.package_restriction_active
+        return list(selection.package_declared_targets), deployable
+
+    def _subtree(root: object) -> list:
+        seen: set[int] = set()
+        stack = [root]
+        ordered = []
+        while stack:
+            current = stack.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            ordered.append(current)
+            stack.extend(getattr(current, "children", ()))
+        return ordered
+
+    requested = targets[0].name
+    for root in root_nodes:
+        members = _subtree(root)
+        if not any(_declared_and_effective(member)[1] for member in members):
+            declared = _declared_and_effective(root)[0]
+            return _failure_message(root, declared, targets, requested)
+    if nodes and not any(_declared_and_effective(node)[1] for node in nodes):
+        root = nodes[0]
+        return _failure_message(root, _declared_and_effective(root)[0], targets, requested)
+    return None
+
+
+def _failure_message(
+    node: object, declared: list[str], targets: list[TargetProfile], requested: str
+) -> str:
+    name = node.dependency_ref.get_unique_key()
+    wanted = ", ".join(sorted(target.name for target in targets))
+    shown = ", ".join(sorted(declared)) or "none"
+    message = (
+        f"{name} declares targets [{shown}] but you requested [{wanted}]; nothing was deployed"
+    )
+    if declared:
+        message += f"\n{_no_target_hint(declared, requested)}"
+    return message

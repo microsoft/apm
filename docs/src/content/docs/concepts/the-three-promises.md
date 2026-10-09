@@ -33,8 +33,8 @@ git clone <repo> && cd <repo> && apm install
   and `targets` / `target` fields consumed by every harness.
 - `src/apm_cli/integration/targets.py` -- the registered harnesses an
   install fans out to by default (Copilot, Claude, Grok Build, Cursor, Codex,
-  Gemini, OpenCode, Windsurf, and Kiro); Antigravity and Hermes are
-  registered as explicit-only targets.
+  Gemini, OpenCode, Windsurf, and Kiro); Antigravity, Hermes, and Grok Bot
+  are registered as explicit-only targets.
 - `src/apm_cli/deps/lockfile.py` -- the `LockEntry.content_hash`
   field (SHA-256 of the package file tree) that makes "same install
   on every clone" mean byte-for-byte the same.

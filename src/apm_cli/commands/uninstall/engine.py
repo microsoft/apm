@@ -1243,13 +1243,11 @@ def _sync_integrations_after_uninstall(
             counts[_entry.counter_key] += result.get("files_removed", 0)
 
     # Skills (multi-target, handled by SkillIntegrator)
-    # Check both target root_dir and deploy_root for skill directories
+    # Check the target's effective skills root (deploy_root + skills subdir)
     _skill_dirs_exist = False
     for t in _resolved_targets:
         if t.supports("skills"):
-            sm = t.primitives["skills"]
-            er = sm.deploy_root or t.root_dir
-            if (project_root / er / "skills").exists():
+            if (project_root / t.skills_rel_root).exists():
                 _skill_dirs_exist = True
                 break
 

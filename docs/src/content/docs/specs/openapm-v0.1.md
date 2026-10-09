@@ -368,8 +368,8 @@ registered **auto-detectable** target (see
 **auto-detectable** when the OpenAPM Target Registry publishes at
 least one detection predicate for it; a target registered without a
 detection predicate is **explicit-only** and MUST be selected
-explicitly. At v0.1 the explicit-only targets are `agent-skills` and
-`antigravity`, so `all` excludes them.
+explicitly. At v0.1 the explicit-only targets are `agent-skills`,
+`antigravity`, `hermes`, and `grok-bot`, so `all` excludes them.
 
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
@@ -2558,9 +2558,9 @@ A target registered without a detection predicate
 MUST NOT be auto-detected and MUST be excluded from the expansion of
 `all`; such an **explicit-only** target MUST be selected explicitly
 via `--target <name>` or via the manifest's `target:` field. At v0.1
-the explicit-only targets are `agent-skills` and `antigravity`. When
-no detection signal fires, the consumer MAY fall back to a `minimal`
-profile that emits `AGENTS.md` only.
+the explicit-only targets are `agent-skills`, `antigravity`, `hermes`,
+and `grok-bot`. When no detection signal fires, the consumer MAY fall
+back to a `minimal` profile that emits `AGENTS.md` only.
 
 ### 8.5 Deploy directory contract (normative)
 
@@ -4282,6 +4282,7 @@ renumbering of conformance classes.
 | 0.1.42 (proposed) | 2026-09-30 | Optional deployed-prompt audit capability for PR #2962. Added conditional governance [req-pl-019] and [req-pl-020] in Section 6.8.1, both enumerations, Appendix C, requirements manifest and behavioral conformance coverage. Under Section 9.2 this is a new opt-in conformance capability, not behavior-neutral errata or a reinterpretation of an existing obligation: implementations not claiming it acquire no new required feature. APM claims it; newly discovered prompt findings and incomplete native coverage can newly fail default and CI audits, command-only content remains non-failing, and protected remediation is refused before writes. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Statement count: 123 -> 125 (120 MUST, 5 SHOULD). |
 | 0.1.43 (proposed) | 2026-10-03 | Codex-native agent model preservation and bounded dropped-metadata diagnostic for PR #3150 (closes #3126). Added [req-tg-015] (Section 8.5.1, consumer MUST): a conforming consumer providing the Codex-native agent conversion capability MUST preserve a source-declared `model` or `model_reasoning_effort` string value in its native top-level placement, MUST leave either field absent when absent from the source, MUST diagnose a non-string value by field name without including that value, and MUST emit a diagnostic bounded on both dropped-field count and per-field name length (never the value) for any other dropped, non-capability-restriction frontmatter field. Under Section 9.2 this is a new opt-in conformance capability scoped to consumers providing the Codex-native agent conversion capability, not behavior-neutral errata: it does not require or imply preservation of any other `config.toml`-native key and does not define behavior for any other conversion target. Implementations not providing Codex-native agent conversion acquire no new required feature. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 125 -> 126 (121 MUST, 5 SHOULD). |
 | 0.1.44 (proposed) | 2026-10-03 | PR #3149 adds two consumer MUSTs in Section 8.5.9: [req-tg-016](#req-tg-016) rejects unsupported Cursor hook vocabulary; [req-tg-017](#req-tg-017) detects overlap with Claude imports before either install order writes, preserving import settings. These cite the accepted Cursor capability, not universal translation or a new mandatory feature (Section 9.2). Section 8.7, Section 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Statement count: 126 -> 128 (123 MUST, 5 SHOULD). |
+| 0.1.45 (proposed) | 2026-10-09 | Editorial fold for PR #3106 (closes #3083 Mode-B silent-extension gate; no new normative statement, count remains 128 (123 MUST, 5 SHOULD)). Section 4.2.1 and [req-tg-001] (Section 8.4): the explicit-only target enumeration now names `agent-skills`, `antigravity`, `hermes`, and `grok-bot`, reflecting the already-registered `hermes` target and the new stable explicit-only `grok-bot` target (skills deploy to `agent-data/workflows/`, per the OpenAPM Target Registry v0.1 companion). |
 
 Errata (none at publication).
 

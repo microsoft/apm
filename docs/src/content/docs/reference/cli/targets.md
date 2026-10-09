@@ -49,7 +49,7 @@ future use. They are not implemented yet.
 | Flag | Description |
 |------|-------------|
 | `--json` | Emit machine-readable JSON instead of the table. One object per canonical target with `target`, `status`, `source`, `deploy_dir`, `needs`. |
-| `--all` | In `--json` mode, include the `agent-skills` meta-target row (excluded by default). No effect on table output. |
+| `--all` | In `--json` mode, include the stable explicit-only target rows (`agent-skills`, `antigravity`, `grok-bot`, `hermes`; excluded by default). No effect on table output. |
 
 The `agent-skills` meta-target is a multi-harness fan-out for shared
 `.agents/skills/` output. It is not a harness and is excluded from the

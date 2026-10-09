@@ -17,6 +17,9 @@ def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dic
     lockfile = LockFile.read(get_lockfile_path(lockfile_root))
     if not lockfile:
         return owned_by, native_owners
+    from apm_cli.integration.targets import skills_root_prefixes
+
+    prefixes = tuple(f"{root}/" for root in skills_root_prefixes())
     for dep in lockfile.get_package_dependencies():
         unique_key = dep.get_unique_key()
         for deployed_path in dep.deployed_files:
@@ -24,7 +27,7 @@ def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dic
             skill_name = normalized.rsplit("/", 1)[-1]
             owned_by[skill_name] = unique_key
             # Another target's same-named skill cannot establish destination ownership.
-            if "/skills/" in normalized:
+            if "/skills/" in normalized or normalized.startswith(prefixes):
                 native_owners[normalized] = unique_key
     return owned_by, native_owners
 

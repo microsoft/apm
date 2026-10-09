@@ -104,3 +104,45 @@ def skill_bundle_file_entries(
         except OSError:
             continue
     return entries
+
+
+def skill_summary_paths(target_paths: Any, project_root: Path, targets: Any) -> list[str]:
+    """Return the sorted skills roots (``<root>/<subdir>/``) a skill landed in.
+
+    Each root is derived from the owning target's skills mapping so targets with
+    a non-default subdir (e.g. ``agent-data/workflows``) render truthfully;
+    external (dynamic-root) deployments are labelled by their owning target.
+    """
+    from apm_cli.integration.targets import target_name_for_locator
+
+    static_roots = sorted(
+        {
+            t.skills_rel_root
+            for t in targets
+            if t.supports("skills") and t.resolved_deploy_root is None
+        }
+    )
+    roots: set[str] = set()
+    for tp in target_paths:
+        try:
+            rel = tp.relative_to(project_root)
+        except ValueError:
+            owner = next(
+                (
+                    t
+                    for t in targets
+                    if t.managed_deploy_root is not None
+                    and tp.is_relative_to(t.managed_deploy_root)
+                ),
+                None,
+            )
+            locator_name = target_name_for_locator(deployed_path_entry(tp, project_root, targets))
+            label = owner.name if owner is not None else locator_name or "external"
+            roots.add(f"{label}/skills")
+            continue
+        if not rel.parts:
+            continue
+        rel_posix = rel.as_posix()
+        owner_root = next((r for r in static_roots if rel_posix.startswith(f"{r}/")), None)
+        roots.add(owner_root or f"{rel.parts[0]}/skills")
+    return [f"{root}/" for root in sorted(roots)]
