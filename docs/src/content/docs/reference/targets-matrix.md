@@ -320,6 +320,9 @@ Grok Bot agent skills deployment.
 - **Deploy directory.** `agent-data/` at project scope; `~/agent-data/` at
   user scope (`--global`).
 - **Supported primitives.** skills only.
+- **Package `targets:`.** Packages that declare `agent-skills` are accepted by
+  skills-only targets such as `grok-bot`. If an explicit `--target` leaves a
+  package with nothing to deploy, the install fails with an error.
 - **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
   `~/agent-data/workflows/<name>/SKILL.md` (user).
 - **Use case.** Deploys skill packages so Grok Bot reads them directly from
