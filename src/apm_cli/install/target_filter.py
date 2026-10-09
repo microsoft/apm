@@ -77,13 +77,16 @@ def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]
     """Return whether a package's declared targets admit *target*.
 
     A declaration of ``agent-skills`` describes cross-client skills, so it also
-    admits every skills-only target (derived from the profile, never by name):
-    only the skills primitive deploys there, which is exactly what the package
-    declared.
+    admits targets whose catalog capability sets ``accepts_agent_skills_packages``
+    (currently ``grok-bot``): only the skills primitive deploys there, which is
+    exactly what the package declared.
     """
     if target.name in package_allowed:
         return True
-    return CROSS_CLIENT_SKILLS_TARGET in package_allowed and target.skills_only
+    return (
+        CROSS_CLIENT_SKILLS_TARGET in package_allowed
+        and target.capability.accepts_agent_skills_packages
+    )
 
 
 def _no_target_hint(declared: list[str], requested: str) -> str:
@@ -91,7 +94,7 @@ def _no_target_hint(declared: list[str], requested: str) -> str:
     names = ", ".join(sorted(declared))
     hint = f"Install with --target {sorted(declared)[0]}, or ask the package author to add {requested} to its targets (declared: {names})."
     if CROSS_CLIENT_SKILLS_TARGET in declared:
-        hint += f" Skills-only targets accept packages that declare {CROSS_CLIENT_SKILLS_TARGET}."
+        hint += f" The grok-bot target accepts packages that declare {CROSS_CLIENT_SKILLS_TARGET}."
     return hint
 
 

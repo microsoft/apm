@@ -139,6 +139,11 @@ class TestAgentSkillsCompatibility:
         assert not package_allows_target(KNOWN_TARGETS["claude"], allowed)
         assert not package_allows_target(KNOWN_TARGETS["copilot"], allowed)
 
+    def test_other_skills_only_targets_do_not_gain_compatibility(self) -> None:
+        allowed = frozenset({"agent-skills", "cursor"})
+        assert KNOWN_TARGETS["hermes"].skills_only
+        assert not package_allows_target(KNOWN_TARGETS["hermes"], allowed)
+
     def test_other_declarations_do_not_admit_skills_only_targets(self) -> None:
         assert not package_allows_target(KNOWN_TARGETS["grok-bot"], frozenset({"cursor"}))
 
@@ -221,4 +226,4 @@ class TestAllTargetsFilteredOut:
         message = explicit_target_failure(_profiles("claude"), [_node("pkg", ["agent-skills"])], [])
 
         assert message is not None
-        assert "Skills-only targets accept packages that declare agent-skills" in message
+        assert "The grok-bot target accepts packages that declare agent-skills" in message
