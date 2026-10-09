@@ -172,6 +172,10 @@ def _create_target_dirs(
             continue
         if _t.resolved_deploy_root is not None:
             continue
+        if _t.skills_only:
+            # The skill integrator creates the root when it writes a skill, so
+            # an install that deploys nothing leaves no empty directory behind.
+            continue
         _root = _t.root_dir
         _target_dir = project_root / _root
         if not _target_dir.exists():
@@ -643,7 +647,7 @@ def run_targets_phase(ctx) -> None:
             continue
 
         target_dir = project_root / profile.root_dir
-        if not target_dir.exists():
+        if not target_dir.exists() and not profile.skills_only:
             target_dir.mkdir(parents=True, exist_ok=True)
 
         # NOTE: do NOT set resolved_deploy_root on static targets.

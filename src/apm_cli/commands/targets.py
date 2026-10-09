@@ -40,7 +40,7 @@ import click
     "show_all",
     is_flag=True,
     default=False,
-    help="Include agent-skills and grok-bot (explicit-only targets) in JSON output (excluded by default).",
+    help="Include explicit-only targets (e.g. agent-skills, grok-bot) in JSON output (excluded by default).",
 )
 @click.pass_context
 def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
@@ -58,10 +58,9 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     )
 
     project_root = Path.cwd()
-    # agent-skills is a meta-target (multi-harness fan-out) and grok-bot is
-    # a stable explicit-only target; neither is auto-detected, so both are
-    # excluded from the apm targets table and visible only in JSON output
-    # if invoked with --all (convergence item 13).
+    # Explicit-only targets (agent-skills, grok-bot, ...) are never
+    # auto-detected, so they are excluded from the apm targets table and
+    # visible only in JSON output with --all (convergence item 13).
 
     # Try to resolve targets using the v2 algorithm.
     # On ambiguous-harness, show all detected signals (the user ran
@@ -97,23 +96,36 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
 
     if as_json:
         if show_all:
-            # Surface explicit-only targets (never auto-detected, so absent
-            # from the default table) only when explicitly requested.
-            # ``agent-skills`` is a true meta-target (multi-harness fan-out);
-            # ``grok-bot`` is a first-class explicit-only target whose deploy
-            # root is read from the catalog rather than hard-coded.
+            # Surface stable explicit-only targets (never auto-detected, so
+            # absent from the default table) only when explicitly requested.
+            # The set and deploy roots come from the target catalog; a target
+            # whose root is shared with another profile is a cross-client
+            # (meta) target.
+            from apm_cli.core.target_catalog import TARGET_CAPABILITIES
             from apm_cli.integration.targets import KNOWN_TARGETS
 
-            for name, is_meta in (("agent-skills", True), ("grok-bot", False)):
+            shown = {row["target"] for row in rows}
+            for name, capability in TARGET_CAPABILITIES.items():
                 profile = KNOWN_TARGETS.get(name)
-                deploy_dir = f"{profile.root_dir}/" if profile is not None else "?"
+                if (
+                    not capability.explicit_only
+                    or capability.experimental_flag is not None
+                    or profile is None
+                    or name in shown
+                ):
+                    continue
+                is_meta = any(
+                    other.root_dir == profile.root_dir
+                    for other_name, other in KNOWN_TARGETS.items()
+                    if other_name != name
+                )
                 rows = [
                     *rows,
                     {
                         "target": name,
                         "status": "active" if name in active else "inactive",
                         "source": None,
-                        "deploy_dir": deploy_dir,
+                        "deploy_dir": f"{profile.root_dir}/",
                         "needs": None,
                         "meta_target": is_meta,
                     },
