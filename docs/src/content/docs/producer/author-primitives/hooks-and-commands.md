@@ -284,7 +284,10 @@ Copilot hook files are namespaced with the source package name to avoid
 collisions across installed deps; bundled scripts land alongside under
 `.github/hooks/scripts/<pkg>/`.
 
-Merged hook files contain only each target's native upstream fields. APM writes
+Merged hook files contain only each target's native upstream fields. Other
+handler and matcher-group fields, including nested objects such as `env` and
+arrays, are copied unchanged into Claude, Codex, Gemini and Antigravity files.
+APM writes
 ownership metadata to a sibling `apm-hooks.json` sidecar for Claude, Cursor,
 Gemini, Codex, Windsurf, and Antigravity. The sidecar is created and cleaned up
 automatically alongside the native config; it is an APM implementation detail
