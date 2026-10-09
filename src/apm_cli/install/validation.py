@@ -887,16 +887,21 @@ def _validate_package_exists(
         # ``virtual_subdir_repo_probe``: a virtual subdirectory on a non-GitHub,
         # non-ADO host must validate the clone root via git ls-remote rather than
         # the virtual downloader so SSH/credential-helper flows are preserved.
+        # The same applies on a GitHub host when the dependency carries an
+        # explicit SSH scheme (e.g. an SSH-registered marketplace, #3164): the
+        # downloader probes are HTTPS-only, while the download step uses SSH.
+        explicit_ssh = (getattr(dep_ref, "explicit_scheme", None) or "").lower() == "ssh"
         virtual_subdir_repo_probe = (
             dep_ref.is_virtual
             and dep_ref.is_virtual_subdirectory()
-            and not is_github_hostname(dep_ref.host or default_host())
+            and (not is_github_hostname(dep_ref.host or default_host()) or explicit_ssh)
             and not dep_ref.is_azure_devops()
         )
 
         # For virtual packages, use the downloader's validation method unless
-        # the virtual path is a subdirectory on a non-GitHub host. Those should
-        # validate the clone root with git, preserving SSH/credential-helper flows.
+        # the virtual path is a subdirectory on a non-GitHub host or is pinned
+        # to SSH. Those validate the clone root with git, preserving
+        # SSH/credential-helper flows.
         if dep_ref.is_virtual and not virtual_subdir_repo_probe:
             return _validate_virtual_package(
                 dep_ref, auth_resolver, verbose, verbose_log, package, logger

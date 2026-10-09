@@ -99,7 +99,9 @@ browse / install / update workflow works against:
   For in-repository plugins from GitLab and generic git marketplaces, APM
   keeps this consumer-selected SSH transport when it writes their concrete
   `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain
-  HTTPS.
+  HTTPS. This includes a `github.com` marketplace registered over SSH: the
+  install pre-flight checks its in-repository plugins with `git ls-remote`
+  over SSH, so a private catalog needs only an SSH key, not a GitHub token.
 
 Remote package entries keep their own source identity independently of the
 marketplace registration. Version lookup uses the package repository's tags,
