@@ -74,6 +74,7 @@ def _make_target(
     mapping.deploy_root = deploy_root
     prim.__getitem__ = MagicMock(return_value=mapping)
     target.primitives = {"skills": mapping}
+    target.skills_rel_root = f"{deploy_root or root_dir}/skills"
     target.skills_deploy_path.side_effect = lambda root: TargetProfile.skills_deploy_path(
         target, root
     )

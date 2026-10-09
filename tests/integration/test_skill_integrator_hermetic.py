@@ -132,6 +132,7 @@ class TestCopySkillToTarget:
         target.supports.return_value = True
         target.primitives = {"skills": MagicMock(deploy_root=None)}
         target.root_dir = Path(".github")
+        target.skills_rel_root = ".github/skills"
         target.auto_create = True
 
         with patch(
@@ -178,6 +179,7 @@ class TestCopySkillToTarget:
         target.supports.return_value = True
         target.primitives = {"skills": MagicMock(deploy_root=None)}
         target.root_dir = Path(".missing-dir")
+        target.skills_rel_root = ".missing-dir/skills"
         target.auto_create = False
 
         with patch("apm_cli.integration.skill_integrator.should_install_skill", return_value=True):
@@ -204,6 +206,7 @@ class TestCopySkillToTarget:
             t.supports.return_value = True
             t.primitives = {"skills": MagicMock(deploy_root=None)}
             t.root_dir = Path(".github")
+            t.skills_rel_root = ".github/skills"
             t.auto_create = True
             return t
 
@@ -569,8 +572,10 @@ class TestIntegrateSkillNameNormalization:
         fake_target.supports.return_value = True
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.resolved_deploy_root = None
         fake_target.auto_create = True
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.skills_deploy_path.side_effect = lambda root: root / ".github" / "skills"
 
         with (
@@ -608,8 +613,10 @@ class TestIntegrateSkillNameNormalization:
         fake_target.supports.return_value = True
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.resolved_deploy_root = None
         fake_target.auto_create = True
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.skills_deploy_path.side_effect = lambda root: root / ".github" / "skills"
 
         with (
@@ -661,6 +668,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -685,6 +693,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -710,6 +719,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -738,6 +748,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,

@@ -308,6 +308,11 @@ class TargetProfile:
         """Return ``True`` if this target accepts *primitive*."""
         return primitive in self.primitives
 
+    @property
+    def skills_only(self) -> bool:
+        """Return ``True`` when skills are the only primitive this target deploys."""
+        return set(self.primitives) == {"skills"}
+
     def effective_root(self, user_scope: bool = False) -> str:
         """Return the root directory for the given scope.
 
@@ -334,12 +339,28 @@ class TargetProfile:
             return False
         return primitive in self.primitives
 
+    @property
+    def skills_subdir(self) -> str:
+        """Return the skills primitive's subdirectory name (e.g. ``skills``)."""
+        return self.primitives["skills"].subdir
+
+    @property
+    def skills_rel_root(self) -> str:
+        """Return the project-relative skills root (POSIX), e.g. ``.github/skills``.
+
+        Single source of truth for where skills land: the skills mapping's
+        ``deploy_root`` (or *root_dir*) joined with its ``subdir``.  Targets
+        that name the subdir differently (``agent-data/workflows``) are
+        honoured without any per-target branching.
+        """
+        mapping = self.primitives["skills"]
+        return f"{mapping.deploy_root or self.root_dir}/{self.skills_subdir}"
+
     def skills_deploy_path(self, project_root: Path) -> Path:
         """Return the actual skills root for static and resolved dynamic targets."""
         if self.resolved_deploy_root is not None:
             return self.deploy_path(project_root)
-        mapping = self.primitives["skills"]
-        return project_root / (mapping.deploy_root or self.root_dir) / "skills"
+        return project_root / self.skills_rel_root
 
     def deploy_path(self, project_root: Path, *parts: str) -> Path:
         """Return the filesystem path for deployment.
@@ -1064,6 +1085,25 @@ def target_supports_primitive(target: object, primitive: str) -> bool:
     return bool(profile and profile.supports(primitive))
 
 
+def skills_root_prefixes() -> frozenset[str]:
+    """Return every static project/user skills root (``<root>/<subdir>``, POSIX).
+
+    Derived from :data:`KNOWN_TARGETS` via :attr:`TargetProfile.skills_rel_root`
+    so callers recognising "a skill directory deployed by some target" never
+    hard-code the ``skills`` directory name.  Dynamic-root targets are omitted
+    (they use URI locators).
+    """
+    roots: set[str] = set()
+    for profile in KNOWN_TARGETS.values():
+        if not profile.supports("skills") or profile.user_root_resolver is not None:
+            continue
+        roots.add(profile.skills_rel_root)
+        user_profile = profile.for_scope(user_scope=True)
+        if user_profile is not None and user_profile.supports("skills"):
+            roots.add(user_profile.skills_rel_root)
+    return frozenset(roots)
+
+
 def target_name_for_locator(locator: str) -> str | None:
     """Resolve a native target name from a registered locator URI."""
     for profile in KNOWN_TARGETS.values():
@@ -1441,7 +1481,9 @@ def materialize_project_target_profiles(
         if profile is None:
             continue
         deploy_path = _validate_project_target_root(project_root, profile)
-        if not deploy_path.is_dir():
+        # Skills-only roots are created by the skill integrator on first write,
+        # so an install that deploys nothing leaves no empty directory behind.
+        if not deploy_path.is_dir() and not profile.skills_only:
             deploy_path.mkdir(parents=True, exist_ok=True)
         profiles.append(profile)
     return profiles
