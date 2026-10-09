@@ -108,7 +108,7 @@ Notes per target:
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 - **kiro** -- Kiro IDE/CLI v3. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, MCP lands in `.kiro/settings/mcp.json`, and agents deploy to `.kiro/agents/<stem>.md` with frontmatter filtered to `description`, `model`, and `tools` only.
 - **hermes** -- Hermes Agent. Stable explicit-only target; skills use `.agents/skills/` at project scope and `~/.hermes/skills/` at user scope. Compiled instructions use `AGENTS.md`; MCP servers use `~/.hermes/config.yaml`.
-- **grok-bot** -- Grok Bot agent runtime. Stable explicit-only target, skills only; skills deploy to `agent-data/workflows/<name>/SKILL.md` at project scope and `~/agent-data/workflows/<name>/SKILL.md` at user scope (`--global`).
+- **grok-bot** -- Grok Bot agent runtime. Stable explicit-only target, skills only; skills deploy to `agent-data/workflows/<name>/SKILL.md` at project scope and `~/agent-data/workflows/<name>/SKILL.md` at user scope (`--global`). Use `--global` for a live Grok Bot, which reads `~/agent-data/workflows/`.
 
 ## The compatibility matrix
 

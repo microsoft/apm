@@ -325,6 +325,10 @@ Grok Bot agent skills deployment.
   package with nothing to deploy, the install fails with an error.
 - **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
   `~/agent-data/workflows/<name>/SKILL.md` (user).
+- **Recommended install.** For a live Grok Bot, use
+  `apm install --target grok-bot --global`. Grok Bot reads skills from
+  `~/agent-data/workflows/`; a project-scope install only lands in
+  `./agent-data/workflows/` under the current folder.
 - **Use case.** Deploys skill packages so Grok Bot reads them directly from
   `agent-data/workflows/` without a manual copy or symlink from
   `.agents/skills/` or `apm_modules`.
