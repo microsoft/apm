@@ -572,6 +572,8 @@ def _fail_explicit_target_without_deploy(ctx: InstallContext) -> None:
     tree = getattr(ctx.dependency_graph, "dependency_tree", None)
     if not _targets_explicitly_requested(ctx) or tree is None:
         return
+    if ctx.root_has_local_primitives and not ctx.only_packages:
+        return
     from apm_cli.install.target_filter import explicit_target_failure
     from apm_cli.models.apm_package import DependencyReference
 

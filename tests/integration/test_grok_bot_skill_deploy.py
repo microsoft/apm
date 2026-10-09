@@ -273,6 +273,25 @@ class TestPackageTargetCompatibility:
         lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
         assert any("parent" in dep.get("local_path", "") for dep in lock["dependencies"])
 
+    def test_local_primitives_count_as_deployable(
+        self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dep = _plain_folder_package(tmp_path / "src", "cursor-dep", targets=["cursor"])
+        project = tmp_path / "project"
+        local_skill = project / ".apm" / "skills" / "localskill"
+        local_skill.mkdir(parents=True)
+        (local_skill / "SKILL.md").write_text(_skill_md("localskill"), encoding="utf-8")
+        (project / "apm.yml").write_text(
+            yaml.dump({"name": "proj", "version": "1.0.0", "dependencies": {"apm": [str(dep)]}}),
+            encoding="utf-8",
+        )
+
+        result = _apm(["install", "--target", "grok-bot"], project, monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        assert (project / "agent-data" / "workflows" / "localskill" / "SKILL.md").is_file()
+        assert "do not overlap" in " ".join(result.output.split())
+
     def test_named_package_subtree_without_overlap_fails_before_writes(
         self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
