@@ -98,9 +98,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
         if show_all:
             # Surface stable explicit-only targets (never auto-detected, so
             # absent from the default table) only when explicitly requested.
-            # The set and deploy roots come from the target catalog; a target
-            # whose root is shared with another profile is a cross-client
-            # (meta) target.
+            # The set, deploy roots and meta-target flag come from the catalog.
             from apm_cli.core.target_catalog import TARGET_CAPABILITIES
             from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -114,11 +112,6 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
                     or name in shown
                 ):
                     continue
-                is_meta = any(
-                    other.root_dir == profile.root_dir
-                    for other_name, other in KNOWN_TARGETS.items()
-                    if other_name != name
-                )
                 rows = [
                     *rows,
                     {
@@ -127,7 +120,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
                         "source": None,
                         "deploy_dir": f"{profile.root_dir}/",
                         "needs": None,
-                        "meta_target": is_meta,
+                        "meta_target": capability.meta_target,
                     },
                 ]
         click.echo(_json.dumps(rows, indent=2))

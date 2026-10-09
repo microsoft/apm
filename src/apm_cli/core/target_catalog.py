@@ -22,6 +22,8 @@ class TargetCapability:
     compile_family: str | None
     runtimes: tuple[str, ...]
     commands: frozenset[str]
+    meta_target: bool = False
+    accepts_agent_skills_packages: bool = False
 
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
@@ -39,6 +41,8 @@ def _capability(
     primitive_profile: str | None = None,
     compile_family: str | None = None,
     runtimes: tuple[str, ...] = (),
+    meta_target: bool = False,
+    accepts_agent_skills_packages: bool = False,
 ) -> TargetCapability:
     """Create catalog data shared by all target-selecting commands."""
     return TargetCapability(
@@ -53,6 +57,8 @@ def _capability(
         compile_family=compile_family,
         runtimes=runtimes,
         commands=_TARGET_COMMANDS,
+        meta_target=meta_target,
+        accepts_agent_skills_packages=accepts_agent_skills_packages,
     )
 
 
@@ -108,6 +114,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             "Cross-client native .agents skills configuration",
             explicit_only=True,
             primitive_profile="agent-skills",
+            meta_target=True,
         ),
         _capability(
             "antigravity",
@@ -171,6 +178,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             "Grok Bot native agent-data/workflows skills configuration",
             explicit_only=True,
             primitive_profile="grok-bot",
+            accepts_agent_skills_packages=True,
         ),
         _capability(
             "grok-build",

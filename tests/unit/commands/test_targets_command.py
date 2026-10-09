@@ -363,9 +363,9 @@ class TestTargetsJsonOutput:
 
         expected = {
             "agent-skills": (".agents/", True),
-            "antigravity": (".agents/", True),
+            "antigravity": (".agents/", False),
             "grok-bot": ("agent-data/", False),
-            "hermes": (".agents/", True),
+            "hermes": (".agents/", False),
         }
         for name, (deploy_dir, meta) in expected.items():
             assert rows[name]["deploy_dir"] == deploy_dir
