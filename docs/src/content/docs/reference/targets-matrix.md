@@ -98,11 +98,10 @@ user-scope `mcp.json`. That global signal does not auto-select file-primitive
 deployment. When `intellij` is selected explicitly, package file primitives use
 the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
-`agent-skills` and `hermes` are canonical target keys; `antigravity` and
-`hermes` are explicit-only for auto-detection. All are available with `--target` and can be listed in a
-project's `apm.yml` `targets:` field so contributors running plain `apm
-install` pick them up automatically. `grok-bot` is also stable and
-explicit-only, available with `--target` and listable in `apm.yml`.
+`agent-skills`, `antigravity`, `hermes` and `grok-bot` are stable explicit-only
+targets: never auto-detected and excluded from `all`. Select them with
+`--target` or list them in a project's `apm.yml` `targets:` field so
+contributors running plain `apm install` pick them up automatically.
 
 `copilot-cowork`, `copilot-app`, `grok-cloud`, and `openclaw` are
 experimental targets that require `apm experimental enable <name>` before use.
@@ -320,9 +319,10 @@ Grok Bot agent skills deployment.
 - **Deploy directory.** `agent-data/` at project scope; `~/agent-data/` at
   user scope (`--global`).
 - **Supported primitives.** skills only.
-- **Package `targets:`.** Packages that declare `agent-skills` are accepted by
-  skills-only targets such as `grok-bot`. If an explicit `--target` leaves a
-  package with nothing to deploy, the install fails with an error.
+- **Package `targets:`.** Packages that declare `agent-skills` are also accepted by
+  `grok-bot`. With an explicit `--target`, the install fails only when no
+  dependency has a compatible target, or when a package named on the command
+  line and its whole subtree have none; other filtered dependencies warn.
 - **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
   `~/agent-data/workflows/<name>/SKILL.md` (user).
 - **Recommended install.** For a live Grok Bot, use
