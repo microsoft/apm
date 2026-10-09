@@ -163,7 +163,8 @@ class TestAllTargetsFilteredOut:
         entry = next(d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR)
         assert "[cursor]" in entry.message
         assert "[grok-bot]" in entry.message
-        assert "--target" in entry.detail
+        assert entry.detail.startswith("Install with --target cursor, or ask the package author")
+        assert "add grok-bot to its targets" in entry.detail
         assert entry.message.isascii()
         assert entry.detail.isascii()
 
@@ -179,3 +180,9 @@ class TestAllTargetsFilteredOut:
         assert [t.name for t in selection.targets] == ["cursor"]
         assert diagnostics.count_for_package("pkg", CATEGORY_ERROR) == 0
         assert diagnostics.count_for_package("pkg", CATEGORY_WARNING) == 0
+
+    def test_hint_mentions_agent_skills_acceptance(self) -> None:
+        _, diagnostics = _selection(["claude"], ["agent-skills"], explicit=True)
+
+        entry = next(d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR)
+        assert "Skills-only targets accept packages that declare agent-skills" in entry.detail

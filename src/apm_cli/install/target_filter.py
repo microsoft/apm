@@ -86,6 +86,15 @@ def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]
     return CROSS_CLIENT_SKILLS_TARGET in package_allowed and target.skills_only
 
 
+def _no_target_hint(declared: list[str], requested: str) -> str:
+    """Actionable hint for a package left with no deployable requested target."""
+    names = ", ".join(sorted(declared))
+    hint = f"Install with --target {sorted(declared)[0]}, or ask the package author to add {requested} to its targets (declared: {names})."
+    if CROSS_CLIENT_SKILLS_TARGET in declared:
+        hint += f" Skills-only targets accept packages that declare {CROSS_CLIENT_SKILLS_TARGET}."
+    return hint
+
+
 def resolve_effective_package_targets(
     targets: list[TargetProfile],
     dep_target_subset: list[str] | None,
@@ -159,10 +168,7 @@ def resolve_effective_package_targets(
                 f"Package declares targets [{requested}] but you requested [{authorized}]; "
                 "nothing was deployed",
                 package=package_name,
-                detail=(
-                    f"Use --target with one of [{requested}], or ask the package author "
-                    f"to add '{consumer_targets[0].name}' to its 'targets:' list"
-                ),
+                detail=_no_target_hint(declared_targets, consumer_targets[0].name),
             )
         else:
             diagnostics.warn(
