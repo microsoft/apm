@@ -175,6 +175,16 @@
       "owner": "models/dependency/selection.py (via DependencyReference)",
       "selectors": ["src/apm_cli/models/dependency/selection.py"],
       "guards": ["install-deployment-uninstall-selection"]
+    },
+    {
+      "id": "skills-root-derivation",
+      "decision": "Target skills-root derivation",
+      "owner": "integration/targets.py (TargetProfile.skills_rel_root, TargetProfile.skills_deploy_path)",
+      "selectors": [
+        "src/apm_cli/install/deployed_paths.py",
+        "src/apm_cli/commands/uninstall/engine.py"
+      ],
+      "guards": ["install-deployment-skills-root-derivation"]
     }
   ]
 }
