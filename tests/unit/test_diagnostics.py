@@ -284,6 +284,19 @@ class TestDiagnosticCollectorRendering:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
+    def test_error_detail_shown_without_verbose(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=False)
+        dc.error("nothing deployed", package="pkg-x", detail="Install with --target cursor")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("Install with --target cursor" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
     def test_error_group_shows_packages_failed(
         self, mock_info, mock_warning, mock_echo, mock_console
     ):

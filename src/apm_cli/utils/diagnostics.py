@@ -509,7 +509,7 @@ class DiagnosticCollector:
         for d in items:
             pkg_prefix = f"{d.package} -- " if d.package else ""
             _rich_echo(f"    +- {pkg_prefix}{d.message}", color="red")
-            if d.detail and self.verbose:
+            if d.detail:
                 _rich_echo(f"         {d.detail}", color="dim")
 
     def _render_info_group(self, items: list[Diagnostic]) -> None:
