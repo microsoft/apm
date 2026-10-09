@@ -341,6 +341,39 @@ class TestTargetsJsonOutput:
         assert grok_bot[0]["deploy_dir"] == "agent-data/"
         assert grok_bot[0]["meta_target"] is False
 
+    def test_json_all_lists_catalog_explicit_only_targets(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Stable explicit-only targets appear under --all; experimental ones do not."""
+        from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+
+        with (
+            patch(
+                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_signals",
+                return_value=[_signal("claude", "CLAUDE.md")],
+            ),
+            patch("pathlib.Path.cwd", return_value=tmp_path),
+        ):
+            result = runner.invoke(targets, ["--json", "--all"])
+        assert result.exit_code == 0, result.output
+        rows = {r["target"]: r for r in json.loads(result.output)}
+
+        expected = {
+            "agent-skills": (".agents/", True),
+            "antigravity": (".agents/", True),
+            "grok-bot": ("agent-data/", False),
+            "hermes": (".agents/", True),
+        }
+        for name, (deploy_dir, meta) in expected.items():
+            assert rows[name]["deploy_dir"] == deploy_dir
+            assert rows[name]["meta_target"] is meta
+        for name, cap in TARGET_CAPABILITIES.items():
+            if cap.experimental_flag:
+                assert name not in rows
+
     def test_json_without_all_excludes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
         with (
             patch(
