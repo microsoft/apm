@@ -118,6 +118,7 @@ what the test family you want actually requires.
 | `requires_e2e_mode` | Opt-in for the heavyweight golden-scenario suite | `export APM_E2E_TESTS=1` |
 | `requires_network_integration` | Opt-in for tests that hit live registries | `export APM_RUN_INTEGRATION_TESTS=1` |
 | `requires_windows` | A Windows-only process or filesystem boundary | Run on Windows |
+| `requires_windows_native_standard_user` | Verified standard-user token without symlink privilege | The disposable Windows native-symlink CI job; do not enable manually |
 | `requires_inference` | Opt-in for tests that call inference APIs | `export APM_RUN_INFERENCE_TESTS=1` |
 | `requires_github_token` | A token usable against `github.com` / GitHub Models | `export GITHUB_APM_PAT=...` (or `GITHUB_TOKEN`) |
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
@@ -455,6 +456,20 @@ Python 3.12 and later use the standard-library lookup without the legacy
 fallback; a candidate-count regression checks linear extension scanning.
 Only a native Windows run demonstrates Windows behavior; passing mocks or
 collection alone do not.
+
+The **Windows Native Symlink Acceptance** job checks out the exact PR head and
+uses a temporary standard account on a disposable hosted runner. It requires
+successful ordinary file I/O, no administrator or symlink privilege, and actual
+Windows error 1314 before running the Git/APM fallback regression. The test keeps
+inherited global `core.symlinks=true` while honoring Git's native local `false`;
+explicit command-scope intent remains covered separately.
+
+The job requires a passing native case, failure after removing the local
+precedence guard in memory, and a restored pass. Empty or skipped runs fail.
+Account, profile, scratch and any changed Developer Mode value are cleaned up
+independently, with an `always()` cleanup fallback. A restoration failure fails
+the job. This is link-text checkout evidence, not archive-symlink support, and
+the job does not change repository protection or replace required SDL scanning.
 
 Plugin sequential-install coverage checks deployed-file removal and lockfile
 ownership after uninstall, plus unchanged files and ownership for the retained

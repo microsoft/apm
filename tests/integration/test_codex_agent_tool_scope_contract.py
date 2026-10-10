@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import tomllib
 
-from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml, yaml_to_str
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_package import LocalPackageFactory
@@ -42,6 +42,7 @@ def _install_codex_agent(
     *,
     name: str,
     tools: list[str] | None,
+    metadata: dict[str, str] | None = None,
 ) -> tuple[CommandResult, Path]:
     """Author and install one Codex project through the packaged CLI boundary."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
@@ -58,6 +59,8 @@ def _install_codex_agent(
     ]
     if tools is not None:
         frontmatter.append("tools: [read, search, 'allowed-demo/*']")
+    if metadata:
+        frontmatter.append(yaml_to_str(metadata).rstrip("\n"))
     frontmatter.extend(("---", "", "Review the requested change.", ""))
     factory.add_agent(project, name, "\n".join(frontmatter))
 
@@ -116,6 +119,42 @@ def test_codex_agent_tool_scope_is_never_silently_lost(
     assert unscoped_agent["name"] == "plain-reviewer"
     assert "tools" not in unscoped_agent
     assert "mcp_servers" not in unscoped_agent
+    assert "model" not in unscoped_agent
+    assert "model_reasoning_effort" not in unscoped_agent
     assert "[!]" not in unscoped_output
     assert "lossy agent compilation" not in unscoped_output
     assert "frontmatter field 'tools' was dropped" not in " ".join(unscoped_output.split())
+
+
+def test_codex_agent_native_models_and_dropped_metadata_reach_cli_output(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Install preserves model settings and reports APM's remaining translation loss."""
+    result, project = _install_codex_agent(
+        tmp_path / "native-model",
+        apm_binary_path,
+        name="model-reviewer",
+        tools=None,
+        metadata={
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "high",
+            "model_verbosity": "low",
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _read_toml(project / ".codex" / "agents" / "model-reviewer.toml") == {
+        "name": "model-reviewer",
+        "description": "Codex agent model-reviewer",
+        "developer_instructions": "Review the requested change.",
+        "model": "gpt-5.6-sol",
+        "model_reasoning_effort": "high",
+    }
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "[!]" in output
+    assert "1 lossy agent compilation warning" in output
+    assert "model-reviewer.agent.md" in output
+    assert "field 'model_verbosity' was dropped" in output
+    assert "not translated by APM for Codex" in output
+    assert "otherwise do not rely on" in output
+    assert "field 'tools' was dropped" not in output

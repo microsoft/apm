@@ -886,3 +886,77 @@ def test_dropped_target_merge_hook_state_reconciled_fail_safe(tmp_path):
         "target while its ownership record remains",
         "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
     )
+
+
+@pytest.mark.req("req-lk-021")
+def test_dropped_cursor_target_merge_hook_state_reconciled_fail_safe(tmp_path):
+    """req-lk-021's preserve/remove decision also covers Cursor's flat
+    native hook format, where ownership is attributed inline via
+    ``_apm_source`` on each entry rather than via a separate sidecar
+    file: a dropped Cursor target's consumer-owned entries are removed,
+    an entry without the consumer's own ownership attribution survives
+    even in the dropped target's own file, and a retained target (here
+    Claude's merge-based settings) is preserved untouched."""
+    import json
+
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    cursor_dir = tmp_path / ".cursor"
+    cursor_dir.mkdir(parents=True)
+    (cursor_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "hooks": {
+                    "preToolUse": [
+                        {
+                            "command": "owned",
+                            "_apm_source": "req-lk-021-fixture",
+                        },
+                        {"command": "user-authored"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}),
+        encoding="utf-8",
+    )
+    (claude_dir / "apm-hooks.json").write_text(
+        json.dumps({"PreToolUse": [{"matcher": "Bash", "_apm_source": "req-lk-021-fixture"}]}),
+        encoding="utf-8",
+    )
+    claude_snapshot = (claude_dir / "settings.json").read_text(encoding="utf-8")
+
+    stats = HookIntegrator().reconcile_dropped_targets(tmp_path, ["cursor"])
+
+    assert stats["errors"] == 0
+    cursor_native = json.loads((cursor_dir / "hooks.json").read_text(encoding="utf-8"))
+    cursor_entries = cursor_native.get("hooks", {}).get("preToolUse", [])
+    assert not any(e.get("command") == "owned" for e in cursor_entries), (
+        "consumer-owned entry for the dropped Cursor target MUST be removed"
+    )
+    assert any(e.get("command") == "user-authored" for e in cursor_entries), (
+        "entry without consumer ownership attribution MUST be preserved"
+    )
+    assert not (cursor_dir / "apm-hooks.json").exists(), (
+        "Cursor has no ownership sidecar to begin with; reconciliation MUST NOT invent one"
+    )
+    assert claude_snapshot == (claude_dir / "settings.json").read_text(encoding="utf-8"), (
+        "a target still attributable to the declared set MUST be preserved untouched"
+    )
+    assert (claude_dir / "apm-hooks.json").exists(), "retained target's ownership record survives"
+
+    assert_spec_contains(
+        "MUST apply the same preserve-or-remove decision",
+        "MUST remove only the consumer-owned entries",
+        "It MUST preserve\nevery entry that does not carry the consumer's own ownership",
+        "the merge-based hook configuration document is already absent for a\n"
+        "target while its ownership record remains",
+        "MUST leave that document or record unmodified and\nemit an actionable diagnostic",
+    )

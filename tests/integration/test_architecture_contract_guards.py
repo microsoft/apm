@@ -7,9 +7,47 @@ from pathlib import Path
 
 import pytest
 
-from scripts.architecture_linter.runner import registered_rules
+from scripts.architecture_linter.runner import registered_rules, run_selected_rules
 
 _RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "entries = _to_cursor_hook_entries(",
+            "entries = _local_cursor_renderer(",
+        ),
+        (
+            "src/apm_cli/integration/hook_cursor_preflight.py",
+            "validate_cursor_config(candidate)",
+            "pass",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            '"preflight_hooks_for_targets"',
+            '"unvalidated_hooks_for_targets"',
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_log = logging.getLogger(__name__)",
+            "_log = logging.getLogger(__name__)\nCURSOR_NATIVE_EVENTS = frozenset()",
+        ),
+    ],
+)
+def test_cursor_native_edge_boundary_rejects_bypass_and_second_owner(
+    path: str, old: str, new: str
+) -> None:
+    root = Path(__file__).parents[2]
+    source = (root / path).read_text(encoding="utf-8")
+    assert old in source
+    rule = _RULES_BY_ID["mutation_writes.neutral_hook_contract"]
+    result = run_selected_rules(
+        root, (rule.id,), source_overrides={path: source.replace(old, new, 1)}
+    )
+    assert any(finding.rule_id == rule.id for finding in result.violations)
 
 
 def _write_portable_hook_package(tmp_path: Path) -> object:

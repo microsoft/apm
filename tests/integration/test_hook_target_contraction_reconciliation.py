@@ -215,10 +215,11 @@ def _pre_tool_use_commands(config_path: Path) -> list[str]:
     if not config_path.exists():
         return []
     data = _read_json(config_path)
-    entries = data.get("hooks", {}).get("PreToolUse", [])
+    hooks = data.get("hooks", {})
+    entries = hooks.get("preToolUse" if config_path.parent.name == ".cursor" else "PreToolUse", [])
     commands = []
     for entry in entries:
-        for handler in entry.get("hooks", []):
+        for handler in entry.get("hooks", [entry]):
             if isinstance(handler, dict) and "command" in handler:
                 commands.append(handler["command"])
     return commands
@@ -404,7 +405,7 @@ def test_widen_then_narrow_removes_dropped_cursor_hook_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Generic-owner proof, Cursor variant (required-gate node-2 evidence):
-    Claude -> Claude+Cursor -> Claude (widen then narrow back, not just a
+    Codex -> Codex+Cursor -> Codex (widen then narrow back, not just a
     single narrow from an initial multi-target install) previously left
     `.cursor/hooks.json` and its `apm-hooks.json` ownership sidecar fully
     intact with the dropped target's marker, even when Cursor's own
@@ -414,17 +415,17 @@ def test_widen_then_narrow_removes_dropped_cursor_hook_state(
 
     GREEN (post-fix): `HookIntegrator.reconcile_dropped_targets` is generic
     over `_MERGE_HOOK_TARGETS` (Claude, Cursor, Codex, Gemini, Windsurf,
-    Antigravity) -- narrowing back to Claude-only reconciles Cursor's
+    Antigravity) -- narrowing back to Codex-only reconciles Cursor's
     merge-hook state exactly like Codex's, asserted directly against the
     native merged config and the sidecar here rather than relying on any
     audit/orphan-detection surface (which only reports the separate,
     out-of-scope `.agents/skills` target-row defect)."""
     project = tmp_path / "proj-cursor-widen-narrow"
-    _write_project(project, ["acme/pkg-a"], ["claude"])
+    _write_project(project, ["acme/pkg-a"], ["codex"])
     result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert result.exit_code == 0, result.output
 
-    _narrow_targets(project, ["claude", "cursor"])  # widen
+    _narrow_targets(project, ["codex", "cursor"])  # widen without a Claude-import route
     widen_result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert widen_result.exit_code == 0, widen_result.output
 
@@ -437,7 +438,8 @@ def test_widen_then_narrow_removes_dropped_cursor_hook_state(
         "precondition: cursor native config carries the widened install's hook command"
     )
 
-    _narrow_targets(project, ["claude"])  # narrow back
+    codex_before = (project / ".codex" / "hooks.json").read_bytes()
+    _narrow_targets(project, ["codex"])  # drop Cursor, retain Codex
     narrow_result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert narrow_result.exit_code == 0, narrow_result.output
 
@@ -455,6 +457,7 @@ def test_widen_then_narrow_removes_dropped_cursor_hook_state(
         "dropped cursor target's dead hook command must not survive in the native "
         "merged config, asserted directly, not via audit"
     )
+    assert (project / ".codex" / "hooks.json").read_bytes() == codex_before
 
 
 def test_widen_then_narrow_preserves_user_owned_cursor_entries(
@@ -465,29 +468,27 @@ def test_widen_then_narrow_preserves_user_owned_cursor_entries(
     proving the generic owner's marker-based ownership check -- not a
     per-target special case -- gates the deletion."""
     project = tmp_path / "proj-cursor-user-owned"
-    _write_project(project, ["acme/pkg-a"], ["claude"])
+    _write_project(project, ["acme/pkg-a"], ["codex"])
     result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert result.exit_code == 0, result.output
 
-    _narrow_targets(project, ["claude", "cursor"])  # widen
+    _narrow_targets(project, ["codex", "cursor"])  # widen without a Claude-import route
     widen_result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert widen_result.exit_code == 0, widen_result.output
 
     cursor_settings = project / ".cursor" / "hooks.json"
     data = _read_json(cursor_settings)
-    data.setdefault("hooks", {}).setdefault("PreToolUse", []).append(
-        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo manual-cursor-hook"}]}
-    )
+    manual = {"matcher": "Shell", "type": "command", "command": "echo manual-cursor-hook"}
+    data["hooks"]["preToolUse"].append(manual)
     cursor_settings.write_text(json.dumps(data), encoding="utf-8")
 
-    _narrow_targets(project, ["claude"])  # narrow back
+    _narrow_targets(project, ["codex"])  # drop Cursor, retain Codex
     narrow_result = _run_install(project, monkeypatch, {"acme/pkg-a": "./scripts/pkg-a-hook.sh"})
     assert narrow_result.exit_code == 0, narrow_result.output
 
-    assert "echo manual-cursor-hook" in _pre_tool_use_commands(cursor_settings), (
-        "user-owned cursor entry must survive dropped-target reconciliation"
-    )
+    assert _read_json(cursor_settings) == {"version": 1, "hooks": {"preToolUse": [manual]}}
     assert "acme/pkg-a" not in _sidecar_sources(project / ".cursor" / "apm-hooks.json")
+    assert not (project / ".cursor" / "apm-hooks.json").exists()
 
 
 def test_dry_run_install_does_not_reconcile_dropped_target_state(
