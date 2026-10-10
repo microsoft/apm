@@ -17,7 +17,7 @@ Typical errors APM surfaces or passes through from the underlying HTTP/git stack
 [!] TLS verification failed -- APM uses the system trust store by default.
     If you're behind a corporate proxy or firewall, make sure your
     organisation's CA is installed in the OS trust store, or set
-    REQUESTS_CA_BUNDLE to a readable PEM bundle and retry.
+    APM_EXTRA_CA_BUNDLE to a readable PEM bundle and retry.
 ```
 
 ```text
@@ -56,39 +56,69 @@ apm install --verbose
 
 ## Default behaviour: the OS trust store
 
-**Fastest fix:** install your corporate CA in the OS trust store and retry. APM picks it up automatically on the covered Python paths.
-
-:::note[Planned]
-**Scope caveat:** only the Python-based paths are covered. The Node-based (Copilot) and Rust-based (Codex) child runtimes are **not yet covered** by OS-store propagation (tracked in #2034). Behind a TLS-proxy today, export `NODE_EXTRA_CA_CERTS=/path/to/org-ca-bundle.pem` for the Node runtime and configure the Codex/Rust runtime's own trust.
-:::
+**Fastest fix:** install your corporate CA in the OS trust store and retry. APM picks it up automatically on its Python paths.
 
 APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This covers in-process commands such as `apm install` and the standalone frozen binary, with bundled `certifi` as a fallback.
 
-For the Python-based `llm` child runtime, `apm runtime setup llm` installs `truststore` in its virtual environment and adds a self-contained bootstrap. Corporate CAs installed in Keychain on macOS, through `update-ca-certificates`/`update-ca-trust` on Linux, or in the Windows Trusted Root store then work without APM-specific configuration.
+**Scope caveat:** `APM_EXTRA_CA_BUNDLE` applies to APM's own package-management HTTPS, including installation, registry access, and downloads. It does not derive trust settings for experimental `apm run` children. Node/Copilot and Rust/Codex retain their runtime-owned trust configuration; configure Node's native `NODE_EXTRA_CA_CERTS` separately when needed.
 
-You only need the steps below when the CA is *not* in the OS store, or you want to pin a specific bundle:
+For the Python-based `llm` child runtime, `apm runtime setup llm` installs `truststore` in its virtual environment and adds a self-contained OS-trust bootstrap. Corporate CAs installed in Keychain on macOS, through `update-ca-certificates`/`update-ca-trust` on Linux, or in the Windows Trusted Root store then work without APM-specific configuration.
 
-- Setting `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` makes APM's HTTP layer verify against that bundle instead of the OS store. (`SSL_CERT_FILE` configures the stdlib `ssl` layer but is *not* read by `requests`, so on its own it does not override the HTTP path -- use `REQUESTS_CA_BUNDLE` for that.)
-- `APM_DISABLE_TRUSTSTORE=1` restores the legacy behaviour (verify against APM's bundled `certifi` set only).
+You only need the settings below when the CA is *not* in the OS store, or you intentionally want to pin a replacement bundle:
+
+- `APM_EXTRA_CA_BUNDLE` adds a readable PEM bundle to APM's active defaults: OS roots while `truststore` is active, or bundled `certifi` for the Requests fallback. This is the recommended per-shell corporate CA setting.
+- `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` makes APM's Python HTTP layer verify against that bundle instead of the OS store. (`SSL_CERT_FILE` configures the stdlib `ssl` layer but is *not* read by `requests`, so on its own it does not override the HTTP path -- use `REQUESTS_CA_BUNDLE` for that.)
+- `APM_DISABLE_TRUSTSTORE=1` disables APM's OS/additive trust. It does not unset `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`; an explicit replacement still controls Requests.
+
+The exact order is `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, the OS trust store, then bundled `certifi` as the final Requests fallback. Higher-precedence controls suppress additive-bundle validation. Leaving the extra bundle unset or blank preserves existing behavior.
+
+### Runtime coverage
+
+| Path | Behaviour when `APM_EXTRA_CA_BUNDLE` is selected |
+|---|---|
+| APM package-management Requests HTTPS | Retains native OS roots and adds the selected PEM certificates; falls back to `certifi` plus the extra CA if OS injection is unavailable. |
+| In-process stdlib metadata HTTPS | Receives OS-plus-extra trust while truststore is active; on injection failure its HTTPS context retains the stdlib defaults plus the extra certificates. |
+| Python/Requests execution child | Unchanged; no additive settings are derived. |
+| Managed Python `llm` child | Unchanged; the existing setup-time bootstrap still provides OS trust when available. |
+| Node/Copilot child | Unchanged; set `NODE_EXTRA_CA_CERTS` using the runtime's own trust settings. |
+| Git | Unchanged; configure `GIT_SSL_CAINFO` or Git's native trust settings separately. |
+| Rust/Codex | Unchanged; configure the runtime's own trust settings. |
 
 ### Known limitations
 
-- Node (Copilot) and Rust (Codex) coverage -- see the scope caveat above.
-- The `llm` child runtime's OS-trust bootstrap needs the runtime venv's interpreter to be **Python 3.10+** (the `truststore` library requires 3.10). On systems where `apm runtime setup llm` builds the venv from a stock **Python 3.9** (for example Apple's `/usr/bin/python3`), `truststore` cannot install and the `llm` child silently falls back to its bundled `certifi` set behind a proxy. Use a Python 3.10+ `python3` on your `PATH` before running setup.
+- Git uses its own trust configuration; `APM_EXTRA_CA_BUNDLE` does not change `git clone`, `git fetch`, or `git ls-remote`. Configure `GIT_SSL_CAINFO` separately when Git needs the same CA.
+- Rust-based Codex uses its own runtime trust configuration. APM does not translate `APM_EXTRA_CA_BUNDLE` into a Rust/OpenSSL setting.
+- If truststore injection is unavailable, Requests-based HTTPS retains `certifi` roots plus the extra certificates. The stdlib HTTPS context used by metadata requests retains its own default roots plus the extra certificates. Raw stdlib SSL contexts keep their existing settings.
+- The `llm` child runtime's OS-trust bootstrap needs the runtime venv's interpreter to be **Python 3.10+** (the `truststore` library requires 3.10). On systems where `apm runtime setup llm` builds the venv from a stock **Python 3.9** (for example Apple's `/usr/bin/python3`), `truststore` cannot install, so CAs present only in the OS store are unavailable to that child. That child keeps its existing certificate defaults; the additive APM setting does not apply to it. Use a Python 3.10+ `python3` on your `PATH` before running setup when the child must use native OS trust.
 - The initial `pip install` run *during* `apm runtime setup llm` uses pip's **own** certificate resolution, not APM's OS-trust path. Behind a MITM proxy, `pip` may fail to fetch `llm`/`truststore` before the bootstrap is even in place. Export `PIP_CERT=/path/to/org-ca-bundle.pem` (or run `pip config set global.cert /path/to/org-ca-bundle.pem`) before running setup so pip trusts your proxy CA.
-- APM cannot currently combine the OS store with an additional PEM bundle. Use `REQUESTS_CA_BUNDLE` to pin a single bundle instead.
 
 ## Configure trust
 
-APM uses `requests` for HTTP and shells out to `git` for repository operations. Both honour standard environment variables. Set them at the shell or in your profile (`~/.zshrc`, `~/.bashrc`, or the Windows user environment).
+APM's primary Python HTTP paths use `requests`, a small number of metadata paths use the stdlib `urllib` stack, and repository operations shell out to `git`. Their fallback trust settings differ as described above. Set them at the shell or in your profile (`~/.zshrc`, `~/.bashrc`, or the Windows user environment).
 
 ### Python HTTP layer
+
+```bash
+export APM_EXTRA_CA_BUNDLE=/path/to/corporate-ca.pem
+```
+
+This retains native OS roots and adds the selected PEM certificates. If APM cannot inject OS trust, Requests-based HTTPS retains the additive certificates over its `certifi` fallback. APM validates one in-memory copy of the bundle before using it: the file must be regular, readable, non-empty, no larger than 8 MiB, certificate-only ASCII PEM, and contain at least one certificate. Private-key blocks are rejected. An invalid selected bundle fails closed before the command runs, rather than silently ignoring the requested trust or disabling verification. Set trust controls in the environment that launches APM.
+
+Use a replacement bundle only when you intend to pin the entire Requests trust set:
 
 ```bash
 export REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem
 ```
 
 `REQUESTS_CA_BUNDLE` wins for `requests`. `SSL_CERT_FILE` / `SSL_CERT_DIR` cover parts of the stdlib TLS stack, but on their own they are not reliable overrides for the `requests` HTTP path APM uses.
+
+### Node children
+
+Configure Node independently; APM does not translate `APM_EXTRA_CA_BUNDLE` into a Node setting:
+
+```bash
+export NODE_EXTRA_CA_CERTS=/path/to/node-ca-bundle.pem
+```
 
 ### Git operations
 
@@ -107,11 +137,11 @@ The trailing slash matters - it scopes the setting to that origin.
 ### Windows (PowerShell)
 
 ```powershell
-$env:REQUESTS_CA_BUNDLE = "C:\certs\corporate-ca.pem"
+$env:APM_EXTRA_CA_BUNDLE = "C:\certs\corporate-ca.pem"
 $env:GIT_SSL_CAINFO     = "C:\certs\corporate-ca.pem"
 
 # Persist for the current user:
-[Environment]::SetEnvironmentVariable("REQUESTS_CA_BUNDLE", "C:\certs\corporate-ca.pem", "User")
+[Environment]::SetEnvironmentVariable("APM_EXTRA_CA_BUNDLE", "C:\certs\corporate-ca.pem", "User")
 ```
 
 ### Where do I get the CA file?
@@ -163,7 +193,7 @@ APM_LOG_LEVEL=DEBUG apm install
 GIT_CURL_VERBOSE=1 git ls-remote https://github.example.com/org/repo.git 2>&1 | grep -i 'ssl\|cert'
 ```
 
-Look for `TLS: verifying against OS trust store (truststore)` in the debug output. That line plus a clean install confirms APM's in-process Python path; a successful `ls-remote` confirms Git trust separately. Verify the managed `llm` child with its normal HTTPS-backed command after `apm runtime setup llm`.
+The debug output identifies whether APM selected the OS trust store, additive bundle, replacement bundle, or `certifi` fallback. That line plus a clean install confirms APM's in-process Python path; a successful `ls-remote` confirms Git trust separately.
 
 ## Development-only escape hatches
 
@@ -190,7 +220,8 @@ unset GIT_SSL_NO_VERIFY PYTHONHTTPSVERIFY
 
 [>] Re-run with `--verbose` and capture the full exception chain.
 [>] Check `curl -v https://<host>` from the same shell - if it fails, the problem is the system trust store, not APM.
+[>] Confirm `APM_EXTRA_CA_BUNDLE` points at a readable, non-empty regular file no larger than 8 MiB and contains certificate-only ASCII PEM. APM rejects malformed bundles and private-key blocks rather than silently ignoring them. Unset it to return to normal OS trust, or replace it with the correct CA file.
 [>] Confirm `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a readable PEM file (`openssl x509 -in $REQUESTS_CA_BUNDLE -noout -subject` should print a subject line). Note `REQUESTS_CA_BUNDLE` *replaces* the OS store rather than augmenting it (like `git`'s `http.sslCAInfo` and `curl --cacert`), so a bundle missing your proxy root will still fail even though the OS store has it.
-[>] If `git`/`curl` succeed but `apm` does not, suspect a **stale `REQUESTS_CA_BUNDLE`** (or `CURL_CA_BUNDLE`) pinning APM to an old bundle that predates the OS store. `unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE` and retry to let APM fall back to the OS trust store.
+[>] If `git`/`curl` succeed but `apm` does not, check the precedence settings. `APM_DISABLE_TRUSTSTORE` bypasses OS and additive trust; a stale `REQUESTS_CA_BUNDLE` (or `CURL_CA_BUNDLE`) pins APM to a replacement bundle. Unset those variables and retry to let `APM_EXTRA_CA_BUNDLE`, or the OS store when it is unset, take effect.
 [>] If only one host fails, see [GHES and GitLab self-managed](#ghes-and-gitlab-self-managed) and the per-host `git config` recipe above.
 [>] If the install proceeds past TLS but then fails, continue at [install failures](../install-failures/).

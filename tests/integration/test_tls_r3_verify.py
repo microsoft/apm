@@ -370,19 +370,20 @@ def test_child_bootstrap_leaves_pip_vendored_truststore_in_control(
     assert injections == []
 
 
-def test_v4_best_effort_control_flow_does_not_abort(tmp_path):
+@pytest.mark.windows_compat
+def test_v4_best_effort_control_flow_does_not_abort() -> None:
     # Dynamically prove the bash guard: a failing `pip` under `set -euo
     # pipefail` guarded by `|| log_warning` still exits 0 and runs later steps.
-    script = tmp_path / "probe.sh"
-    script.write_text(
+    script = (
         "set -euo pipefail\n"
         'log_warning() { echo "[!] $*"; }\n'
         "pip() { echo 'simulated failure' >&2; return 1; }\n"
         "pip install 'truststore>=0.10.0' || log_warning 'truststore install failed'\n"
-        "echo CONTINUED\n",
-        encoding="ascii",
+        "echo CONTINUED\n"
     )
-    result = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [shutil.which("bash") or "bash"], input=script, capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, result.stderr
     assert "CONTINUED" in result.stdout
 

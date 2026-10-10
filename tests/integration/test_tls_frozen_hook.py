@@ -241,13 +241,14 @@ def test_bundled_default_neutralized_system_store_wins(tmp_path):
 
 @_requires_truststore
 @_requires_openssl
+@pytest.mark.windows_compat
 def test_genuine_user_override_still_honored(tmp_path):
     """B2 Test B: a genuine user CA override (no marker) is honored -> request succeeds.
 
     Same private-CA bundle, delivered as a real user value WITHOUT the
     bundled-default marker. Only OUR bundled default is ever neutralized; user
     intent must survive. Delivered via the channel the platform's truststore
-    backend honors (REQUESTS_CA_BUNDLE on macOS, SSL_CERT_FILE on Linux). Run in
+    backend honors (SSL_CERT_FILE on Linux, REQUESTS_CA_BUNDLE elsewhere). Run in
     a child process to avoid global-state bleed.
     """
     from ._tls_ca_server import private_ca_https_server
@@ -255,10 +256,10 @@ def test_genuine_user_override_still_honored(tmp_path):
     with private_ca_https_server(tmp_path) as server:
         bundle = _bundle_with_private_ca(tmp_path, server.ca_pem)
         env = _clean_child_env()
-        if sys.platform == "darwin":
-            env["REQUESTS_CA_BUNDLE"] = str(bundle)
-        else:
+        if sys.platform == "linux":
             env["SSL_CERT_FILE"] = str(bundle)
+        else:
+            env["REQUESTS_CA_BUNDLE"] = str(bundle)
 
         result = subprocess.run(
             [sys.executable, "-c", _B2_CHILD, server.url],

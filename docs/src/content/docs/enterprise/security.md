@@ -55,12 +55,13 @@ inherited `PATH`.
 
 APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.
 
-- `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` replace the OS store with an explicitly selected PEM bundle for APM's HTTP layer.
-- `APM_DISABLE_TRUSTSTORE=1` restores the previous bundled-`certifi` behavior.
-- If `truststore` is unavailable or injection fails, APM falls back to `certifi`; it does not disable verification.
-- The Python-based `llm` runtime receives a shipped, self-contained `.pth` bootstrap in its managed virtual environment. The bootstrap imports only `truststore`; it does not execute dependency-provided package content.
+- `REQUESTS_CA_BUNDLE` takes precedence over `CURL_CA_BUNDLE`; either explicitly replaces normal Requests trust and suppresses OS/additive injection.
+- `APM_DISABLE_TRUSTSTORE=1` disables OS/additive trust without unsetting a separately configured replacement bundle.
+- `APM_EXTRA_CA_BUNDLE` adds certificate-only PEM certificates to APM's package-management HTTPS. Truststore-backed contexts retain native OS roots; the Requests fallback retains bundled `certifi` roots plus the extra certificates. Certificate and hostname verification remain enabled.
+- A selected bundle that is missing, unreadable, empty, non-regular, over 8 MiB, non-ASCII, malformed, or contains a private key fails closed with a configuration error.
+- The existing Python `llm` runtime still receives a self-contained `.pth` OS-trust bootstrap at venv setup. `APM_EXTRA_CA_BUNDLE` does not extend that bootstrap or derive Python/Node child settings.
 
-Node-based (Copilot) and Rust-based (Codex) child runtimes retain their own trust configuration for now. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
+Git, Node-based Copilot, and Rust-based Codex retain their own trust configuration. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
 
 ## Dependency provenance
 

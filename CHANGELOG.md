@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `APM_EXTRA_CA_BUNDLE` adds corporate PEM certificates to APM package-management HTTPS while retaining default trust roots and explicit Requests/curl overrides. (#2034) — by @TameTheGame (#2741)
+
 ### Changed
 
 - `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
