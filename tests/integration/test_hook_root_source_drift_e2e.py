@@ -49,7 +49,7 @@ _HARNESS_CASES = [
         "cursor",
         ".cursor/hooks.json",
         ".cursor/apm-hooks.json",
-        "PreToolUse",
+        "preToolUse",
         id="cursor",
     ),
     pytest.param(
@@ -67,6 +67,17 @@ _HARNESS_CASES = [
         id="windsurf",
     ),
 ]
+
+# Cursor's native schema accepts only flat handlers, so a nested user entry
+# would make the second install reject the config instead of preserving it.
+_FLAT_HANDLER_TARGETS = frozenset({"cursor"})
+
+
+def _user_owned_entry(target: str) -> dict:
+    command = {"type": "command", "command": "echo user-owned"}
+    if target in _FLAT_HANDLER_TARGETS:
+        return command
+    return {"matcher": "Bash", "hooks": [command]}
 
 
 def _load_sources(
@@ -178,12 +189,8 @@ def test_root_hook_source_drift_heals_on_reinstall(
     # Append a user-owned entry directly to the settings file (never in the sidecar).
     settings_path = project / settings_rel
     settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
-    settings_data.setdefault("hooks", {}).setdefault(event_key, []).append(
-        {
-            "matcher": "Bash",
-            "hooks": [{"type": "command", "command": "echo user-owned"}],
-        }
-    )
+    user_entry = _user_owned_entry(target)
+    settings_data.setdefault("hooks", {}).setdefault(event_key, []).append(user_entry)
     settings_path.write_text(json.dumps(settings_data), encoding="utf-8")
 
     # Second install: must heal the stale marker without touching the user-owned entry.
@@ -197,15 +204,7 @@ def test_root_hook_source_drift_heals_on_reinstall(
 
     settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
     entries = settings_data.get("hooks", {}).get(event_key, [])
-    user_owned = [
-        e
-        for e in entries
-        if isinstance(e, dict)
-        and isinstance(e.get("hooks"), list)
-        and e["hooks"]
-        and isinstance(e["hooks"][0], dict)
-        and e["hooks"][0].get("command") == "echo user-owned"
-    ]
+    user_owned = [e for e in entries if e == user_entry]
     assert len(user_owned) == 1, (
         f"User-owned hook entry must survive healing for {target}; entries={entries}"
     )
