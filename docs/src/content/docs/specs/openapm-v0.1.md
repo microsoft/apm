@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **128 normative statements (123 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **129 normative statements (124 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1356,6 +1356,18 @@ registered **discovery provider** invoked in the configured order
 substituted for this order. When no provider yields a policy, no
 policy is applied.
 
+<a id="req-pl-021"></a>
+**[req-pl-021]** A conforming **governance** implementation MUST,
+when an explicit `--policy <ref>` argument names a concrete policy
+source (rather than requesting discovery) and that source cannot be
+resolved, fetched, or parsed into a valid policy, terminate the
+governance operation non-zero with a diagnostic that names the ref
+and the cause. It MUST NOT fall back to discovery or proceed as
+though no policy applies, and the effective `fetch_failure` default
+MUST NOT relax this outcome. A previously fetched valid policy that
+the implementation serves from cache under its documented
+stale-cache rules counts as resolved.
+
 #### 6.1.1 Discovery providers
 
 OpenAPM v0.1 defines discovery as a **pluggable extension point**.
@@ -1871,7 +1883,8 @@ This section's normative statements are:
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
   [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
   [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
-  [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020).
+  [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020),
+  [req-pl-021](#req-pl-021).
 
 ---
 
@@ -3784,7 +3797,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
 [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
 [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
-[req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020).
+[req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020),
+[req-pl-021](#req-pl-021).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -4168,6 +4182,7 @@ renumbering of conformance classes.
 | [req-pl-018](#req-pl-018)                | MUST    | 6.3.1   | governance  |
 | [req-pl-019](#req-pl-019)                | MUST    | 6.8.1   | governance  |
 | [req-pl-020](#req-pl-020)                | MUST    | 6.8.1   | governance  |
+| [req-pl-021](#req-pl-021)                | MUST    | 6.1     | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -4228,7 +4243,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 128** (123 MUST, 5 SHOULD).
+**Total normative statements: 129** (124 MUST, 5 SHOULD).
 
 ---
 
@@ -4283,6 +4298,7 @@ renumbering of conformance classes.
 | 0.1.43 (proposed) | 2026-10-03 | Codex-native agent model preservation and bounded dropped-metadata diagnostic for PR #3150 (closes #3126). Added [req-tg-015] (Section 8.5.1, consumer MUST): a conforming consumer providing the Codex-native agent conversion capability MUST preserve a source-declared `model` or `model_reasoning_effort` string value in its native top-level placement, MUST leave either field absent when absent from the source, MUST diagnose a non-string value by field name without including that value, and MUST emit a diagnostic bounded on both dropped-field count and per-field name length (never the value) for any other dropped, non-capability-restriction frontmatter field. Under Section 9.2 this is a new opt-in conformance capability scoped to consumers providing the Codex-native agent conversion capability, not behavior-neutral errata: it does not require or imply preservation of any other `config.toml`-native key and does not define behavior for any other conversion target. Implementations not providing Codex-native agent conversion acquire no new required feature. No schema, lockfile version, existing mandatory feature, drift-policy or ownership rule changes. Section 9.3 reviewer approvals and public comment period remain pending; this proposal is not evidence of adoption. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 125 -> 126 (121 MUST, 5 SHOULD). |
 | 0.1.44 (proposed) | 2026-10-03 | PR #3149 adds two consumer MUSTs in Section 8.5.9: [req-tg-016](#req-tg-016) rejects unsupported Cursor hook vocabulary; [req-tg-017](#req-tg-017) detects overlap with Claude imports before either install order writes, preserving import settings. These cite the accepted Cursor capability, not universal translation or a new mandatory feature (Section 9.2). Section 8.7, Section 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Statement count: 126 -> 128 (123 MUST, 5 SHOULD). |
 | 0.1.45 (proposed) | 2026-10-09 | Editorial fold for PR #3106 (closes #3083 Mode-B silent-extension gate; no new normative statement, count remains 128 (123 MUST, 5 SHOULD)). Section 4.2.1 and [req-tg-001] (Section 8.4): the explicit-only target enumeration now names `agent-skills`, `antigravity`, `hermes`, and `grok-bot`, reflecting the already-registered `hermes` target and the new stable explicit-only `grok-bot` target (skills deploy to `agent-data/workflows/`, per the OpenAPM Target Registry v0.1 companion). |
+| 0.1.46 (proposed) | 2026-10-14 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Statement count: 128 -> 129 (124 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

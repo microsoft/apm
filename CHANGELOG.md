@@ -13,10 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-pl-021`: an explicit `--policy <ref>` that cannot be resolved, fetched, or parsed fails the governance operation instead of proceeding without policy. (#3230)
 - `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
 
 ### Fixed
 
+- `apm audit --ci --policy <path|url|owner/repo>` now exits 1 with an `[x]` error naming the source and cause when that policy cannot be loaded (missing file, unreachable, malformed, or garbage response) instead of passing with enforcement skipped; auto-discovery and `--policy org` keep the `policy.fetch_failure_default` warn default, and CI JSON/SARIF report a `policy` object showing whether a policy was enforced. (#3230)
 - Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
 - Cursor hooks use native v1 events and flat handlers; unsupported input and overlapping Claude imports now fail explicitly. Choose one hook route per dependency; see the [supported mappings](docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import) and `openapm-v0.1.md` requirements `req-tg-016/017`. (#3149)
 

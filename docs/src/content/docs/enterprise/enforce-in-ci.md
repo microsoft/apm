@@ -32,6 +32,8 @@ Useful flags:
 - `--policy <source>` -- explicit policy ref
   (`org`, a path, a URL, or `<owner>/<repo>`). Without it, APM
   auto-discovers from your project's git remote, mirroring `apm install`.
+  A path, URL, or `<owner>/<repo>` that cannot be loaded fails the gate
+  (exit `1`) instead of skipping policy checks.
 - `--no-policy` -- skip policy discovery (baseline + drift only).
 - `--no-cache` -- force a fresh policy fetch. Recommended in CI so a
   cached file does not mask a same-day policy update.

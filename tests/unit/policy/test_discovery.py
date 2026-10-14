@@ -730,6 +730,46 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertIn("org:", result.source)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_missing_local_path_skips_repo_lookup(self, mock_fetch):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for ref in (
+                "./missing-policy.yml",
+                "../policies/apm-policy.yml",
+                str(Path(tmpdir) / "missing.yml"),
+                "missing.yaml",
+                "missing.YML",
+            ):
+                result = discover_policy(Path(tmpdir), policy_override=ref, no_cache=True)
+                self.assertFalse(result.found)
+                self.assertEqual(result.outcome, "absent")
+                self.assertEqual(result.source, f"file:{ref}")
+                self.assertEqual(result.error, f"Policy file not found: {ref}")
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_existing_directory_reports_not_a_file(self, mock_fetch):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = discover_policy(Path(tmpdir), policy_override=tmpdir, no_cache=True)
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "absent")
+            self.assertEqual(result.error, f"Policy path is not a file: {tmpdir}")
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_owner_repo_with_yaml_suffix_still_tries_repo(self, mock_fetch):
+        mock_fetch.return_value = (VALID_POLICY_YAML, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = discover_policy(
+                Path(tmpdir),
+                policy_override="contoso/policy.yml",
+                no_cache=True,
+            )
+            self.assertTrue(result.found)
+            self.assertEqual(result.source, "org:contoso/policy.yml")
+        mock_fetch.assert_called_once()
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
     @patch("apm_cli.policy.discovery.subprocess.run")
     def test_override_org_auto_discovers(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(

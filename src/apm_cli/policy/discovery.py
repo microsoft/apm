@@ -729,6 +729,8 @@ def discover_policy(
 
     Resolution order:
     1. If policy_override is a local file path -> load from file
+       (an unambiguous local path that does not exist returns
+       ``outcome="absent"`` with an error instead of a repo lookup)
     2. If policy_override is an https:// URL -> fetch from URL
        (http:// is rejected for security)
     3. If policy_override is "org" -> auto-discover from project's git remote
@@ -749,6 +751,18 @@ def discover_policy(
         path = Path(policy_override)
         if path.exists() and path.is_file():
             return _load_from_file(path, expected_hash=expected_hash)
+        if _is_unambiguous_local_policy_path(policy_override):
+            reason = (
+                f"Policy path is not a file: {policy_override}"
+                if path.exists()
+                else f"Policy file not found: {policy_override}"
+            )
+            return PolicyFetchResult(
+                error=reason,
+                source=f"file:{policy_override}",
+                outcome="absent",
+                not_found=True,
+            )
         if policy_override.startswith("http://"):
             return PolicyFetchResult(
                 error="Refusing plaintext http:// policy URL -- use https://",
@@ -785,6 +799,20 @@ def discover_policy(
         expected_hash=expected_hash,
         cache_only=cache_only,
     )
+
+
+def _is_unambiguous_local_policy_path(ref: str) -> bool:
+    """Return True when *ref* can only be a local file path.
+
+    Such refs are never valid ``owner/repo`` / URL / ``org`` forms, so a
+    missing file must not fall through to a remote repository lookup.
+    ``owner/name.yml`` stays ambiguous and is still tried as a repo.
+    """
+    if ref.startswith(("https://", "http://")):
+        return False
+    if ref.startswith((".", "/", "~")) or "\\" in ref or Path(ref).is_absolute():
+        return True
+    return "/" not in ref and ref.lower().endswith((".yml", ".yaml"))
 
 
 def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFetchResult:

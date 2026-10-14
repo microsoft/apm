@@ -89,7 +89,7 @@ single-file `--file` operation is unchanged.
 | Flag | Default | Description |
 |---|---|---|
 | `--ci` | off | Run lockfile consistency checks and drift as a CI gate. Cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`. |
-| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. Experimental. Without `--ci` it is ignored with a warning. |
+| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. A path, URL, or `owner/repo` that cannot be loaded (missing, unreachable, malformed) fails the gate with exit 1; `org` keeps the discovery default (warn unless `policy.fetch_failure_default: block`). Experimental. Without `--ci` it is ignored with a warning. |
 | `--no-policy` | off | Skip policy discovery and enforcement. Equivalent to `APM_POLICY_DISABLE=1`. Overridden when `--policy` is passed explicitly. |
 | `--no-cache` | off | Force a fresh policy fetch (skip the policy cache). Only relevant with policy discovery active. |
 | `--no-fail-fast` | off | Run every check even after the first failure, for a full diagnostic report. |
@@ -310,7 +310,9 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations). |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), or an explicit `--policy` source could not be loaded. |
+
+CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 
 ## Related
 
