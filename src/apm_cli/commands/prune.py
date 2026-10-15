@@ -115,7 +115,7 @@ def prune(ctx, dry_run):
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
             expected_installed = _build_expected_install_paths(
-                declared_deps, lockfile, apm_modules_dir
+                declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")

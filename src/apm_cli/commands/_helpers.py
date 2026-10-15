@@ -22,6 +22,10 @@ from ..constants import (
     SKILL_MD_FILENAME,
 )
 from ..core import project_name as _project_name
+from ..models.dependency.materialization import (
+    CachedMaterializationPathReader,
+    find_case_equivalent_materialization_path,
+)
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
@@ -139,16 +143,35 @@ def _lazy_confirm():
 # ------------------------------------------------------------------
 
 
-def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path) -> set:
+def _build_expected_install_paths(
+    declared_deps, lockfile, apm_modules_dir: Path, *, preserve_installed_case: bool = False
+) -> set:
     """Build expected package paths under *apm_modules_dir*.
 
     Combines direct deps (from ``apm.yml``) with transitive deps
     (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
-    consistency with how packages are actually installed.
+    consistency with how packages are actually installed. Prune opts into
+    recognizing existing case-equivalent paths without renaming them.
     """
+    reader = CachedMaterializationPathReader()
+
+    def expected_path(dependency):
+        desired = dependency.get_install_path(apm_modules_dir)
+        if (
+            preserve_installed_case
+            and dependency.alias is None
+            and dependency.has_case_insensitive_repo_identity
+        ):
+            existing = find_case_equivalent_materialization_path(
+                desired, apm_modules_dir, dependency=dependency, reader=reader
+            )
+            if existing is not None:
+                return existing
+        return desired
+
     expected = set()
     for dep in declared_deps:
-        install_path = dep.get_install_path(apm_modules_dir)
+        install_path = expected_path(dep)
         try:
             relative_path = install_path.relative_to(apm_modules_dir)
             expected.add(relative_path.as_posix())
@@ -159,7 +182,7 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
         for dep in lockfile.get_package_dependencies():
             if dep.depth is not None and dep.depth > 1:
                 dep_ref = dep.to_dependency_ref()
-                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path = expected_path(dep_ref)
                 try:
                     relative_path = install_path.relative_to(apm_modules_dir)
                     expected.add(relative_path.as_posix())
