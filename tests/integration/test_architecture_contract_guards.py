@@ -12,6 +12,23 @@ from scripts.architecture_linter.runner import registered_rules, run_selected_ru
 _RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
 
 
+def test_legacy_hook_shapes_boundary_rejects_cleanup_bypass() -> None:
+    """A second legacy-shape policy cannot silently bypass the native owner."""
+    root = Path(__file__).parents[2]
+    path = "src/apm_cli/integration/hook_integrator.py"
+    source = (root / path).read_text(encoding="utf-8")
+    old = "_legacy_hook_entries(entries, config.target_key)"
+    assert old in source
+    rule_id = "mutation_writes.neutral_hook_contract"
+    result = run_selected_rules(
+        root, (rule_id,), source_overrides={path: source.replace(old, "[]", 1)}
+    )
+    assert any(
+        finding.rule_id == rule_id and "_legacy_hook_entries" in finding.message
+        for finding in result.violations
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [
@@ -119,13 +136,19 @@ def test_codex_native_edge_preserves_nested_entries() -> None:
     assert _to_codex_hook_entries(source) == source
 
 
-def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path) -> None:
+@pytest.mark.parametrize("typed", [True, False], ids=["explicit-type", "default-type"])
+def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path, typed: bool) -> None:
     """Claude output must wrap portable handlers in matcher/hooks entries."""
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     (tmp_path / ".claude").mkdir()
     package_info = _write_portable_hook_package(tmp_path)
+    if not typed:
+        hook_path = package_info.install_path / ".apm/hooks/check.json"
+        hook = json.loads(hook_path.read_text(encoding="utf-8"))
+        hook["hooks"]["PreToolUse"][0].pop("type")
+        hook_path.write_text(json.dumps(hook), encoding="utf-8")
 
     HookIntegrator().integrate_hooks_for_target(
         KNOWN_TARGETS["claude"],

@@ -405,6 +405,7 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_cursor_preflight_unconditional(provider, rule_id),
         *_nhc_contract_vocabulary(provider, rule_id),
         *_nhc_command_keys(provider, rule_id),
+        *_nhc_legacy_native_shapes(provider, rule_id),
         *_nhc_file_routing(provider, rule_id),
         *_nhc_config_writes(provider, rule_id),
         *_nhc_ownership_markers(provider, rule_id),
@@ -718,6 +719,22 @@ def _nhc_command_keys(provider: FactsProvider, rule_id: str) -> tuple[Violation,
             )
         )
     return tuple(findings)
+
+
+def _nhc_legacy_native_shapes(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Ownership matching must obtain legacy shapes from the native renderer."""
+    facts, failures = checked_facts(provider, _HOOK_INTEGRATOR, rule_id, require_python=True)
+    if failures:
+        return failures
+    return _require(
+        any(
+            call.scope == "_integrate_merged_hooks" and call.qualname == "_legacy_hook_entries"
+            for call in facts.calls
+        ),
+        rule_id,
+        _HOOK_INTEGRATOR,
+        "legacy hook shapes must route through _legacy_hook_entries",
+    )
 
 
 def _nhc_file_routing(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
