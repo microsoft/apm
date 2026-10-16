@@ -73,6 +73,77 @@ apm pack --archive -o ./dist
 # -> ./dist/my-pkg-<version>.zip
 ```
 
+## Independent resources (experimental)
+
+For package-owned contracts, checks, or other data that must not become
+automatically activated primitives, use the working-draft `resources` field:
+
+```yaml
+name: software-factory
+version: "1.0.0"
+resources:
+  - contracts
+  - checks
+```
+
+Keep an existing, supported `apm.lock.yaml` beside `apm.yml`, then run:
+
+```bash
+apm pack --format apm --source --archive -o ./dist
+apm unpack --source ./dist/software-factory-1.0.0.zip -o ./acquired
+```
+
+`acquired` must not exist, even as an empty directory. Source mode copies
+the original manifest, lockfile, and selected resource files byte-for-byte.
+It never runs scripts, checks, hooks, dependency installation, or compilation;
+it also suppresses marketplace and plugin-manifest output. Choose an isolated
+acquisition directory, not a consumer workspace. Configuration in the restored
+manifest remains inert until a separate command explicitly uses it.
+
+Each resource entry is a nonempty, package-relative directory, recursively
+selected without globs. Use POSIX paths without a leading `./` or trailing
+slash; nested roots such as `factory/contracts` work. Roots cannot overlap
+or alias each other by case. Files and directories must be regular, contained,
+and unambiguous across platforms; symlinks and special files fail.
+Hidden paths, `apm.yml`, `apm.lock`, `apm.lock.yaml`, `plugin.json`, `mcp.json`,
+`apm_modules`, `node_modules`, `__pycache__`, `build`, and `dist` are rejected
+anywhere in selected content. Do not select `.` or a broad parent containing
+metadata, secrets, or caches. APM does not perform secret detection on arbitrary
+resource bytes; the author is responsible for the explicitly selected content.
+
+The existing APM envelope contains an integrity lockfile with `pack.source: true`
+and `pack.bundle_files` SHA-256 entries. Its `package/` directory holds the exact
+author files, including the original lockfile; restoration removes only this
+envelope prefix. Hashes detect corruption, not publisher authenticity: obtain
+the archive and any external checksum from a trusted source. Missing, changed,
+extra, ambiguous, or unsupported-version metadata fails before restoration.
+Final staged bytes are checked against the original envelope hashes before
+publication, not against hashes recomputed from potentially changed input.
+Metadata documents are limited to 4 MiB each; the shared asset inventory allows
+at most 10,000 budgeted entries and 512 MiB in aggregate.
+Portable paths are limited to 4,096 UTF-8 bytes and 128 segments.
+Ordinary file permissions are copied where the host supports them; set-ID and
+sticky bits are rejected. SHA-256 entries attest file bytes, not permissions,
+ownership, or timestamps. Use an externally trusted archive checksum when those
+archive metadata values are part of your verification policy.
+
+Directory output and `--archive-format tar.gz` are also supported. `--dry-run`
+performs the same admission and integrity checks without writing. `--force` and
+`--skip-verify` cannot bypass source verification, and occupied outputs are
+never replaced.
+Directory publication requires native atomic no-replace support; unavailable
+platform or filesystem capabilities fail closed. A destination created while
+staging is also left untouched.
+
+This route packages only the author's declared resources, not dependency
+resources or installed primitives. It adds no remote acquisition operation.
+`apm install` and ordinary `apm unpack` reject marked source envelopes.
+Renaming the marker lockfile to legacy `apm.lock` does not enable deployment.
+Ordinary pack and plugin formats reject manifests declaring resources rather
+than silently dropping them; `includes` remains primitive selection.
+This extension is not normative OpenAPM: omit `$schema` to select the working
+draft. Existing releases without `--source` support cannot use this route.
+
 ## The plugin.json contract
 
 `plugin.json` is the bundle's identity card. Only `name` is required. APM

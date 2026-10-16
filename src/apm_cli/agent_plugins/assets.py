@@ -349,9 +349,13 @@ def _open_verified_asset(
         ):
             raise AssetInventoryError(f"asset {expected.path} no longer matches its inventory")
         digest = hashlib.sha256()
+        bytes_read = 0
         while chunk := file_handle.read(_READ_CHUNK_BYTES):
+            bytes_read += len(chunk)
+            if bytes_read > expected.size:
+                raise AssetInventoryError(f"asset {expected.path} grew after inventory")
             digest.update(chunk)
-        if digest.hexdigest() != expected.sha256:
+        if bytes_read != expected.size or digest.hexdigest() != expected.sha256:
             raise AssetInventoryError(f"asset {expected.path} no longer matches its inventory")
         file_handle.seek(0)
         yield file_handle

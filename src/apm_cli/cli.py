@@ -134,7 +134,8 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "unpack",
         "apm_cli.commands.pack",
         "unpack_cmd",
-        "[Deprecated] Extract an APM bundle into the current project. Use 'apm install <bundle-path>' instead -- this command will be removed in a future release.",
+        "Restore an experimental source package with --source into a new directory. "
+        "Without --source: deprecated deployment extraction; use 'apm install <bundle-path>'.",
     ),
     (
         "update",

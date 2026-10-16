@@ -26,8 +26,16 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 
 ## Options
 
+**Experimental source mode:** `--format apm --source` packages only declared
+`resources` plus the original `apm.yml` and `apm.lock.yaml`, without deployment
+or marketplace output. Restore with `apm unpack --source`, not `apm install`.
+See [independent resources](../../../producer/pack-a-bundle/#independent-resources-experimental)
+for selection, integrity, and safety rules. Declared resources cause ordinary
+pack and plugin formats to fail rather than silently omit them.
+
 | Flag | Default | Description |
 |---|---|---|
+| `--source` | off | Experimental non-activating source package. Requires `--format apm`, working-draft `resources`, and an existing supported `apm.lock.yaml`. Only archive/output/dry-run/JSON/verbose options combine with this mode; outputs must not exist. |
 | `--claude-plugin` | on (no-flag default) | Select the Claude Code plugin bundle: `plugin.json` plus plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). This is what `apm pack` produces with zero flags. |
 | `--format plugin\|agent-plugin\|claude\|claude-plugin\|apm` | `claude-plugin` | Bundle format selector. `agent-plugin` is the sole opt-in for the portable Agent Plugins v1 bundle. `plugin` is a compatibility alias for the Claude Code plugin bundle, not for `agent-plugin`. `claude` and `claude-plugin` also select the Claude Code plugin bundle (the no-flag default). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). Passing more than one selector (`--claude-plugin`, `--format`) is a usage error. |
 | `--archive` | off | Produce a `.zip` archive instead of a directory (previous default: `.tar.gz`; use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |

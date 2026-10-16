@@ -90,10 +90,10 @@
     },
     {
       "id": "deterministic-atomic-text-writes",
-      "decision": "Deterministic UTF-8 text writes and atomic replacement",
-      "owner": "utils/atomic_io.py (write_text_lf, atomic_write_text)",
+      "decision": "Deterministic UTF-8 text writes, atomic replacement, and exclusive directory publication",
+      "owner": "utils/atomic_io.py (write_text_lf, atomic_write_text, publish_directory_noreplace)",
       "selectors": ["src/apm_cli/utils/atomic_io.py"],
-      "guards": ["contracts-tooling-project-yaml-write-delegation"]
+      "guards": ["contracts-tooling-project-yaml-write-delegation", "marketplace-integrations-exclusive-directory-publication"]
     },
     {
       "id": "read-only-lockfile-path",

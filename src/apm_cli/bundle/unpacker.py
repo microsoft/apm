@@ -40,6 +40,7 @@ def unpack_bundle(
     skip_verify: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    source: bool = False,
 ) -> UnpackResult:
     """Extract and apply an APM bundle to a project directory.
 
@@ -62,6 +63,10 @@ def unpack_bundle(
         ValueError: If verification finds files listed in the lockfile but
             absent from the bundle.
     """
+    if source and (skip_verify or force):
+        raise ValueError("--source cannot bypass verification with --skip-verify or --force")
+    if source and bundle_path.is_symlink():
+        raise ValueError("Source-package input must not be a symlink")
     # 1. If archive, extract to temp dir
     cleanup_temp = False
     if bundle_path.is_file() and bundle_path.name.endswith(".zip"):
@@ -77,7 +82,11 @@ def unpack_bundle(
                     max_entries=_MAX_ZIP_ENTRIES,
                     max_uncompressed=_MAX_ZIP_UNCOMPRESSED,
                     error_type=ValueError,
+                    strict=source,
                 )
+        except zipfile.BadZipFile as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise ValueError(f"Invalid ZIP bundle: {exc}") from exc
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
@@ -95,7 +104,7 @@ def unpack_bundle(
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
         cleanup_temp = True
         try:
-            _extract_tar_gz_file(bundle_path, str(temp_dir))
+            _extract_tar_gz_file(bundle_path, str(temp_dir), strict=source)
         except ArchiveError as exc:
             shutil.rmtree(temp_dir, ignore_errors=True)
             msg = str(exc)
@@ -119,6 +128,11 @@ def unpack_bundle(
         raise FileNotFoundError(f"Bundle not found or unsupported format: {bundle_path}")
 
     try:
+        from .source_package import reject_source_deployment, restore_source_package
+
+        if source:
+            return restore_source_package(source_dir, Path(output_dir), dry_run=dry_run)
+        reject_source_deployment(source_dir)
         # 2. Read apm.lock.yaml (or legacy apm.lock) from bundle
         lockfile_path = source_dir / LOCKFILE_NAME
         if not lockfile_path.exists():

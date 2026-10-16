@@ -372,6 +372,9 @@ class PackageFormatRegistry:
         agent_plugin_detection: AgentPluginDetection | None = None,
     ) -> DetectionReport:
         """Run all detectors against ``package_path`` and return the report."""
+        from ..bundle.source_package import reject_source_deployment
+
+        reject_source_deployment(package_path)
         apm_yml_ev: ApmYmlFormatEvidence | None = None
         skill_md_ev: SkillMdFormatEvidence | None = None
         hook_json_ev: HookJsonFormatEvidence | None = None

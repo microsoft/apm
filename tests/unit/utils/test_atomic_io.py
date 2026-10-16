@@ -14,20 +14,102 @@ Covers:
 
 from __future__ import annotations
 
+import errno
+import os
 import stat
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 
-from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
+from apm_cli.utils.atomic_io import atomic_write_text, publish_directory_noreplace, write_text_lf
 
 # Entire module: this is the canonical owner of platform-independent
 # atomic/LF-safe text writes (microsoft/apm#2233 CRLF-drift class).
 # Selected by the PR-time Windows Compatibility Gate via
 # `pytest -m windows_compat`; also runs on every other OS.
 pytestmark = pytest.mark.windows_compat
+
+
+class TestExclusiveDirectoryPublication:
+    """Native no-replace publication never falls back to replacing a directory."""
+
+    def test_publishes_complete_directory(self, tmp_path: Path) -> None:
+        source, destination = tmp_path / "staged", tmp_path / "published"
+        source.mkdir()
+        (source / "content").write_bytes(b"verified")
+        publish_directory_noreplace(source, destination)
+        assert (destination / "content").read_bytes() == b"verified"
+        assert not source.exists()
+
+    @pytest.mark.parametrize("occupied_kind", ["directory", "file"])
+    def test_occupied_destination_is_unchanged(self, tmp_path: Path, occupied_kind: str) -> None:
+        source, destination = tmp_path / "staged", tmp_path / "occupied"
+        source.mkdir()
+        (source / "content").write_bytes(b"verified")
+        if occupied_kind == "directory":
+            destination.mkdir()
+        else:
+            destination.write_bytes(b"original")
+        inode = destination.stat().st_ino
+        with pytest.raises(OSError):
+            publish_directory_noreplace(source, destination)
+        assert destination.stat().st_ino == inode
+        assert (source / "content").read_bytes() == b"verified"
+        if occupied_kind == "directory":
+            assert list(destination.iterdir()) == []
+        else:
+            assert destination.read_bytes() == b"original"
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin", "unsupported"])
+    def test_unavailable_capability_never_uses_plain_rename(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+    ) -> None:
+        from apm_cli.utils import atomic_io
+
+        source, destination = tmp_path / "staged", tmp_path / "published"
+        source.mkdir()
+        monkeypatch.setattr(atomic_io, "sys", SimpleNamespace(platform=platform))
+        with (
+            patch("ctypes.CDLL", return_value=object()),
+            patch.object(atomic_io.os, "rename") as plain_rename,
+            pytest.raises(OSError) as error,
+        ):
+            publish_directory_noreplace(source, destination)
+        assert error.value.errno == errno.ENOTSUP
+        plain_rename.assert_not_called()
+        assert source.is_dir() and not destination.exists()
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    @pytest.mark.parametrize("failure", [errno.ENOSYS, errno.ENOTSUP, errno.EXDEV])
+    def test_native_failure_propagates_without_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, failure: int
+    ) -> None:
+        from apm_cli.utils import atomic_io
+
+        source, destination = tmp_path / "staged", tmp_path / "published"
+        source.mkdir()
+        native = Mock(return_value=-1)
+        library = SimpleNamespace(renameat2=native, renamex_np=native)
+        monkeypatch.setattr(atomic_io, "sys", SimpleNamespace(platform=platform))
+        with (
+            patch("ctypes.CDLL", return_value=library),
+            patch("ctypes.get_errno", return_value=failure),
+            patch.object(atomic_io.os, "rename") as plain_rename,
+            pytest.raises(OSError) as error,
+        ):
+            publish_directory_noreplace(source, destination)
+        assert error.value.errno == failure
+        arguments = (
+            (-100, os.fsencode(source), -100, os.fsencode(destination), 1)
+            if platform == "linux"
+            else (os.fsencode(source), os.fsencode(destination), 4)
+        )
+        native.assert_called_once_with(*arguments)
+        plain_rename.assert_not_called()
+        assert source.is_dir() and not destination.exists()
 
 
 class TestAtomicWriteText:

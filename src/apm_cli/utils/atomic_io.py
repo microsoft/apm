@@ -1,4 +1,4 @@
-"""Atomic file-write primitive for APM.
+"""Atomic file writes and exclusive directory publication for APM.
 
 Writes go to a temp file in the same directory as the target, then are
 renamed via :func:`os.replace`. A crash mid-write cannot leave a half-
@@ -9,13 +9,61 @@ This is the single canonical implementation; both
 ``apm_cli.commands._helpers._atomic_write`` (kept as an alias for
 backward compatibility with existing tests) and
 ``apm_cli.compilation.output_writer`` route through here.
+Source packages use ``publish_directory_noreplace`` to publish staged
+directories without replacing concurrently created consumer output.
 """
 
 import contextlib
+import errno
 import os
 import stat
+import sys
 import tempfile
 from pathlib import Path
+
+
+def publish_directory_noreplace(source: Path, destination: Path) -> None:
+    """Atomically move a staged directory without replacing any destination.
+
+    Both paths must be on the same filesystem. Unsupported platforms,
+    libraries and filesystems fail closed; an exists-check plus ordinary
+    POSIX rename cannot provide this guarantee.
+    """
+    if sys.platform == "win32":
+        # Windows rename refuses existing destinations, including empty dirs.
+        os.rename(source, destination)
+        return
+    if sys.platform not in {"linux", "darwin"}:
+        raise OSError(errno.ENOTSUP, "Atomic no-replace directory publication is unavailable")
+
+    import ctypes
+
+    source_bytes, destination_bytes = os.fsencode(source), os.fsencode(destination)
+    if b"\0" in source_bytes or b"\0" in destination_bytes:
+        raise ValueError("Directory publication paths cannot contain NUL bytes")
+    libc = ctypes.CDLL(None, use_errno=True)
+    arguments: tuple[bytes | int, ...]
+    if sys.platform == "darwin":
+        rename = getattr(libc, "renamex_np", None)
+        argument_types = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        arguments = (source_bytes, destination_bytes, 0x00000004)  # RENAME_EXCL
+    else:
+        rename = getattr(libc, "renameat2", None)
+        argument_types = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        arguments = (-100, source_bytes, -100, destination_bytes, 1)  # AT_FDCWD, RENAME_NOREPLACE
+    if rename is None:
+        raise OSError(errno.ENOTSUP, "Atomic no-replace directory publication is unavailable")
+    rename.argtypes = argument_types
+    rename.restype = ctypes.c_int
+    if rename(*arguments) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), os.fspath(source), None, os.fspath(destination))
 
 
 def _replace_atomic_file(source: str, destination: Path) -> None:
