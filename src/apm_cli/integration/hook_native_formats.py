@@ -13,6 +13,7 @@ from apm_cli.hook_contract import (
     HookHandler,
     _entries_to_ir,
     _handler_to_ir,
+    _thaw,
     hook_handlers,
 )
 
@@ -350,7 +351,7 @@ def inspect_native_hooks(
 
 def _handler_from_ir(handler: HookHandler, *, timeout_milliseconds: bool) -> dict[str, Any]:
     """Render a portable handler into one native command object."""
-    result = dict(handler.metadata)
+    result = _thaw(handler.metadata)
     if handler.command is not None:
         result["command"] = handler.command
     if handler.timeout_seconds is not None:
@@ -372,9 +373,9 @@ def _render_nested_document(
     result: list = []
     for binding in document.bindings:
         if "raw_entry" in binding.metadata:
-            result.append(binding.metadata["raw_entry"])
+            result.append(_thaw(binding.metadata["raw_entry"]))
             continue
-        outer = dict(binding.metadata)
+        outer = _thaw(binding.metadata)
         if binding.matcher is not None or default_matcher is not None:
             outer["matcher"] = binding.matcher or default_matcher
         outer["hooks"] = [
@@ -441,7 +442,7 @@ def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
     flat: list[dict[str, Any]] = []
     for binding in document.bindings:
         if "raw_entry" in binding.metadata:
-            flat.append(binding.metadata["raw_entry"])
+            flat.append(_thaw(binding.metadata["raw_entry"]))
             continue
         for handler in binding.handlers:
             rendered = _handler_from_ir(handler, timeout_milliseconds=False)

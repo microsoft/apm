@@ -183,6 +183,8 @@ hook action under `.kiro/hooks/`.
 
 For Codex, APM wraps flat command entries in hook groups containing a
 nested `hooks` array in `.codex/hooks.json`.
+Claude, Codex, Gemini, and Antigravity preserve nested handler and
+hook-group metadata, including `env` objects and arrays, in native JSON.
 
 For Cursor, APM writes native v1 flat command or prompt handlers using only
 verified aliases. Unsupported fields, restrictions and overlapping Claude

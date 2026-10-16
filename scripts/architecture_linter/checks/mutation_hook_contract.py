@@ -409,6 +409,7 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_config_writes(provider, rule_id),
         *_nhc_ownership_markers(provider, rule_id),
         *_nhc_drift_projection(provider, rule_id),
+        *_nhc_native_metadata_thaw(provider, rule_id),
     )
 
 
@@ -550,6 +551,47 @@ def _nhc_contract_vocabulary(provider: FactsProvider, rule_id: str) -> tuple[Vio
             exempt_marker=EXEMPT_MARKER,
         )
     )
+
+
+def _nhc_native_metadata_thaw(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Native renderers must thaw frozen hook metadata through ``hook_contract._thaw``.
+
+    The IR freezes nested metadata, so a shallow ``dict(...)`` copy or a raw
+    ``raw_entry`` passthrough leaves nested mappings frozen and breaks JSON
+    serialization (#3167).
+    """
+    renderer = "src/apm_cli/integration/hook_native_formats.py"
+    facts_by_path, failures = _read_required(provider, rule_id, (_HOOK_CONTRACT, renderer))
+    findings: list[Violation] = list(failures)
+    if not failures:
+        findings.extend(
+            _require(
+                _count_regex_lines(facts_by_path[_HOOK_CONTRACT], r"^def _thaw\(") == 1,
+                rule_id,
+                _HOOK_CONTRACT,
+                "_thaw must be defined exactly once by hook_contract",
+            )
+        )
+        for required in ("_thaw(handler.metadata)", "_thaw(binding.metadata)"):
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[renderer], required),
+                    rule_id,
+                    renderer,
+                    f"native hook renderers must call {required}",
+                )
+            )
+        findings.extend(
+            line_pattern_violations(
+                provider,
+                rule_id=rule_id,
+                paths=(renderer,),
+                pattern=r'dict\((?:handler|binding)\.metadata\)|append\(binding\.metadata\["raw_entry"\]\)',
+                message="native hook renderers must thaw frozen metadata with hook_contract._thaw",
+                exempt_marker=EXEMPT_MARKER,
+            )
+        )
+    return tuple(findings)
 
 
 def _nhc_cursor_edge(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:

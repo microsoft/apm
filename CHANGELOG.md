@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` and `apm update` no longer fail with `Object of type mappingproxy is not JSON serializable` when a hook carries nested metadata such as `env`; Claude, Codex, Gemini and Antigravity hook files keep that metadata as plain JSON. (by @abhishekacharya200, with regression coverage from @MohammedAlkindi in #3199, closes #3167) (#3211)
 - Hook ownership sidecars ignore JSON formatting during drift checks while preserving meaningful and invalid-content findings. -- by @Pybsama (#3155)
 - `apm install` now reconciles renamed or deleted project-local skills and removed targets using recorded concrete ownership, preserving ambiguous legacy output, shared claims, and user edits -- by @tillig (#3190)
 - `apm install plugin@mkt` for an in-repository plugin of a `github.com` marketplace registered over SSH pre-flights the repository over SSH instead of HTTPS-only probes, so a private marketplace installs with an SSH key and no GitHub token. (#3164)

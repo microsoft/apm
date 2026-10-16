@@ -201,6 +201,9 @@ hook groups containing a nested `hooks` array in `.codex/hooks.json`. Kiro
 receives its current v1 standalone schema:
 `{ "version": "v1", "hooks": [{ "name", "trigger", "matcher", "action" }] }`.
 Kiro trigger names are PascalCase and command timeouts remain in seconds.
+For Claude, Codex, Gemini, and Antigravity, other handler and hook-group
+fields, including nested objects and arrays such as `env`, are written to the
+native JSON unchanged.
 
 ### Cursor native hooks and Claude import
 
