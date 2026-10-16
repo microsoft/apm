@@ -105,6 +105,7 @@ def run_mcp_install(  # noqa: PLR0913
     registry_allow_http: bool = True,
     registry_source: str | None = None,
     initial_manifest_config: dict | None = None,
+    retry_args: tuple[str, ...] = (),
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
@@ -167,6 +168,7 @@ def run_mcp_install(  # noqa: PLR0913
                     registry_source=registry_source,
                     verbose=verbose,
                     logger=logger,
+                    retry_args=retry_args,
                 )
             except Exception as exc:
                 detail = str(exc)

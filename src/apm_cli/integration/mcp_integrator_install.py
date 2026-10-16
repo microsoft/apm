@@ -59,7 +59,9 @@ def _validate_registry_servers(
     verbose: bool,
     logger: Any,
     fail_closed: bool = False,
+    suggest_official_registry: bool = False,
     server_info_cache: dict[str, dict] | None = None,
+    retry_args: tuple[str, ...] = (),
 ) -> list[str]:
     """Validate registry identities and raise before any target write."""
     logger.mcp_lookup_heartbeat(len(server_names))
@@ -77,14 +79,36 @@ def _validate_registry_servers(
             server_info_cache=server_info_cache,
         )
     if invalid_servers:
-        from apm_cli.registry.client import redact_mcp_registry_url
+        import re
+
+        from apm_cli.registry import client as registry_api
 
         registry_client = operations.registry_client
-        registry_url = redact_mcp_registry_url(registry_client.registry_url)
+        registry_url = registry_api.redact_mcp_registry_url(registry_client.registry_url)
         logger.error(
             f"Server(s) not found in registry {registry_url}: {', '.join(invalid_servers)}"
         )
-        if getattr(registry_client, "registry_url_source", None) == "explicit":
+        registry_source = getattr(registry_client, "registry_url_source", None)
+        is_safe_name = registry_api.is_valid_mcp_server_name
+        names_are_safe = all(map(is_safe_name, invalid_servers))
+        # Version pins are opaque strings. Only emit portable literal tokens,
+        # never shell syntax or control characters from a copied option value.
+        args_are_safe = all(re.fullmatch(r"[A-Za-z0-9._+,\-]+", arg) for arg in retry_args)
+        if (
+            suggest_official_registry
+            and registry_source == "default"
+            and names_are_safe
+            and args_are_safe
+        ):
+            for server_name in invalid_servers:
+                retry_command = (
+                    f'apm install --mcp "{server_name}" '
+                    f"--registry {registry_api.OFFICIAL_MCP_REGISTRY_URL}"
+                )
+                if retry_args:
+                    retry_command += " " + " ".join(retry_args)
+                logger.info(f"Try: {retry_command}", soft_wrap=True)
+        elif registry_source == "explicit":
             logger.progress(
                 "Set MCP_REGISTRY_URL to this endpoint, then run "
                 "'apm mcp search <query>' to find available servers"
@@ -102,6 +126,7 @@ def prevalidate_registry_dependencies(
     verbose: bool,
     logger: Any,
     registry_source: str | None = None,
+    retry_args: tuple[str, ...] = (),
 ) -> dict[str, dict]:
     """Resolve direct-install registry identities before persistent writes."""
     from apm_cli.registry.operations import MCPServerOperations
@@ -116,7 +141,9 @@ def prevalidate_registry_dependencies(
         verbose=verbose,
         logger=logger,
         fail_closed=True,
+        suggest_official_registry=True,
         server_info_cache=server_info_cache,
+        retry_args=retry_args,
     )
     return _PrevalidatedRegistryServers(
         {name: server_info_cache[name] for name in valid_servers},
