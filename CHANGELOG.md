@@ -7,42 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-16
+
 ### Added
 
-- `APM_EXTRA_CA_BUNDLE` adds corporate PEM certificates to APM package-management HTTPS while retaining default trust roots and explicit Requests/curl overrides. (#2034) — by @TameTheGame (#2741)
-- Agent primitives (`*.agent.md`) accept an optional `user-invocable: false` frontmatter field (default `true`; `visibility: internal` is an accepted alias). APM preserves the metadata so the agent is intended to be reachable programmatically only (for example via `handoffs:` or subagent calls); picker exclusion and that reachability take effect only when the receiving harness supports them. Verbatim-copy targets preserve the field; Codex and Kiro warn instead of silently dropping it. -- by @richard-fowles-epam (#3132)
-- `apm pack` can emit a Copilot CLI marketplace (`marketplace.outputs: {copilot: {}}`), preserving real local paths and remote repository/subdirectory identities, tag refs, and full commit pins without changing Claude/Codex defaults. -- by @aryansk (#2600)
-- New `grok-bot` install target deploys skill packages to `agent-data/workflows/<skill-name>/` for Grok Bot at project and user (`--global`) scope; the `grok-bot` target accepts packages declaring `agent-skills`, and an explicit `--target` fails only when no dependency in the install has a compatible target or a package named on the command line (and its whole subtree) has none; other filtered dependencies warn. (#3106)
+- `APM_EXTRA_CA_BUNDLE` adds corporate PEM certificates to APM's package-management HTTPS on top of the default trust roots, so private registries and TLS-inspecting proxies work without replacing the machine trust store. (by @TameTheGame, closes #2034, #2741)
+- Agent primitives (`*.agent.md`) accept an optional `user-invocable: false` frontmatter field (alias `visibility: internal`) to mark an agent as reachable only through handoffs or subagent calls on harnesses that support it. Verbatim-copy targets preserve the field; Codex and Kiro warn instead of silently dropping it. (by @richard-fowles-epam, closes #3132, #3133)
+- `apm pack` can emit a GitHub Copilot CLI marketplace via `marketplace.outputs: {copilot: {}}`, preserving local paths, remote subdirectories, tag refs, and full commit pins; Claude and Codex defaults are unchanged. (by @aryansk, #2600)
+- New `grok-bot` install target deploys skill packages to `agent-data/workflows/<skill-name>/` at project and user (`--global`) scope. An explicit `--target grok-bot` fails only when nothing in the install is compatible; other incompatible dependencies warn. (by @sergio-sisternes-epam, closes #3083, #3106)
+- `apm audit --external-args` now accepts SkillSpector's `--baseline`, so reviewed suppression baselines inside the scan directory work through APM. (by @MohammedAlkindi, closes #2331, #2936)
 
 ### Changed
 
-- `batch_fetch_server_info` now looks up independent MCP registry documents concurrently with a bounded `ThreadPoolExecutor` (max 4 workers), matching the existing install-check fan-out. Closes #2981. (#2983)
-- `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
+- **BREAKING:** `apm install --frozen` no longer writes `apm.lock.yaml`; a frozen install whose lockfile does not record every deployed file now fails and names the missing paths instead of silently repairing the lockfile. If CI starts failing on `--frozen` after upgrading, run `apm install` locally and commit the updated `apm.lock.yaml`. (by @salpers, closes #2379, #2384)
+- Cursor hooks are now written as native v1 events with flat handlers, and a dependency that would activate the same hooks through both native Cursor output and Claude imports fails explicitly. Choose one hook route per dependency; see the [supported mappings](docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import). (#3149)
 
 ### Fixed
 
-- Hook ownership sidecars ignore JSON formatting during drift checks while preserving meaningful and invalid-content findings. -- by @Pybsama (#3155)
-- `apm install` now reconciles renamed or deleted project-local skills and removed targets using recorded concrete ownership, preserving ambiguous legacy output, shared claims, and user edits -- by @tillig (#3190)
-- `apm install plugin@mkt` for an in-repository plugin of a `github.com` marketplace registered over SSH pre-flights the repository over SSH instead of HTTPS-only probes, so a private marketplace installs with an SSH key and no GitHub token. (#3164)
-- `apm pack --check-clean` now certifies GitHub-hosted manifestless skills when `SKILL.md` has valid frontmatter at the resolved repository, ref, and subdirectory, while invalid skill metadata and missing repositories, refs, and package paths remain fail-closed. (#3064)
-- `apm audit` no longer reports a sibling root `skills/` folder alongside a project's `.apm/` content as `unintegrated` after a clean install; replay now uses install's project-local package interpretation. - by @adityaanikam (#3209, closes #3151)
-- `apm.yml` keys matching `x-[a-z][a-z0-9-]*` are preserved in the parsed manifest and dependency lock entry; other unknown keys warn without failing, including a single warning during install dry-runs. Proposed `req-ext-003` in `openapm-v0.1.md` records this contract with a distinct `.46` lockfile schema; existing schema bytes remain unchanged. - by @sergio-sisternes-epam (#3222)
-- `apm install -g` (including `--mcp`) now configures MCP servers for Cursor in `~/.cursor/mcp.json` and OpenCode in `~/.config/opencode/opencode.json`, and `apm uninstall -g` removes them; existing configs APM cannot parse, such as OpenCode JSONC, are left untouched. (by @alvedder, #3100)
-- Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it. (#3150)
-- Cursor hooks use native v1 events and flat handlers; unsupported input and overlapping Claude imports now fail explicitly. Choose one hook route per dependency; see the [supported mappings](docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import) and `openapm-v0.1.md` requirements `req-tg-016/017`. (#3149)
+- `apm install` fails instead of deleting a dependency's skills when its persisted `skills:` selection no longer matches any available skill, preserving prior files and ownership. (by @dajiaohuang, closes #3204, #3235)
+- `apm install` now reconciles renamed or deleted project-local skills and removed targets under shared `.agents/` roots using recorded ownership, preserving shared claims and user edits. (by @tillig, #3190)
+- `apm install plugin@marketplace` for an in-repository plugin of a `github.com` marketplace registered over SSH now pre-flights over SSH, so private marketplaces install with an SSH key and no GitHub token. (by @MohammedAlkindi, closes #3164, #3200)
+- `apm install -g` (including `--mcp`) configures MCP servers for Cursor (`~/.cursor/mcp.json`) and OpenCode (`~/.config/opencode/opencode.json`), and `apm uninstall -g` removes them; configs APM cannot parse, such as OpenCode JSONC, are left untouched. (by @alvedder, #3100)
+- Claude user-scope MCP stale cleanup honors `CLAUDE_CONFIG_DIR` instead of always editing `~/.claude.json`. (by @bodapatisaikrishna, closes #3127, #3148)
+- `apm.yml` keys matching `x-[a-z][a-z0-9-]*` are preserved in the parsed manifest and lockfile dependency entry; other unknown keys warn without failing (proposed `req-ext-003`). (by @sergio-sisternes-epam, #3222)
+- Codex agent conversion preserves native `model` and `model_reasoning_effort` settings and warns about dropped metadata instead of silently losing it (proposed `req-tg-015`). (closes #3126, #3150)
+- `apm compile --target copilot` omits a global instruction from `.github/copilot-instructions.md` when its matching native rule is deployed under `.github/instructions/`, avoiding duplicate context; hand-authored root files are never removed. (by @dajiaohuang, closes #3099, #3113)
 - `apm pack` records the commit an annotated or signed tag points to as `source.sha` instead of the tag object, so plugin installers that check out the tag accept the pin. (by @nefayran, closes #3048, #3161)
-- `apm install --frozen` no longer writes `apm.lock.yaml`, which req-lk-006
-  requires it to leave untouched. It previously deployed files and rewrote the
-  lockfile to claim them, so a committed lockfile that under-recorded the
-  deployed set was silently repaired in CI instead of being reported -- and the
-  files it omitted stayed outside `content-integrity`'s hash and hidden-Unicode
-  scanners. Frozen installs now fail and name the unrecorded paths. The check is
-  one-directional -- claims the install would drop (a `--target` filter,
-  `--only`, a removed dependency) are tolerated, as removed deps already were --
-  and `generated_at` / `apm_version` are excluded, so a newer CLI reading an
-  older lockfile is not treated as a rewrite. (#2379)
-  If CI starts failing on `--frozen` after upgrading, run `apm install`
-  locally and commit the updated `apm.lock.yaml`.
+- `apm pack --check-clean` certifies GitHub-hosted manifestless skills whose `SKILL.md` has valid frontmatter at the resolved ref; invalid metadata and missing repositories, refs, or paths still fail closed. (by @yfoel, #3064)
+- `apm audit` no longer reports a root `skills/` folder alongside `.apm/` content as `unintegrated` after a clean install; replay now interprets project-local content the same way install does. (by @adityaanikam, closes #3151, #3209)
+- `apm audit --ci` validates selected skill subsets against its prepared lock-pinned dependency tree, so a clean committed checkout passes without a prior `apm install`. (closes #3136, #3147)
+- `apm audit` drift checks ignore JSON key order and formatting in hook ownership sidecars while still reporting meaningful and invalid content changes. (by @Pybsama, #3155)
+- `apm prune` keeps an installed GitHub dependency when only its owner/repo casing changes in `apm.yml`; genuinely duplicate paths stop with a path-specific error. (closes #3034, #3241)
+- Azure DevOps Git operations retry repository-scoped `git credential fill` (Git Credential Manager) after `ADO_APM_PAT` and `az` bearer tokens are rejected, so Windows GCM-backed marketplace and package installs succeed without a PAT. (by @mheeaxa, #2610)
+- APM's Git subprocesses keep a repository's effective `core.symlinks` value instead of letting an inherited global or system setting override it, so per-checkout symlink detection (for example on non-admin Windows) is respected. (#3145)
+- `apm runtime setup` from the standalone binary no longer leaks bundled library paths into setup children, so `apm runtime setup llm` creates its Python environment instead of failing in `ensurepip`. (#3251)
+- Stale-file cleanup messages now read `Cleaned N stale deployed files for DEPENDENCY` instead of implying the dependency key is the deletion location. (by @Dansatch, closes #3026, #3120)
+- Docs: the bundled `apm-usage` guide no longer claims package content must be ASCII-only, and corrects `apm run` stability and LSP discoverability guidance. (by @MohammedAlkindi, closes #2315, #2647)
+
+### Performance
+
+- `apm install` fetches independent MCP registry server details concurrently (up to 4 at a time), shortening installs that declare several registry MCP servers. (by @sergio-sisternes-epam, closes #2981, #2983)
 
 ## [0.33.0] - 2026-10-02
 
@@ -90,7 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` shortens dependency-staging paths by 68 characters to avoid Windows `MAX_PATH` failures in deep checkouts. This does not guarantee arbitrary long-path support. (by @MohammedAlkindi, closes #2896, #2941)
 - Dependency updates preserve marketplace provenance so `plugin@marketplace` uninstall aliases keep working in project and global scope. (by @mfroembgen, #2949)
 - `apm audit` drift replay now discovers root-local primitives with the same source scope as a normal install, rather than treating the scratch deployment directory as the project root. (#3021)
-- Azure DevOps Git clones now retry path-scoped `git credential fill` (Git Credential Manager) after `ADO_APM_PAT` and `az` bearer fail, so Windows GCM-backed marketplace and package installs can succeed without a PAT. Auth-failure detection reads git stderr on wrapped clone errors and does not treat Azure DevOps `TF401xxx` codes as HTTP 401. - by @mheeaxa (#2610)
 
 ### Security
 
