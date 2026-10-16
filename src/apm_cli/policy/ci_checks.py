@@ -113,6 +113,64 @@ def _check_ref_consistency(
             mismatches.append(f"{key}: not found in lockfile")
             requires_update = requires_update or bool(lock.dependencies)
             continue
+        if dep_ref.is_marketplace:
+            if dep_ref.marketplace_version_spec:
+                from ..marketplace.semver import parse_semver, satisfies_range
+                from ..marketplace.version_resolver import is_version_constraint
+
+                spec = dep_ref.marketplace_version_spec
+                if is_version_constraint(spec):
+                    matches_constraint = bool(
+                        locked_dep.constraint and locked_dep.constraint == spec
+                    )
+                    candidates: list[str] = []
+                    if locked_dep.resolved_tag:
+                        candidates.append(locked_dep.resolved_tag)
+                    if locked_dep.resolved_ref:
+                        candidates.append(locked_dep.resolved_ref)
+                    if locked_dep.version:
+                        candidates.append(locked_dep.version)
+
+                    matches_semver = False
+                    for cand in candidates:
+                        parsed = parse_semver(cand)
+                        if parsed is None and cand.startswith("v"):
+                            parsed = parse_semver(cand[1:])
+                        if parsed is None:
+                            for sep in ("--v", "-v", "--", "-"):
+                                if sep in cand:
+                                    part = cand.split(sep)[-1]
+                                    parsed = parse_semver(part.lstrip("v"))
+                                    if parsed is not None:
+                                        break
+                        if parsed is not None and satisfies_range(parsed, spec):
+                            matches_semver = True
+                            break
+
+                    if not (matches_constraint or matches_semver):
+                        mismatches.append(
+                            f"{key}: manifest version '{spec}' != "
+                            f"lockfile '{locked_dep.constraint or locked_dep.resolved_tag or locked_dep.resolved_ref or locked_dep.version or '(missing)'}'"
+                        )
+                        requires_update = True
+                elif is_full_revision_pin(spec):
+                    if locked_dep.resolved_commit != spec:
+                        mismatches.append(
+                            f"{key}: manifest commit '{spec}' != "
+                            f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
+                        )
+                        requires_update = True
+                elif spec not in (
+                    locked_dep.resolved_ref,
+                    locked_dep.resolved_tag,
+                    locked_dep.version,
+                ):
+                    mismatches.append(
+                        f"{key}: manifest ref '{spec}' != "
+                        f"lockfile ref '{locked_dep.resolved_ref or locked_dep.resolved_tag or '(missing)'}'"
+                    )
+                    requires_update = True
+            continue
         if is_full_revision_pin(dep_ref.reference) and (
             locked_dep.resolved_commit != dep_ref.reference
         ):
@@ -317,11 +375,21 @@ def _check_no_orphans(
     sub-package's manifest, not the root manifest, so the root manifest
     cannot make them go away by editing its dependency lists.
     """
-    manifest_keys = {dep.get_unique_key() for dep in manifest.get_all_apm_dependencies()}
+    declared_lock_keys: set[str] = set()
+    for dep in manifest.get_all_apm_dependencies():
+        key = dep.get_unique_key()
+        declared_lock_keys.add(key)
+        if dep.is_marketplace or key.startswith("_marketplace/"):
+            locked_dep = lock.get_dependency(key)
+            if locked_dep is not None:
+                declared_lock_keys.add(locked_dep.get_unique_key())
+
     orphaned = [
         dep_key
         for dep_key, locked_dep in lock.dependencies.items()
-        if dep_key not in manifest_keys and dep_key != _SELF_KEY and locked_dep.resolved_by is None
+        if dep_key not in declared_lock_keys
+        and dep_key != _SELF_KEY
+        and locked_dep.resolved_by is None
     ]
     if not orphaned:
         return CheckResult(

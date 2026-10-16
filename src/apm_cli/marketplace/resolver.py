@@ -112,6 +112,8 @@ class MarketplacePluginResolution:
     cross_repo_misconfig_risk: CrossRepoMisconfigRisk | None = None
     source_url: str = ""
     source_digest: str = ""
+    constraint: str | None = None
+    resolved_tag: str | None = None
 
     def __iter__(self) -> Iterator[str | MarketplacePlugin]:
         yield self.canonical
@@ -127,6 +129,10 @@ class MarketplacePluginResolution:
             data["source_url"] = self.source_url
         if self.source_digest:
             data["source_digest"] = self.source_digest
+        if self.constraint:
+            data["constraint"] = self.constraint
+        if self.resolved_tag:
+            data["resolved_tag"] = self.resolved_tag
         return data
 
 
@@ -1057,6 +1063,8 @@ def resolve_marketplace_plugin(
     # (for plain tags/branches/SHAs like v2.0.0). Tags live on the package
     # repository; when that differs from the marketplace catalog, query the
     # package remote instead of ``source.owner/source.repo``.
+    resolved_constraint: str | None = None
+    resolved_tag_name: str | None = None
     if version_spec:
         from .version_resolver import is_version_constraint
 
@@ -1120,6 +1128,8 @@ def resolve_marketplace_plugin(
                 **version_auth,
             )
             resolved_override = tag_name
+            resolved_constraint = version_spec
+            resolved_tag_name = tag_name
             logger.debug(
                 "Version constraint '%s' for %s@%s resolved with pattern '%s' to tag '%s'",
                 version_spec,
@@ -1201,4 +1211,6 @@ def resolve_marketplace_plugin(
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
         source_url=manifest.source_url,
         source_digest=manifest.source_digest,
+        constraint=resolved_constraint,
+        resolved_tag=resolved_tag_name,
     )

@@ -865,7 +865,34 @@ class LockFile:
 
     def get_dependency(self, key: str) -> LockedDependency | None:
         """Get a dependency by its unique key."""
-        return self.dependencies.get(key)
+        dep = self.dependencies.get(key)
+        if dep is not None:
+            return dep
+        if key.startswith("_marketplace/"):
+            parts = key.split("/", 2)
+            if len(parts) == 3:
+                return self.get_dependency_by_marketplace(parts[1], parts[2])
+        return None
+
+    def get_dependency_by_marketplace(
+        self, marketplace_name: str, plugin_name: str
+    ) -> LockedDependency | None:
+        """Find a locked dependency by its marketplace provenance.
+
+        Fails closed (returns None) if no matching dependency is found or if
+        multiple rows share the same marketplace provenance.
+        """
+        matches = [
+            dep
+            for dep in self.dependencies.values()
+            if (
+                dep.discovered_via == marketplace_name
+                and dep.marketplace_plugin_name == plugin_name
+            )
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
         """Rename one locally deployed path and carry its content hash."""
@@ -875,7 +902,7 @@ class LockFile:
 
     def has_dependency(self, key: str) -> bool:
         """Check if a dependency exists."""
-        return key in self.dependencies
+        return self.get_dependency(key) is not None
 
     def get_all_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies sorted by depth then repo_url."""
