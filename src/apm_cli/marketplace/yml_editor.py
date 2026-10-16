@@ -151,6 +151,13 @@ def _validate_subdir(subdir: str) -> None:
         raise MarketplaceYmlError(str(exc)) from exc
 
 
+def _validate_category(category: str) -> str:
+    """Validate *category* is a non-empty string and return it stripped."""
+    if not isinstance(category, str) or not category.strip():
+        raise MarketplaceYmlError("'category' must be a non-empty string")
+    return category.strip()
+
+
 # -------------------------------------------------------------------
 # Public API
 # -------------------------------------------------------------------
@@ -167,6 +174,7 @@ def add_plugin_entry(
     tag_pattern: str | None = None,
     tags: list[str] | None = None,
     include_prerelease: bool = False,
+    category: str | None = None,
 ) -> str:
     """Append a new entry to ``packages[]``.
 
@@ -187,6 +195,9 @@ def add_plugin_entry(
 
     if subdir is not None:
         _validate_subdir(subdir)
+
+    if category is not None:
+        category = _validate_category(category)
 
     # Derive name from source repo if not provided.
     if name is None:
@@ -225,6 +236,8 @@ def add_plugin_entry(
         new_entry["include_prerelease"] = True
     if tags is not None and len(tags) > 0:
         new_entry["tags"] = tags
+    if category is not None:
+        new_entry["category"] = category
 
     packages.append(new_entry)
 
@@ -267,12 +280,15 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
             del entry["version"]
 
     # Simple scalar fields.
-    _SIMPLE_FIELDS = ("subdir", "tag_pattern")
+    _SIMPLE_FIELDS = ("subdir", "tag_pattern", "category")
     for key in _SIMPLE_FIELDS:
         if key in fields and fields[key] is not None:
+            value = fields[key]
             if key == "subdir":
-                _validate_subdir(fields[key])
-            entry[key] = fields[key]
+                _validate_subdir(value)
+            elif key == "category":
+                value = _validate_category(value)
+            entry[key] = value
 
     # Boolean field: include_prerelease.
     if "include_prerelease" in fields and fields["include_prerelease"] is not None:
