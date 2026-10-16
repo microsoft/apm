@@ -307,6 +307,27 @@ apm install --target codex --mcp local-dev --url http://localhost:3000/mcp
 
 This writes the endpoint to the Codex MCP configuration.
 
+Codex's [native configuration schema](https://developers.openai.com/codex/config-schema.json)
+does not accept an MCP `id` setting. After upgrading APM, repair older generated
+entries with:
+
+```sh
+apm install --only mcp --target codex
+```
+
+Add `--global` for user-scope configuration. APM reports how many entries it
+repairs and preserves other settings. It changes only entries recorded as
+APM-owned in `apm.lock.yaml`, or unchanged self-defined entries matching an
+older lockfile's saved configuration. Entries without that evidence, including
+edited legacy entries and entries you added yourself, stay untouched.
+
+If Codex still reports an unsupported `id` on an entry you maintain yourself,
+back up `.codex/config.toml` (or the user-scope file) and remove only that
+entry's `id = ...` setting. Keep generated comments such as
+`# apm-registry-id: "registry-uuid"`: APM uses them to prevent duplicate
+registry installs. Regeneration may expand inline TOML tables while retaining
+their values and comments; it does not change Codex's project trust settings.
+
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive
 combinations (`--url` plus stdio command, `--header` without `--url`,

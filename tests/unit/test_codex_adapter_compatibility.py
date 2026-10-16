@@ -498,7 +498,7 @@ class TestFormatServerConfig:
             cfg = adapter._format_server_config({"packages": [pkg]})
         assert cfg["env"].get("MY_TOKEN") == "env-value"
 
-    def test_id_added_from_server_info(self, tmp_path: Path) -> None:
+    def test_registry_id_is_not_a_native_setting(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
         pkg = {
             "registry_name": "npm",
@@ -509,7 +509,7 @@ class TestFormatServerConfig:
             "environment_variables": [],
         }
         cfg = adapter._format_server_config({"packages": [pkg], "id": "my-uuid-123"})
-        assert cfg["id"] == "my-uuid-123"
+        assert "id" not in cfg
 
 
 # ---------------------------------------------------------------------------

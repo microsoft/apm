@@ -43,11 +43,14 @@ class MCPConflictDetector:
 
                 # Check if any existing server has the same UUID
                 for existing_name, existing_config in existing_servers.items():  # noqa: B007
-                    if (
-                        isinstance(existing_config, dict)
-                        and existing_config.get("id") == server_uuid
-                    ):
-                        return True
+                    if isinstance(existing_config, dict):
+                        existing_id = existing_config.get("id")
+                        if self.adapter.target_name == "codex":
+                            from ..adapters.client.codex import CodexClientAdapter
+
+                            existing_id = CodexClientAdapter.get_registry_id(existing_config)
+                        if existing_id == server_uuid:
+                            return True
             elif server_info:
                 # MCP Registry v0.1 entries carry no stable id; match by name
                 # without further registry lookups.

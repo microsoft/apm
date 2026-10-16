@@ -457,7 +457,7 @@ def test_required_codex_runtime_headers_follow_declaration_changes(
             "mcp.example.invalid",
             "/mcp",
         )
-        rendered.pop("id")
+        assert "id" not in rendered
         assert rendered == expected_fields
         assert document["model"] == "user-selected-model"
         assert document["mcp_servers"]["user-authored"] == {"command": "user-command"}
