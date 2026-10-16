@@ -236,6 +236,7 @@ def _allows_missing_manifest(
         accepted_types = {
             PackageType.APM_PACKAGE.value: "APM package",
             PackageType.CLAUDE_SKILL.value: "Claude skill",
+            PackageType.AGENT_PLUGIN.value: "Agent plugin",
         }
         accepted_kind = accepted_types.get(dependency.package_type)
         if accepted_kind is None:
@@ -258,6 +259,8 @@ def _allows_missing_manifest(
             dependency.to_dependency_ref().is_virtual_subdirectory()
             and dependency.package_type == PackageType.HOOK_PACKAGE.value
         )
+    if package_type is PackageType.AGENT_PLUGIN:
+        return dependency.package_type == PackageType.AGENT_PLUGIN.value
     return (
         package_type is PackageType.CLAUDE_SKILL
         and dependency.package_type == PackageType.CLAUDE_SKILL.value
