@@ -23,6 +23,8 @@ AI coding agents need context to be useful — standards, prompts, skills, plugi
 # apm.yml — ships with your project
 name: your-project
 version: 1.0.0
+targets:
+  - copilot # choose the harness(es) this project supports
 dependencies:
   apm:
     # Skills from any repository
@@ -34,7 +36,7 @@ dependencies:
     # A full APM package with instructions, skills, prompts, hooks...
     - microsoft/apm-sample-package#v1.0.0
   mcp:
-    # MCP servers -- installed into every detected client
+    # MCP servers -- installed into every selected target
     - name: io.github.github/github-mcp-server
       transport: http   # MCP transport name, not URL scheme -- connects over HTTPS
 ```
@@ -195,4 +197,4 @@ Created by [@danielmeppiel](https://github.com/danielmeppiel). Maintained by [@d
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Any use of third-party trademarks or logos are subject to their respective policies.
