@@ -30,9 +30,8 @@ from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
     PolicyViolationError,
     RequiredIntegrationError,
-)
-from apm_cli.install.errors import (
-    frozen_install_tip as _frozen_install_tip,
+    install_failure_message,
+    log_frozen_install_error,
 )
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
@@ -1653,10 +1652,7 @@ def install(  # noqa: PLR0913
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
     except FrozenInstallError as e:
-        logger.error(str(e))
-        for reason in e.reasons:
-            logger.error_detail(reason)
-        logger.info(_frozen_install_tip(e))
+        log_frozen_install_error(e, logger)
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1674,9 +1670,8 @@ def install(  # noqa: PLR0913
         # render with exit code 2 and the standard "Usage: ..." prefix.
         raise
     except Exception as e:
-        (logger or InstallLogger(verbose=verbose, dry_run=dry_run)).exception(
-            f"Error installing dependencies: {e}"
-        )
+        failure_logger = logger or InstallLogger(verbose=verbose, dry_run=dry_run)
+        failure_logger.exception(install_failure_message(e))
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1943,10 +1938,7 @@ def _install_apm_packages(ctx, outcome):
             logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
             raise InstallFailureAlreadyRendered(str(e)) from e
         except FrozenInstallError as e:
-            logger.error(str(e))
-            for reason in e.reasons:
-                logger.error_detail(reason)
-            logger.info(_frozen_install_tip(e))
+            log_frozen_install_error(e, logger)
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise

@@ -1059,6 +1059,51 @@ def test_required_lsp_only_dry_run_reports_plan_without_writing_state(
     _assert_same_state(before, after)
 
 
+def test_required_conflicted_lockfile_preserves_durable_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Required readers fail and preview warns without repairing conflicted state."""
+    scenario = _new_scenario(tmp_path / "conflicted-lockfile", apm_binary_path)
+    source = _publish(scenario, "conflict-kit", skill="preserved")
+    consumer = scenario.consumers.create(
+        "conflict-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="conflict-seed",
+    )
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (PurePosixPath("apm_modules"),),
+    }
+    before = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    lockfile = consumer.root / "apm.lock.yaml"
+    good_bytes = lockfile.read_bytes()
+    conflicted = good_bytes + b"\n<<<<<<< HEAD\n=======\n>>>>>>> feature\n"
+    for suffix, exit_code in (((), 1), (("--frozen",), 1), (("--dry-run",), 0)):
+        lockfile.write_bytes(conflicted)
+        result = scenario.runner.run(
+            (*_INSTALL_ARGS, *suffix),
+            cwd=consumer.root,
+            env=source.environment,
+            scenario_id=f"conflict-{suffix[0] if suffix else 'install'}",
+        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == exit_code, _result_evidence(result)
+        assert "unresolved git merge conflict markers" in output
+        assert "".join(str(lockfile).split()) in "".join(output.split())
+        assert "retry your original command" in output
+        assert lockfile.read_bytes() == conflicted
+        # The semantic snapshot requires parseable YAML. Assert conflicted bytes
+        # first, then restore only the test fixture to compare all other state.
+        lockfile.write_bytes(good_bytes)
+        _assert_same_state(before, LifecycleStateSnapshot.capture(consumer.root, **capture_args))
+
+
 def test_required_unknown_host_qualified_virtual_install_fails_before_state_write(
     tmp_path: Path,
     apm_binary_path: Path,

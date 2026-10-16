@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **129 normative statements (124 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **130 normative statements (125 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1197,6 +1197,40 @@ of the versions it recognises, with a diagnostic that explicitly
 offers the user a choice of either upgrading the consumer or
 regenerating the lockfile from the manifest.
 
+This section also covers diagnosis of unresolved merge-conflict markers at load time.
+
+<a id="req-lk-023"></a>
+**[req-lk-023]** A conforming **consumer** implementation that
+encounters a lockfile carrying unresolved version-control merge
+conflict markers (for example, lines beginning with seven consecutive
+less-than, greater-than, or pipe characters followed by a space or
+end-of-line) MUST satisfy all of the following:
+
+(a) **Recognise the condition where the lockfile is loaded.** The
+consumer MUST identify the markers through the same authority that
+loads the lockfile, and MUST report the lockfile path and the cause
+without emitting raw parser output.
+
+(b) **Name an action the user can take on the unreadable file.** The
+diagnostic MUST direct the user to resolve the conflict in that file
+or restore a known-good lockfile. It MUST NOT present an operation
+that reads the same lockfile as the repair for the markers, because
+such an operation cannot succeed while they are present; naming one
+as a follow-up step, sequenced after the resolving action, MAY be
+included in the diagnostic.
+
+(c) **Leave the lockfile unmodified.** The consumer MUST NOT remove,
+rewrite, or re-resolve the lockfile in response to the markers. The
+recorded bytes are preserved for the user to resolve.
+
+This requirement governs diagnosis only. A lockfile that is
+unreadable for any other reason is out of scope and continues to be
+handled as before, and this requirement neither defines nor
+authorises automatic recovery from a conflicted lockfile.
+
+> **Note.** The parenthetical above is an interim illustrative aid; the
+> normative minimum marker grammar is not yet pinned by this specification.
+
 ### 5.5 Drift and integrity model
 
 The lockfile is the contract `apm audit` validates the workspace
@@ -1361,7 +1395,8 @@ This section's normative statements are:
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
-  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022).
+  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+  [req-lk-023](#req-lk-023).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -3752,6 +3787,7 @@ conformance statement identifying:
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+[req-lk-023](#req-lk-023),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -4182,6 +4218,7 @@ renumbering of conformance classes.
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
 | [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-lk-022](#req-lk-022)                | MUST    | 5.2     | consumer    |
+| [req-lk-023](#req-lk-023)                | MUST    | 5.4     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -4262,7 +4299,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 129** (124 MUST, 5 SHOULD).
+**Total normative statements: 130** (125 MUST, 5 SHOULD).
 
 ---
 
@@ -4319,6 +4356,7 @@ renumbering of conformance classes.
 | 0.1.45 (proposed) | 2026-10-09 | Editorial fold for PR #3106 (closes #3083 Mode-B silent-extension gate; no new normative statement, count remains 128 (123 MUST, 5 SHOULD)). Section 4.2.1 and [req-tg-001] (Section 8.4): the explicit-only target enumeration now names `agent-skills`, `antigravity`, `hermes`, and `grok-bot`, reflecting the already-registered `hermes` target and the new stable explicit-only `grok-bot` target (skills deploy to `agent-data/workflows/`, per the OpenAPM Target Registry v0.1 companion). |
 | 0.1.46 (proposed) | 2026-10-13 | Spec-citation fold for manifest extension keys (closes #3219 Mode-B silent-extension gate). Added [req-ext-003] (Section 4.6.2, consumer MUST): top-level keys matching `x-[a-z][a-z0-9-]*` are vendor extensions preserved on the parsed package in declaration order without validating or interpreting values; a dependency lock entry records them under optional `extensions` and omits that field when empty; any other unrecognised top-level key produces a non-failing warning without failing parse or install solely because it is unknown. Independent validation, policy, and security failures still apply. The warning does not relax [req-mf-006] (writers still preserve unknown top-level keys on rewrite). Additive optional lockfile field under Section 9.2: previously silent unknown keys now warn. `extensions` added to the Section 5.2 field table and selected through the distinct proposed `lockfile-v0.1.46.schema.json`; earlier schema bytes and `lockfile_version` are unchanged. Sections 1.3, 4.9, and 11.3.2, and Appendices A and C updated. Statement count: 128 -> 129 (124 MUST, 5 SHOULD). Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. |
 | 0.1.47 (proposed) | 2026-10-15 | Amendment for accepted issue #3204. Revised [req-mf-022] to require a nonzero install result and preservation of previously deployed skill files and ownership records for an unmatched non-empty persisted selection. This intentionally replaces permitted warning-only success; it is not behavior-neutral errata. Section 9.3 review and public-comment requirements remain pending; issue-scope acceptance is not specification adoption. Statement count remains 129 (124 MUST, 5 SHOULD). |
+| 0.1.48 (proposed) | 2026-10-16 | Diagnostic-only spec citation for conflicted lockfiles (PR #3028, refs #2979). Added [req-lk-023] (Section 5.4, consumer MUST): a consumer encountering unresolved version-control merge conflict markers recognises them through the same authority that loads the lockfile and reports the path and cause without raw parser output (a); directs the user to resolve the conflict or restore a known-good lockfile, never to another operation that reads the same unreadable file (b); and leaves the lockfile unmodified, never removing, rewriting, or re-resolving it (c). The requirement governs diagnosis only: lockfiles unreadable for other reasons are out of scope, and automatic recovery from a conflicted lockfile is neither defined nor authorised here. The diagnostic text has separate maintainer agreement; this integration does not establish Section 9.3 adoption. Sections 5.7 and 11.3.2 and Appendix C updated. Statement count: 129 -> 130 (125 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

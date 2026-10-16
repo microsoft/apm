@@ -351,6 +351,20 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-lk-023",
+      "keyword": "MUST",
+      "section": "5.4",
+      "status": "active",
+      "test_count": 4,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_conflict_diagnostic_names_an_action_for_the_unreadable_file",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_conflict_markers_recognised_at_load_without_raw_parser_output",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_is_left_unmodified_across_reading_operations[crlf]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_is_left_unmodified_across_reading_operations[lf]"
+      ]
+    },
+    {
       "conformance_class": "producer",
       "id": "req-mf-001",
       "keyword": "MUST",
@@ -1619,7 +1633,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 95,
+      "active": 96,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1643,5 +1657,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 129
+  "total_requirements": 130
 }
