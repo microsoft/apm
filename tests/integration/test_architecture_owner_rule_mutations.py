@@ -59,6 +59,33 @@ OWNERS_DIR = ROOT / ".apm/architecture/owners"
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/install/phases/resolve.py",
+            "selected_dependency_identity(p, resolved_refs)",
+            "DependencyReference.parse(p).get_identity()",
+        ),
+        (
+            "src/apm_cli/install/dry_run_plan.py",
+            "selected_dependency_identity(package, all_apm_dependencies)",
+            "DependencyReference.parse(package).get_identity()",
+        ),
+    ],
+)
+def test_package_selector_identity_cannot_bypass_interpreted_references(
+    path: str, old: str, new: str
+) -> None:
+    """Install and preview cannot revert to lossy shorthand reparsing."""
+    rule_id = "install-deployment-prospective-dry-run-plan"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
             "src/apm_cli/integration/hook_ownership.py",
             "def canonicalize_hook_sidecar(",
             "def canonicalize_hook_sidecar_disabled(",

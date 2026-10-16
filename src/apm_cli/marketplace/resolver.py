@@ -35,6 +35,7 @@ from urllib.parse import quote, urlparse
 from ..deps.transport_selection import initial_transport_scheme
 from ..models.dependency.host_virtual import dependency_repository_owner
 from ..models.dependency.reference import DependencyReference
+from ..models.validation import InvalidVirtualPackageExtensionError
 from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
@@ -975,15 +976,20 @@ def resolve_marketplace_plugin(
             plugin_root=manifest.plugin_root,
         )
 
-    if (
-        dep_ref is None
-        and _source_needs_explicit_git_path(source)
-        and _is_in_marketplace_source(plugin, source)
-    ):
+    if dep_ref is None and _is_in_marketplace_source(plugin, source):
         in_repo_path, path_ref = _extract_in_repo_path_and_ref(
             plugin, plugin_root=manifest.plugin_root
         )
-        if in_repo_path:
+        needs_explicit_path = _source_needs_explicit_git_path(source)
+        if in_repo_path and not needs_explicit_path:
+            try:
+                DependencyReference.parse(canonical)
+            except InvalidVirtualPackageExtensionError:
+                # The catalog already identifies the repository and path. A
+                # dotted bundle directory need not fit shorthand's file-name
+                # heuristic; the normal downloader still validates its content.
+                needs_explicit_path = True
+        if in_repo_path and needs_explicit_path:
             # Fall back to the marketplace's registered ref when the plugin
             # source itself declares no ref and no version_spec overrides it.
             # "main" / "HEAD" are excluded because they represent the default

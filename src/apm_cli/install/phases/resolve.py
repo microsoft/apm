@@ -928,23 +928,22 @@ def _apply_only_filter(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 7. --only filtering
     # ------------------------------------------------------------------
-    from apm_cli.models.apm_package import DependencyReference
+    from apm_cli.install.package_selection import selected_dependency_identity
 
     # Build identity set from user-supplied package specs.
     # Accepts any input form: git URLs, FQDN, shorthand.
+    tree = ctx.dependency_graph.dependency_tree
+    resolved_refs = [node.dependency_ref for node in tree.nodes.values()]
     only_identities: builtins.set = builtins.set()
     for p in ctx.only_packages:
         try:
-            ref = DependencyReference.parse(p)
-            only_identities.add(ref.get_identity())
+            only_identities.add(selected_dependency_identity(p, resolved_refs))
         except Exception:
             only_identities.add(p)
 
     # Expand the set to include transitive descendants of the
     # requested packages so their MCP servers, primitives, etc.
     # are correctly installed and written to the lockfile.
-    tree = ctx.dependency_graph.dependency_tree
-
     def _collect_descendants(node: object, visited: builtins.set | None = None) -> None:
         """Walk the tree and add every child identity (cycle-safe)."""
         if visited is None:

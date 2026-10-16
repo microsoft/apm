@@ -390,9 +390,14 @@ Virtual packages reference a subset of a repository.
 | Type | Detection rule | Example |
 |------|---------------|---------|
 | File | Ends in `.prompt.md`, `.instructions.md`, or `.agent.md` | `owner/repo/prompts/review.prompt.md` |
-| Subdirectory | Does not match a file extension above | `owner/repo/skills/security` |
+| Subdirectory | Shorthand path has no file extension, or an explicit `git`/`path` reference identifies a directory | `owner/repo/skills/security` |
 
-Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
+Shorthand rejects unsupported file-like suffixes. Git-hosted marketplaces can
+preserve dotted directories such as `plugins/my-plugin-1.2.3` through explicit
+`git`/`path` coordinates; do not rewrite them as shorthand. Directory and
+package-content validation still apply. The actual package shape -- APM package
+(including dep-only `apm.yml`), skill bundle, or plugin -- is resolved at fetch
+time. See [install validation](commands.md#install-validation-chain-virtual-subdirectory-packages).
 
 **Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). Direct GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths. **Exception:** when the dep routes through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`), the install-time boundary probe HEAD-walks the candidate splits against the proxy and locks in the first one whose archive responds, so nested-group shorthand works without the object form (#1472).
 

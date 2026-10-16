@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from apm_cli.install.package_selection import selected_dependency_identity
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.executables import filter_lsp_by_allow_executables
 
@@ -41,7 +42,8 @@ class ProspectiveInstallPlan:
         selected_apm_dependencies = all_apm_dependencies
         if only_packages is not None:
             selected_identities = {
-                DependencyReference.parse(package).get_identity() for package in only_packages
+                selected_dependency_identity(package, all_apm_dependencies)
+                for package in only_packages
             }
             selected_apm_dependencies = tuple(
                 dependency
@@ -60,7 +62,8 @@ class ProspectiveInstallPlan:
             only_packages=tuple(only_packages) if only_packages is not None else None,
             lsp_dependencies=tuple(apm_package.get_lsp_dependencies()),
             updated_apm_identities=frozenset(
-                DependencyReference.parse(package).get_identity() for package in updated_packages
+                selected_dependency_identity(package, all_apm_dependencies)
+                for package in updated_packages
             ),
         )
 

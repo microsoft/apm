@@ -433,9 +433,11 @@
       "keyword": "MUST",
       "section": "4.3.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_version"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_version",
+        "tests/spec_conformance/test_marketplace_directory_reqs.py::test_versioned_marketplace_directory_installs_and_replays_as_subdirectory[1.2.3]",
+        "tests/spec_conformance/test_marketplace_directory_reqs.py::test_versioned_marketplace_directory_installs_and_replays_as_subdirectory[2026.9.3]"
       ]
     },
     {

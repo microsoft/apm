@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   older lockfile is not treated as a rewrite. (#2379)
   If CI starts failing on `--frozen` after upgrading, run `apm install`
   locally and commit the updated `apm.lock.yaml`.
+- Git marketplace installs accept versioned plugin directories while rejecting file, symlink, and submodule responses during directory validation. -- by @Pybsama (#3156)
 
 ## [0.33.0] - 2026-10-02
 
