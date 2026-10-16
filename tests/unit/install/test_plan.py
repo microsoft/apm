@@ -910,16 +910,16 @@ class TestLockfileSatisfiesManifest:
         ]
         assert lockfile_satisfies_manifest(lock, manifest) == (True, [])
 
-    def test_local_deps_skipped(self):
-        """Local file deps have no remote ref, so they're skipped."""
+    def test_local_deps_require_locked_evidence(self):
+        """Local dependencies require a recorded baseline even without a ref."""
         lock = _new_lockfile()
         local = DependencyReference(repo_url="local", local_path="./vendor/pkg")
         local.is_local = True
 
         ok, reasons = lockfile_satisfies_manifest(lock, [local])
 
-        assert ok is True
-        assert reasons == []
+        assert ok is False
+        assert reasons == ["  - ./vendor/pkg is declared in apm.yml but missing from apm.lock.yaml"]
 
     def test_orphan_lockfile_entries_do_not_fail_check(self):
         """Lock has extra entries not in manifest -- structural check passes."""

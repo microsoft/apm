@@ -303,7 +303,7 @@ class TestLocalDependencySourceAcquire:
             patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="deadbeef",
-            ),
+            ) as hash_package,
         ):
             from apm_cli.install.sources import LocalDependencySource
 
@@ -311,6 +311,8 @@ class TestLocalDependencySourceAcquire:
             result = source.acquire()
 
         assert result is not None
+        assert ctx.package_hashes["owner/pkg"] == "deadbeef"
+        hash_package.assert_called_once_with(install_path)
 
     def test_logger_download_complete_called_on_success(self, tmp_path: Path) -> None:
         """logger.download_complete should be called on the happy path."""

@@ -14,6 +14,7 @@ dependencies:
     .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
   source: local
   local_path: ./packages/autopilot/autopilot-issue-delivery-scheduler
+  content_hash: sha256:7d14f759ebb29b8c9737a8210e1247aa5fe3f64e07215b6ac4a01e94459c88c0
   declared_license: MIT
 - repo_url: _local/autopilot-issue-triage-scheduler
   name: autopilot-issue-triage-scheduler
@@ -34,6 +35,7 @@ dependencies:
     .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
   local_path: ./packages/autopilot/autopilot-issue-triage-scheduler
+  content_hash: sha256:3363991ecb9dbf21472d428a4010a202d226c65b62c02085a58053a2e1a4e1a1
   declared_license: MIT
 - repo_url: _local/autopilot-pr-merge-worker
   name: autopilot-pr-merge-worker
@@ -66,6 +68,7 @@ dependencies:
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-merge-worker
+  content_hash: sha256:bde4eeed39d953ffcefa1d59754e6da12570c9974f5747b62a521d2e9ecc5e5a
   declared_license: MIT
 - repo_url: _local/autopilot-pr-review-scheduler
   name: autopilot-pr-review-scheduler
@@ -80,6 +83,7 @@ dependencies:
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:6c4c5802109cbbb76ecf28ab2299410f4f6f3f9dd9cb2586624c1783538d20a5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-review-scheduler
+  content_hash: sha256:38c718b08b4a26f91e02ddff26913d2007ab139c33047da62cf8c7dfcafac4bd
   declared_license: MIT
 - repo_url: _local/autopilot-pr-triage-scheduler
   name: autopilot-pr-triage-scheduler
@@ -100,6 +104,7 @@ dependencies:
     .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
   local_path: ./packages/autopilot/autopilot-pr-triage-scheduler
+  content_hash: sha256:4842fc91f4b2671688885d639939f36497aa3e58275146fa1353112ee794765a
   declared_license: MIT
 - repo_url: _local/autopilot-comment
   name: autopilot-comment

@@ -164,6 +164,11 @@ requirements:
     section: "5.5"
     conformance_class: consumer
     notes: "frozen validation covers direct package pins and MCP state before durable mutation"
+  - id: req-lk-023
+    keyword: MUST
+    section: "5.5.1"
+    conformance_class: consumer
+    notes: "proposed 0.1.48: selected direct/transitive local-copy content must match its existing locked baseline before frozen mutation; missing legacy evidence fails explicitly; specification adoption remains pending"
   - id: req-lk-007
     keyword: SHOULD
     section: "5.5"

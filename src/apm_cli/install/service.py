@@ -31,6 +31,7 @@ from apm_cli.models.results import InstallDisposition
 if TYPE_CHECKING:
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.models.results import InstallResult
 
 
@@ -364,6 +365,95 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
+            )
+
+        InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
+
+    @staticmethod
+    def _verify_frozen_local_content(
+        request: InstallRequest,
+        lockfile: LockFile,
+        manifest_deps: list[DependencyReference],
+    ) -> None:
+        """Verify selected local declarations before any lifecycle or deployment."""
+        from collections import deque
+        from dataclasses import replace
+
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+        from apm_cli.deps.path_anchoring import (
+            LocalResolutionError,
+            build_local_parent_index,
+            resolve_local_dep_dir,
+        )
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.phases.local_content import compute_local_package_hash
+        from apm_cli.install.plan import lockfile_satisfies_manifest
+        from apm_cli.models.apm_package import APMPackage
+
+        queue = deque(dep for dep in manifest_deps if dep.is_local)
+        if not queue:
+            return
+        package_root = Path(request.apm_package.package_path).resolve()
+        parent_index = build_local_parent_index(lockfile)
+        resolved_cache: dict[str, Path] = {}
+        seen: set[str] = set()
+        reasons: list[str] = []
+        while queue:
+            declared = queue.popleft()
+            key = declared.get_unique_key()
+            if key in seen:
+                continue
+            seen.add(key)
+            satisfied, missing = lockfile_satisfies_manifest(lockfile, [declared])
+            if not satisfied:
+                reasons.extend(missing)
+                continue
+            dependency = lockfile.get_dependency(key)
+            try:
+                source = resolve_local_dep_dir(
+                    dependency,
+                    lockfile,
+                    package_root,
+                    parent_index=parent_index,
+                    resolved_cache=resolved_cache,
+                )
+                if compute_local_package_hash(source) != dependency.content_hash:
+                    reasons.append(
+                        f"  - local dependency {declared.local_path!r} content differs "
+                        "from its locked snapshot"
+                    )
+                    continue
+                # Only selected, verified local manifests can introduce further
+                # local declarations. Do not inspect orphan lock entries or
+                # expand local paths declared by untrusted remote packages.
+                if (source / "apm.yml").is_file():
+                    package = APMPackage.from_apm_yml(source / "apm.yml", source_path=source)
+                    for child in package.get_apm_dependencies():
+                        if not child.is_local:
+                            continue
+                        anchored = APMDependencyResolver._compute_dep_source_path(
+                            child, package, source
+                        )
+                        child = replace(
+                            child,
+                            declaring_parent=key,
+                            anchored_local_path=APMDependencyResolver._portable_anchor_identity(
+                                anchored, request.apm_package.source_path
+                            ),
+                        )
+                        queue.append(child)
+            except (LocalResolutionError, OSError, ValueError) as exc:
+                reasons.append(
+                    f"  - local dependency {declared.local_path!r} cannot be verified: {exc}"
+                )
+        if reasons:
+            raise FrozenInstallError(
+                "--frozen: local dependency content does not match apm.lock.yaml.",
+                reasons=reasons,
+                tip=(
+                    "Restore the locked local content, or run 'apm install' without "
+                    "--frozen to explicitly accept and record the change."
+                ),
             )
 
     @staticmethod

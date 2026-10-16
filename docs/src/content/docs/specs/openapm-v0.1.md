@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **129 normative statements (124 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **130 normative statements (125 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -927,7 +927,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_url`            | Registry archive download URL (advisory; see [req-rs-009](#req-rs-009)).        |
 | `resolved_hash`           | Hash envelope (`sha256:<hex>`) of the registry archive bytes. Trust anchor.     |
 | `local_path`              | Original path for local deps.                                                   |
-| `content_hash`            | Hash envelope (`sha256:<hex>`) of a local package's source tree.                |
+| `content_hash`            | Hash envelope (`sha256:<hex>`) of a local package's source tree. Frozen verification uses the validated local-copy image; see [req-lk-023](#req-lk-023). |
 | `is_dev`                  | True when declared under `devDependencies`.                                     |
 | `constraint`              | git-semver discriminator: the original semver range from the manifest (verbatim). |
 | `resolved_tag`            | git-semver selected tag, or advisory tag provenance for a full-SHA git-literal update under [req-rs-017](#req-rs-017). |
@@ -1265,6 +1265,57 @@ locked commit. This optimisation MUST NOT change observable
 behaviour; the post-install workspace state MUST be identical to a
 fresh install.
 
+#### 5.5.1 Frozen local-path content (Proposed)
+
+> **Proposed amendment 0.1.48.** The following requirement records the
+> bounded behavior accepted in
+> [issue #3194](https://github.com/microsoft/apm/issues/3194#issuecomment-6169567910).
+> Product-scope acceptance is not specification adoption. The non-author
+> review and public comment period in [Section 9.3](#93-amendment-process)
+> remain pending; this proposal does not claim they have completed.
+
+<a id="req-lk-023"></a>
+**[req-lk-023]** A conforming **consumer** that supports local-path
+dependencies MUST, during frozen installation, compare every selected
+declared direct or transitive local dependency with its existing locked
+`content_hash` before lifecycle execution or persistent mutation of the
+lockfile, target configuration, deployment state, or resolver/materializer
+cache. Selection follows existing manifest declaration and resolution
+rules ([Section 7](#7-dependency-resolution)); transitive path anchoring
+retains the existing dependency identity, trust, and containment rules.
+Unselected orphan lock entries
+MUST NOT cause their local sources to be inspected by this check.
+
+The comparison MUST use the existing package content-hash algorithm
+over the validated local-copy image, including contained symlinks after
+dereferencing, before integration transforms that image. Local-copy
+dereferencing produces regular files; [req-sc-015](#req-sc-015) excludes
+symlinks still present in its later authorized source set, not regular
+copies of dereferenced content. These are distinct lifecycle stages.
+An implementation MUST NOT substitute deployed-file hashes for the
+source-content evidence required by this check. A missing
+lock entry, missing baseline hash (including a legacy local lock),
+unreadable or invalid source, or content mismatch MUST fail with a
+diagnostic identifying the dependency, without changing the lockfile or
+accepting or deploying the changed snapshot. Frozen verification MUST
+NOT create or replace the baseline to make that verification succeed.
+Unchanged content passes this check without rewriting the lockfile.
+
+Ordinary non-frozen installation continues to support local development
+and explicitly establishes or refreshes the baseline. Restoring the
+accepted source, or explicitly accepting it through a non-frozen install,
+permits a later frozen verification, subject to other install checks.
+This requirement introduces neither a new hash policy nor a lockfile
+format change; it does not promise rollback of arbitrary external
+lifecycle effects.
+
+> **Editorial note.** The canonical byte-representation for local-path
+> `content_hash` is reserved for v0.2; see
+> [Section 5.6.4](#564-git-source-tree-integrity-hash). Verification here
+> uses the implementation's documented hash algorithm; cross-implementation
+> lockfile portability for local-path `content_hash` is not guaranteed
+> until that canonical-tree definition is adopted.
+
 ### 5.6 git-semver fields (constraint, resolved_tag, resolved_at)
 
 When the resolver picks a git tag from a semver range (see
@@ -1361,7 +1412,8 @@ This section's normative statements are:
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
-  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022).
+  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+  [req-lk-023](#req-lk-023) (proposed).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -1630,8 +1682,9 @@ behaves exactly as it did before these keys existed.
   when `true`, the install operation fails closed if any resolved
   non-local dependency selected for installation lacks a recorded
   content hash (the `content_hash` lockfile field) in `apm.lock.yaml`.
-  Local dependencies are exempt (they are anchored by deployed-file
-  hashes, not a package digest).
+  Local dependencies are exempt from this governance check. Their
+  deployed-file audit hashes and proposed frozen source-content
+  verification ([req-lk-023](#req-lk-023)) are separate evidence.
 - `security.audit.fail_on_drift` (boolean, default `false`): when
   `true`, a bare `apm audit` exits non-zero if lockfile drift is
   detected or the drift check cannot complete.
@@ -1768,8 +1821,10 @@ non-local dependency selected for installation lacks a recorded
 content hash (the `content_hash` lockfile field) in `apm.lock.yaml`.
 The same fail-closed behaviour
 MUST hold when the lockfile is absent or unreadable at the point of
-the check. Local dependencies are exempt; they are anchored by
-deployed-file hashes rather than a package content hash.
+the check. Local dependencies are exempt from this governance check;
+their integrity is anchored by deployed-file hashes at audit time.
+Frozen-mode source verification uses the lockfile `content_hash` field
+separately (see proposed [req-lk-023](#req-lk-023)).
 
 <a id="req-pl-014"></a>
 **[req-pl-014]** A conforming **governance** implementation that
@@ -3489,7 +3544,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 1 | Dependency confusion                        | [req-pl-005](#req-pl-005), [req-pl-006](#req-pl-006), [req-pl-007](#req-pl-007) | Governance-only   |
 | 2 | Typosquatting                               | [req-mf-009](#req-mf-009), [req-pl-005](#req-pl-005), [req-pl-007](#req-pl-007) | Governance-only   |
 | 3 | Token leakage across hosts                  | [req-sc-003](#req-sc-003), [req-sc-005](#req-sc-005), [req-sc-007](#req-sc-007), [req-sc-008](#req-sc-008), [req-sc-013](#req-sc-013) | Consumer-default  |
-| 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
+| 4 | Lockfile tampering and local source substitution | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-lk-023](#req-lk-023) (proposed), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
 | 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
@@ -3752,6 +3807,7 @@ conformance statement identifying:
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+[req-lk-023](#req-lk-023) (proposed),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -3959,6 +4015,12 @@ assertion that exercises it.
 
 ### 12.4 Fixture layout (informative)
 
+The runtime-computed local-content cases for proposed
+[req-lk-023](#req-lk-023) live in
+`tests/spec_conformance/test_frozen_local_content_reqs.py`. They create
+local source packages with the existing lifecycle fixtures rather than
+committing platform-dependent content-hash baselines.
+
 The conformance seed fixture tree shipped with this specification
 lives at `tests/fixtures/spec-conformance/`. Concrete on-disk
 files:
@@ -4130,6 +4192,11 @@ renumbering of conformance classes.
 
 ## Appendix C. Index of normative statements
 
+The [req-lk-023](#req-lk-023) row is **proposed**, not adopted. Its inclusion
+in this working-draft index and conformance suite does not complete the
+[Section 9.3](#93-amendment-process) process; the requirements manifest
+also records that status. The four-column row grammar is unchanged.
+
 | ID                                       | Keyword | Section | Class       |
 |------------------------------------------|---------|---------|-------------|
 | [req-mf-001](#req-mf-001)                | MUST    | 4.1     | producer    |
@@ -4182,6 +4249,7 @@ renumbering of conformance classes.
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
 | [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-lk-022](#req-lk-022)                | MUST    | 5.2     | consumer    |
+| [req-lk-023](#req-lk-023)                | MUST    | 5.5.1   | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -4262,7 +4330,8 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 129** (124 MUST, 5 SHOULD).
+**Total normative statements: 130** (125 MUST, 5 SHOULD), including
+the proposed requirements identified in the body.
 
 ---
 
@@ -4270,6 +4339,7 @@ renumbering of conformance classes.
 
 | Version | Date       | Changes                                                  |
 |---------|------------|----------------------------------------------------------|
+| 0.1.48 (proposed) | 2026-10-16 | PR #3236 adds [req-lk-023](#req-lk-023) for the accepted #3194 frozen local-content behavior, its enumerations, requirements manifest, and real-CLI conformance coverage. Statement count: 129 -> 130 (125 MUST, 5 SHOULD; cumulative, including prior proposed amendments). Previously successful frozen local installs with changed content or missing baseline evidence now fail; unchanged accepted content and ordinary non-frozen local development remain supported. Migration: review local sources and run non-frozen `apm install` to establish missing baseline hashes before retrying frozen installation. Proposed behavioral strengthening, not errata or an adopted revision; Section 9.3 review/comment process and applicable Section 9.2/9.5 release and migration requirements remain pending. |
 | 0.1     | 2026-05-10 | Initial editor's Working Draft.                          |
 | 0.1-r2  | 2026-05-17 | Round-2 adversarial revision. Closed mandatory FOLDs F1-F10: pinned semver dialect (node-semver + semver 2.0.0); tri-modal transitive conflict resolution; vendor-host neutrality (default_host, pluggable policy discovery, host class via PSL+aliases); hash envelope on every stored hash; canonical git tree-hash definition; mirror-tolerant fetch; producer release contract (tag-version alignment, SHOULD-sign); update operation semantics; lockfile_version monotonicity; reserved-slot prose for 11 deferrals (workspaces, x-* extensions, machine-readable conformance, update --aggressive, frozen-default flip, target registry companion, version yank, attestations, registry HTTP, mirror-tolerance, .agents/ partition); inline JSON Schemas in Appendix A; YAML safe subset; archive container binding; credential redaction. Conformance-statement count: 56 -> 83. Companion seed fixture tree shipped under `tests/fixtures/spec-conformance/`. |
 | 0.1.1   | 2026-05-24 | v1.1 editorial+defensive fold. Closed convergent round-2 followups: Section 12.3 CI-binding MUST-for-claim (req-cf-002); req-mf-019 class reclassification (producer -> consumer); three stale heading labels in req-cf-001 and Appendix E.4; depEntry oneOf source-key requirement plus new fixture `manifest/invalid-no-source-key.yml`; normative-count reconciliation across Section 1.3, Appendix C trailer, and this row; bare-hex pattern anchored to exactly 64 hex characters; req-sc-007 redaction scope extended to packed bundles, lockfiles, and audit records, plus producer secret-pattern refuse-to-pack rule; workspaces MUST-NOT-use in v0.1 (req-mf-021); nest-mode reject-in-v0.1 (req-rs-013); tag-name regex tightened to the semver.org 2.0.0 reference grammar; build-metadata tie-break rule (req-rs-014); mirror-tolerance editorial note (replicate-verbatim); req-rg-001 cross-references added in Section 7.5.1 and Section 10.5; bare-hex reader-tolerance deprecation horizon; interoperability informative note Section 6.1.2; conformance-summary precedence rule in Section 11.1; wildcard typo `x.y.x` -> `x.y.z`; resolved_by worked-example fragment in Section 7.4. Statement count: 83 -> 87. Drift-detection scaffolding lands in-spec and in-tree (informative machine-readable manifest at `docs/public/specs/manifests/openapm-v0.1.requirements.yml`; 4-way orphan_check + spec-conformance pytest suite + generated `CONFORMANCE.{md,json}` at repo root); Section 12.3 language updated to identify HTML anchors as the canonical source. No normative count change. |

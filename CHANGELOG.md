@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm install --frozen` verifies selected local dependency content before mutation; legacy locks need one reviewed non-frozen `apm install` to record missing hashes. `openapm-v0.1.md` records proposed `req-lk-023`, pending specification adoption. -- by @dajiaohuang (#3236)
 - `batch_fetch_server_info` now looks up independent MCP registry documents concurrently with a bounded `ThreadPoolExecutor` (max 4 workers), matching the existing install-check fan-out. Closes #2981. (#2983)
 - `docs/src/content/docs/specs/openapm-v0.1.md` adds proposed `req-tg-015` for Codex-native `model`/`model_reasoning_effort` preservation and bounded dropped-metadata diagnostics. (#3150)
 

@@ -29,6 +29,7 @@ _copy_local_package
 """
 
 import shutil
+import tempfile
 from pathlib import Path
 
 from apm_cli.utils.path_security import (
@@ -86,6 +87,22 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 # Local-path dependency copy
 # ---------------------------------------------------------------------------
+
+
+def compute_local_package_hash(source: Path) -> str:
+    """Hash the validated local-copy image without changing installed content.
+
+    Local copying dereferences contained symlinks. Use that same materializer
+    before the existing package hash, rather than changing the hash policy or
+    comparing a raw source tree with transformed deployed primitives.
+    """
+    from apm_cli.config import get_apm_temp_dir
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    with tempfile.TemporaryDirectory(prefix="apm-local-snapshot-", dir=get_apm_temp_dir()) as stage:
+        snapshot = Path(stage) / "package"
+        _copy_tree_dereferencing_validated(source, snapshot, source)
+        return compute_package_hash(snapshot)
 
 
 def _copy_tree_dereferencing_validated(
