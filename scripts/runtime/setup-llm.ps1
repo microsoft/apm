@@ -26,9 +26,16 @@ function Install-Llm {
         exit 1
     }
 
-    # Create virtual environment
+    # Create virtual environment. A re-run over an existing venv must not let
+    # APM's truststore .pth bootstrap inject into ensurepip's bundled pip.
     Write-Info "Creating Python virtual environment for LLM..."
-    python -m venv $llmVenv
+    $previousDisable = $env:APM_DISABLE_TRUSTSTORE
+    $env:APM_DISABLE_TRUSTSTORE = "1"
+    try {
+        python -m venv $llmVenv
+    } finally {
+        $env:APM_DISABLE_TRUSTSTORE = $previousDisable
+    }
 
     $pipExe = Join-Path (Join-Path $llmVenv "Scripts") "pip.exe"
     $llmExe = Join-Path (Join-Path $llmVenv "Scripts") "llm.exe"

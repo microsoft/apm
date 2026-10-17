@@ -309,6 +309,16 @@ def test_v3_writes_module_before_pth(tmp_path, monkeypatch):
     )
 
 
+def test_setup_llm_pip_bootstrap_skips_apm_truststore_injection():
+    """Re-running setup over a bootstrapped venv must not inject into ensurepip's pip."""
+    root = _repo_root()
+    sh = (root / "scripts" / "runtime" / "setup-llm.sh").read_text(encoding="utf-8")
+    ps1 = (root / "scripts" / "runtime" / "setup-llm.ps1").read_text(encoding="utf-8")
+
+    assert 'APM_DISABLE_TRUSTSTORE=1 "$llm_venv/bin/python" -m ensurepip' in sh
+    assert '$env:APM_DISABLE_TRUSTSTORE = "1"' in ps1
+
+
 # --------------------------------------------------------------------------- #
 # V4 (M1): runtime setup scripts install truststore best-effort + pinned
 # --------------------------------------------------------------------------- #
