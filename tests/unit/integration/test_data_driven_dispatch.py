@@ -331,6 +331,7 @@ class TestExhaustivenessChecks:
             "commands_grok-build",
             "instructions_grok-build",
             "prompts_copilot-app",  # copilot-app uses dedicated prompts bucket
+            "prompts_kiro",  # kiro uses .kiro/prompts/
             "canvas_copilot",  # canvas extensions (copilot-only, experimental)
         }
 

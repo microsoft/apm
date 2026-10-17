@@ -914,11 +914,13 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Steering files use Kiro frontmatter under .kiro/steering/.
     # Skills use the open Agent Skills SKILL.md layout under .kiro/skills/.
     # Hooks are individual JSON files under .kiro/hooks/.
+    # Prompts are standard .prompt.md files under .kiro/prompts/.
     # MCP config lives at .kiro/settings/mcp.json and ~/.kiro/settings/mcp.json.
     # Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
     # Ref: https://kiro.dev/docs/steering/
     # Ref: https://kiro.dev/docs/skills/
     # Ref: https://kiro.dev/docs/hooks/
+    # Ref: https://kiro.dev/docs/cli/chat/manage-prompts/
     "kiro": TargetProfile(
         capability=TARGET_CAPABILITIES["kiro"],
         root_dir=".kiro",
@@ -930,6 +932,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
                 "kiro_steering",
                 output_compare=True,
             ),
+            "prompts": PrimitiveMapping("prompts", ".prompt.md", "prompt_standard"),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
             "hooks": PrimitiveMapping("hooks", ".json", "kiro_hooks"),
         },

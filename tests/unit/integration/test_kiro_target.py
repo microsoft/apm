@@ -10,6 +10,7 @@ from pathlib import Path
 from apm_cli.integration.agent_integrator import KIRO_AGENT_ALLOWED_TOOLS, AgentIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import (
@@ -66,7 +67,7 @@ def test_kiro_target_profile_matches_ratified_layout() -> None:
     assert target.detect_by_dir is True
     assert target.user_supported is True
     assert target.user_root_dir == ".kiro"
-    assert set(target.primitives) == {"agents", "instructions", "skills", "hooks"}
+    assert set(target.primitives) == {"agents", "instructions", "prompts", "skills", "hooks"}
 
     agents = target.primitives["agents"]
     assert agents.subdir == "agents"
@@ -882,3 +883,120 @@ def test_kiro_agents_stale_managed_file_removed_when_tools_become_incompatible(
         "sync_for_target must remove the stale APM-managed file"
     )
     assert not stale_path.exists(), "Stale managed Kiro agent must be removed after sync"
+
+
+# ---------------------------------------------------------------------------
+# Kiro prompts (#3216) - .kiro/prompts/<name>.prompt.md
+# ---------------------------------------------------------------------------
+
+
+def test_kiro_prompts_deploy_to_kiro_prompts_dir(tmp_path: Path) -> None:
+    """Prompts are deployed to .kiro/prompts/ when the kiro target is used."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_prompts = package_dir / ".apm" / "prompts"
+    apm_prompts.mkdir(parents=True)
+    (apm_prompts / "review.prompt.md").write_text(
+        "---\ndescription: Review code\n---\n\n# Review\n\nReview the code.\n",
+        encoding="utf-8",
+    )
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".kiro" / "prompts" / "review.prompt.md"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == (
+        "---\ndescription: Review code\n---\n\n# Review\n\nReview the code.\n"
+    )
+
+
+def test_kiro_prompts_skip_when_no_kiro_dir(tmp_path: Path) -> None:
+    """Prompt integration is skipped when .kiro/ does not exist."""
+    package_dir = tmp_path / "pkg"
+    apm_prompts = package_dir / ".apm" / "prompts"
+    apm_prompts.mkdir(parents=True)
+    (apm_prompts / "review.prompt.md").write_text(
+        "---\ndescription: Review\n---\n\n# Review\n",
+        encoding="utf-8",
+    )
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 0
+    assert not (tmp_path / ".kiro").exists()
+
+
+def test_kiro_prompts_primitive_mapping(tmp_path: Path) -> None:
+    """Verify the kiro target profile has a prompts primitive mapping."""
+    target = KNOWN_TARGETS["kiro"]
+    assert "prompts" in target.primitives
+    mapping = target.primitives["prompts"]
+    assert mapping.subdir == "prompts"
+    assert mapping.extension == ".prompt.md"
+    assert mapping.format_id == "prompt_standard"
+    assert mapping.output_compare is False
+
+
+def test_kiro_prompts_sync_removes_managed_file(tmp_path: Path) -> None:
+    """sync_for_target removes APM-managed Kiro prompt files."""
+    (tmp_path / ".kiro" / "prompts").mkdir(parents=True)
+    managed_prompt = tmp_path / ".kiro" / "prompts" / "obsolete.prompt.md"
+    managed_prompt.write_text(
+        "---\ndescription: Old\n---\n\n# Old\n",
+        encoding="utf-8",
+    )
+
+    pkg = APMPackage(
+        name="test-pkg",
+        version="1.0.0",
+        package_path=tmp_path,
+        source="github.com/test/test-pkg",
+    )
+    managed_files = {".kiro/prompts/obsolete.prompt.md"}
+
+    result = PromptIntegrator().sync_for_target(
+        KNOWN_TARGETS["kiro"],
+        pkg,
+        tmp_path,
+        managed_files=managed_files,
+    )
+
+    assert result["files_removed"] == 1
+    assert not managed_prompt.exists()
+
+
+def test_kiro_prompts_coexist_with_agents_and_hooks(tmp_path: Path) -> None:
+    """Kiro prompts coexist with agents and hooks under .kiro/."""
+    kiro_dir = tmp_path / ".kiro"
+    kiro_dir.mkdir()
+    (kiro_dir / "agents").mkdir()
+    (kiro_dir / "hooks").mkdir()
+
+    package_dir = tmp_path / "pkg"
+    apm_prompts = package_dir / ".apm" / "prompts"
+    apm_prompts.mkdir(parents=True)
+    (apm_prompts / "review.prompt.md").write_text(
+        "---\ndescription: Review\n---\n\n# Review\n",
+        encoding="utf-8",
+    )
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    assert (tmp_path / ".kiro" / "prompts" / "review.prompt.md").exists()
+    # Existing agents and hooks directories are untouched
+    assert (tmp_path / ".kiro" / "agents").exists()
+    assert (tmp_path / ".kiro" / "hooks").exists()

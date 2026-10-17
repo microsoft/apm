@@ -122,7 +122,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 | Primitive | Copilot | Claude | Grok Build | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro | Hermes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | instructions | native | native | native | native | compiled | compiled | native | compiled | native | native | compiled |
-| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported | unsupported |
+| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | native | unsupported |
 | agents | native | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled | unsupported |
 | skills | native | native | native | native | native | native | native | native | native | native | native |
 | hooks | native | native | unsupported | native | native | native | native | unsupported | native | native | unsupported |
@@ -138,6 +138,7 @@ How to read a cell:
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
 - `agents / antigravity = unsupported` -- Antigravity CLI has no agents primitive; their content reaches Antigravity through the compiled `AGENTS.md`.
 - `agents / kiro = compiled` -- APM writes `.kiro/agents/<relative-stem>.md`; frontmatter is filtered to `description`, `model`, and `tools` (unsupported tool values fail the deploy). See [targets-matrix](/apm/reference/targets-matrix/#kiro) for the approved tool set.
+- `prompts / kiro = native` -- APM writes `.kiro/prompts/<name>.prompt.md`; Kiro reads the prompt file directly.
 - `instructions / antigravity = native` -- APM deploys instructions as plain-markdown rules under `.agents/rules/`.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
