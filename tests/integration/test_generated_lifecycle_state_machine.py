@@ -340,14 +340,23 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     @rule()
     @precondition(lambda self: self.declared and not self.materialized)
     def install(self) -> None:
-        before = self._capture()
-        self._run(self.fixture.install_args, "install")
+        before, state = self._capture(), self._state()
+        result = self._run(
+            self.fixture.install_args,
+            "install",
+            expected_returncode=1 if self.retained_user_file else 0,
+        )
         assert_snapshot_changes_within(
             before,
             self._capture(),
             exact_paths=self.fixture.exact_paths,
             tree_prefixes=self.fixture.tree_prefixes,
         )
+        if self.retained_user_file:
+            assert "conflicts with unmanaged file" in " ".join(result.stdout.split())
+            assert self.skill_path.read_bytes() == _TAMPER_BYTES
+            _assert_same_state(state, self._state())
+            return
         self.materialized = True
         self.clean = not self.retained_user_file
         self.locked = True
@@ -386,11 +395,22 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert self._state().deployment_records
 
     @rule()
-    @precondition(lambda self: self.declared and self.materialized and self.clean)
+    @precondition(lambda self: self.declared and self.materialized and not self.retained_user_file)
     def reinstall(self) -> None:
-        before = self._capture()
+        before, state = self._capture(), self._state()
+        if not self.clean:
+            assert any(
+                record.content_hash is not None
+                and record.locator.value.endswith(f"/{_SKILL_NAME}/SKILL.md")
+                for record in state.deployment_records
+            )
         self._run(self.fixture.install_args, "reinstall")
         assert_snapshot_set_unchanged(before, self._capture())
+        if not self.clean:
+            assert self.skill_path.read_bytes() == _TAMPER_BYTES
+            assert self._state().deployment_records == state.deployment_records, (
+                "Ordinary reinstall must preserve the original deployment hashes"
+            )
 
     @rule()
     @precondition(lambda self: self.declared)
@@ -435,19 +455,25 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
-    @precondition(lambda self: self.declared and self.materialized and not self.clean)
+    @precondition(
+        lambda self: (
+            self.declared and (self.retained_user_file or (self.materialized and not self.clean))
+        )
+    )
     def repair(self) -> None:
         before = self._capture()
-        args = self.fixture.install_args
-        if self.retained_user_file:
-            args = (*args, "--force")
-        self._run(args, "repair")
+        self._run((*self.fixture.install_args, "--force"), "repair")
         assert_snapshot_changes_within(
             before,
             self._capture(),
             exact_paths=self.fixture.exact_paths,
             tree_prefixes=self.fixture.tree_prefixes,
         )
+        if not self.materialized:
+            self.materialized = True
+            self.locked = True
+            self.installed_revision = self.published_revision
+            self.installed_commit = self.published_commit
         self.clean = True
         self.retained_user_file = False
 
@@ -900,6 +926,7 @@ def _mandatory_replay(model: _LifecycleReferenceModel) -> None:
     operations.extend(
         [
             model.tamper,
+            model.reinstall,
             model.audit_tampered,
             model.repair,
             model.audit_clean,

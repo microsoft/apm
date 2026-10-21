@@ -90,12 +90,12 @@ subsequent steps. That is still the right default for most workflows:
 it ensures the lockfile and deployed files are present before the audit
 reads them.
 
-However, `apm install` overwrites every managed file with a fresh copy
-before `apm audit --ci` runs. If a managed file was modified on disk after
-the last install -- its bytes changed without updating the lockfile hash --
-the install step silently restores the clean copy. The `content-integrity`
-check then compares the freshly restored file against a hash that matches,
-and the tampering goes undetected.
+However, `apm install` can restore managed output, such as deployed
+instructions, before `apm audit --ci` inspects it. The `content-integrity`
+check then sees the restored bytes rather than the pre-install changes.
+This does not apply to every managed file: ordinary reinstall preserves
+edited managed skill members and their original deployment hashes.
+Restoring those members requires explicit `--force` consent.
 
 For repos that **commit** their deployed files, the CI gate can now run in
 setup-only mode and still execute drift plus `config-consistency` and

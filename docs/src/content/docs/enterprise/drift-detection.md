@@ -122,12 +122,13 @@ the goal is detecting a developer who forgot to run `apm install` after
 editing `apm.yml`. The install step regenerates deployed files so the
 subsequent audit can compare them against the lockfile.
 
-That sequence has a blind spot: `apm install` overwrites every managed file
-with a clean copy before the audit runs. If a deployed file was modified on
-disk after the last install -- for example a hand-edit to
-`.github/instructions/` -- the install step restores the original bytes.
-The `content-integrity` check then compares the restored file against a
-matching hash and reports no finding.
+That sequence has a blind spot: `apm install` can restore managed output
+before the audit runs. For example, a hand-edit to `.github/instructions/`
+can be replaced with the original bytes, so `content-integrity` sees a
+matching hash rather than the pre-install change. Edited managed skill
+members behave differently: ordinary reinstall preserves their bytes and
+original deployment hashes; restoration requires explicit `--force`
+consent.
 
 For repos that commit their deployed files, use `setup-only: true` on the
 action so it only provides the CLI without running `apm install`, then run
