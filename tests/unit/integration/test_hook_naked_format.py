@@ -174,8 +174,8 @@ def test_malformed_hooks_list_value_does_not_crash(tmp_path: Path) -> None:
     ``_parse_hook_json`` returned the raw dict and downstream
     ``_rewrite_hooks_data`` / ``_integrate_merged_hooks`` called
     ``.items()`` on the list, raising AttributeError mid-merge.
-    The parser must now treat the file as invalid (return None),
-    the integration must not crash, and the counter must report 0.
+    The parser treats the file as invalid; selected native integration
+    reports a contract error instead of AttributeError or silent omission.
     """
     pkg_dir = tmp_path / "pkg"
     hooks_dir = pkg_dir / ".apm" / "hooks"
@@ -187,12 +187,10 @@ def test_malformed_hooks_list_value_does_not_crash(tmp_path: Path) -> None:
     (project_root / ".claude").mkdir(parents=True)
 
     integrator = HookIntegrator()
-    # Must not raise AttributeError.
-    result = integrator.integrate_package_hooks_claude(pkg_info, project_root)
+    from apm_cli.hook_contract import HookContractError
 
-    assert result.files_integrated == 0, (
-        "Malformed hook file must be skipped, not counted as integrated; "
-        f"got files_integrated={result.files_integrated}"
-    )
+    with pytest.raises(HookContractError, match="invalid hook JSON"):
+        integrator.integrate_package_hooks_claude(pkg_info, project_root)
+    assert not (project_root / ".claude/settings.json").exists()
     # Direct parser contract: malformed shape returns None.
     assert integrator._parse_hook_json(hooks_dir / "malformed.json") is None

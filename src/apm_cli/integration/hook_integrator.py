@@ -1,17 +1,4 @@
-"""Hook integration functionality for APM packages.
-Integrates hook JSON files and referenced scripts during package installation.
-Supports VSCode Copilot (.github/hooks/), Claude Code
-(.claude/settings.json), and Cursor (.cursor/hooks.json) targets.
-
-Native handler layouts are declared in the merge-target registry below and
-converted through ``hook_native_formats``: Claude uses nested matcher groups,
-GitHub Copilot accepts bash/powershell commands, and Cursor uses flat commands.
-
-Script path handling:
-    - Supported plugin-root aliases -> package-relative path rewritten for target
-    - ./path -> relative path, resolved from the hook file context, rewritten for target
-    - System commands (no path separators) -> passed through unchanged
-"""
+"""Deploy selected hook descriptors and resources through native format owners."""
 
 import json
 import logging
@@ -54,11 +41,13 @@ from apm_cli.integration.hook_native_formats import (
     _to_codex_hook_entries,
     _to_cursor_hook_entries,
     _to_gemini_hook_entries,
+    render_selected_hook_source,
 )
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
     dependency_hook_sources,
     legacy_source_marker_is_unambiguous,
+    read_owned_hook_config,
 )
 from apm_cli.integration.hook_ownership import (
     extract_apm_source_sidecar as _extract_apm_source_sidecar,
@@ -87,7 +76,7 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-# Testability seam: tests can patch deprecated filename routing without
+# Testability seam: tests can patch filename migration admission without
 # replacing the imported helper for every call site.
 _filter_hook_files_for_target = filter_hook_files_for_target
 
@@ -142,28 +131,9 @@ class _MergeHookConfig:
 # Copilot (camelCase) or Claude (PascalCase) names; targets that use
 # different conventions get their events renamed during merge.
 _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
-    "copilot": {
-        # Claude PascalCase -> Copilot camelCase
-        "PreToolUse": "preToolUse",
-        "preToolUse": "preToolUse",
-        "PostToolUse": "postToolUse",
-        "postToolUse": "postToolUse",
-        **dict.fromkeys(("UserPromptSubmit", "userPromptSubmit"), "userPromptSubmitted"),
-        "userPromptSubmitted": "userPromptSubmitted",
-        **dict.fromkeys(("SessionStart", "sessionStart"), "sessionStart"),
-        **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "agentStop"),
-        "PreTaskExecution": "preTaskExecution",
-        "preTaskExecution": "preTaskExecution",
-        "PostTaskExecution": "postTaskExecution",
-        "postTaskExecution": "postTaskExecution",
-    },
-    "claude": {
-        # Copilot camelCase and portable lifecycle aliases -> Claude PascalCase
-        "preToolUse": "PreToolUse",
-        "postToolUse": "PostToolUse",
-        **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
-        **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
-    },
+    # These native event spellings carry invocation semantics, not just casing.
+    "copilot": {},
+    "claude": {},
     "cursor": {  # Values must stay within CURSOR_NATIVE_EVENTS.
         "PreToolUse": "preToolUse",
         "PostToolUse": "postToolUse",
@@ -213,7 +183,6 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
 # Used to warn when a package author deploys events whose casing does not
 # match the target's convention AND no explicit rename mapping exists.
 _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
-    "copilot": "camelCase",
     "vscode": "PascalCase",
     "claude": "PascalCase",
     "cursor": "camelCase",
@@ -521,7 +490,8 @@ class HookIntegrator(BaseIntegrator):
     ) -> HookSourceSelection:
         """Select routed descriptors and resource bundles through one owner.
 
-        Inline definitions stay native-scoped; recursive-scanner targets omit JSON assets.
+        Global descriptors pass filename migration admission. Inline definitions stay
+        native-scoped; recursive-scanner targets omit JSON assets.
         """
         integrator = cls()
         discovered_files = (
@@ -571,6 +541,17 @@ class HookIntegrator(BaseIntegrator):
     def _parse_hook_json(self, hook_file: Path) -> dict | None:
         """Parse a hook document and normalize a supported naked hook slice."""
         return _parse_hook_json(hook_file, logger=_log)
+
+    def _selected_native_hook(self, hook_file: Path, target_name: str) -> dict:
+        """Validate selected native intent before rewriting paths or writing files."""
+        return render_selected_hook_source(self._parse_hook_json(hook_file), hook_file, target_name)
+
+    def _preflight_selected_native_hooks(self, selection: HookSourceSelection) -> None:
+        """Validate all selected Claude/Copilot descriptors before any mutation."""
+        for target_name in ("claude", "copilot"):
+            files = selection.descriptors_for(target_name)
+            for hook_file in files:
+                self._selected_native_hook(hook_file, target_name)
 
     @staticmethod
     def _project_scoped_command_path(
@@ -1006,22 +987,9 @@ class HookIntegrator(BaseIntegrator):
         user_scope: bool = False,
         source_plan=None,
     ) -> HookIntegrationResult:
-        """Integrate hooks from a package into hooks dir (Copilot target).
+        """Preflight and deploy Copilot hooks without changing native event semantics.
 
-        Deploys hook JSON files with clean filenames and copies referenced
-        script files. Skips user-authored files unless force=True.
-
-        Args:
-            package_info: PackageInfo with package metadata and install path
-            project_root: Root directory of the project
-            force: If True, overwrite user-authored files on collision
-            managed_files: Set of relative paths known to be APM-managed
-            target: Optional TargetProfile for scope-resolved root_dir
-            user_scope: If True, rewrite hook script commands to absolute paths
-                so global hooks resolve from any working directory
-
-        Returns:
-            HookIntegrationResult: Results of the integration operation
+        Preserve user-authored files unless forced. User-scope paths are absolute.
         """
         package_name = self._get_package_name(package_info, project_root)
         hook_sources = self.select_hook_sources_for_target(
@@ -1036,6 +1004,7 @@ class HookIntegrator(BaseIntegrator):
                 files_integrated=0, files_updated=0, files_skipped=0, target_paths=[]
             )
 
+        self._preflight_selected_native_hooks(hook_sources)
         root_dir = target.root_dir if target else ".github"
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -1047,11 +1016,10 @@ class HookIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         display_payloads: list = []
         materializations: list[MaterializationResult] = []
+        seen_bindings: set[tuple[str, str]] = set()
 
         for hook_file in hook_files:
-            data = self._parse_hook_json(hook_file)
-            if data is None:
-                continue
+            data = self._selected_native_hook(hook_file, "copilot")
 
             # Rewrite script paths for Copilot target
             rewritten, scripts = self._rewrite_hooks_data(
@@ -1076,18 +1044,15 @@ class HookIntegrator(BaseIntegrator):
                 continue
 
             hooks = rewritten.get("hooks", {})
-            event_map = _HOOK_EVENT_MAP.get("copilot", {})
-            _emit_hook_event_diagnostics(list(hooks.keys()), "copilot", event_map)
-            if isinstance(hooks, dict):
-                renamed_hooks = {}
-                for raw_event_name, entries in hooks.items():
-                    event_name = event_map.get(raw_event_name, raw_event_name)
-                    if event_name in renamed_hooks and isinstance(renamed_hooks[event_name], list):
-                        if isinstance(entries, list):
-                            renamed_hooks[event_name].extend(entries)
-                            continue
-                    renamed_hooks[event_name] = entries
-                rewritten["hooks"] = renamed_hooks
+            _emit_hook_event_diagnostics(list(hooks), "copilot", {})
+            for event_name, entries in hooks.items():
+                unique = []
+                for entry in entries:
+                    identity = (event_name, self._hook_entry_content_key(entry))
+                    if identity not in seen_bindings:
+                        unique.append(entry)
+                        seen_bindings.add(identity)
+                rewritten["hooks"][event_name] = unique
 
             rewritten.setdefault("version", 1)
             errors = _validate_copilot_payload(rewritten)
@@ -1230,6 +1195,7 @@ class HookIntegrator(BaseIntegrator):
         if not hook_files:
             return _empty
 
+        self._preflight_selected_native_hooks(hook_sources)
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
             dependency_hook_sources(project_root) if heal_stale_root_source else set()
@@ -1240,6 +1206,9 @@ class HookIntegrator(BaseIntegrator):
             package_name,
             dependency_sources,
         )
+        if config.target_key == "claude":
+            # Equal content is not proof that an unknown historical owner is ours.
+            heal_stale_root_source = False
         # Always re-check authorized Cursor/import sources at this write
         # boundary, even if preflight_hooks_for_targets already ran for this
         # plan. A plan object can be reused across projects or after a
@@ -1268,8 +1237,10 @@ class HookIntegrator(BaseIntegrator):
 
         # Read existing JSON config
         json_path = target_dir / config.config_filename
-        json_config: dict = {}
-        if json_path.exists():
+        json_config: dict = (
+            read_owned_hook_config(json_path, target_dir) if config.target_key == "claude" else {}
+        )
+        if json_path.exists() and config.target_key != "claude":
             try:
                 with open(json_path, encoding="utf-8") as f:
                     json_config = json.load(f)
@@ -1279,7 +1250,7 @@ class HookIntegrator(BaseIntegrator):
         # Load external ownership metadata before reconciling native entries.
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
         sidecar_data: dict = {}
-        if config.schema_strict and sidecar_path.exists():
+        if config.schema_strict and sidecar_path.exists() and config.target_key != "claude":
             try:
                 with open(sidecar_path, encoding="utf-8") as f:
                     _raw = json.load(f)
@@ -1304,7 +1275,7 @@ class HookIntegrator(BaseIntegrator):
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
-        if config.target_key == "cursor":
+        if config.target_key in {"cursor", "claude"}:
             for event in list(json_config[container]):
                 json_config[container][event] = [
                     entry
@@ -1329,7 +1300,11 @@ class HookIntegrator(BaseIntegrator):
             )
 
         for hook_file in hook_files:
-            data = self._parse_hook_json(hook_file)
+            data = (
+                self._selected_native_hook(hook_file, "claude")
+                if config.target_key == "claude"
+                else self._parse_hook_json(hook_file)
+            )
             if data is None:
                 continue
 
@@ -1462,6 +1437,9 @@ class HookIntegrator(BaseIntegrator):
                 deduped: list = []
                 for entry in json_config[container][event_name]:
                     if not isinstance(entry, dict):
+                        deduped.append(entry)
+                        continue
+                    if entry.get("_apm_source") != source_marker:
                         deduped.append(entry)
                         continue
                     cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
@@ -1638,10 +1616,21 @@ class HookIntegrator(BaseIntegrator):
         *,
         user_scope: bool = False,
         retiring_targets: frozenset[str] = frozenset(),
+        targets: Iterable[Any] | None = None,
     ) -> None:
-        """Check authorized Cursor/import sources before any primitive is written."""
+        """Check selected native sources and existing settings before any primitive writes."""
         selection = source_plan.hook_source_selection
         if selection is not None:
+            self._preflight_selected_native_hooks(selection)
+            if selection.descriptors_for("claude"):
+                if targets is None:
+                    from apm_cli.integration.targets import KNOWN_TARGETS
+
+                    targets = (KNOWN_TARGETS["claude"].for_scope(user_scope=user_scope),)
+                for target in targets:
+                    if target is not None and target.name == "claude":
+                        root = project_root / target.root_dir
+                        read_owned_hook_config(root / "settings.json", root)
             preflight_cursor_hooks(
                 self,
                 package_info,

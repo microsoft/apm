@@ -7,6 +7,8 @@ from collections import Counter, deque
 from pathlib import Path
 from typing import Any, NoReturn
 
+from apm_cli.hook_contract import HookContractError
+from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -18,7 +20,16 @@ from apm_cli.utils.path_security import (
 def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     """Restore sidecar ownership markers onto matching in-memory entries."""
     for event_name, sidecar_entries in sidecar_data.items():
-        if event_name not in hooks or not isinstance(sidecar_entries, list):
+        if not isinstance(sidecar_entries, list):
+            raise HookContractError("ownership sidecar events must be lists")
+        if any(
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("_apm_source"), str)
+            or not entry["_apm_source"]
+            for entry in sidecar_entries
+        ):
+            raise HookContractError("ownership sidecar requires entries with source identities")
+        if event_name not in hooks:
             continue
         pool: dict[str, deque[str]] = {}
         for sidecar_entry in sidecar_entries:
@@ -31,6 +42,19 @@ def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                 content_key = json.dumps(comparable, sort_keys=True)
                 pool.setdefault(content_key, deque()).append(sidecar_entry["_apm_source"])
 
+        disk_counts = Counter(
+            json.dumps(
+                {key: value for key, value in entry.items() if key != "_apm_source"},
+                sort_keys=True,
+            )
+            for entry in hooks[event_name]
+            if isinstance(entry, dict) and "_apm_source" not in entry
+        )
+        if any(disk_counts[key] > len(sources) for key, sources in pool.items()):
+            raise HookContractError(
+                "ambiguous duplicate APM-owned hook entry; preserve the existing settings "
+                "and resolve ownership before reinstalling"
+            )
         for disk_entry in hooks[event_name]:
             if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
                 continue
@@ -43,6 +67,40 @@ def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                 disk_entry["_apm_source"] = sources.popleft()
                 if not sources:
                     del pool[content_key]
+
+
+def read_hook_config(path: Path, root: Path) -> dict[str, Any]:
+    """Read a native configuration without replacing malformed or linked content."""
+    ensure_path_within(path, root)
+    if has_symlink_component(root, path):
+        raise HookContractError("hook configuration must not be a symlink")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_non_json_constant,
+        )
+    except (OSError, ValueError) as exc:
+        raise HookContractError(
+            f"cannot read hook configuration {printable_ascii_text(path.name)}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise HookContractError("hook configuration must be a JSON object")
+    return data
+
+
+def read_owned_hook_config(path: Path, root: Path) -> dict[str, Any]:
+    """Reattach only unambiguous sidecar evidence to an existing native config."""
+    data = read_hook_config(path, root)
+    sidecar = read_hook_config(path.with_name("apm-hooks.json"), root)
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict) or any(not isinstance(v, list) for v in hooks.values()):
+        raise HookContractError("existing hook configuration requires event arrays")
+    if sidecar:
+        reinject_apm_source_from_sidecar(hooks, sidecar)
+    return data
 
 
 def extract_apm_source_sidecar(hooks: dict) -> dict[str, list[dict[str, Any]]]:
@@ -117,26 +175,6 @@ def project_apm_owned_hook_entries(
     if any(not isinstance(entries, list) for entries in raw_container.values()):
         raise ValueError("merged hook events must be lists")
     container = {event_name: list(entries) for event_name, entries in raw_container.items()}
-    for event_name, sidecar_entries in sidecar.items():
-        if not isinstance(sidecar_entries, list):
-            if sidecar_entries:
-                raise ValueError("ownership sidecar events must be lists")
-            continue
-        owned_counts = Counter(
-            json.dumps(
-                {key: value for key, value in entry.items() if key != "_apm_source"},
-                sort_keys=True,
-            )
-            for entry in sidecar_entries
-            if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
-        )
-        config_counts = Counter(
-            json.dumps(entry, sort_keys=True)
-            for entry in container.get(event_name, [])
-            if isinstance(entry, dict)
-        )
-        if any(config_counts[key] > count for key, count in owned_counts.items()):
-            raise ValueError("ambiguous duplicate APM-owned hook entry")
     reinject_apm_source_from_sidecar(container, sidecar)
 
     owned: dict[str, list[dict[str, Any]]] = {}

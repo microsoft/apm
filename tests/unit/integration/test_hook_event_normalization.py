@@ -1,213 +1,163 @@
-"""Regression coverage for native hook event normalization."""
+"""Native event spelling is part of the invocation contract, not presentation."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from apm_cli.integration.hook_integrator import (
-    _HOOK_EVENT_MAP,
-    HookIntegrator,
-    _emit_hook_event_diagnostics,
-)
+from apm_cli.hook_contract import HookContractError
+from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
-
-def _entry(command: str) -> dict[str, Any]:
-    return {"hooks": [{"type": "command", "command": command}]}
+pytestmark = pytest.mark.component
 
 
-def _package(
-    tmp_path: Path,
-    hooks: dict[str, list[dict[str, Any]]],
-    *,
-    name: str = "native-event-kit",
-) -> PackageInfo:
-    package_root = tmp_path / "packages" / name
+def _package(tmp_path: Path, hooks: dict) -> PackageInfo:
+    package_root = tmp_path / "packages" / "native-event-kit"
     hooks_dir = package_root / ".apm" / "hooks"
     hooks_dir.mkdir(parents=True)
-    (hooks_dir / "events.json").write_text(
-        json.dumps({"hooks": hooks}, indent=2),
-        encoding="utf-8",
-    )
+    (hooks_dir / "events.json").write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
     return PackageInfo(
-        package=APMPackage(name=name, version="1.0.0"),
+        package=APMPackage(name="native-event-kit", version="1.0.0"),
         install_path=package_root,
     )
 
 
-def _commands(entries: list[dict[str, Any]]) -> list[str]:
-    return [entry["hooks"][0]["command"] for entry in entries]
+@pytest.mark.parametrize(
+    "event",
+    [
+        "SessionStart",
+        "sessionStart",
+        "Stop",
+        "agentStop",
+        "UserPromptSubmit",
+        "userPromptSubmitted",
+        "PreToolUse",
+        "preToolUse",
+        "SubagentStop",
+        "subagentStop",
+    ],
+)
+def test_copilot_preserves_documented_native_event_spelling(tmp_path: Path, event: str) -> None:
+    package = _package(tmp_path, {event: [{"type": "command", "command": "echo harmless"}]})
+    project = tmp_path / "project"
+    HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["copilot"], package, project)
+    path = project / ".github/hooks/native-event-kit-events.json"
+    assert json.loads(path.read_text())["hooks"] == {
+        event: [{"type": "command", "command": "echo harmless"}]
+    }
 
 
 @pytest.mark.parametrize(
-    ("target", "source_event", "native_event"),
+    "target,event",
     [
-        ("copilot", "SessionStart", "sessionStart"),
-        ("copilot", "sessionStart", "sessionStart"),
-        ("copilot", "Stop", "agentStop"),
-        ("copilot", "AgentStop", "agentStop"),
-        ("copilot", "agentStop", "agentStop"),
-        ("copilot", "UserPromptSubmit", "userPromptSubmitted"),
-        ("copilot", "userPromptSubmit", "userPromptSubmitted"),
-        ("copilot", "userPromptSubmitted", "userPromptSubmitted"),
-        ("claude", "SessionStart", "SessionStart"),
-        ("claude", "sessionStart", "SessionStart"),
-        ("claude", "Stop", "Stop"),
-        ("claude", "AgentStop", "Stop"),
-        ("claude", "agentStop", "Stop"),
+        ("claude", "subagentStop"),
+        ("claude", "sessionStart"),
+        ("claude", "agentStop"),
+        ("claude", "AgentStop"),
+        ("copilot", "AgentStop"),
+        ("copilot", "userPromptSubmit"),
+        ("copilot", "UnsupportedEvent"),
+        ("claude", "UnsupportedEvent"),
     ],
 )
-def test_supported_aliases_map_to_documented_native_events(
-    target: str,
-    source_event: str,
-    native_event: str,
+def test_unverified_alias_fails_without_native_writes(
+    tmp_path: Path, target: str, event: str
 ) -> None:
-    assert _HOOK_EVENT_MAP[target][source_event] == native_event
-
-
-def test_unsupported_lowercase_stop_is_not_declared_as_native_alias() -> None:
-    assert "stop" not in _HOOK_EVENT_MAP["copilot"]
-    assert "stop" not in _HOOK_EVENT_MAP["claude"]
-
-
-def test_copilot_alias_collisions_merge_in_source_order(tmp_path: Path) -> None:
+    package = _package(tmp_path, {event: [{"type": "command", "command": "echo harmless"}]})
     project = tmp_path / "project"
-    package = _package(
-        tmp_path,
-        {
-            "SessionStart": [_entry("echo start-pascal")],
-            "sessionStart": [_entry("echo start-camel")],
-            "Stop": [_entry("echo stop")],
-            "AgentStop": [_entry("echo agent-pascal")],
-            "agentStop": [_entry("echo agent-camel")],
-        },
-    )
-
-    HookIntegrator().integrate_hooks_for_target(
-        KNOWN_TARGETS["copilot"],
-        package,
-        project,
-    )
-
-    target = project / ".github" / "hooks" / "native-event-kit-events.json"
-    hooks = json.loads(target.read_text(encoding="utf-8"))["hooks"]
-    assert list(hooks) == ["sessionStart", "agentStop"]
-    assert _commands(hooks["sessionStart"]) == [
-        "echo start-pascal",
-        "echo start-camel",
-    ]
-    assert _commands(hooks["agentStop"]) == [
-        "echo stop",
-        "echo agent-pascal",
-        "echo agent-camel",
-    ]
+    with pytest.raises(HookContractError, match="unsupported"):
+        HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS[target], package, project)
+    assert not project.exists()
 
 
-def test_claude_alias_collisions_merge_in_source_order(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    package = _package(
-        tmp_path,
-        {
-            "sessionStart": [_entry("echo start-camel")],
-            "SessionStart": [_entry("echo start-pascal")],
-            "agentStop": [_entry("echo agent-camel")],
-            "AgentStop": [_entry("echo agent-pascal")],
-            "Stop": [_entry("echo stop")],
-        },
-    )
-
-    HookIntegrator().integrate_hooks_for_target(
-        KNOWN_TARGETS["claude"],
-        package,
-        project,
-    )
-
-    hooks = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))["hooks"]
-    assert list(hooks) == ["SessionStart", "Stop"]
-    assert _commands(hooks["SessionStart"]) == [
-        "echo start-camel",
-        "echo start-pascal",
-    ]
-    assert _commands(hooks["Stop"]) == [
-        "echo agent-camel",
-        "echo agent-pascal",
-        "echo stop",
-    ]
-
-
-def test_unknown_event_warns_and_is_not_renamed(
+def test_copilot_aliases_with_identical_commands_still_have_distinct_payloads(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    project = tmp_path / "project"
+    events = ["SessionStart", "sessionStart", "Stop", "agentStop"]
     package = _package(
-        tmp_path,
-        {"UnsupportedEvent": [_entry("echo unsupported")]},
+        tmp_path, {event: [{"type": "command", "command": "echo harmless"}] for event in events}
     )
-
-    HookIntegrator().integrate_hooks_for_target(
-        KNOWN_TARGETS["copilot"],
-        package,
-        project,
-    )
-
-    warning = capsys.readouterr().out
-    assert "UnsupportedEvent" in warning
-    assert "may not be recognized" in warning
-    assert "Rename events" in warning
-    assert "then reinstall" in warning
-    target = project / ".github" / "hooks" / "native-event-kit-events.json"
-    hooks = json.loads(target.read_text(encoding="utf-8"))["hooks"]
-    assert list(hooks) == ["UnsupportedEvent"]
-
-
-def test_supported_alias_diagnostics_do_not_warn(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    aliases = ["SessionStart", "sessionStart", "Stop", "AgentStop", "agentStop"]
-
-    for target in ("copilot", "claude"):
-        _emit_hook_event_diagnostics(aliases, target, _HOOK_EVENT_MAP[target])
-
-    assert "may not be recognized" not in capsys.readouterr().out
-
-
-def test_reinstall_repairs_owned_stop_without_touching_user_hook(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    package = _package(
-        tmp_path,
-        {
-            "SessionStart": [_entry("echo start")],
-            "Stop": [_entry("echo managed-stop")],
-        },
-    )
+    HookIntegrator().integrate_hooks_for_target(KNOWN_TARGETS["copilot"], package, project)
+    hooks = json.loads((project / ".github/hooks/native-event-kit-events.json").read_text())[
+        "hooks"
+    ]
+    assert list(hooks) == events
+    assert all(len(entries) == 1 for entries in hooks.values())
+
+
+def test_reinstall_repairs_only_owned_copilot_document(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    package = _package(tmp_path, {"Stop": [{"type": "command", "command": "echo managed-stop"}]})
     integrator = HookIntegrator()
-    target = project / ".github" / "hooks" / "native-event-kit-events.json"
-    user_target = project / ".github" / "hooks" / "user-hooks.json"
-    user_payload = {
-        "version": 1,
-        "hooks": {"stop": [{"type": "command", "command": "echo user-stop"}]},
-    }
-
+    target = project / ".github/hooks/native-event-kit-events.json"
+    user_target = project / ".github/hooks/user-hooks.json"
+    user_payload = {"version": 1, "hooks": {"stop": [{"command": "echo personal"}]}}
     integrator.integrate_hooks_for_target(KNOWN_TARGETS["copilot"], package, project)
-    stale = json.loads(target.read_text(encoding="utf-8"))
-    stale["hooks"]["stop"] = stale["hooks"].pop("agentStop")
-    target.write_text(json.dumps(stale, indent=2) + "\n", encoding="utf-8")
-    user_target.write_text(json.dumps(user_payload, indent=2) + "\n", encoding="utf-8")
-
+    stale = json.loads(target.read_text())
+    stale["hooks"]["stop"] = stale["hooks"].pop("Stop")
+    target.write_text(json.dumps(stale))
+    user_target.write_text(json.dumps(user_payload))
     integrator.integrate_hooks_for_target(
         KNOWN_TARGETS["copilot"],
         package,
         project,
         managed_files={".github/hooks/native-event-kit-events.json"},
     )
+    assert set(json.loads(target.read_text())["hooks"]) == {"Stop"}
+    assert json.loads(user_target.read_text()) == user_payload
 
-    repaired = json.loads(target.read_text(encoding="utf-8"))
-    assert set(repaired["hooks"]) == {"sessionStart", "agentStop"}
-    assert "stop" not in repaired["hooks"]
-    assert json.loads(user_target.read_text(encoding="utf-8")) == user_payload
+
+@pytest.mark.parametrize("collision", [False, True])
+def test_copilot_multi_descriptor_dedup_preserves_bindings_and_skipped_owners(
+    tmp_path: Path, collision: bool
+) -> None:
+    binding = {"type": "command", "command": "echo harmless", "matcher": "Bash"}
+    package = _package(tmp_path, {"PreToolUse": [binding]})
+    extra = package.install_path / ".apm/hooks/extra.json"
+    extra.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [binding, {**binding, "matcher": "*"}],
+                    "preToolUse": [binding],
+                }
+            }
+        )
+    )
+    project = tmp_path / "project"
+    first = project / ".github/hooks/native-event-kit-events.json"
+    personal = '{"version":1,"hooks":{"Stop":[{"command":"echo personal"}]}}'
+    if collision:
+        first.parent.mkdir(parents=True)
+        first.write_text(personal)
+    integrator = HookIntegrator()
+    managed = {
+        f".github/hooks/native-event-kit-{stem}.json"
+        for stem in (("extra",) if collision else ("events", "extra"))
+    }
+    integrator.integrate_hooks_for_target(
+        KNOWN_TARGETS["copilot"], package, project, managed_files=set()
+    )
+    before = {path: (project / path).read_bytes() for path in managed}
+    bindings = [
+        (event, entry["matcher"])
+        for path in managed
+        for event, entries in json.loads((project / path).read_text())["hooks"].items()
+        for entry in entries
+    ]
+    assert sorted(bindings) == [
+        ("PreToolUse", "*"),
+        ("PreToolUse", "Bash"),
+        ("preToolUse", "Bash"),
+    ]
+    integrator.integrate_hooks_for_target(
+        KNOWN_TARGETS["copilot"], package, project, managed_files=managed
+    )
+    assert before == {path: (project / path).read_bytes() for path in managed}
+    if collision:
+        assert first.read_text() == personal

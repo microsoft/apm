@@ -39,12 +39,13 @@
     },
     {
       "id": "neutral-hook-contract",
-      "decision": "Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, and ownership-sidecar comparison",
-      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar)",
+      "decision": "Neutral hook source grammar, complete-inventory filename migration admission, per-target native shape and preflight, shared-config APM-owned drift projection, and ownership-sidecar comparison",
+      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), hook_file_routing.py (filter_hook_files_for_target), hook_native_formats.py (render_selected_hook_document), hook_ownership.py (project_apm_owned_hook_entries, canonicalize_hook_sidecar)",
       "selectors": [
         "src/apm_cli/hook_contract.py",
         "src/apm_cli/integration/hook_ir.py",
         "src/apm_cli/integration/hook_native_formats.py",
+        "src/apm_cli/integration/hook_file_routing.py",
         "src/apm_cli/integration/hook_cursor_preflight.py",
         "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/integration/hook_ownership.py"

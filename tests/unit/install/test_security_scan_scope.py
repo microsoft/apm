@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from apm_cli.deps.plugin_parser import normalize_plugin_directory
+from apm_cli.hook_contract import HookContractError
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.integration.agent_integrator import AgentIntegrator
@@ -145,8 +146,8 @@ def test_nested_skill_plan_excludes_unapproved_bin(tmp_path: Path) -> None:
     assert SecurityGate.scan_files(tmp_path, paths=plan.paths).should_block is False
 
 
-def test_hook_plan_routes_descriptors_before_scanning(tmp_path: Path) -> None:
-    """Copilot cannot scan a hostile Claude-only descriptor or its script."""
+def test_hook_plan_rejects_widened_filename_routing_before_scanning(tmp_path: Path) -> None:
+    """Migration refuses formerly excluded hooks rather than widening their reach."""
     hooks_dir = tmp_path / ".apm" / "hooks"
     hooks_dir.mkdir(parents=True)
     (hooks_dir / "hooks-claude.json").write_text(
@@ -155,14 +156,15 @@ def test_hook_plan_routes_descriptors_before_scanning(tmp_path: Path) -> None:
     )
     (hooks_dir / "claude.sh").write_text("#!/bin/sh\n# \u202e\n", encoding="utf-8")
 
-    copilot_plan = DeployableSourcePlan.create(
-        _package(tmp_path),
-        [KNOWN_TARGETS["copilot"]],
-        skill_subset=None,
-        hooks_approved=True,
-        canvas_approved=False,
-        skip_bin=True,
-    )
+    with pytest.raises(HookContractError, match="would widen executable reach"):
+        DeployableSourcePlan.create(
+            _package(tmp_path),
+            [KNOWN_TARGETS["copilot"]],
+            skill_subset=None,
+            hooks_approved=True,
+            canvas_approved=False,
+            skip_bin=True,
+        )
     claude_plan = DeployableSourcePlan.create(
         _package(tmp_path),
         [KNOWN_TARGETS["claude"]],
@@ -172,8 +174,6 @@ def test_hook_plan_routes_descriptors_before_scanning(tmp_path: Path) -> None:
         skip_bin=True,
     )
 
-    assert copilot_plan.paths == frozenset()
-    assert SecurityGate.scan_files(tmp_path, paths=copilot_plan.paths).should_block is False
     assert claude_plan.paths == frozenset({".apm/hooks/hooks-claude.json", ".apm/hooks/claude.sh"})
     assert SecurityGate.scan_files(tmp_path, paths=claude_plan.paths).should_block is True
 

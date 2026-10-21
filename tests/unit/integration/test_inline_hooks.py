@@ -1,5 +1,6 @@
 """Selected-source and native-scope boundaries for standalone inline hooks."""
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -120,3 +121,29 @@ def test_empty_inline_hook_map_has_no_executable_declaration(tmp_path: Path) -> 
     assert plan.inline_hook_documents == {}
     _, post, _, _ = CommandIntegrator()._transform_prompt_to_command(source)
     assert "hooks" not in post.metadata
+
+
+@pytest.mark.parametrize(
+    ("relative", "allows_once"),
+    [
+        (".apm/prompts/guard.prompt.md", True),
+        (".apm/skills/guard/SKILL.md", True),
+        (".apm/agents/guard.agent.md", False),
+    ],
+)
+def test_inline_native_contract_uses_selected_primitive_placement(
+    tmp_path: Path, relative: str, allows_once: bool
+) -> None:
+    """Commands use skill placement; standalone agents reject skill-only lifetime."""
+    source = tmp_path / relative
+    source.parent.mkdir(parents=True)
+    hooks = deepcopy(_HOOKS)
+    hooks["PreToolUse"][0]["hooks"][0]["once"] = True
+    metadata = {"description": "Scoped lifetime", "hooks": hooks}
+    source.write_text(f"---\n{yaml_to_str(metadata)}---\nContent.\n", encoding="utf-8")
+    if allows_once:
+        plan = _plan(tmp_path, approved=True)
+        assert plan.inline_hook_documents == {source: {"hooks": hooks}}
+    else:
+        with pytest.raises(HookContractError, match="once"):
+            _plan(tmp_path, approved=True)

@@ -6,11 +6,12 @@ import hashlib
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 
 from apm_cli.hook_contract import HookContractError, hook_handlers
+from apm_cli.integration.hook_native_formats import render_selected_hook_document
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_frontmatter, loads_frontmatter, yaml_to_str
@@ -20,61 +21,10 @@ if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
-_EVENTS = frozenset(
-    {
-        "SessionStart",
-        "SessionEnd",
-        "Setup",
-        "UserPromptSubmit",
-        "UserPromptExpansion",
-        "PreToolUse",
-        "PermissionRequest",
-        "PermissionDenied",
-        "PostToolUse",
-        "PostToolUseFailure",
-        "PostToolBatch",
-        "Notification",
-        "MessageDisplay",
-        "SubagentStart",
-        "SubagentStop",
-        "TaskCreated",
-        "TaskCompleted",
-        "Stop",
-        "StopFailure",
-        "TeammateIdle",
-        "InstructionsLoaded",
-        "ConfigChange",
-        "CwdChanged",
-        "DirectoryAdded",
-        "FileChanged",
-        "WorktreeCreate",
-        "WorktreeRemove",
-        "PreCompact",
-        "PostCompact",
-        "PreModelSwitch",
-        "PostModelSwitch",
-        "Elicitation",
-        "ElicitationResult",
-    }
-)
-_COMMON_FIELDS = {"type", "if", "timeout", "statusMessage", "once"}
-_HANDLER_FIELDS = {
-    "command": {"command", "async", "asyncRewake", "shell", "onFailure"},
-    "http": {"url", "headers", "allowedEnvVars", "onFailure"},
-    "prompt": {"prompt", "model"},
-    "agent": {"prompt", "model"},
-    "mcp_tool": {"server", "tool", "input"},
-}
-_REQUIRED_FIELDS = {
-    "command": ("command",),
-    "http": ("url",),
-    "prompt": ("prompt",),
-    "agent": ("prompt",),
-    "mcp_tool": ("server", "tool"),
-}
 
-
-def read_inline_hook_document(source: Path) -> dict[str, Any] | None:
+def read_inline_hook_document(
+    source: Path, *, placement: Literal["skill", "agent"]
+) -> dict[str, Any] | None:
     """Validate a selected primitive's hooks without interpreting its Markdown body."""
     try:
         metadata = load_frontmatter(source).metadata
@@ -82,43 +32,12 @@ def read_inline_hook_document(source: Path) -> dict[str, Any] | None:
             return None
         document = {"hooks": metadata["hooks"]}
         declarations = hook_handlers(document)
+        render_selected_hook_document(document, "claude", placement=placement)
         for declaration in declarations:
             value = declaration.value
-            if declaration.event not in _EVENTS:
-                raise HookContractError(f"unsupported Claude event {declaration.event!r}")
             if declaration.json_pointer.count("/") == 3:
                 if set(value) - {"matcher", "hooks"} or not isinstance(value.get("hooks"), list):
                     raise HookContractError("Claude inline hooks require nested matcher groups")
-                if "matcher" in value and not isinstance(value["matcher"], str):
-                    raise HookContractError("matcher must be a string")
-                continue
-            handler_type = value.get("type")
-            if not isinstance(handler_type, str) or handler_type not in _HANDLER_FIELDS:
-                raise HookContractError(f"unsupported Claude handler type {handler_type!r}")
-            unknown = set(value) - _COMMON_FIELDS - _HANDLER_FIELDS[handler_type]
-            if unknown:
-                raise HookContractError(
-                    f"unsupported Claude inline handler fields: {', '.join(sorted(unknown))}"
-                )
-            for key in _REQUIRED_FIELDS[handler_type]:
-                if not isinstance(value.get(key), str) or not value[key].strip():
-                    raise HookContractError(f"{handler_type} handler requires a nonempty {key}")
-            for key in ("once", "async", "asyncRewake"):
-                if key in value and not isinstance(value[key], bool):
-                    raise HookContractError(f"{key} must be a boolean")
-            for key in ("if", "statusMessage", "model"):
-                if key in value and not isinstance(value[key], str):
-                    raise HookContractError(f"{key} must be a string")
-            if "timeout" in value and (
-                isinstance(value["timeout"], bool)
-                or not isinstance(value["timeout"], (int, float))
-                or value["timeout"] <= 0
-            ):
-                raise HookContractError("timeout must be a positive number")
-            if "shell" in value and value["shell"] not in {"bash", "powershell"}:
-                raise HookContractError("shell must be bash or powershell")
-            if "onFailure" in value and value["onFailure"] not in {"continue", "block"}:
-                raise HookContractError("onFailure must be continue or block")
         return document if declarations else None
     except (yaml.YAMLError, HookContractError) as exc:
         raise HookContractError(

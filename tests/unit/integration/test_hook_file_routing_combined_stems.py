@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_file_routing import (
     _hook_file_allowed_targets,
     filter_hook_files_for_target,
@@ -37,10 +38,11 @@ def test_combined_manifest_selected_for_all_its_targets_and_not_others(tmp_path:
 
     assert [p.name for p in filter_hook_files_for_target([combined], "claude")] == [combined.name]
     assert [p.name for p in filter_hook_files_for_target([combined], "codex")] == [combined.name]
-    assert filter_hook_files_for_target([combined], "copilot") == []
+    with pytest.raises(HookContractError, match="previously excluded"):
+        filter_hook_files_for_target([combined], "copilot")
 
 
-def test_unknown_suffix_with_known_token_warns_before_universal_fallback(
+def test_unknown_suffix_does_not_create_a_migration_requirement(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -56,13 +58,10 @@ def test_unknown_suffix_with_known_token_warns_before_universal_fallback(
     ) == [mixed]
 
     output = capsys.readouterr().out
-    assert "hook filename routing could not resolve" in output
-    assert "claude-launch-hooks.json" in output
-    assert "contains target token(s) [claude]" in output
-    assert "universal fallback" in output
+    assert output == ""
 
 
-def test_known_token_outside_target_suffix_warns_when_routed_to_last_token(
+def test_only_historically_excluded_target_requires_migration(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -79,7 +78,7 @@ def test_known_token_outside_target_suffix_warns_when_routed_to_last_token(
             warned_packages=warned_packages,
         )
     ] == [mixed.name]
-    assert (
+    with pytest.raises(HookContractError, match="previously excluded"):
         filter_hook_files_for_target(
             [mixed],
             "claude",
@@ -87,11 +86,6 @@ def test_known_token_outside_target_suffix_warns_when_routed_to_last_token(
             package_identity="DietrichGebert/ponytail",
             warned_packages=warned_packages,
         )
-        == []
-    )
 
     output = capsys.readouterr().out
-    assert "hook filename routing could not resolve" in output
-    assert "claude-approval-codex-hooks.json" in output
-    assert "contains target token(s) [claude]" in output
-    assert "uses the suffix" in output
+    assert output == ""

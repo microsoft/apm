@@ -12,7 +12,7 @@ import stat
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
@@ -375,20 +375,22 @@ class DeployableSourcePlan:
             and find_plugin_json(self.source_root) is None
         )
         if claude is not None and standalone:
-            candidates = {(Path(root) / "SKILL.md").as_posix() for root in self.skill_source_roots}
+            candidates: dict[str, Literal["skill", "agent"]] = {
+                (Path(root) / "SKILL.md").as_posix(): "skill" for root in self.skill_source_roots
+            }
             for relative in sorted(non_skill_paths):
                 source = self.source_root / relative
                 if "commands" in claude.primitives and source.name.endswith(".prompt.md"):
-                    candidates.add(relative)
+                    candidates[relative] = "skill"
                 elif "agents" in claude.primitives and (
                     source.name.endswith(".agent.md") or relative.startswith(".apm/agents/")
                 ):
                     classification = classify_agent_source_file(source, self.source_root)
                     if classification.kind is PrimitiveKind.AGENT:
-                        candidates.add(relative)
-            for relative in sorted(candidates & self.paths):
+                        candidates[relative] = "agent"
+            for relative in sorted(candidates.keys() & self.paths):
                 source = self.source_root / relative
-                document = read_inline_hook_document(source)
+                document = read_inline_hook_document(source, placement=candidates[relative])
                 if document is None:
                     continue
                 documents[source] = document

@@ -30,11 +30,16 @@ class PackageDeploymentPlan:
     bin_skip_reason: str | None = None
     codex_native: CodexNativePlugin | None = None
     source_plan: DeployableSourcePlan | None = None
+    copilot_native: bool = False
 
     @property
     def projection_targets(self) -> list[TargetProfile]:
-        """Keep native Codex bundles opaque to loose primitive adapters."""
-        return [] if self.codex_native is not None else list(self.target_selection.targets)
+        """Keep admitted native bundles opaque to loose primitive adapters."""
+        return (
+            []
+            if self.codex_native is not None or self.copilot_native
+            else list(self.target_selection.targets)
+        )
 
 
 def prepare_package_deployment(  # noqa: PLR0913
@@ -60,6 +65,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     import sys
 
     from apm_cli.codex_plugins.admission import plan_native_codex_plugin
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 
     selection = resolve_effective_package_targets(
@@ -93,7 +99,15 @@ def prepare_package_deployment(  # noqa: PLR0913
         ctx=ctx,
         read_only=read_only,
     )
-    projection_targets = [] if codex_native is not None else list(selection.targets)
+    copilot_native = admits_native_plugin(package_info)
+    projection_targets = (
+        [] if codex_native is not None or copilot_native else list(selection.targets)
+    )
+    native_root = (
+        codex_native.source_root
+        if codex_native
+        else (Path(package_info.install_path) if copilot_native else None)
+    )
     source_plan = DeployableSourcePlan.create(
         package_info,
         projection_targets,
@@ -103,7 +117,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         skip_bin=skip_bin,
         diagnostics=diagnostics,
         package_name=package_name,
-        native_plugin_root=codex_native.source_root if codex_native else None,
+        native_plugin_root=native_root,
         plugin_bin_deployable=plugin_bin_deployable(
             package_info,
             projection_targets,
@@ -124,4 +138,6 @@ def prepare_package_deployment(  # noqa: PLR0913
             is_first_party=is_first_party,
             source_plan=source_plan,
         )
-    return PackageDeploymentPlan(selection, approvals, skip_bin, reason, codex_native, source_plan)
+    return PackageDeploymentPlan(
+        selection, approvals, skip_bin, reason, codex_native, source_plan, copilot_native
+    )

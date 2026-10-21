@@ -1,10 +1,16 @@
-"""Deprecated hook filename-routing helpers."""
+"""Fail-closed migration from historical filename-based hook selection.
+
+Filenames never select a destination or a descriptor subset. Historical
+recognition is retained only to detect executable reach that removal would
+otherwise silently widen.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from apm_cli.utils.console import _rich_warning
+from apm_cli.hook_contract import HookContractError
+from apm_cli.utils.diagnostics import printable_ascii_text
 
 _HOOK_FILE_TARGET_TOKENS: dict[str, set[str]] = {
     "copilot": {"copilot", "vscode"},
@@ -27,41 +33,44 @@ def filter_hook_files_for_target(
     package_identity: str = "",
     warned_packages: set[str] | None = None,
 ) -> list[Path]:
-    """Return only hook files intended for *target_key*."""
-    warning_key = package_identity or package_name
+    """Admit the complete discovery inventory or require an explicit migration.
+
+    The compatibility name is retained for the shared source-selection seam.
+    Package/dependency target configuration has already selected *target_key*.
+    Even an explicit target cannot make formerly shadowed files safe to add.
+    """
     specific: list[Path] = []
     universal: list[Path] = []
     for hook_file in hook_files:
         allowed_targets = _hook_file_allowed_targets(hook_file)
-        _warn_unresolved_target_tokens_if_needed(
-            warned_packages,
-            warning_key,
-            package_name,
-            package_identity,
-            hook_file.name,
-            _hook_file_unresolved_target_tokens(hook_file),
-        )
         if allowed_targets is None:
             universal.append(hook_file)
         elif target_key in allowed_targets:
-            _warn_if_needed(
-                warned_packages,
-                warning_key,
-                package_name,
-                package_identity,
-                hook_file.name,
-                sorted(allowed_targets),
-            )
             specific.append(hook_file)
 
-    return _dedupe_selected_hook_files(specific if specific else universal)
+    historical = set(_dedupe_selected_hook_files(specific if specific else universal))
+    newly_reachable = [path for path in hook_files if path not in historical]
+    if newly_reachable:
+        names = ", ".join(printable_ascii_text(path.name) for path in newly_reachable)
+        package = printable_ascii_text(package_name or package_identity or "<package>")
+        raise HookContractError(
+            f"Cannot install hooks for {package} to {target_key}: {names} "
+            "were previously excluded or shadowed by filename routing. "
+            "Filename routing has been removed; installing all discovered hooks "
+            "would widen executable reach. Split differing native definitions into "
+            "separate packages with target/targets in apm.yml, retain only each package's "
+            "intended hooks, and select those packages with dependency targets. "
+            "A targets declaration alone does not resolve shadowed files. "
+            "Review the scripts before renaming or moving them, then reinstall."
+        )
+    return list(hook_files)
 
 
 def _hook_file_allowed_targets(hook_file: Path) -> set[str] | None:
-    """Return explicit targets for a hook file, or None for universal files.
+    """Recognize historical reach solely for the migration check.
 
-    Filename routing is a deprecated package-authoring convenience, not an
-    authorization boundary. Unknown stems intentionally stay universal.
+    This frozen vocabulary must never select destinations or filter sources.
+    Unknown stems historically stayed universal.
     """
     stem_lower = hook_file.stem.lower()
     for token, allowed_targets in _HOOK_FILE_TARGET_TOKENS.items():
@@ -103,109 +112,8 @@ def _union_target_sets(target_sets: list[set[str]]) -> set[str]:
     return matched
 
 
-def _hook_file_unresolved_target_tokens(hook_file: Path) -> list[str]:
-    """Return known target tokens ignored by suffix-based filename routing."""
-    stem_lower = hook_file.stem.lower()
-    if not stem_lower.endswith("-hooks"):
-        return []
-    segments = stem_lower[: -len("-hooks")].split("-")
-    suffix_count = len(_target_suffix_segments(segments))
-    ignored_segments = segments[: len(segments) - suffix_count] if suffix_count else segments
-    return sorted({segment for segment in ignored_segments if segment in _HOOK_FILE_TARGET_TOKENS})
-
-
-def _warn_if_needed(
-    warned_packages: set[str] | None,
-    warning_key: str,
-    package_name: str,
-    package_identity: str,
-    hook_filename: str,
-    matched_targets: list[str],
-) -> None:
-    """Emit the deprecated filename-routing warning once per package."""
-    if warned_packages is None or warning_key in warned_packages:
-        return
-    _rich_warning(
-        _deprecated_filename_routing_warning(
-            package_name,
-            package_identity,
-            hook_filename,
-            matched_targets,
-        ),
-        symbol="warning",
-    )
-    warned_packages.add(warning_key)
-
-
-def _warn_unresolved_target_tokens_if_needed(
-    warned_packages: set[str] | None,
-    warning_key: str,
-    package_name: str,
-    package_identity: str,
-    hook_filename: str,
-    token_names: list[str],
-) -> None:
-    """Emit a warning when a target-looking filename falls back to universal."""
-    if warned_packages is None or not token_names:
-        return
-    unresolved_key = f"{warning_key}:unresolved:{hook_filename.lower()}"
-    if unresolved_key in warned_packages:
-        return
-    _rich_warning(
-        _unresolved_filename_routing_warning(
-            package_name,
-            package_identity,
-            hook_filename,
-            token_names,
-        ),
-        symbol="warning",
-    )
-    warned_packages.add(unresolved_key)
-
-
-def _deprecated_filename_routing_warning(
-    package_name: str,
-    package_identity: str,
-    hook_filename: str,
-    matched_targets: list[str],
-) -> str:
-    """Return the user-facing filename-routing deprecation warning."""
-    targets_csv = ", ".join(matched_targets)
-    pkg_label = package_name or package_identity or "<owner/repo>"
-    identity = package_identity or package_name or "<owner/repo>"
-    return (
-        f"{pkg_label}: filename-based target routing is deprecated.\n"
-        f"    '{hook_filename}' routes via suffix to [{targets_csv}].\n"
-        "    Update your apm.yml dependency to object form:\n"
-        "\n"
-        f"      - git: {identity}\n"
-        f"        targets: [{targets_csv}]\n"
-        "\n"
-        "    See: https://microsoft.github.io/apm/reference/manifest-schema/#412-object-form"
-    )
-
-
-def _unresolved_filename_routing_warning(
-    package_name: str,
-    package_identity: str,
-    hook_filename: str,
-    token_names: list[str],
-) -> str:
-    """Return the warning for target-looking stems treated as universal."""
-    tokens_csv = ", ".join(token_names)
-    pkg_label = package_name or package_identity or "<owner/repo>"
-    return (
-        f"{pkg_label}: hook filename routing could not resolve '{hook_filename}'.\n"
-        f"    The stem contains target token(s) [{tokens_csv}] outside the trailing\n"
-        "    target suffix, so APM ignores those token(s) and uses the suffix\n"
-        "    match or universal fallback. Rename the file to\n"
-        "    '<prefix>-<target>-hooks.json' or prefer per-dependency\n"
-        "    targets: [...] in apm.yml."
-    )
-
-
 def _dedupe_selected_hook_files(selected: list[Path]) -> list[Path]:
-    """Deduplicate selected hook files by filename while preserving order."""
+    """Reproduce historical duplicate suppression for migration evidence."""
     result: list[Path] = []
     seen_names: set[str] = set()
     for hook_file in selected:

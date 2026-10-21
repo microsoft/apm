@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_EXPECTED_CASING,
     HookIntegrator,
@@ -62,8 +63,8 @@ class TestDetectEventCasing:
 
 
 class TestHookEventExpectedCasing:
-    def test_copilot_expects_camel(self):
-        assert _HOOK_EVENT_EXPECTED_CASING["copilot"] == "camelCase"
+    def test_copilot_has_multiple_native_casing_contracts(self):
+        assert "copilot" not in _HOOK_EVENT_EXPECTED_CASING
 
     def test_claude_expects_pascal(self):
         assert _HOOK_EVENT_EXPECTED_CASING["claude"] == "PascalCase"
@@ -136,12 +137,10 @@ class TestEmitHookEventDiagnosticsMismatch:
         captured = capsys.readouterr()
         assert "mysteryEvent" in captured.out
 
-    def test_warns_pascal_event_on_camel_target(self, capsys):
-        # "PreToolUse" is PascalCase but copilot expects camelCase;
-        # no mapping exists so it may not be recognized.
-        _emit_hook_event_diagnostics(["PreToolUse"], "copilot", {})
+    def test_copilot_native_aliases_do_not_emit_false_casing_warnings(self, capsys):
+        _emit_hook_event_diagnostics(["PreToolUse", "preToolUse"], "copilot", {})
         captured = capsys.readouterr()
-        assert "PreToolUse" in captured.out
+        assert captured.out == ""
 
     def test_no_warn_when_event_is_mapped(self, capsys):
         # "preToolUse" is remapped to "PreToolUse" for claude, so no warning.
@@ -232,7 +231,7 @@ class TestMultiTargetHookDiagnostics:
             temp_project,
             {
                 "hooks": {
-                    "preToolUse": [{"type": "command", "bash": "echo pre"}],
+                    "PreToolUse": [{"type": "command", "command": "echo pre"}],
                     "PostToolUse": [{"hooks": [{"type": "command", "command": "echo post"}]}],
                 }
             },
@@ -255,8 +254,8 @@ class TestMultiTargetHookDiagnostics:
         assert "copilot" in targets_logged, "No INFO log for copilot target"
         assert "claude" in targets_logged, "No INFO log for claude target"
 
-    def test_session_start_alias_on_claude_target_emits_no_warning(self, temp_project, capsys):
-        """Claude recognizes the portable camelCase session-start alias."""
+    def test_unverified_session_start_alias_on_claude_fails(self, temp_project):
+        """Claude event spelling must not be guessed from a foreign alias."""
         pkg_info = self._make_package_with_hooks(
             temp_project,
             {
@@ -268,10 +267,9 @@ class TestMultiTargetHookDiagnostics:
         integrator = HookIntegrator()
         claude = KNOWN_TARGETS["claude"]
 
-        integrator.integrate_hooks_for_target(claude, pkg_info, temp_project)
-
-        captured = capsys.readouterr()
-        assert "may not be recognized" not in captured.out
+        with pytest.raises(HookContractError, match="unsupported claude event"):
+            integrator.integrate_hooks_for_target(claude, pkg_info, temp_project)
+        assert not (temp_project / ".claude/settings.json").exists()
 
     def test_collision_suppresses_diagnostics(self, temp_project, caplog, capsys):
         """No diagnostics are emitted for a hook file skipped due to collision.

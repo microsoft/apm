@@ -1114,9 +1114,8 @@ def _legacy_scope_findings(provider: FactsProvider, rule_id: str) -> list[Violat
         or not _present(ledger, '".copilot/": "copilot"')
         or not _present_re(ledger, re.compile(r"^    def legacy_scope\("))
         or not _present(manifest, "scope=DeploymentLedgerCodec.legacy_scope(path)")
-        or not _present(
-            targets, "if targets is None and user_scope and t.user_root_dir is not None:"
-        )
+        or not _present(targets, "if targets is None and user_scope:")
+        or not _present(targets, "scoped = t.for_scope(user_scope=True)")
     ):
         return [
             _summary(

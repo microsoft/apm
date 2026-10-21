@@ -1,4 +1,4 @@
-"""Hermetic install-path proof for combined multi-target hook manifest routing."""
+"""Combined legacy descriptors require migration before install dispatch writes."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from apm_cli.hook_contract import HookContractError
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -15,7 +16,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 @pytest.fixture(autouse=True)
@@ -115,93 +116,33 @@ def _integrate_package_hooks_for_targets(
     )
 
 
-def test_claude_target_gets_combined_manifest_not_universal_copilot_fallback(
+@pytest.mark.parametrize("target", ["claude", "copilot", "codex"])
+def test_selected_target_does_not_activate_formerly_shadowed_generic_hooks(
     tmp_path: Path,
+    target: str,
 ) -> None:
-    """The combined claude-codex-hooks.json manifest must win over the universal file.
-
-    Before the fix, a `claude-codex-hooks.json` manifest routed only to codex
-    (matching the trailing `-codex-hooks` token), so the claude target had no
-    target-specific file, fell back to the universal (Copilot-shaped)
-    hooks.json, and Copilot field names leaked into .claude/settings.json.
-    """
+    """Neither a foreign descriptor nor the old fallback becomes newly executable."""
     project_root = tmp_path / "project"
     (project_root / ".claude").mkdir(parents=True)
     package_info = _make_ponytail_package(tmp_path)
 
-    result = _integrate_package_hooks(package_info, project_root, target_name="claude")
-
-    assert result["hooks"] == 1
-    settings = json.loads((project_root / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    hooks = settings["hooks"]
-    assert set(hooks) == {"SessionStart", "SubagentStart"}
-
-    raw = json.dumps(hooks)
-    assert "sessionStart" not in raw
-    assert "bash" not in raw
-    assert "powershell" not in raw
-    assert "timeoutSec" not in raw
-
-    for entries in hooks.values():
-        for entry in entries:
-            assert "hooks" in entry
+    with pytest.raises(HookContractError, match="previously excluded or shadowed"):
+        _integrate_package_hooks(package_info, project_root, target_name=target)
+    assert not (project_root / ".claude/settings.json").exists()
+    assert not (project_root / ".github/hooks").exists()
+    assert not (project_root / ".codex/hooks.json").exists()
 
 
-def test_copilot_target_still_deploys_its_own_manifest(tmp_path: Path) -> None:
-    """The dedicated copilot-hooks.json file keeps deploying for the copilot target."""
-    project_root = tmp_path / "project"
-    (project_root / ".github").mkdir(parents=True)
-    (project_root / ".github" / "copilot-instructions.md").write_text(
-        "# Copilot instructions\n",
-        encoding="utf-8",
-    )
-    package_info = _make_ponytail_package(tmp_path)
-
-    result = _integrate_package_hooks(package_info, project_root, target_name="copilot")
-
-    assert result["hooks"] == 1
-    config_path = (
-        project_root / ".github" / "hooks" / f"{package_info.package.name}-copilot-hooks.json"
-    )
-    assert config_path.exists()
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    assert set(config["hooks"]) == {"sessionStart"}
-
-
-def test_codex_target_still_gets_the_combined_manifest(tmp_path: Path) -> None:
-    """The combined claude-codex-hooks.json manifest also deploys for the codex target."""
-    project_root = tmp_path / "project"
-    (project_root / ".codex").mkdir(parents=True)
-    package_info = _make_ponytail_package(tmp_path)
-
-    result = _integrate_package_hooks(package_info, project_root, target_name="codex")
-
-    assert result["hooks"] == 1
-    settings = json.loads((project_root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
-    assert set(settings["hooks"]) == {"SessionStart", "SubagentStart"}
-
-
-def test_combined_manifest_deploys_to_all_named_targets_in_one_install_pass(
+def test_combined_manifest_fails_before_any_selected_target_write(
     tmp_path: Path,
 ) -> None:
-    """One install pass deploys a combined manifest to every named target."""
+    """An incompatible multi-target selection must not partially activate hooks."""
     project_root = tmp_path / "project"
     (project_root / ".claude").mkdir(parents=True)
     (project_root / ".codex").mkdir(parents=True)
     package_info = _make_ponytail_package(tmp_path)
 
-    result = _integrate_package_hooks_for_targets(
-        package_info,
-        project_root,
-        ["claude", "codex"],
-    )
-
-    assert result["hooks"] == 2
-    claude_settings = json.loads(
-        (project_root / ".claude" / "settings.json").read_text(encoding="utf-8")
-    )
-    codex_settings = json.loads(
-        (project_root / ".codex" / "hooks.json").read_text(encoding="utf-8")
-    )
-    assert set(claude_settings["hooks"]) == {"SessionStart", "SubagentStart"}
-    assert set(codex_settings["hooks"]) == {"SessionStart", "SubagentStart"}
+    with pytest.raises(HookContractError, match="previously excluded or shadowed"):
+        _integrate_package_hooks_for_targets(package_info, project_root, ["claude", "codex"])
+    assert not (project_root / ".claude/settings.json").exists()
+    assert not (project_root / ".codex/hooks.json").exists()

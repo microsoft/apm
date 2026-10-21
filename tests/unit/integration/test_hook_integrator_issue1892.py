@@ -5,9 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_integrator import HookIntegrator, _filter_hook_files_for_target
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+
+pytestmark = pytest.mark.component
 
 
 def _make_package_info(install_path: Path, name: str = "superpowers") -> PackageInfo:
@@ -28,8 +33,10 @@ def _session_start_hook(command: str) -> dict:
     }
 
 
-def test_filter_recognizes_hooks_target_names_and_skips_base_when_specific(
+@pytest.mark.parametrize("target", ["claude", "codex", "cursor"])
+def test_migration_detects_formerly_shadowed_or_foreign_sources(
     tmp_path: Path,
+    target: str,
 ) -> None:
     files = [
         tmp_path / "hooks.json",
@@ -39,15 +46,8 @@ def test_filter_recognizes_hooks_target_names_and_skips_base_when_specific(
         tmp_path / "cursor-hooks.json",
     ]
 
-    assert [p.name for p in _filter_hook_files_for_target(files, "claude")] == ["hooks.json"]
-    assert {p.name for p in _filter_hook_files_for_target(files, "codex")} == {
-        "hooks-codex.json",
-        "codex-hooks.json",
-    }
-    assert {p.name for p in _filter_hook_files_for_target(files, "cursor")} == {
-        "hooks-cursor.json",
-        "cursor-hooks.json",
-    }
+    with pytest.raises(HookContractError, match="previously excluded or shadowed"):
+        _filter_hook_files_for_target(files, target)
 
 
 def test_claude_and_codex_do_not_merge_foreign_or_base_manifests(
@@ -77,30 +77,16 @@ def test_claude_and_codex_do_not_merge_foreign_or_base_manifests(
     pkg_info = _make_package_info(pkg_dir)
 
     integrator = HookIntegrator()
-    claude_result = integrator.integrate_package_hooks_claude(pkg_info, project)
-    codex_result = integrator.integrate_package_hooks_codex(pkg_info, project)
+    with pytest.raises(HookContractError, match="previously excluded or shadowed"):
+        integrator.integrate_package_hooks_claude(pkg_info, project)
+    with pytest.raises(HookContractError, match="previously excluded or shadowed"):
+        integrator.integrate_package_hooks_codex(pkg_info, project)
     captured = capsys.readouterr()
 
-    assert claude_result.files_integrated == 1
-    assert codex_result.files_integrated == 1
     assert "sessionStart" not in captured.out
     assert "may not be recognized" not in captured.out
-
-    claude = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    assert set(claude["hooks"]) == {"SessionStart"}
-    claude_commands = [
-        hook["command"] for entry in claude["hooks"]["SessionStart"] for hook in entry["hooks"]
-    ]
-    assert claude_commands == [
-        '"${CLAUDE_PROJECT_DIR}/.claude/hooks/superpowers/hooks/run-hook.cmd" session-start'
-    ]
-
-    codex = json.loads((project / ".codex" / "hooks.json").read_text(encoding="utf-8"))
-    assert set(codex["hooks"]) == {"SessionStart"}
-    codex_commands = [
-        hook["command"] for entry in codex["hooks"]["SessionStart"] for hook in entry["hooks"]
-    ]
-    assert codex_commands == [".codex/hooks/superpowers/hooks/run-hook.cmd session-start-codex"]
+    assert not (project / ".claude/settings.json").exists()
+    assert not (project / ".codex/hooks.json").exists()
 
 
 def test_mirrored_manifests_integrate_once_per_target(tmp_path: Path) -> None:

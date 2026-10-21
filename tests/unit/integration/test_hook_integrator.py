@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.core.deployment_state import MaterializationStatus
 from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_command_paths import normalize_quoted_plugin_root
 from apm_cli.integration.hook_integrator import (
@@ -273,7 +272,7 @@ class TestVSCodeIntegration:
 
         # Verify rewritten paths
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["preToolUse"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["PreToolUse"][0]["command"]
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
         assert ".github/hooks/scripts/hookify/hooks/pretooluse.py" in cmd
         assert cmd.startswith("python3 ")
@@ -305,12 +304,10 @@ class TestVSCodeIntegration:
         source_path.write_text(json.dumps(source_config))
 
         integrator = HookIntegrator()
-        result = integrator.integrate_package_hooks(pkg_info, temp_project)
-
+        with pytest.raises(ValueError, match="requires version 1"):
+            integrator.integrate_package_hooks(pkg_info, temp_project)
         hooks_path = temp_project / ".github" / "hooks" / "hookify-hooks.json"
         assert not hooks_path.exists()
-        assert result.files_integrated == 0
-        assert result.materializations[0].status is MaterializationStatus.FAILED
 
     def test_integrate_learning_output_style_vscode(self, temp_project):
         """Test VSCode integration of learning-output-style plugin (different script dir)."""
@@ -334,7 +331,7 @@ class TestVSCodeIntegration:
         # Verify rewritten paths
         target_json = temp_project / ".github" / "hooks" / "learning-output-style-hooks.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["sessionStart"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["SessionStart"][0]["command"]
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
         assert "learning-output-style" in cmd
         assert "session-start.sh" in cmd
@@ -369,7 +366,7 @@ class TestVSCodeIntegration:
 
         target_json = temp_project / ".github" / "hooks" / "ralph-loop-hooks.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["agentStop"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["Stop"][0]["command"]
         assert "ralph-loop" in cmd
         assert "stop-hook.sh" in cmd
 
@@ -435,11 +432,11 @@ class TestVSCodeIntegration:
 
         target_json = temp_project / ".github" / "hooks" / "format-pkg-format.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["preToolUse"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["PreToolUse"][0]["command"]
         assert cmd == "npx prettier --check ."
 
-    def test_invalid_json_skipped(self, temp_project):
-        """Test that invalid JSON hook files are skipped gracefully."""
+    def test_invalid_json_fails_before_mutation(self, temp_project):
+        """Selected malformed JSON must not silently lose protection."""
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -448,8 +445,9 @@ class TestVSCodeIntegration:
         pkg_info = _make_package_info(pkg_dir)
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks(pkg_info, temp_project)
-        assert result.files_integrated == 0
+        with pytest.raises(ValueError, match="invalid hook JSON"):
+            integrator.integrate_package_hooks(pkg_info, temp_project)
+        assert not (temp_project / ".github/hooks").exists()
 
     def test_creates_github_hooks_dir(self, temp_project):
         """Test that .github/hooks/ directory is created if it doesn't exist."""
@@ -935,7 +933,7 @@ class TestClaudeIntegration:
             "hooks": {
                 "PostToolUse": [
                     {
-                        "matcher": {"tool_name": "write_to_file"},
+                        "matcher": "Write",
                         "hooks": [
                             {"type": "command", "command": "./scripts/lint.sh", "timeout": 10}
                         ],
@@ -1108,13 +1106,8 @@ class TestSidecarRobustness:
         yield project
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_corrupt_sidecar_degrades_gracefully_on_install(self, temp_project):
-        """Corrupt sidecar JSON must not crash integrate_package_hooks_claude.
-
-        When .claude/apm-hooks.json contains invalid JSON, the integrator
-        must degrade gracefully: skip the sidecar, treat ownership metadata
-        as empty, and complete the install successfully without raising.
-        """
+    def test_corrupt_sidecar_preserved_on_failed_install(self, temp_project):
+        """Unknown ownership must not be discarded to manufacture a successful install."""
         # Write a valid settings.json with an existing hook
         settings_path = temp_project / ".claude" / "settings.json"
         settings_path.write_text(json.dumps({"hooks": {"Stop": []}}))
@@ -1137,13 +1130,11 @@ class TestSidecarRobustness:
         pkg_info = _make_package_info(pkg_dir, "my-pkg")
         integrator = HookIntegrator()
 
-        # Must not raise
-        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
-        assert result.files_integrated == 1
-
-        # settings.json must have the new hook (install succeeded)
-        settings = json.loads(settings_path.read_text())
-        assert "Stop" in settings["hooks"]
+        before = settings_path.read_bytes()
+        with pytest.raises(ValueError, match="cannot read hook configuration"):
+            integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        assert settings_path.read_bytes() == before
+        assert sidecar_path.read_text() == "{this is: not valid json!!!"
 
     def test_corrupt_sidecar_degrades_gracefully_on_sync(self, temp_project):
         """Corrupt sidecar JSON must not crash sync_integration (uninstall path).
@@ -1201,11 +1192,7 @@ class TestSidecarRobustness:
         assert "_apm_source" not in hooks["PreToolUse"][0]
 
     def test_reinject_does_not_claim_user_hook_when_content_identical(self):
-        """_reinject_apm_source_from_sidecar claims each sidecar entry at most once.
-
-        When a user hook has identical content to an APM hook, only the first
-        matching live entry gets claimed; the second stays user-owned.
-        """
+        """Identical live entries with insufficient ownership evidence are ambiguous."""
         # Two identical hooks on disk
         entry_a = {"hooks": [{"type": "command", "command": "echo hi", "timeout": 5}]}
         entry_b = {"hooks": [{"type": "command", "command": "echo hi", "timeout": 5}]}
@@ -1221,13 +1208,9 @@ class TestSidecarRobustness:
             ]
         }
 
-        _reinject_apm_source_from_sidecar(hooks, sidecar_data)
-
-        claimed = [e for e in hooks["Stop"] if "_apm_source" in e]
-        unclaimed = [e for e in hooks["Stop"] if "_apm_source" not in e]
-        assert len(claimed) == 1, "exactly one entry should be claimed by APM"
-        assert len(unclaimed) == 1, "the other entry must remain user-owned"
-        assert claimed[0]["_apm_source"] == "my-pkg"
+        with pytest.raises(ValueError, match="ambiguous duplicate"):
+            _reinject_apm_source_from_sidecar(hooks, sidecar_data)
+        assert all("_apm_source" not in entry for entry in hooks["Stop"])
 
     def test_reinject_empty_sidecar_is_noop(self):
         """_reinject_apm_source_from_sidecar with empty sidecar leaves hooks unchanged."""
@@ -2731,7 +2714,7 @@ class TestScriptPathRewriting:
             "hooks": {
                 "PostToolUse": [
                     {
-                        "matcher": {"tool_name": "write_to_file"},
+                        "matcher": "Write",
                         "hooks": [
                             {"type": "command", "command": "./scripts/lint.sh", "timeout": 10}
                         ],
@@ -2753,7 +2736,7 @@ class TestScriptPathRewriting:
         # Verify the rewritten command points to the bundled script
         target_json = temp_project / ".github" / "hooks" / "lint-hooks-hooks.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["postToolUse"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["PostToolUse"][0]["command"]
         assert ".github/hooks/scripts/lint-hooks/scripts/lint.sh" in cmd
         assert "./" not in cmd
 
@@ -3789,12 +3772,8 @@ class TestIssue1007Fixes:
         for f in files:
             f.write_text("{}")
 
-        result = _filter_hook_files_for_target(files, "claude")
-
-        names = {f.name for f in result}
-        assert names == {"hooks.json"}, (
-            f"Only the generic hooks.json should reach the claude target; got {names}"
-        )
+        with pytest.raises(ValueError, match="previously excluded"):
+            _filter_hook_files_for_target(files, "claude")
 
     def test_filter_cursor_hooks_excluded_from_copilot(self, tmp_path: Path) -> None:
         """Files with *-cursor-hooks stem must be excluded from the copilot target."""
@@ -3806,12 +3785,8 @@ class TestIssue1007Fixes:
         for f in files:
             f.write_text("{}")
 
-        result = _filter_hook_files_for_target(files, "copilot")
-
-        names = {f.name for f in result}
-        assert "cursor-hooks.json" not in names, "cursor-hooks.json must not reach copilot"
-        assert "copilot-hooks.json" in names, "copilot-hooks.json must reach copilot"
-        assert "hooks.json" not in names, "hooks.json must not reach copilot when specific exists"
+        with pytest.raises(ValueError, match="previously excluded"):
+            _filter_hook_files_for_target(files, "copilot")
 
     def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
         """Generic stems pass through for all targets when no target-specific file exists."""
@@ -3834,10 +3809,9 @@ class TestIssue1007Fixes:
         prefixed.write_text("{}")
 
         assert _filter_hook_files_for_target([prefixed], "cursor") == [prefixed]
-        assert _filter_hook_files_for_target([prefixed], "claude") == []
-        assert _filter_hook_files_for_target([prefixed], "copilot") == []
-        assert _filter_hook_files_for_target([prefixed], "codex") == []
-        assert _filter_hook_files_for_target([prefixed], "gemini") == []
+        for target in ("claude", "copilot", "codex", "gemini"):
+            with pytest.raises(ValueError, match="previously excluded"):
+                _filter_hook_files_for_target([prefixed], target)
 
     def test_filter_case_insensitive(self, tmp_path: Path) -> None:
         """Stem routing must be case-insensitive (Azure-Skills-Cursor-Hooks)."""
@@ -3847,12 +3821,11 @@ class TestIssue1007Fixes:
         assert _filter_hook_files_for_target([mixed], "cursor") == [mixed], (
             "Mixed-case cursor-hooks stem must route to cursor"
         )
-        assert _filter_hook_files_for_target([mixed], "claude") == [], (
-            "Mixed-case cursor-hooks stem must NOT route to claude"
-        )
+        with pytest.raises(ValueError, match="previously excluded"):
+            _filter_hook_files_for_target([mixed], "claude")
 
-    def test_claude_integration_skips_cursor_hook_files(self, temp_project: Path) -> None:
-        """End-to-end: .claude/settings.json must not contain entries from cursor-hooks.json."""
+    def test_claude_requires_migration_for_cursor_hook_files(self, temp_project: Path) -> None:
+        """Foreign descriptors fail migration instead of becoming silently executable."""
         pkg_info = self._make_pkg(
             temp_project,
             "multi-hooks-pkg",
@@ -3876,25 +3849,9 @@ class TestIssue1007Fixes:
         )
 
         integrator = HookIntegrator()
-        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
-
-        assert result.files_integrated == 1, "Exactly hooks.json should be integrated"
-        settings = self._read_claude_settings(temp_project)
-        hooks = settings.get("hooks", {})
-
-        # Must have the generic hook entry
-        assert "PostToolUse" in hooks, "PostToolUse from hooks.json must be present"
-
-        # Must NOT have anything from cursor-hooks.json
-        all_commands = [
-            entry.get("command", "")
-            for entries in hooks.values()
-            for entry in entries
-            if isinstance(entry, dict)
-        ]
-        assert not any("CURSOR_PLUGIN_ROOT" in cmd for cmd in all_commands), (
-            "No ${CURSOR_PLUGIN_ROOT} reference should appear in Claude settings.json"
-        )
+        with pytest.raises(ValueError, match="previously excluded"):
+            integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        assert not (temp_project / ".claude/settings.json").exists()
 
     # ------------------------------------------------------------------
     # Group B: Variable pattern expansion
@@ -4187,8 +4144,8 @@ class TestIssue1007Fixes:
     # Group C: Event normalisation for Claude
     # ------------------------------------------------------------------
 
-    def test_claude_normalises_camelcase_events(self, temp_project: Path) -> None:
-        """postToolUse (camelCase) in hook files must be stored as PostToolUse."""
+    def test_claude_rejects_foreign_camelcase_events(self, temp_project: Path) -> None:
+        """Event spelling cannot be guessed independently of its payload contract."""
         pkg_info = self._make_pkg(
             temp_project,
             "camel-pkg",
@@ -4199,11 +4156,9 @@ class TestIssue1007Fixes:
             },
         )
 
-        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
-
-        hooks = self._read_claude_settings(temp_project).get("hooks", {})
-        assert "PostToolUse" in hooks, "Normalised PascalCase key must be present"
-        assert "postToolUse" not in hooks, "Original camelCase key must not remain"
+        with pytest.raises(ValueError, match="unsupported claude event"):
+            HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+        assert not (temp_project / ".claude/settings.json").exists()
 
     def test_claude_preserves_pascal_case_events(self, temp_project: Path) -> None:
         """PostToolUse (already PascalCase) must be stored unchanged."""
@@ -4275,16 +4230,9 @@ class TestIssue1007Fixes:
             },
         )
 
-        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
-
-        hooks = self._read_claude_settings(temp_project).get("hooks", {})
-        assert "postToolUse" not in hooks, (
-            "Residual camelCase key must not exist after Claude integration"
-        )
-        assert "PostToolUse" in hooks, "PostToolUse key must be present"
-        assert len(hooks["PostToolUse"]) == 1, (
-            f"Exactly 1 PostToolUse entry expected; got {len(hooks['PostToolUse'])}"
-        )
+        with pytest.raises(ValueError, match="previously excluded"):
+            HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+        assert not (temp_project / ".claude/settings.json").exists()
 
     def test_content_dedup_same_package(self, temp_project: Path) -> None:
         """Two hook files in the same package producing identical entries yield only 1."""
@@ -4346,11 +4294,11 @@ class TestIssue1007Fixes:
         sources = self._claude_sources(temp_project, "PreToolUse")
         assert sources == [f"_local/{manifest_name}"]
 
-    def test_root_local_heals_stale_source_in_claude_settings(
+    def test_root_local_preserves_ambiguous_source_in_claude_settings(
         self,
         temp_project: Path,
     ) -> None:
-        """Root .apm reinstall removes same-content entries from old checkout sources."""
+        """Content equality does not prove an unknown historical owner is ours."""
         pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
         settings_path = temp_project / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4384,9 +4332,8 @@ class TestIssue1007Fixes:
 
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["_local/sample-project"]
-        # settings.json must retain both the managed entry and the user-owned hook
-        assert len(entries) == 2
+        assert sources == ["suspicious-bardeen-e50cf8", "_local/sample-project"]
+        assert len(entries) == 3
         user_owned = [e for e in entries if e["hooks"][0]["command"] == "echo user-owned"]
         assert len(user_owned) == 1
 
@@ -4476,7 +4423,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["dep-hooks", "_local/sample-project"]
+        assert sources == ["dep-hooks", "suspicious-bardeen-e50cf8", "_local/sample-project"]
 
     @pytest.mark.parametrize(
         "relative_path",
@@ -4543,7 +4490,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["dep-hooks", "_local/sample-project"]
+        assert sources == ["dep-hooks", "stale-root-name", "_local/sample-project"]
 
     def test_dependency_hook_sources_uses_lockfile_paths(
         self,
@@ -4666,7 +4613,7 @@ class TestIssue1007Fixes:
         HookIntegrator().integrate_package_hooks_claude(root_info, temp_project)
 
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert sources == ["_local/sample-project"]
+        assert sources == ["deep-skill", "_local/sample-project"]
 
     def test_bounded_dependency_scan_ignores_unrecognized_nested_markers(
         self,
@@ -4743,11 +4690,11 @@ class TestIssue1007Fixes:
         sources = self._claude_sources(temp_project, "PreToolUse")
         assert sources == ["matching-dep", "_local/matching-dep"]
 
-    def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
+    def test_root_local_preserves_unknown_source_for_multiple_hook_files_same_event(
         self,
         temp_project: Path,
     ) -> None:
-        """Stale-source healing applies to every root hook file for an event."""
+        """Unknown historical content remains separate from the current source."""
         first = {
             "hooks": {
                 "PreToolUse": [
@@ -4801,8 +4748,8 @@ class TestIssue1007Fixes:
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
         commands = [e["hooks"][0]["command"] for e in entries if isinstance(e, dict)]
         sources = self._claude_sources(temp_project, "PreToolUse")
-        assert commands == ["echo first", "echo second"]
-        assert sources == ["_local/sample-project", "_local/sample-project"]
+        assert commands == ["echo second", "echo first", "echo second"]
+        assert sources == ["old-root-name", "_local/sample-project", "_local/sample-project"]
 
     def test_reinstall_clears_aliased_events(self, temp_project: Path) -> None:
         """Re-integration removes stale postToolUse (camelCase) aliases.
@@ -4872,13 +4819,9 @@ class TestIssue1007Fixes:
 
         integrator = HookIntegrator()
         for _ in range(3):
-            integrator.integrate_package_hooks_claude(pkg_info, temp_project)
-
-        hooks = self._read_claude_settings(temp_project).get("hooks", {})
-        entries = hooks.get("PostToolUse", [])
-        assert len(entries) == 1, (
-            f"Entry count must remain constant across re-installs; got {len(entries)}"
-        )
+            with pytest.raises(ValueError, match="previously excluded"):
+                integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        assert not (temp_project / ".claude/settings.json").exists()
 
 
 # ==================================================================

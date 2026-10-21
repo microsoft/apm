@@ -76,6 +76,10 @@ _HOOK_COMMAND_PATHS = "src/apm_cli/integration/hook_command_paths.py"
 
 _HOOK_SOURCE_SELECTION = "src/apm_cli/integration/hook_source_selection.py"
 
+_HOOK_FILE_ROUTING = "src/apm_cli/integration/hook_file_routing.py"
+
+_HOOK_NATIVE_FORMATS = "src/apm_cli/integration/hook_native_formats.py"
+
 _PLUGIN_HOOK_RESOURCES = "src/apm_cli/bundle/plugin_hooks.py"
 
 
@@ -411,6 +415,7 @@ def _check_neutral_hook_contract(provider: FactsProvider) -> Iterable[Violation]
         *_nhc_command_keys(provider, rule_id),
         *_nhc_legacy_native_shapes(provider, rule_id),
         *_nhc_file_routing(provider, rule_id),
+        *_nhc_selected_native(provider, rule_id),
         *_nhc_config_writes(provider, rule_id),
         *_nhc_ownership_markers(provider, rule_id),
         *_nhc_drift_projection(provider, rule_id),
@@ -784,8 +789,43 @@ def _nhc_legacy_native_shapes(provider: FactsProvider, rule_id: str) -> tuple[Vi
 
 
 def _nhc_file_routing(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
-    """Per-file hook routing must not be gated by ``dep_targets_active``."""
+    """Migration may refuse the complete inventory, never choose a filename subset."""
     findings: list[Violation] = []
+    _facts, failures = checked_facts(provider, _HOOK_FILE_ROUTING, rule_id, require_python=True)
+    findings.extend(failures)
+    if not failures:
+        index = provider.tree_index(_HOOK_FILE_ROUTING)
+        function = index.function("filter_hook_files_for_target")
+        returns = (
+            []
+            if function is None
+            else [node for node in index.own_scope(function) if isinstance(node, ast.Return)]
+        )
+        findings.extend(
+            _require(
+                len(returns) == 1
+                and returns[0].value is not None
+                and ast.unparse(returns[0].value) == "list(hook_files)",
+                rule_id,
+                _HOOK_FILE_ROUTING,
+                "Filename migration must return the complete discovered hook inventory",
+            )
+        )
+        findings.extend(
+            _require(
+                isinstance(function, FUNCTION_NODES)
+                and any(
+                    isinstance(node, ast.If)
+                    and isinstance(node.test, ast.Name)
+                    and node.test.id == "newly_reachable"
+                    and any(isinstance(item, ast.Raise) for item in node.body)
+                    for node in function.body
+                ),
+                rule_id,
+                _HOOK_FILE_ROUTING,
+                "Newly reachable legacy hooks must fail migration before returning",
+            )
+        )
     for path in _HOOK_FILE_ROUTING_TARGETS:
         facts, failures = checked_facts(provider, path, rule_id, require_python=True)
         findings.extend(failures)
@@ -804,6 +844,43 @@ def _nhc_file_routing(provider: FactsProvider, rule_id: str) -> tuple[Violation,
                     line=finding.line,
                 )
             )
+    return tuple(findings)
+
+
+def _nhc_selected_native(provider: FactsProvider, rule_id: str) -> tuple[Violation, ...]:
+    """Native invocation semantics stay behind their rendering and preflight owners."""
+    facts, failures = _read_required(provider, rule_id, (_HOOK_INTEGRATOR, _HOOK_NATIVE_FORMATS))
+    if failures:
+        return failures
+    findings: list[Violation] = []
+    for scope in (
+        "integrate_package_hooks",
+        "_integrate_merged_hooks",
+        "preflight_hooks_for_targets",
+    ):
+        findings.extend(
+            _require(
+                any(
+                    call.scope == scope and call.qualname == "self._preflight_selected_native_hooks"
+                    for call in facts[_HOOK_INTEGRATOR].calls
+                ),
+                rule_id,
+                _HOOK_INTEGRATOR,
+                f"{scope} must preflight selected native hook sources",
+            )
+        )
+    for path, required in (
+        (_HOOK_INTEGRATOR, "render_selected_hook_source(self._parse_hook_json(hook_file)"),
+        (_HOOK_NATIVE_FORMATS, "_validate_native_handler(candidate, target, event, placement)"),
+    ):
+        findings.extend(
+            _require(
+                _has_fixed(facts[path], required),
+                rule_id,
+                path,
+                f"Selected native hook contracts must route through {required}",
+            )
+        )
     return tuple(findings)
 
 

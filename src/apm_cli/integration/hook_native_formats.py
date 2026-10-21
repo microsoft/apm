@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import urlparse
 
 from apm_cli.hook_contract import (
     HOOK_COMMAND_KEYS,
@@ -15,7 +18,9 @@ from apm_cli.hook_contract import (
     _handler_to_ir,
     _thaw,
     hook_handlers,
+    parse_hook_source,
 )
+from apm_cli.utils.diagnostics import printable_ascii_text
 
 _ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
 
@@ -48,6 +53,315 @@ CURSOR_NATIVE_EVENTS = frozenset(
 
 # https://cursor.com/docs/hooks - the only keys Cursor's loader recognizes.
 CURSOR_CONFIG_TOP_LEVEL_KEYS = frozenset({"version", "hooks"})
+
+# Primary contracts retrieved 2026-10-21:
+# https://code.claude.com/docs/en/hooks
+# github/docs content/copilot/reference/hooks-reference.md blob
+# 0be7a2c689786017602bd8201cb38620b717843b. Copilot casing selects
+# payload and matcher semantics, so native aliases must not be renamed.
+CLAUDE_NATIVE_EVENTS = frozenset(
+    {
+        "SessionStart",
+        "Setup",
+        "UserPromptSubmit",
+        "UserPromptExpansion",
+        "PreToolUse",
+        "PermissionRequest",
+        "PermissionDenied",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PostToolBatch",
+        "Notification",
+        "MessageDisplay",
+        "SubagentStart",
+        "SubagentStop",
+        "TaskCreated",
+        "TaskCompleted",
+        "Stop",
+        "StopFailure",
+        "TeammateIdle",
+        "InstructionsLoaded",
+        "ConfigChange",
+        "CwdChanged",
+        "DirectoryAdded",
+        "FileChanged",
+        "WorktreeCreate",
+        "WorktreeRemove",
+        "PreCompact",
+        "PostCompact",
+        "PreModelSwitch",
+        "PostModelSwitch",
+        "Elicitation",
+        "ElicitationResult",
+        "SessionEnd",
+    }
+)
+COPILOT_NATIVE_EVENTS = frozenset(
+    {
+        "sessionStart",
+        "SessionStart",
+        "sessionEnd",
+        "SessionEnd",
+        "userPromptSubmitted",
+        "UserPromptSubmit",
+        "userPromptTransformed",
+        "preToolUse",
+        "PreToolUse",
+        "postToolUse",
+        "PostToolUse",
+        "postToolUseFailure",
+        "PostToolUseFailure",
+        "agentStop",
+        "Stop",
+        "subagentStart",
+        "subagentStop",
+        "SubagentStop",
+        "errorOccurred",
+        "ErrorOccurred",
+        "preCompact",
+        "PreCompact",
+        "permissionRequest",
+        "PermissionRequest",
+        "notification",
+        "Notification",
+    }
+)
+_CLAUDE_TOOL_EVENTS = frozenset(
+    {"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "PermissionDenied"}
+)
+_CLAUDE_UNMATCHED_EVENTS = frozenset(
+    {
+        "CwdChanged",
+        "UserPromptSubmit",
+        "PostToolBatch",
+        "Stop",
+        "TeammateIdle",
+        "TaskCreated",
+        "TaskCompleted",
+        "WorktreeCreate",
+        "WorktreeRemove",
+        "MessageDisplay",
+    }
+)
+_CLAUDE_EVALUATION_EVENTS = frozenset(
+    {
+        "PermissionDenied",
+        "PostToolBatch",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PreToolUse",
+        "Stop",
+        "SubagentStop",
+        "TaskCompleted",
+        "TaskCreated",
+        "TeammateIdle",
+        "UserPromptExpansion",
+        "UserPromptSubmit",
+    }
+)
+
+
+def _validate_native_handler(
+    handler: dict,
+    target: str,
+    event: str,
+    placement: Literal["settings", "skill", "agent"],
+) -> None:
+    """Reject invocation fields that the selected native contract cannot preserve."""
+    kind = handler.get("type", "command")
+    common = {"type", "timeout", "_apm_source"}
+    if target == "claude":
+        common |= {"statusMessage", "if", "once"}
+        fields = {
+            "command": {"command", "args", "async", "asyncRewake", "shell", "onFailure"},
+            "prompt": {"prompt", "model"},
+            "agent": {"prompt", "model"},
+            "http": {"url", "headers", "allowedEnvVars", "onFailure"},
+            "mcp_tool": {"server", "tool", "input"},
+        }
+    else:
+        common |= {"timeoutSec", "matcher"}
+        fields = {
+            "command": {"command", "bash", "powershell", "cwd", "env"},
+            "http": {"url", "headers", "allowedEnvVars"},
+            "prompt": {"prompt"},
+        }
+    if not isinstance(kind, str) or kind not in fields:
+        raise HookContractError(f"unsupported {target} hook handler type {kind!r}")
+    unknown = handler.keys() - common - fields[kind]
+    if unknown:
+        raise HookContractError(
+            f"unsupported {target} handler fields {sorted(unknown)!r}; no conditions were discarded"
+        )
+    required = {
+        "command": ("command",) if target == "claude" else ("command", "bash", "powershell"),
+        "prompt": ("prompt",),
+        "agent": ("prompt",),
+        "http": ("url",),
+        "mcp_tool": ("server",),
+    }[kind]
+    if not any(isinstance(handler.get(key), str) and handler[key].strip() for key in required):
+        raise HookContractError(f"{target} {kind} hook requires a nonempty {required!r}")
+    for key in (*required, "matcher", "if", "shell", "model", "statusMessage", "cwd", "onFailure"):
+        if key in handler and not isinstance(handler[key], str):
+            raise HookContractError(f"{target} hook {key} must be a string")
+    for key in ("timeout", "timeoutSec"):
+        if key in handler and (
+            type(handler[key]) not in (int, float)
+            or not math.isfinite(handler[key])
+            or handler[key] <= 0
+        ):
+            raise HookContractError(f"{target} hook {key} must be finite positive seconds")
+    for key in ("once", "async", "asyncRewake"):
+        if key in handler and type(handler[key]) is not bool:
+            raise HookContractError(f"{target} hook {key} must be a boolean")
+    for key in ("env", "headers"):
+        if key in handler and (
+            not isinstance(handler[key], dict)
+            or any(
+                not isinstance(name, str) or not isinstance(value, str)
+                for name, value in handler[key].items()
+            )
+        ):
+            raise HookContractError(f"{target} hook {key} must map strings to strings")
+    for key in ("args", "allowedEnvVars"):
+        if key in handler and (
+            not isinstance(handler[key], list)
+            or not all(isinstance(value, str) for value in handler[key])
+        ):
+            raise HookContractError(f"{target} hook {key} must be an array of strings")
+    if "args" in handler and any(
+        "/" in value or "\\" in value or "$" in value
+        for value in [handler.get("command", ""), *handler["args"]]
+    ):
+        raise HookContractError(
+            "hook args with resource paths cannot be relocated faithfully; "
+            "use a package script in a command hook instead"
+        )
+    if "args" in handler and any(char.isspace() for char in handler["command"]):
+        raise HookContractError("exec-form command must be one executable, not a shell expression")
+    if kind == "http":
+        try:
+            url = urlparse(handler["url"])
+        except ValueError as exc:
+            raise HookContractError("HTTP hook URL is malformed") from exc
+        if url.scheme not in {"http", "https"} or not url.hostname:
+            raise HookContractError("HTTP hook URL must have an http(s) scheme and host")
+        if target == "copilot" and url.scheme != "https":
+            raise HookContractError(
+                "Copilot HTTP hooks require HTTPS; runtime-only localhost opt-ins are not projected"
+            )
+    if kind == "mcp_tool":
+        if not isinstance(handler.get("tool"), str) or not handler["tool"].strip():
+            raise HookContractError("MCP hook requires a nonempty tool name")
+        if "input" in handler and not isinstance(handler["input"], dict):
+            raise HookContractError("MCP hook input must be an object")
+    if target == "claude":
+        if kind in {"prompt", "agent"} and event not in _CLAUDE_EVALUATION_EVENTS:
+            if kind != "prompt" or event != "PermissionRequest":
+                raise HookContractError(f"Claude {event} does not support {kind} handlers")
+        if event in {"SessionStart", "Setup"} and kind == "http":
+            raise HookContractError(f"Claude {event} does not support HTTP handlers")
+        if event == "Setup" and kind == "mcp_tool":
+            raise HookContractError("Claude Setup runs before MCP servers are available")
+        if (handler.get("once") and placement != "skill") or (
+            "if" in handler and event not in _CLAUDE_TOOL_EVENTS
+        ):
+            raise HookContractError("Claude settings cannot preserve this once/if condition")
+        if "shell" in handler and handler["shell"] not in {"bash", "powershell"}:
+            raise HookContractError("unsupported Claude hook shell")
+        if "onFailure" in handler and handler["onFailure"] not in {"continue", "block"}:
+            raise HookContractError("unsupported Claude hook onFailure")
+    elif kind == "prompt" and event not in {"sessionStart", "SessionStart"}:
+        raise HookContractError("Copilot prompt handlers require sessionStart")
+
+
+def render_selected_hook_document(
+    document: dict,
+    target: str,
+    *,
+    placement: Literal["settings", "skill", "agent"] = "settings",
+) -> dict:
+    """Render selected Claude/Copilot sources without guessing native semantics."""
+    if target not in {"claude", "copilot"}:
+        raise HookContractError(f"no selected hook contract for {target!r}")
+    if placement not in {"settings", "skill", "agent"} or (
+        target != "claude" and placement != "settings"
+    ):
+        raise HookContractError(f"unsupported {target} hook placement {placement!r}")
+    parse_hook_source(document)
+    if document.keys() - {"version", "hooks", "description"}:
+        raise HookContractError(f"unsupported {target} hook document fields")
+    if "version" in document and (type(document["version"]) is not int or document["version"] != 1):
+        raise HookContractError(f"{target} hook document requires version 1")
+    hooks = document.get("hooks")
+    if not isinstance(hooks, dict):
+        raise HookContractError("selected hook document requires a hooks object")
+    result = copy.deepcopy(document)
+    native_events = CLAUDE_NATIVE_EVENTS if target == "claude" else COPILOT_NATIVE_EVENTS
+    rendered: dict[str, list[dict]] = {}
+    for event, entries in hooks.items():
+        if event not in native_events:
+            raise HookContractError(
+                f"unsupported {target} event {event!r}; use that client's native event "
+                "and payload contract in a target-specific package"
+            )
+        flat: list[dict] = []
+        for entry in entries:
+            if "hooks" not in entry:
+                candidates = [copy.deepcopy(entry)]
+            else:
+                if entry.keys() - {"hooks", "matcher", "_apm_source"}:
+                    raise HookContractError(f"unsupported {target} matcher-group fields")
+                candidates = []
+                for handler in entry["hooks"]:
+                    if target == "claude" and "type" not in handler:
+                        raise HookContractError("nested Claude handlers require an explicit type")
+                    candidate = copy.deepcopy(handler)
+                    if "matcher" in entry:
+                        if "matcher" in candidate:
+                            raise HookContractError("cannot combine nested and outer matchers")
+                        candidate["matcher"] = entry["matcher"]
+                    if "_apm_source" in entry:
+                        candidate["_apm_source"] = entry["_apm_source"]
+                    candidates.append(candidate)
+            for candidate in candidates:
+                matcher = candidate.get("matcher")
+                if "matcher" in candidate and not isinstance(matcher, str):
+                    raise HookContractError(f"{target} matcher must be a string")
+                if target == "claude":
+                    candidate.pop("matcher", None)
+                    if event in _CLAUDE_UNMATCHED_EVENTS and matcher not in (None, "", "*"):
+                        raise HookContractError(f"Claude {event} does not support a matcher")
+                _validate_native_handler(candidate, target, event, placement)
+                candidate.setdefault("type", "command")
+                if target == "claude":
+                    outer = {"matcher": matcher or "*", "hooks": [candidate]}
+                    if "_apm_source" in candidate:
+                        outer["_apm_source"] = candidate.pop("_apm_source")
+                    flat.append(outer)
+                else:
+                    candidate.pop("_apm_source", None)
+                    flat.append(candidate)
+        rendered[event] = flat
+    result["hooks"] = rendered
+    if target == "copilot":
+        result.setdefault("version", 1)
+    return result
+
+
+def render_selected_hook_source(data: dict | None, path: Path, target: str) -> dict:
+    """Attach the selected descriptor identity and recovery action to native failures."""
+    try:
+        if data is None:
+            raise HookContractError("invalid hook JSON")
+        return render_selected_hook_document(data, target)
+    except HookContractError as exc:
+        raise HookContractError(
+            f"Cannot install {target} hooks from {printable_ascii_text(path.name)}: "
+            f"{printable_ascii_text(str(exc))}. No settings were replaced. "
+            "Use supported native definitions in a target-specific package and reinstall."
+        ) from exc
 
 
 def _cursor_matcher(matcher: str | None, event: str, *, foreign: bool) -> str | None:

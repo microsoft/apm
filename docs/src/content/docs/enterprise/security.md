@@ -455,9 +455,15 @@ When the executable trust gate is enabled, APM blocks unapproved executable
 primitives from dependency packages: hooks, `bin/` executables, self-defined
 MCP servers (`registry: false`), LSP servers, and canvas extensions. The gate is
 opt-in for backward compatibility; a project `executables:` block or org policy
-enables it. Text primitives (skills, agents, instructions) are never gated, and
-local root `.apm/` content is always trusted. Supported runtimes may start an
-approved generated LSP command automatically after install.
+enables it. Pure-text primitives are not gated, and genuine local root `.apm/`
+content remains trusted. A selected standalone Claude command, skill or
+non-plugin agent with structured inline hooks uses the package's hooks consent.
+Pending or denied hooks withhold the whole affected Claude primitive; APM does
+not remove its protection and deploy the remaining text. Separate pure-text
+primitives remain available. See [scoped inline hooks](../../producer/author-primitives/hooks-and-commands/#scoped-inline-hooks-in-claude-primitives)
+for resource limits, native trust and running-session restart requirements.
+Supported runtimes may start an approved generated LSP command automatically
+after install.
 
 Trust is expressed through one noun, `executables`, across three layers, and the
 install gate and `apm audit` resolve it through a single deny-wins,

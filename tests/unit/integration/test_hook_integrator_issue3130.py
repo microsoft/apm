@@ -9,12 +9,11 @@ These tests assert the post-fix contract:
 - Untyped flat command entries render as ``"type": "command"`` handlers in
   ``.claude/settings.json`` and its ownership sidecar, both standalone and
   when merged next to a Claude-shaped hook file from the same package.
-- Explicit handler types and untyped entries that are not command handlers
-  are preserved unchanged.
-- Untyped handlers already inside a nested Claude group are left unchanged.
+- Supported native types are preserved; invalid types and conditions fail.
+- Untyped handlers already inside a nested Claude group are rejected.
 - Other targets do not receive the Claude-only default.
-- Reinstalling over settings written before the fix leaves one typed group,
-  including content-matched healing of stale root-package entries.
+- Reinstalling known-owned settings leaves one typed group. Unknown root
+  attribution is preserved, not inferred from matching content.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ from unittest.mock import patch
 
 import pytest
 
+from apm_cli.hook_contract import HookContractError
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -33,11 +33,11 @@ pytestmark = pytest.mark.component
 
 _PACKAGE_NAME = "demo-pkg"
 
-# Exact flat hook file from the #3130 report: no ``type`` on the handler.
+# The #3130 untyped command shape, with the native Claude event spelling.
 _FLAT_UNTYPED_HOOK = {
     "version": 1,
     "hooks": {
-        "preToolUse": [
+        "PreToolUse": [
             {
                 "command": 'node "${PLUGIN_ROOT}/.apm/hooks/scripts/gate.mjs"',
                 "matcher": "Write",
@@ -136,18 +136,23 @@ def test_flat_untyped_entry_merged_next_to_claude_shaped_file(tmp_path: Path) ->
     [
         pytest.param(
             {"bash": "echo posix"},
-            {"type": "command", "command": "echo posix"},
+            None,
             id="untyped-bash-command",
         ),
         pytest.param(
             {"powershell": "Write-Output windows"},
-            {"type": "command", "command": "Write-Output windows"},
+            None,
             id="untyped-powershell-command",
         ),
         pytest.param(
             {"windows": "echo windows"},
-            {"type": "command", "command": "echo windows"},
+            None,
             id="untyped-windows-command",
+        ),
+        pytest.param(
+            {"command": "echo untyped"},
+            {"type": "command", "command": "echo untyped"},
+            id="untyped-native-command",
         ),
         pytest.param(
             {"type": "command", "command": "echo typed"},
@@ -161,39 +166,43 @@ def test_flat_untyped_entry_merged_next_to_claude_shaped_file(tmp_path: Path) ->
         ),
         pytest.param(
             {"type": "prompt", "command": "echo explicit", "prompt": "Review"},
-            {"type": "prompt", "command": "echo explicit", "prompt": "Review"},
+            None,
             id="explicit-prompt-with-command",
         ),
         pytest.param(
             {"foo": 1},
-            {"foo": 1},
+            None,
             id="untyped-without-command",
         ),
     ],
 )
 def test_flat_handler_types_are_defaulted_only_for_commands(
-    tmp_path: Path, source_entry: dict, expected_handler: dict
+    tmp_path: Path, source_entry: dict, expected_handler: dict | None
 ) -> None:
     (tmp_path / ".claude").mkdir()
     package_info = _write_package(
         tmp_path, {"edge.json": {"hooks": {"PreToolUse": [source_entry]}}}
     )
 
+    if expected_handler is None:
+        with pytest.raises(HookContractError):
+            _integrate(tmp_path, package_info, "claude")
+        assert not (tmp_path / ".claude/settings.json").exists()
+        return
     _integrate(tmp_path, package_info, "claude")
 
     settings = _read_json(tmp_path / ".claude" / "settings.json")
     assert settings["hooks"]["PreToolUse"] == [{"matcher": "*", "hooks": [expected_handler]}]
 
 
-def test_untyped_handler_inside_nested_claude_group_is_unchanged(tmp_path: Path) -> None:
+def test_untyped_handler_inside_nested_claude_group_is_rejected(tmp_path: Path) -> None:
     (tmp_path / ".claude").mkdir()
     nested = {"matcher": "Edit", "hooks": [{"command": "echo nested"}]}
     package_info = _write_package(tmp_path, {"nested.json": {"hooks": {"PostToolUse": [nested]}}})
 
-    _integrate(tmp_path, package_info, "claude")
-
-    settings = _read_json(tmp_path / ".claude" / "settings.json")
-    assert settings["hooks"] == {"PostToolUse": [nested]}
+    with pytest.raises(HookContractError, match="explicit type"):
+        _integrate(tmp_path, package_info, "claude")
+    assert not (tmp_path / ".claude/settings.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -207,7 +216,11 @@ def test_claude_handler_default_does_not_reach_other_targets(
     tmp_path: Path, target: str, config_dir: str, config_file: str
 ) -> None:
     (tmp_path / config_dir).mkdir()
-    package_info = _write_package(tmp_path, {"flat.json": _FLAT_UNTYPED_HOOK})
+    native_source = {
+        **_FLAT_UNTYPED_HOOK,
+        "hooks": {"preToolUse": _FLAT_UNTYPED_HOOK["hooks"]["PreToolUse"]},
+    }
+    package_info = _write_package(tmp_path, {"flat.json": native_source})
 
     with patch(
         "apm_cli.integration.hook_native_formats._with_claude_default_handler_type",
@@ -251,8 +264,8 @@ def test_reinstall_replaces_untyped_group_written_before_fix(tmp_path: Path) -> 
     assert sidecar == {"PreToolUse": [{**_EXPECTED_FLAT_GROUP, "_apm_source": _PACKAGE_NAME}]}
 
 
-def test_stale_root_source_untyped_group_is_still_healed(tmp_path: Path) -> None:
-    """Content-matched healing must still recognise groups written before the fix."""
+def test_stale_root_source_untyped_group_is_not_adopted(tmp_path: Path) -> None:
+    """Matching content is not evidence that an unknown historical owner is ours."""
     (tmp_path / "apm.yml").write_text("name: consumer\nversion: 0.0.1\n", encoding="utf-8")
     hooks_dir = tmp_path / ".apm" / "hooks"
     hooks_dir.mkdir(parents=True)
@@ -276,12 +289,15 @@ def test_stale_root_source_untyped_group_is_still_healed(tmp_path: Path) -> None
     )
 
     _integrate(tmp_path, root_package, "claude")
+    _integrate(tmp_path, root_package, "claude")
 
     settings = _read_json(claude_dir / "settings.json")
-    assert settings["hooks"] == {
-        "PreToolUse": [{"matcher": "Write", "hooks": [{"type": "command", "command": "echo root"}]}]
-    }
+    current = {"matcher": "Write", "hooks": [{"type": "command", "command": "echo root"}]}
+    assert settings["hooks"] == {"PreToolUse": [legacy_group, current]}
     sidecar = _read_json(claude_dir / "apm-hooks.json")
     assert sidecar == {
-        "PreToolUse": [{**settings["hooks"]["PreToolUse"][0], "_apm_source": "_local/consumer"}]
+        "PreToolUse": [
+            {**legacy_group, "_apm_source": "old-root-name"},
+            {**current, "_apm_source": "_local/consumer"},
+        ]
     }

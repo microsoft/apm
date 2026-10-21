@@ -55,6 +55,73 @@ ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
 
 
+def test_custom_user_cleanup_prefix_must_use_scope_owner() -> None:
+    path = "src/apm_cli/integration/targets.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    original = "scoped = t.for_scope(user_scope=True)"
+    assert source.count(original) == 1
+    rule = "install-deployment-provenance-state"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, "scoped = t")}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    "path,original,replacement",
+    [
+        (
+            "src/apm_cli/integration/hook_file_routing.py",
+            "return list(hook_files)",
+            "return specific",
+        ),
+        (
+            "src/apm_cli/integration/hook_file_routing.py",
+            "if newly_reachable:",
+            "if False and newly_reachable:",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "self._preflight_selected_native_hooks(hook_sources)",
+            "self._skip_native_check(hook_sources)",
+        ),
+        (
+            "src/apm_cli/integration/hook_native_formats.py",
+            "_validate_native_handler(candidate, target, event, placement)",
+            "pass",
+        ),
+        (
+            "src/apm_cli/install/deployment_plan.py",
+            "copilot_native = admits_native_plugin(package_info)",
+            "copilot_native = False",
+        ),
+        (
+            "src/apm_cli/install/deployment_plan.py",
+            "native_plugin_root=native_root",
+            "native_plugin_root=None",
+        ),
+    ],
+)
+def test_hook_migration_native_contract_and_opacity_have_teeth(
+    path: str,
+    original: str,
+    replacement: str,
+) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert original in source
+    mutated = source.replace(original, replacement)
+    ast.parse(mutated)
+    rule = (
+        "install-deployment-skill-preflight"
+        if path == "src/apm_cli/install/deployment_plan.py"
+        else "mutation_writes.neutral_hook_contract"
+    )
+    report = run_selected_rules(ROOT, (rule,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
 @pytest.mark.parametrize(
     ("path", "original", "replacement"),
     [

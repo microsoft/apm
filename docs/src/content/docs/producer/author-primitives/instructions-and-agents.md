@@ -239,6 +239,18 @@ offending package and field so you can fix the source.
 - Keep the body under 300 lines. Long agents drown the harness's
   context window before the user's task even loads.
 
+### Claude inline hooks
+
+A standalone, non-plugin Claude agent can declare structured `hooks` in its
+frontmatter. The package's existing hooks consent applies: when enforcement
+is enabled, pending or denied hooks withhold the whole affected Claude agent.
+Separate pure-text agents remain available. This does not activate hook fields
+ignored by native-plugin agents or establish support in another harness.
+See [scoped inline hooks](../hooks-and-commands/#scoped-inline-hooks-in-claude-primitives)
+for bounded resources, native trust and restart requirements. APM installation
+and audit do not certify a native Claude version or revoke hooks already
+registered in a running session.
+
 ### What compiles where
 
 | Target | Output path | Transform |

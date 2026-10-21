@@ -80,7 +80,9 @@ def test_approved_inline_hook_preserves_native_definition(
     source = _primitive(factory, dependency, kind, "protected", hooks=True)
     document = deepcopy(_HOOKS)
     handler = document["PreToolUse"][0]["hooks"][0]
-    handler.update({"timeout": 5, "once": True})
+    handler["timeout"] = 5
+    if kind != "agent":
+        handler["once"] = True
     if resource:
         script = source.parent / "scripts" / "guard.py"
         script.parent.mkdir()
@@ -125,7 +127,10 @@ def test_approved_inline_hook_preserves_native_definition(
         actual = deployed["hooks"]["PreToolUse"][0]
         assert actual["matcher"] == "Bash"
         assert actual["hooks"][0]["timeout"] == 5
-        assert actual["hooks"][0]["once"] is True
+        if kind != "agent":
+            assert actual["hooks"][0]["once"] is True
+        else:
+            assert "once" not in actual["hooks"][0]
         assert deployed["allowed-tools"] == "Read"
         assert deployed["disable-model-invocation"] is True
         assert deployed["user-invocable"] is False

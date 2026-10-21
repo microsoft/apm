@@ -22,7 +22,8 @@ def check_inline_hooks(provider: FactsProvider) -> tuple[Violation, ...]:
     """Require selected native documents, shared resources, and read-only consent replay."""
     required = {
         "src/apm_cli/install/deployable_source_plan.py": (
-            "candidates & self.paths",
+            "candidates.keys() & self.paths",
+            "placement=candidates[relative]",
             "HookIntegrator.select_deployable_hook_sources(",
             "inline_documents=documents",
             "paths=self.paths - self.claude_withheld_paths",
@@ -33,6 +34,7 @@ def check_inline_hooks(provider: FactsProvider) -> tuple[Violation, ...]:
             "strict=hook_file in inline_documents",
         ),
         _OWNER: (
+            'render_selected_hook_document(document, "claude", placement=placement)',
             'selection.inline_for("claude")',
             'selected_bundle_files=selection.bundle_for("claude")',
             "copy_deployed_hook_bundle(",

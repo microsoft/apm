@@ -41,7 +41,12 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
             "deployment_plan=deployment_plan",
         ),
         "src/apm_cli/install/services.py": ("source_plan = deployment_plan.source_plan",),
-        "src/apm_cli/install/deployment_plan.py": ("source_plan = DeployableSourcePlan.create(",),
+        "src/apm_cli/install/deployment_plan.py": (
+            "source_plan = DeployableSourcePlan.create(",
+            "copilot_native = admits_native_plugin(package_info)",
+            "codex_native is not None or copilot_native",
+            "native_plugin_root=native_root",
+        ),
     }
     failures: list[Violation] = []
     for path, fragments in required.items():
@@ -52,7 +57,8 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
                 _summary(
                     GUARD_SKILL_PREFLIGHT,
                     path,
-                    "Skill preflight must reuse canonical selection and collision owners",
+                    "Deployment preflight must reuse canonical selection, native admission, "
+                    "and collision owners",
                 )
             )
     index = provider.tree_index(_PHASE)

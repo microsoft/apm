@@ -1231,7 +1231,7 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
     When *targets* is provided, prefixes are derived from those
     (already scope-resolved) profiles.  Otherwise falls back to
     ``KNOWN_TARGETS`` for backward compatibility. When *user_scope* is
-    true, that fallback also includes static ``user_root_dir`` prefixes.
+    true, that fallback also includes canonically resolved user-root prefixes.
 
     Includes prefixes from ``deploy_root`` overrides (e.g. ``.agents/``
     for Codex skills) so cross-root paths pass security validation.
@@ -1258,11 +1258,11 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
         if t.prefix not in seen:
             seen.add(t.prefix)
             prefixes.append(t.prefix)
-        if targets is None and user_scope and t.user_root_dir is not None:
-            user_prefix = f"{t.user_root_dir}/"
-            if user_prefix not in seen:
-                seen.add(user_prefix)
-                prefixes.append(user_prefix)
+        if targets is None and user_scope:
+            scoped = t.for_scope(user_scope=True)
+            if scoped is not None and scoped.prefix not in seen:
+                seen.add(scoped.prefix)
+                prefixes.append(scoped.prefix)
         for m in t.primitives.values():
             if m.deploy_root is not None:
                 dp = f"{m.deploy_root}/"

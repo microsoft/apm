@@ -172,8 +172,8 @@ revoke hooks registered in a running session; explain reload/restart needs and
 qualify native versions separately from APM CLI tests.
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
-files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
-(`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
+files under `hooks/` or `.apm/hooks/`. Filenames do not select destinations:
+package and dependency targets intersect the active installation targets.
 
 Hook-only Git dependencies need neither `apm.yml` nor `SKILL.md`. Set
 `path` to the directory containing `hooks/` or `.apm/hooks/`, not the
@@ -211,9 +211,14 @@ A consumer can narrow it further with per-dependency `targets:`; see
 
 ### Migrating filename-routed hooks
 
-When renaming a target-specific hook file to generic `hooks.json`, preserve
-producer intent with an explicit package `target:` declaration -- consumers
-may narrow it further but cannot expand it:
+The retirement is a breaking draft, not a release announcement. Specification
+review, the subsequent 14-day public comment period, and previous-minor notice
+at least 90 days before removal remain outstanding. Historical warnings do not
+establish that notice; no removal date or version is assigned.
+
+When renaming retained definitions to generic `hooks.json`, preserve producer
+intent with a package `target:` declaration -- consumers may narrow it further
+but cannot expand it:
 
 ```yaml
 name: codex-hooks
@@ -221,21 +226,26 @@ version: "1.0.0"
 target: codex
 ```
 
-Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
-After: rename to `hooks.json` and add `target: codex` to the package's own
-`apm.yml`. The consumer can still narrow further with per-dependency `targets:`.
-Combined deprecated stems such as `claude-codex-hooks.json` route to every
-named target token during the migration window.
-Stems with target tokens outside the trailing target suffix (for example
-`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
-warning naming the ignored token.
+The old routing chose target-specific descriptors instead of generic ones.
+APM now admits the complete discovered inventory or fails actionably if that
+would activate a formerly excluded or shadowed descriptor. Explicit targets
+alone do not waive migration. Review every check, split differing native
+definitions into separately targeted packages, remove unselected descriptors
+from discovered hook locations, and only then rename retained files. Do not
+blindly rename all old files: generic filenames explicitly select their contents.
+Discovery and unaffected defaults stay unchanged; targets are not newly required
+for unaffected packages. Opaque native plugins retain their native identity and
+permissions rather than being dissected into loose hook files.
 
-During the deprecation window, suffix routing remains an additional
-restriction inside the effective target set and emits an install-time warning.
-Consumer per-dependency `targets:` can narrow that set further.
+Claude and Copilot retain documented native event spellings. Claude requires
+`PostToolUse` and `SubagentStop`, not guessed camelCase aliases. Copilot
+`PreToolUse` and `preToolUse` have distinct payload and matcher contracts and
+remain distinct. Unsupported selected events or invocation fields fail before
+known-good settings are replaced. Equal command text does not make a `Bash`
+binding equivalent to a wildcard; only equivalent complete same-owner bindings
+are deduplicated. Personal entries and ambiguous ownership remain untouched.
 
-APM automatically normalises event names per target (e.g. `postToolUse`
-becomes `PostToolUse` in Claude) and rewrites path variables
+APM rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
@@ -243,12 +253,13 @@ hook action under `.kiro/hooks/`.
 For Claude, APM wraps flat command entries in `{ "matcher", "hooks": [...] }`
 groups in `.claude/settings.json` and adds the required `"type": "command"`
 when a flat command entry omits `type`. Explicit handler types are kept.
-Handlers already inside nested Claude groups and other targets are unchanged.
+Nested Claude handlers require an explicit native type. Other targets are unchanged.
 
 For Codex, APM wraps flat command entries in hook groups containing a
 nested `hooks` array in `.codex/hooks.json`.
-Claude, Codex, Gemini, and Antigravity preserve nested handler and
+Codex, Gemini, and Antigravity preserve nested handler and
 hook-group metadata, including `env` objects and arrays, in native JSON.
+Claude preserves supported native fields and rejects unsupported conditions.
 
 For Cursor, APM writes native v1 flat command or prompt handlers using only
 verified aliases. Unsupported fields, restrictions and overlapping Claude

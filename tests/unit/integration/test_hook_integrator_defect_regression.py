@@ -239,7 +239,9 @@ def test_hook_source_selector_enumerates_shared_root_once_per_target(tmp_path: P
     assert enumerate_bundle.call_args.args[0] == hooks_dir
 
 
-def test_copilot_renames_claude_tool_events_to_camel_case(tmp_path: Path, caplog, capsys) -> None:
+def test_copilot_preserves_native_pascal_case_payload_contract(
+    tmp_path: Path, caplog, capsys
+) -> None:
     project = tmp_path / "project"
     package_path = tmp_path / "superpowers"
     hooks_dir = package_path / ".apm" / "hooks"
@@ -261,13 +263,13 @@ def test_copilot_renames_claude_tool_events_to_camel_case(tmp_path: Path, caplog
     output = json.loads(
         (project / ".github" / "hooks" / "superpowers-hooks.json").read_text(encoding="utf-8")
     )
-    assert set(output["hooks"]) == {"preToolUse", "postToolUse"}
+    assert set(output["hooks"]) == {"PreToolUse", "PostToolUse"}
     captured = capsys.readouterr()
     assert "may not be recognized" not in captured.out
     assert "hook event casing mismatch" not in caplog.text
 
 
-def test_copilot_merges_duplicate_event_aliases_to_camel_case(tmp_path: Path) -> None:
+def test_copilot_does_not_merge_distinct_alias_payload_contracts(tmp_path: Path) -> None:
     project = tmp_path / "project"
     package_path = tmp_path / "superpowers"
     hooks_dir = package_path / ".apm" / "hooks"
@@ -289,9 +291,9 @@ def test_copilot_merges_duplicate_event_aliases_to_camel_case(tmp_path: Path) ->
     output = json.loads(
         (project / ".github" / "hooks" / "superpowers-hooks.json").read_text(encoding="utf-8")
     )
-    assert set(output["hooks"]) == {"preToolUse"}
-    commands = [entry["hooks"][0]["command"] for entry in output["hooks"]["preToolUse"]]
-    assert commands == ["echo pascal", "echo camel"]
+    assert set(output["hooks"]) == {"PreToolUse", "preToolUse"}
+    assert output["hooks"]["PreToolUse"][0]["command"] == "echo pascal"
+    assert output["hooks"]["preToolUse"][0]["command"] == "echo camel"
 
 
 def test_claude_hook_script_path_no_doubling(tmp_path: Path) -> None:

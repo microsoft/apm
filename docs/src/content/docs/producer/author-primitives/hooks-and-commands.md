@@ -223,18 +223,39 @@ the target vocabulary in
 [Primitives and targets](../../../concepts/primitives-and-targets/).
 :::
 
-:::caution[Deprecated]
-Hook filename routing (`*-<harness>-hooks.json`) is deprecated and warns
-at install time. When renaming `my-pkg-codex-hooks.json` to generic
-`hooks.json`, preserve package intent with `target: codex` in the package's
-own `apm.yml`. Consumer per-dependency `targets:` may narrow that scope
-further, but cannot expand it.
-
-During migration, suffix routing still filters within the effective target
-set. Multi-target stems such as `claude-codex-hooks.json` match each named
-target. Ambiguous stems such as `codex-launch-hooks.json` use universal
-fallback and warn that the apparent target token was ignored.
+:::caution[Draft retirement, not a release announcement]
+The filename-routing retirement in [#3226](https://github.com/microsoft/apm/issues/3226)
+is a breaking change, including warning-to-error migration. It is not
+release-qualified. The [OpenAPM amendment process](../../../specs/openapm-v0.1/#93-amendment-process)
+requires an editor's draft, at least two non-author reviewers covering
+implementation and consumer/integrator experience, and then 14 days of public
+comment. [Migration notice](../../../specs/openapm-v0.1/#95-migration-windows-for-consumers)
+must appear in the previous minor's revision history at least 90 days before
+removal. Those gates remain outstanding; earlier CLI warnings are not proof
+of notice. No removal version or date is assigned.
 :::
+
+### Migrating filename-routed hooks
+
+Filenames no longer select a target or a subset of discovered hook descriptors.
+Every selected target receives the complete discovered descriptor set, subject
+to its native capabilities and executable consent. Unchanged discovery still
+resolves mirrored stems as described above; this is not recursive discovery.
+
+The old routing selected target-specific files **instead of** generic files.
+For example, a package containing both `claude-hooks.json` and `hooks.json`
+previously hid the generic file from Claude. Simply removing that filter would
+activate a formerly shadowed script. APM therefore compares the complete
+inventory with historical selection and fails before deployment if any
+descriptor would gain reach. A target declaration alone does not waive this check.
+
+Review every descriptor and its intended checks. Put different native definitions
+in separate packages, each with its own `target:` or `targets:` declaration;
+consumers may narrow those packages further. Move unselected definitions out of
+the package's discovered hook locations. Then rename retained descriptors to
+generic names such as `hooks.json` and reinstall. Do not rename all old files
+blindly: that would explicitly select scripts that the old routing hid.
+Unaffected packages do not acquire a mandatory target declaration.
 
 Supported targets and where the integrator writes:
 
@@ -250,20 +271,33 @@ Supported targets and where the integrator writes:
 | kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
-APM parses the source into vendor-neutral hook intent, then each target
-integrator renders its native schema. Flat command entries become Claude's
+APM uses the shared hook parser and each selected target's native renderer.
+Claude and Copilot events must use their documented native spellings; APM does
+not guess event names or translate payload-dependent scripts. In Copilot,
+`PreToolUse` and `preToolUse` retain their distinct payload and matcher contracts.
+Claude's event is `SubagentStop`, not `subagentStop`.
+
+Unsupported selected events, handler fields, or invocation conditions fail
+with a nonzero install result before replacing known-good hook settings.
+Distinct `Bash` and wildcard bindings remain distinct even when their commands
+match. Equivalent complete bindings owned by the same package are deduplicated;
+personal entries and ambiguous historical ownership are not adopted or deleted.
+This describes configuration handling, not proof of native execution count.
+
+Flat command entries become Claude's
 required `{ "matcher": "*", "hooks": [...] }` entries in
 `.claude/settings.json`; a flat command entry that omits `type` receives
 Claude's required `"type": "command"`, while explicit handler types are kept
 and other targets are unchanged. This default applies only to flat command
-entries, not handlers already inside nested Claude groups. For Codex, flat command entries become
+entries; nested Claude handlers require an explicit native type. For Codex, flat command entries become
 intermediate hook groups containing a nested `hooks` array in
 `.codex/hooks.json`. Kiro receives its current v1 standalone schema:
 `{ "version": "v1", "hooks": [{ "name", "trigger", "matcher", "action" }] }`.
 Kiro trigger names are PascalCase and command timeouts remain in seconds.
-For Claude, Codex, Gemini, and Antigravity, other handler and hook-group
+For Codex, Gemini, and Antigravity, other handler and hook-group
 fields, including nested objects and arrays such as `env`, are written to the
-native JSON unchanged.
+native JSON unchanged. Claude preserves supported native fields and rejects
+unsupported conditions instead of silently discarding them.
 
 ### Cursor native hooks and Claude import
 
@@ -335,8 +369,8 @@ Reinstall migrates matching APM-owned legacy Cursor entries and keeps unrelated
 user hooks. Switching a dependency to one route can retire its old project
 route; it does not remove user hooks or matching hooks in another scope.
 Invalid or unsupported user configuration is rejected without being
-overwritten. Target-specific files retain the existing filename-routing rules;
-this repair does not add per-file target declarations or dry-run hook previews.
+overwritten. Source selection follows the configuration-only model and migration
+check above; there are no per-file target declarations or dry-run hook previews.
 
 These mappings follow the [Cursor hook reference](https://cursor.com/docs/hooks)
 and [third-party hook reference](https://cursor.com/docs/reference/third-party-hooks).

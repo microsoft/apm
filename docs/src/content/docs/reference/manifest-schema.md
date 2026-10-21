@@ -520,6 +520,13 @@ Listing a harness the install did not select does not add it; omitting
 list `targets: []` is rejected at parse time -- omit the key to mean
 "all".
 
+Hook destinations also respect the dependency package's own `target:` or
+`targets:` restriction. Filenames do not select destinations. The draft
+[filename-routing retirement](../../producer/author-primitives/hooks-and-commands/#migrating-filename-routed-hooks)
+rejects migrations that would activate previously excluded or shadowed
+descriptors; adding `targets:` alone does not waive that check. Its breaking
+release and specification gates remain outstanding.
+
 ```yaml
 - git: my-team/review-hooks
   targets: [copilot, claude]

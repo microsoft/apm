@@ -410,6 +410,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             source_plan,
             user_scope=scope is InstallScope.USER,
             retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
+            targets=projection_targets,
         )
 
     # Validate every converted instruction target before any primitive kind can

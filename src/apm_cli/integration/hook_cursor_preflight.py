@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,43 +12,13 @@ from apm_cli.integration.hook_native_formats import (
     _to_cursor_hook_entries,
     validate_cursor_config,
 )
-from apm_cli.integration.hook_ownership import reinject_apm_source_from_sidecar
+from apm_cli.integration.hook_ownership import read_owned_hook_config as _existing_hooks
 from apm_cli.integration.hook_source_selection import HookSourceSelection
 from apm_cli.utils.diagnostics import printable_ascii_text
-from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 
 if TYPE_CHECKING:
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.models.apm_package import PackageInfo
-
-
-def _read_config(path: Path, root: Path) -> dict[str, Any]:
-    """Read existing config without following links or replacing malformed content."""
-    ensure_path_within(path, root)
-    if has_symlink_component(root, path):
-        raise HookContractError("hook configuration must not be a symlink")
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise HookContractError(
-            f"cannot read hook configuration {printable_ascii_text(path.name)}"
-        ) from exc
-    if not isinstance(data, dict):
-        raise HookContractError("hook configuration must be a JSON object")
-    return data
-
-
-def _existing_hooks(path: Path, root: Path) -> dict[str, Any]:
-    data = _read_config(path, root)
-    sidecar = _read_config(path.with_name("apm-hooks.json"), root)
-    hooks = data.get("hooks", {})
-    if not isinstance(hooks, dict) or any(not isinstance(v, list) for v in hooks.values()):
-        raise HookContractError("existing hook configuration requires event arrays")
-    if sidecar:
-        reinject_apm_source_from_sidecar(hooks, sidecar)
-    return data
 
 
 def _without_retiring_owner(document: dict[str, Any], owners: set[str]) -> dict[str, Any]:
