@@ -14,6 +14,7 @@ dependencies:
     .agents/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
   source: local
   local_path: ./packages/autopilot/autopilot-issue-delivery-scheduler
+  content_hash: sha256:7d14f759ebb29b8c9737a8210e1247aa5fe3f64e07215b6ac4a01e94459c88c0
   declared_license: MIT
 - repo_url: _local/autopilot-issue-triage-scheduler
   name: autopilot-issue-triage-scheduler
@@ -27,13 +28,14 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:ec2544ba86f1fd1064397ea3abc8dab4200d26f752001a6f07020cda32943951
+    .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:70c0189155b32a60cce674dd28a9699b533dff6964e35c183fa35f5fc092415f
     .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md: sha256:b7c780cf9ec1d73ea5d4d8bc2cda031287aa2a478872339a3d6a8cc2cc329677
     .agents/skills/autopilot-issue-triage-scheduler/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
-    .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
-    .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
+    .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:8b635d39c2e1eb9f87ea19a06d95f92421c651039282782840c32a9cb0450ca7
+    .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:76316bd07cc9f0cfe0ad56ce2e896c33f100c3c950321e7f94ae441f90a274da
   source: local
   local_path: ./packages/autopilot/autopilot-issue-triage-scheduler
+  content_hash: sha256:3363991ecb9dbf21472d428a4010a202d226c65b62c02085a58053a2e1a4e1a1
   declared_license: MIT
 - repo_url: _local/autopilot-pr-merge-worker
   name: autopilot-pr-merge-worker
@@ -66,6 +68,7 @@ dependencies:
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-merge-worker
+  content_hash: sha256:bde4eeed39d953ffcefa1d59754e6da12570c9974f5747b62a521d2e9ecc5e5a
   declared_license: MIT
 - repo_url: _local/autopilot-pr-review-scheduler
   name: autopilot-pr-review-scheduler
@@ -80,6 +83,7 @@ dependencies:
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:6c4c5802109cbbb76ecf28ab2299410f4f6f3f9dd9cb2586624c1783538d20a5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-review-scheduler
+  content_hash: sha256:38c718b08b4a26f91e02ddff26913d2007ab139c33047da62cf8c7dfcafac4bd
   declared_license: MIT
 - repo_url: _local/autopilot-pr-triage-scheduler
   name: autopilot-pr-triage-scheduler
@@ -96,10 +100,11 @@ dependencies:
     .agents/skills/autopilot-pr-triage-scheduler/SKILL.md: sha256:6b1eedeb452b4af4c1a43fe94e7dded7e2893ba16da3f727669fa2891d02d075
     .agents/skills/autopilot-pr-triage-scheduler/assets/fan-out-pool.md: sha256:c6c997d5bc1a941b10afafd35b06313b2ed34d7d484a29b82680019ec97e160d
     .agents/skills/autopilot-pr-triage-scheduler/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
-    .agents/skills/autopilot-pr-triage-scheduler/scripts/fetch_queue.py: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
-    .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
+    .agents/skills/autopilot-pr-triage-scheduler/scripts/fetch_queue.py: sha256:8b635d39c2e1eb9f87ea19a06d95f92421c651039282782840c32a9cb0450ca7
+    .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py: sha256:76316bd07cc9f0cfe0ad56ce2e896c33f100c3c950321e7f94ae441f90a274da
   source: local
   local_path: ./packages/autopilot/autopilot-pr-triage-scheduler
+  content_hash: sha256:4842fc91f4b2671688885d639939f36497aa3e58275146fa1353112ee794765a
   declared_license: MIT
 - repo_url: _local/autopilot-comment
   name: autopilot-comment
@@ -116,6 +121,7 @@ dependencies:
     .agents/skills/autopilot-comment/apm.yml: sha256:4db657c42507061d9bfbd795a498e32f2492817b91343e4ff158886619c17fd0
   source: local
   local_path: ../autopilot-comment
+  content_hash: sha256:99f30af2deabe503620dfdb31d5f9c9d475b6649933d0e9acca5f1a2b3cc31dd
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/autopilot/autopilot-comment
   declared_license: MIT
@@ -176,6 +182,7 @@ dependencies:
     .agents/skills/autopilot-issue-delivery-worker/references/strategic-alignment-gate.md: sha256:17c872d668907fbee8fb1069244e5ac893dffdc1c5a36f898b7aee76397e91c8
   source: local
   local_path: ../autopilot-issue-delivery-worker
+  content_hash: sha256:92d235f5e94fc408eb8807fe21d03253fa9e5bedc2ca42777ddaf0ed272da742
   declaring_parent: ./packages/autopilot/autopilot-issue-delivery-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-delivery-worker
   declared_license: MIT
@@ -198,6 +205,7 @@ dependencies:
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:e37365e25911cca25775b1b111f38bbd1ccd09f6b57b7739ea09471d245d3d35
   source: local
   local_path: ../autopilot-issue-triage-worker
+  content_hash: sha256:9c3b431664852a2c80cb2b92026477ea28db38681ab4fccdd6af21e6c055d612
   declaring_parent: ./packages/autopilot/autopilot-issue-triage-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-triage-worker
   declared_license: MIT
@@ -242,6 +250,7 @@ dependencies:
     .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json: sha256:76d6da23bde1c6b6f0b0bf883ba8b5bf065f0db73f69182cfd98449716bc0d84
   source: local
   local_path: ../autopilot-pr-review-worker
+  content_hash: sha256:154423a450bd1a75727f7cf373344998542ee38310ec038b0f41f741e67206b1
   declaring_parent: ./packages/autopilot/autopilot-pr-review-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-review-worker
   declared_license: MIT
@@ -262,6 +271,7 @@ dependencies:
     .agents/skills/autopilot-pr-triage-worker/assets/pr-triage-template.md: sha256:d5155b45b2fa10badd82945582a9e3968cfaece5ca29678f3091f78e9dffae70
   source: local
   local_path: ../autopilot-pr-triage-worker
+  content_hash: sha256:0158981d171b3cc5d7ed3edfd31bc0f6f246175f454f18c7e6558cb113008c5a
   declaring_parent: ./packages/autopilot/autopilot-pr-triage-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-triage-worker
   declared_license: MIT
@@ -318,6 +328,7 @@ dependencies:
     .agents/skills/pr-description-skill/scripts/run_evals.py: sha256:a1792f8cb95b4fb37a4133af079908e2a3b5643c1a81d97e4dcda399bac069a2
   source: local
   local_path: ../../pr-description-skill
+  content_hash: sha256:6bda4645f6a5e190f0649c17d6a72a5ac3d88a71eaafc0fca4cb4b16cb973530
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/pr-description-skill
   declared_license: MIT
@@ -609,7 +620,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:ec2544ba86f1fd1064397ea3abc8dab4200d26f752001a6f07020cda32943951
+  content_hash: sha256:70c0189155b32a60cce674dd28a9699b533dff6964e35c183fa35f5fc092415f
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md
@@ -636,7 +647,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
+  content_hash: sha256:8b635d39c2e1eb9f87ea19a06d95f92421c651039282782840c32a9cb0450ca7
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
@@ -645,7 +656,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
+  content_hash: sha256:76316bd07cc9f0cfe0ad56ce2e896c33f100c3c950321e7f94ae441f90a274da
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-worker
@@ -1014,7 +1025,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
+  content_hash: sha256:8b635d39c2e1eb9f87ea19a06d95f92421c651039282782840c32a9cb0450ca7
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py
@@ -1023,7 +1034,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
+  content_hash: sha256:76316bd07cc9f0cfe0ad56ce2e896c33f100c3c950321e7f94ae441f90a274da
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-worker

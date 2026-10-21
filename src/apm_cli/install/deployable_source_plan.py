@@ -8,7 +8,7 @@ because it happens to be scanned.
 
 from __future__ import annotations
 
-import os
+import stat
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,9 +49,22 @@ def _is_safe_source_path(
     return True
 
 
+def _optional_source_directory(root: Path) -> bool | None:
+    """Distinguish an absent optional root from a non-directory or an access failure."""
+    try:
+        return stat.S_ISDIR(root.stat().st_mode)
+    except FileNotFoundError:
+        return None
+
+
 @dataclass(frozen=True)
 class DeployableSourcePlan:
-    """Concrete, authorized source files for one package deployment."""
+    """Authorized sources plus a skill-scoped discovery witness.
+
+    Skill roots and members are source-relative coverage witnesses for the
+    materializer, not certificates for other primitives. Legacy/plugin skill
+    selectors without complete discovery stay unknown.
+    """
 
     source_root: Path
     paths: frozenset[str]
@@ -59,6 +72,9 @@ class DeployableSourcePlan:
     authorized_parent_prefixes: frozenset[str] = frozenset()
     hook_source_selection: Any | None = None
     plugin_bin_deployable: bool = False
+    skill_discovery_complete: bool = False
+    skill_source_roots: frozenset[str] = frozenset()
+    skill_source_files: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Index authorized parents for constant-time copy filtering."""
@@ -83,15 +99,33 @@ class DeployableSourcePlan:
         canvas_approved: bool,
         skip_bin: bool,
         plugin_bin_deployable: bool = False,
+        native_plugin_root: Path | None = None,
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
     ) -> DeployableSourcePlan:
         """Build the authorized deploy set after all deployment gates resolve."""
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
         source_root = Path(package_info.install_path).resolve()
+        # Require the package root itself, while optional primitive roots may be absent.
+        if not source_root.is_dir():
+            raise OSError(
+                f"Cannot enumerate source {source_root}: package root is missing or not a directory. "
+                "Restore the package source and retry installation."
+            )
         paths: set[str] = set()
+        skill_source_roots: set[str] = set()
+        skill_source_files: set[str] = set()
+        discovery_complete = native_plugin_root is None
         selected_skill_names: frozenset[str] | None = None
         hook_source_selection = None
         target_primitives = {primitive for target in targets for primitive in target.primitives}
+
+        def safe(path: Path, on_symlink: Callable[[Path], None] | None = None) -> bool:
+            nonlocal discovery_complete
+            admitted = _is_safe_source_path(path, source_root, on_symlink)
+            discovery_complete = discovery_complete and admitted
+            return admitted
 
         def warn_agent_symlink(path: Path) -> None:
             if diagnostics is not None:
@@ -108,21 +142,42 @@ class DeployableSourcePlan:
                     package=printable_ascii_text(package_name),
                 )
 
-        def add_file(path: Path, on_symlink: Callable[[Path], None] | None = None) -> None:
-            if _is_safe_source_path(path, source_root, on_symlink) and path.is_file():
-                paths.add(portable_relpath(path, source_root))
+        def add_file(
+            path: Path,
+            on_symlink: Callable[[Path], None] | None = None,
+            *,
+            skill_member: bool = False,
+        ) -> None:
+            nonlocal discovery_complete
+            if safe(path, on_symlink) and path.is_file():
+                relative = portable_relpath(path, source_root)
+                if native_plugin_root is not None and (
+                    relative == MARKER_FILENAME or ".git" in Path(relative).parts
+                ):
+                    return
+                paths.add(relative)
+                if skill_member:
+                    skill_source_files.add(relative)
+            else:
+                discovery_complete = False
+
+        def source_directory(root: Path, on_symlink: Callable[[Path], None] | None = None) -> bool:
+            nonlocal discovery_complete
+            if not safe(root, on_symlink):
+                return False
+            directory = _optional_source_directory(root)
+            discovery_complete = discovery_complete and directory is not False
+            return directory is True
 
         def tree_files(
             root: Path, on_symlink: Callable[[Path], None] | None = None
         ) -> Iterator[Path]:
-            if not _is_safe_source_path(root, source_root, on_symlink) or not root.is_dir():
+            if not source_directory(root, on_symlink):
                 return
-            for parent, directory_names, file_names in os.walk(root, followlinks=False):
+            for parent, directory_names, file_names in BaseIntegrator.walk_source_tree(root):
                 parent_path = Path(parent)
                 directory_names[:] = [
-                    name
-                    for name in directory_names
-                    if _is_safe_source_path(parent_path / name, source_root, on_symlink)
+                    name for name in directory_names if safe(parent_path / name, on_symlink)
                 ]
                 yield from (parent_path / name for name in file_names)
 
@@ -140,7 +195,7 @@ class DeployableSourcePlan:
         def add_direct_matching_files(
             root: Path, pattern: str, on_symlink: Callable[[Path], None] | None = None
         ) -> None:
-            if not _is_safe_source_path(root, source_root, on_symlink) or not root.is_dir():
+            if not source_directory(root, on_symlink):
                 return
             for path in root.iterdir():
                 if path.match(pattern):
@@ -172,6 +227,20 @@ class DeployableSourcePlan:
             for path in hook_source_selection.files:
                 add_file(path)
 
+        if native_plugin_root is not None:
+            if native_plugin_root != source_root:
+                raise ValueError("Native source plan must use the admitted package root.")
+            for parent, directories, files in BaseIntegrator.walk_source_tree(source_root):
+                for name in (*directories, *files):
+                    path = Path(parent) / name
+                    if not _is_safe_source_path(path, source_root):
+                        raise ValueError(
+                            "Native plugin contains an unsafe path or symlink; "
+                            "a live loader cannot honor partial source exclusions."
+                        )
+                    add_file(path)
+                directories[:] = [name for name in directories if name != ".git"]
+
         if canvas_approved and "canvas" in target_primitives:
             from apm_cli.integration.canvas_integrator import CanvasIntegrator
 
@@ -184,11 +253,13 @@ class DeployableSourcePlan:
             is_marketplace_plugin = (
                 getattr(package_info, "package_type", None) is PackageType.MARKETPLACE_PLUGIN
             )
+            if is_marketplace_plugin:
+                # Legacy plugin normalization exposes membership, not a complete-discovery proof.
+                discovery_complete = False
             source_skill = source_root / "SKILL.md"
-            has_root_skill = (
-                _is_safe_source_path(source_skill, source_root) and source_skill.is_file()
-            )
+            has_root_skill = safe(source_skill) and source_skill.is_file()
             if has_root_skill:
+                skill_source_roots.add(".")
                 for path in tree_files(source_root):
                     relative = path.relative_to(source_root)
                     if (
@@ -202,10 +273,12 @@ class DeployableSourcePlan:
                         )
                     ):
                         continue
-                    add_file(path)
+                    add_file(path, skill_member=True)
 
             selected = skill_subset_filter_tokens(skill_subset)
             selected_skill_names = frozenset(selected) if selected is not None else None
+            if has_root_skill and selected is not None:
+                discovery_complete = False
             if is_marketplace_plugin and not has_root_skill:
                 from apm_cli.deps.plugin_parser import normalized_plugin_skill_sources
 
@@ -223,14 +296,10 @@ class DeployableSourcePlan:
                     source_root / "skills",
                     source_root / ".apm" / "skills",
                 ):
-                    if (
-                        not _is_safe_source_path(skills_root, source_root)
-                        or not skills_root.is_dir()
-                        or (
-                            has_root_skill
-                            and selected is None
-                            and skills_root == source_root / "skills"
-                        )
+                    if not source_directory(skills_root) or (
+                        has_root_skill
+                        and selected is None
+                        and skills_root == source_root / "skills"
                     ):
                         continue
                     candidates.extend(
@@ -241,18 +310,23 @@ class DeployableSourcePlan:
 
             for skill_dir in candidates:
                 if not (
-                    _is_safe_source_path(skill_dir, source_root)
+                    safe(skill_dir)
                     and skill_dir.is_dir()
-                    and _is_safe_source_path(skill_dir / "SKILL.md", source_root)
+                    and safe(skill_dir / "SKILL.md")
                     and (skill_dir / "SKILL.md").is_file()
                     and (selected is None or skill_dir.name in selected)
                 ):
                     continue
+                skill_source_roots.add(portable_relpath(skill_dir, source_root))
                 for path in tree_files(skill_dir):
                     relative = path.relative_to(skill_dir)
                     if skip_bin and relative.parts[0] == "bin":
                         continue
-                    add_file(path)
+                    add_file(path, skill_member=True)
+            if selected is not None and not set(selected).issubset(
+                Path(root).name for root in skill_source_roots
+            ):
+                discovery_complete = False
 
         if plugin_bin_deployable:
             add_tree(source_root / "bin")
@@ -264,6 +338,9 @@ class DeployableSourcePlan:
             selected_skill_names=selected_skill_names,
             hook_source_selection=hook_source_selection,
             plugin_bin_deployable=plugin_bin_deployable,
+            skill_discovery_complete=discovery_complete,
+            skill_source_roots=frozenset(skill_source_roots),
+            skill_source_files=frozenset(skill_source_files),
         )
 
     def includes(self, relative_path: str) -> bool:

@@ -370,7 +370,7 @@ class TestOpenCodeConfigureMCPServer(unittest.TestCase):
         data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
         server = data["mcp"]["test-npm"]
         self.assertEqual(server["type"], "local")
-        self.assertEqual(server["environment"], {"MY_TOKEN": "tok"})
+        self.assertEqual(server["environment"], {"MY_TOKEN": "{env:MY_TOKEN}"})
 
 
 class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):

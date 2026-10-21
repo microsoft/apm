@@ -48,6 +48,28 @@ def _ctx(*, package_deployed_files, existing_lockfile, targets, project_root):
     )
 
 
+def test_target_attribution_setup_does_not_scale_with_file_count() -> None:
+    """Canonical attribution builds each target's prefix set once per reconciliation."""
+    from apm_cli.install import manifest_reconcile
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    target = KNOWN_TARGETS["claude"]
+    files = [f".claude/skills/shared/{name}.md" for name in ("SKILL", "extra", "notes")]
+    hashes = dict.fromkeys(files, "sha256:" + "a" * 64)
+    with patch.object(
+        manifest_reconcile, "install_governance", wraps=manifest_reconcile.install_governance
+    ) as governance:
+        actual_files, actual_hashes, ledger = manifest_reconcile.union_preserving(
+            files, hashes, [], {}, [target], declared_targets=[target], include_ledger=True
+        )
+
+    assert actual_files == files
+    assert actual_hashes == hashes
+    assert {record.locator.target for record in ledger.records.values()} == {"claude"}
+    assert {record.locator.value for record in ledger.records.values()} == set(files)
+    assert sum(call.args == ([target],) for call in governance.call_args_list) == 1
+
+
 class TestAttachDeployedFilesUnion:
     def test_preserves_other_target_entry_when_dep_absent_from_current_install(self, tmp_path):
         """copilot install records .agents/skills; a later copilot-app install

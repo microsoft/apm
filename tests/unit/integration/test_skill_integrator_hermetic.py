@@ -606,8 +606,9 @@ class TestIntegrateNativeSkillCollision:
                 targets=[target],
             )
         logger.warning.assert_called_once_with(
-            "Skill 'my-skill' from 'other/repo' replaced "
-            "'prev-owner/pkg' -- remove one package to avoid this"
+            "Skill 'my-skill' from 'other/repo' replaced overlapping files "
+            "from 'prev-owner/pkg'; separately owned assets were preserved "
+            "-- remove one package to avoid this"
         )
         assert result.skill_updated is True
         assert result.skill_created is False

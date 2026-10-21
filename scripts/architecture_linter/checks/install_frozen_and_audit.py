@@ -11,6 +11,7 @@ Ports four owner guards recorded in
 
 from __future__ import annotations
 
+import ast
 import re
 
 from scripts.architecture_linter.checks.install_deployment_shared import (
@@ -72,8 +73,22 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     rule_id = _GUARD_FROZEN
     owner, owner_fail = _facts_for(provider, _FROZEN_OWNER, rule_id)
     adapter, adapter_fail = _facts_for(provider, _INSTALL_ADAPTER, rule_id)
-    if owner_fail or adapter_fail:
-        return tuple(list(owner_fail) + list(adapter_fail))
+    services, services_fail = _facts_for(
+        provider, "src/apm_cli/install/service_integration.py", rule_id
+    )
+    integration, integration_fail = _facts_for(
+        provider, "src/apm_cli/install/phases/integrate.py", rule_id
+    )
+    outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
+    mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
+    failures = (
+        owner_fail + adapter_fail + services_fail + integration_fail + outcome_fail + mcp_fail
+    )
+    if failures:
+        return tuple(failures)
+    mcp_prepare_body = _awk_body(
+        mcp, re.compile(r"^def prepare_mcp_integration\("), re.compile(r"^def ")
+    )
 
     preflight = _first_line(adapter, "InstallService.enforce_frozen(")
     migration = _first_line(adapter, "migrate_lockfile_if_needed(ctx.apm_dir)")
@@ -82,6 +97,9 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     root_redirect = _first_line(adapter, "_root_redirect = install_root_redirect(")
     dedicated_mcp = _last_line_re(adapter, re.compile(r"^[ \t]*_handle_mcp_install\("))
     local_bundle = _first_line(adapter, "if len(packages) == 1 and not mcp_name")
+    acquisition = _first_line(integration, "prepare_integration_materialization(source)")
+    hydrated_check = _first_line(integration, "InstallService.enforce_hydrated_mcp(")
+    deployment = _first_line(integration, "run_integration_template(source,")
 
     duplicates = _duplicate_definition_lines(
         provider,
@@ -96,6 +114,14 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         _present_re(owner, re.compile(r"^    def enforce_frozen\("))
         and _present_re(owner, re.compile(r"^    def reject_frozen_mutation\("))
         and _present_re(owner, re.compile(r"^    def reject_missing_frozen_root\("))
+        and _present_re(owner, re.compile(r"^    def frozen_writes\("))
+        and _present_re(owner, re.compile(r"^    def enforce_frozen_services\("))
+        and _present(owner, "current_mcp.diff(lockfile.mcp_configs)")
+        and _present_re(owner, re.compile(r"^    def enforce_hydrated_mcp\("))
+        and _present(owner, "current.pending_servers(lockfile)")
+        and _present(owner, "current.diff(lockfile.mcp_configs)")
+        and _present(owner, "allow_pending=False,")
+        and _present(owner, "active_package_keys=active_package_keys,")
         and _first_line(owner, "project_dir = get_lockfile_dir(request.scope)") is not None
     )
 
@@ -115,6 +141,49 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or local_bundle is None
         or not _before(add_guard, dedicated_mcp)
         or not _before(add_guard, local_bundle)
+        or not _before(
+            _first_line(adapter, "ctx.with_resource(InstallService.frozen_writes(frozen))"),
+            root_redirect,
+        )
+        or not _before(
+            _first_line(services, "prepared_mcp = prepare_mcp_integration("),
+            _first_line(services, "InstallService.enforce_frozen_services("),
+        )
+        or not _before(
+            _first_line(services, "prepared_lsp = prepare_lsp_integration("),
+            _first_line(services, "InstallService.enforce_frozen_services("),
+        )
+        or not _before(
+            _first_line(services, "InstallService.enforce_frozen_services("),
+            _first_line(services, "mcp_count, mcp_apm_config = run_mcp_integration("),
+        )
+        or not _before(
+            _first_line(services, "InstallService.enforce_frozen_services("),
+            _first_line(services, "lsp_count = run_lsp_integration("),
+        )
+        or not _present(services, "prepared=prepared_mcp,")
+        or not _present(services, "prepared=prepared_lsp,")
+        or not _present(services, "current_mcp=prepared_mcp.current_view,")
+        or not _present(
+            outcome, 'complete_dep_keys = getattr(ctx, "update_plan_complete_dep_keys", None)'
+        )
+        or not _present(
+            outcome, "frozenset(complete_dep_keys) if complete_dep_keys is not None else None"
+        )
+        or not _present(
+            adapter, "install_result.active_package_keys if install_result is not None else None"
+        )
+        or not _present(services, "active_package_keys=active_package_keys,")
+        or not _present(services, "allow_pending=False,")
+        or not _body_has(mcp_prepare_body, "active_package_keys=active_package_keys,")
+        or not _body_has(mcp_prepare_body, "allow_pending=allow_pending,")
+        or not _present(adapter, "allow_pending_mcp=ctx.install_mode != InstallMode.MCP,")
+        or not _present(integration, "if ctx.frozen and ctx.existing_lockfile is not None:")
+        or not _present(
+            integration, "active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),"
+        )
+        or not _before(acquisition, hydrated_check)
+        or not _before(hydrated_check, deployment)
         or bool(duplicates)
     )
     if not failed:
@@ -142,7 +211,7 @@ _MCP_OWNERSHIP_CONSUMERS = (
 
 
 def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Legacy MCP ownership migration and adoption stay owned by one module."""
+    """MCP ownership comparison, removal, migration and adoption share one owner."""
     rule_id = _GUARD_MCP_OWNERSHIP
     owner, owner_fail = _facts_for(provider, _MCP_OWNERSHIP_OWNER, rule_id)
     consumer, consumer_fail = _facts_for(provider, _MCP_INTEGRATOR, rule_id)
@@ -168,6 +237,90 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         respect_exempt=False,
     )
     findings = list(duplicates)
+    findings.extend(
+        _duplicate_definition_lines(
+            provider,
+            rule_id=rule_id,
+            prefix=_SRC_PREFIX,
+            pattern=re.compile(
+                r"^[ \t]*(?:def (?:compare_native_mcp_connection|"
+                r"require_removable_mcp_connections)\(|class NativeMcpConnectionState\b)"
+            ),
+            owner=_MCP_OWNERSHIP_OWNER,
+            message="Native MCP connection ownership must stay owned by install/mcp/ownership.py",
+            respect_exempt=False,
+        )
+    )
+    for name in ("compare_native_mcp_connection", "require_removable_mcp_connections"):
+        if not _present_re(owner, re.compile(rf"^def {name}\(")):
+            findings.append(
+                _summary(rule_id, _MCP_OWNERSHIP_OWNER, f"Missing canonical MCP owner: {name}")
+            )
+    projection_calls = 0
+    for path in _python_paths(provider, _SRC_PREFIX):
+        facts = provider.file_facts(path)
+        for call in getattr(facts, "calls", ()):
+            if call.qualname.rsplit(".", 1)[-1] != "project_managed_server_config":
+                continue
+            if path == _MCP_OWNERSHIP_OWNER and call.scope == "compare_native_mcp_connection":
+                projection_calls += 1
+            else:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Managed MCP projection may only be called by the canonical comparator",
+                        line=call.line,
+                    )
+                )
+    if projection_calls != 1:
+        findings.append(
+            _summary(
+                rule_id,
+                _MCP_OWNERSHIP_OWNER,
+                "The canonical MCP comparator must route once through managed projection",
+            )
+        )
+    for path, function, required_call in (
+        (_MCP_INTEGRATOR, "_install_self_defined_deps", "compare_native_mcp_connection"),
+        (_MCP_INTEGRATOR, "run_mcp_install", "compare_native_mcp_connection"),
+        (
+            _MCP_OWNERSHIP_OWNER,
+            "require_removable_mcp_connections",
+            "compare_native_mcp_connection",
+        ),
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "remove_stale",
+            "require_removable_mcp_connections",
+        ),
+    ):
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if not failures and required_call not in _name_calls_in(facts, function):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    f"{function} must route native MCP ownership through {required_call}",
+                )
+            )
+    cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
+    if (
+        sum(
+            call.scope == "remove_stale"
+            and call.qualname.rsplit(".", 1)[-1] == "require_removable_mcp_connections"
+            for call in getattr(cleanup, "calls", ())
+        )
+        != 3
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/integration/mcp_integrator.py",
+                "Codex and both Claude cleanup scopes must verify their managed baseline",
+            )
+        )
     if not _present_re(
         owner, re.compile(r"^def migrate_legacy_project_target_servers\(")
     ) or not _present(consumer, "migrate_legacy_project_target_servers("):
@@ -190,7 +343,8 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         consumer, consumer_fail = _facts_for(provider, path, rule_id)
         if consumer_fail:
             findings.extend(consumer_fail)
-        elif not _present(consumer, "resolve_mcp_target_servers("):
+            continue
+        if not _present(consumer, "resolve_mcp_target_servers("):
             findings.append(
                 _summary(
                     rule_id,
@@ -198,6 +352,30 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                     "MCP ownership consumers must route legacy adoption through install/mcp/ownership.py",
                 )
             )
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "remove_stale"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"MCPIntegrator", "_OwnedMCPIntegrator"}
+                and not any(
+                    keyword.arg == "stored_configs"
+                    and isinstance(keyword.value, (ast.Name, ast.Attribute))
+                    for keyword in node.keywords
+                )
+            ):
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "MCP cleanup must pass its recorded configuration baseline to the owner",
+                        line=node.lineno,
+                    )
+                )
     return tuple(findings)
 
 
@@ -306,6 +484,18 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
         )
 
     audit_gate_calls = _name_calls_in(audit, "_audit_ci_gate")
+    audit_gate_body = _awk_body(audit, re.compile(r"^def _audit_ci_gate\("), re.compile(r"^def "))
+    if not _body_has(
+        audit_gate_body,
+        "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/commands/audit.py",
+                "CI audit must compare resolved workspace identities before refusing global replay",
+            )
+        )
     config_body = _awk_body(
         ci_checks, re.compile(r"^def _check_config_consistency\("), re.compile(r"^def ")
     )

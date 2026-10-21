@@ -173,7 +173,8 @@ A Claude Code plugin directory under `--output`. Contains:
 - Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
-- A merged `hooks.json` from the producer's own hooks. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+- A merged `hooks.json` from the producer's own hooks. When present, root `plugin.json` and `.claude-plugin/plugin.json` declare `"hooks": "./hooks.json"` for native Claude discovery. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/pack-a-bundle/#hook-resources-in-claude-plugin-bundles).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 

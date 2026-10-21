@@ -13,6 +13,7 @@ from apm_cli.hook_contract import (
     HookHandler,
     _entries_to_ir,
     _handler_to_ir,
+    _thaw,
     hook_handlers,
 )
 
@@ -350,7 +351,7 @@ def inspect_native_hooks(
 
 def _handler_from_ir(handler: HookHandler, *, timeout_milliseconds: bool) -> dict[str, Any]:
     """Render a portable handler into one native command object."""
-    result = dict(handler.metadata)
+    result = _thaw(handler.metadata)
     if handler.command is not None:
         result["command"] = handler.command
     if handler.timeout_seconds is not None:
@@ -372,9 +373,9 @@ def _render_nested_document(
     result: list = []
     for binding in document.bindings:
         if "raw_entry" in binding.metadata:
-            result.append(binding.metadata["raw_entry"])
+            result.append(_thaw(binding.metadata["raw_entry"]))
             continue
-        outer = dict(binding.metadata)
+        outer = _thaw(binding.metadata)
         if binding.matcher is not None or default_matcher is not None:
             outer["matcher"] = binding.matcher or default_matcher
         outer["hooks"] = [
@@ -411,8 +412,37 @@ def _to_gemini_hook_entries(entries: list) -> list:
     )
 
 
-def _to_claude_hook_entries(entries: list) -> list:
-    """Render portable bindings in Claude's nested matcher schema."""
+def _legacy_hook_entries(entries: list, target: str) -> list:
+    """Render old native shapes for ownership matching, never for deployment."""
+    if target == "claude":
+        return _to_claude_hook_entries(entries, default_handler_type=False)
+    # Codex installs before native nesting wrote the original flat entries.
+    return entries if target == "codex" else []
+
+
+def _with_claude_default_handler_type(entry: object) -> object:
+    """Supply Claude's required ``type`` for an untyped flat command entry.
+
+    Only flat entries that the neutral grammar reads as a command handler are
+    defaulted; explicit types, nested groups, and non-command entries pass
+    through unchanged.
+    """
+    if not isinstance(entry, dict) or "type" in entry or isinstance(entry.get("hooks"), list):
+        return entry
+    if not isinstance(_handler_to_ir(entry, None).command, str):
+        return entry
+    return {"type": "command", **entry}
+
+
+def _to_claude_hook_entries(entries: list, *, default_handler_type: bool = True) -> list:
+    """Render portable bindings in Claude's nested matcher schema.
+
+    ``default_handler_type=False`` reproduces the output of installs before
+    untyped flat command entries were typed, so owned entries they wrote can
+    still be matched on reinstall.
+    """
+    if default_handler_type:
+        entries = [_with_claude_default_handler_type(entry) for entry in entries]
     return _render_nested_document(
         _entries_to_ir(entries),
         timeout_milliseconds=False,
@@ -441,7 +471,7 @@ def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
     flat: list[dict[str, Any]] = []
     for binding in document.bindings:
         if "raw_entry" in binding.metadata:
-            flat.append(binding.metadata["raw_entry"])
+            flat.append(_thaw(binding.metadata["raw_entry"]))
             continue
         for handler in binding.handlers:
             rendered = _handler_from_ir(handler, timeout_milliseconds=False)

@@ -22,6 +22,7 @@ the blast radius of a deeper DI rewrite.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,66 +30,13 @@ from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.models.results import InstallResult
-
-
-def _absent_apm_package_mcp_configs(
-    lockfile: LockFile,
-    modules_dir: Path,
-) -> dict[str, dict]:
-    """Return MCP configs stored for absent non-local apm_package deps (cold cache).
-
-    On a fresh checkout (cold cache) git and registry apm_package deps have not
-    been fetched yet, so ``CurrentMcpConfigView.derive`` cannot read their
-    ``apm.yml`` files. ``--frozen`` will hydrate them from the lock pins and
-    produce exactly the MCP state recorded in the lockfile. To avoid false
-    ``lock_only`` drift entries, we augment the derived current-state with the
-    locked configs for those absent packages so both sides of the comparison
-    carry the same values.
-
-    Correlation uses ``mcp_config_provenance`` (server -> declaring package
-    name) and the dep's self-asserted ``name`` / install-dir name as declarer
-    candidates. Only servers whose EVERY owner is an absent package are
-    included; shared servers remain subject to full comparison.
-    """
-    from apm_cli.models.validation import PackageType
-
-    # Short-circuit: if modules_dir itself is absent every remote dep is absent,
-    # but we still need to walk dependencies to build absent_declarers.  However,
-    # when modules_dir does not exist we can skip the per-dep exists() stat entirely
-    # because all remote deps are guaranteed absent.
-    modules_dir_exists = modules_dir.exists()
-
-    absent_declarers: set[str] = set()
-    for dep in lockfile.dependencies.values():
-        if dep.package_type != PackageType.APM_PACKAGE.value:
-            continue
-        if dep.source == "local":
-            continue
-        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
-        if not modules_dir_exists or not install_path.exists():
-            # The declarer used when this package contributed MCP was:
-            #   package.apm_yml.name  (stored in dep.name by the lock writer)
-            #   or the install-directory name (fallback)
-            if dep.name:
-                absent_declarers.add(dep.name)
-            absent_declarers.add(install_path.name)
-
-    if not absent_declarers or not lockfile.mcp_config_provenance:
-        return {}
-
-    augment: dict[str, dict] = {}
-    for server_name, owner in lockfile.mcp_config_provenance.items():
-        owners: set[str] = {owner} if isinstance(owner, str) else set(owner)
-        # Only include servers that are exclusively from absent packages; any
-        # server co-owned by a present package is still subject to live comparison.
-        if owners and owners.issubset(absent_declarers):
-            config = lockfile.mcp_configs.get(server_name)
-            if config is not None:
-                augment[server_name] = config
-    return augment
 
 
 class InstallNotAvailableError(RuntimeError):
@@ -103,6 +51,66 @@ class InstallService:
     extension point for collaborator injection (downloader, scanner,
     integrator factory) when programmatic callers need to swap them.
     """
+
+    @staticmethod
+    def frozen_writes(frozen: bool) -> AbstractContextManager[list[str] | None]:
+        """Protect the complete caller lifetime with the canonical write chokepoint."""
+        from apm_cli.deps.lockfile import suppress_lockfile_writes
+
+        return suppress_lockfile_writes() if frozen else nullcontext()
+
+    @staticmethod
+    def enforce_frozen_services(
+        lockfile: LockFile,
+        *,
+        mcp_servers: set[str],
+        mcp_targets: list[str],
+        lsp_servers: set[str],
+        lsp_targets: list[str],
+        current_mcp: CurrentMcpConfigView | None,
+        user_scope: bool,
+    ) -> None:
+        """Refuse unrecorded service claims before either service mutates native state."""
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
+
+        mcp_ownership = {
+            target: set(names) for target, names in lockfile.mcp_target_servers.items()
+        }
+        migrate_legacy_project_target_servers(
+            mcp_ownership, active_runtimes=set(mcp_targets), user_scope=user_scope
+        )
+        reasons = []
+        if current_mcp is not None:
+            reasons.extend(
+                f"  - {problem.package_key}: {problem.message}" for problem in current_mcp.problems
+            )
+            difference = current_mcp.diff(lockfile.mcp_configs)
+            for name in sorted(difference.changed | difference.source_only | difference.lock_only):
+                reasons.append(
+                    f"  - MCP server {name!a} cannot reproduce its locked config "
+                    "from the available source declarations"
+                )
+        for service, names, targets, recorded in (
+            ("MCP", mcp_servers, mcp_targets, mcp_ownership),
+            ("LSP", lsp_servers, lsp_targets, lockfile.lsp_target_servers),
+        ):
+            for target in targets:
+                for name in sorted(names - set(recorded.get(target, ()))):
+                    reasons.append(
+                        f"  - {service} server {name!a} target {target!a} "
+                        "ownership is not recorded in apm.lock.yaml"
+                    )
+        if reasons:
+            raise FrozenInstallError(
+                "--frozen cannot replay the selected native services.",
+                reasons=reasons,
+                tip=(
+                    "Tip: native MCP/LSP configs were not changed. Rerun the same "
+                    "install command without --frozen, retaining the intended --target, "
+                    "--only, --root DIR or --global options, then commit apm.lock.yaml."
+                ),
+            )
 
     def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.
@@ -175,6 +183,7 @@ class InstallService:
             request.apm_package,
             update_refs=request.update_refs,
             frozen=request.frozen,
+            trust_transitive_mcp=request.trust_transitive_mcp,
             verbose=request.verbose,
             only_packages=request.only_packages,
             force=request.force,
@@ -280,14 +289,14 @@ class InstallService:
             )
 
     @staticmethod
-    def enforce_frozen(request: InstallRequest) -> None:
+    def enforce_frozen(request: InstallRequest, *, allow_pending_mcp: bool = True) -> None:
         """Raise :class:`FrozenInstallError` if lockfile is absent or stale.
 
         Reads the scoped installation's ``apm.lock.yaml`` (manifest-relative
         for unscoped API callers) and checks package dependencies and the canonical
         current MCP config view. Any miss raises before install mutation.
         """
-        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.lockfile import LockFile, LockfileConflictError
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import lockfile_satisfies_manifest
 
@@ -299,71 +308,225 @@ class InstallService:
         )
 
         if not lockfile_path.exists():
-            raise FrozenInstallError(missing_message)
+            raise FrozenInstallError(missing_message, tip="")
 
         try:
             lockfile = LockFile.read(lockfile_path)
+        except LockfileConflictError as e:
+            raise FrozenInstallError(
+                f"--frozen cannot read the lockfile. {e}\nFor CI, commit the resolved lockfile.",
+                tip="",
+            ) from e
         except Exception as e:
             raise FrozenInstallError(
-                f"--frozen could not read apm.lock.yaml: {e}",
+                f"--frozen could not read apm.lock.yaml: {e}. Fix the file, or restore "
+                "a known-good lockfile from version control, before retrying.",
+                tip="",
             ) from e
 
         if lockfile is None:
-            raise FrozenInstallError(missing_message)
+            raise FrozenInstallError(missing_message, tip="")
 
         manifest_deps = list(request.apm_package.get_apm_dependencies())
         manifest_deps.extend(request.apm_package.get_dev_apm_dependencies())
 
         satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
         from apm_cli.core.scope import get_modules_dir
-        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView, McpConfigDiff
 
-        root_mcp = list(request.apm_package.get_all_mcp_dependencies())
-        check_mcp = bool(root_mcp) or bool(lockfile.mcp_configs) or bool(lockfile.mcp_servers)
-        if check_mcp:
-            modules_dir = get_modules_dir(request.scope)
-            current_mcp = CurrentMcpConfigView.derive(
+        reasons.extend(
+            InstallService._frozen_mcp_reasons(
                 request.apm_package,
                 lockfile,
-                modules_dir,
-                trust_transitive_self_defined=request.trust_transitive_mcp,
+                get_modules_dir(request.scope),
+                trust_transitive_mcp=request.trust_transitive_mcp,
                 logger=request.logger,
+                allow_pending=allow_pending_mcp,
             )
-            # On a cold cache, absent non-local apm_package deps have not been
-            # fetched yet and contribute nothing to current_mcp.configs, even
-            # though their MCP servers are stored in lockfile.mcp_configs. Augment
-            # the derived current state with those stored configs so the comparison
-            # produces no false lock_only entries for cold-cache hydration targets.
-            cold_cache_mcp = _absent_apm_package_mcp_configs(lockfile, modules_dir)
-            if cold_cache_mcp and request.logger is not None:
-                request.logger.verbose_detail(
-                    f"Restoring {len(cold_cache_mcp)} cold-cache MCP server(s) "
-                    "from lockfile; frozen check will hydrate after structural check."
-                )
-            effective_configs: dict = {**cold_cache_mcp, **current_mcp.configs}
-            config_diff = McpConfigDiff.between(effective_configs, lockfile.mcp_configs)
-            if current_mcp.problems:
-                reasons.extend(
-                    f"  - {problem.package_key}: {problem.message}"
-                    for problem in current_mcp.problems
-                )
-            if not config_diff.is_empty:
-                for name in sorted(config_diff.changed):
-                    reasons.append(f"  - MCP server {name!r} config differs from apm.lock.yaml")
-                for name in sorted(config_diff.source_only):
-                    reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
-                for name in sorted(config_diff.lock_only):
-                    reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
-            expected_names = set(effective_configs)
-            locked_names = set(lockfile.mcp_servers)
-            if expected_names != locked_names and config_diff.is_empty:
-                reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")
+        )
 
         satisfied = satisfied and not reasons
         if not satisfied:
             raise FrozenInstallError(
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
+            )
+
+        InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
+
+    @staticmethod
+    def _verify_frozen_local_content(
+        request: InstallRequest,
+        lockfile: LockFile,
+        manifest_deps: list[DependencyReference],
+    ) -> None:
+        """Verify selected local declarations before any lifecycle or deployment."""
+        from collections import deque
+        from dataclasses import replace
+
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+        from apm_cli.deps.path_anchoring import (
+            LocalResolutionError,
+            build_local_parent_index,
+            resolve_local_dep_dir,
+        )
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.phases.local_content import compute_local_package_hash
+        from apm_cli.install.plan import lockfile_satisfies_manifest
+        from apm_cli.models.apm_package import APMPackage
+
+        queue = deque(dep for dep in manifest_deps if dep.is_local)
+        if not queue:
+            return
+        package_root = Path(request.apm_package.package_path).resolve()
+        parent_index = build_local_parent_index(lockfile)
+        resolved_cache: dict[str, Path] = {}
+        seen: set[str] = set()
+        reasons: list[str] = []
+        while queue:
+            declared = queue.popleft()
+            key = declared.get_unique_key()
+            if key in seen:
+                continue
+            seen.add(key)
+            satisfied, missing = lockfile_satisfies_manifest(lockfile, [declared])
+            if not satisfied:
+                reasons.extend(missing)
+                continue
+            dependency = lockfile.get_dependency(key)
+            try:
+                source = resolve_local_dep_dir(
+                    dependency,
+                    lockfile,
+                    package_root,
+                    parent_index=parent_index,
+                    resolved_cache=resolved_cache,
+                )
+                selected_source = source
+                if source.is_file():
+                    # Admission must see the selected leaf, not a resolved symlink.
+                    source_base = resolve_local_dep_dir(
+                        replace(dependency, local_path="."),
+                        lockfile,
+                        package_root,
+                        parent_index=parent_index,
+                    )
+                    selected_source = source_base / Path(dependency.local_path).expanduser()
+                observed_hash = compute_local_package_hash(selected_source)
+                expected_hash = dependency.content_hash
+                # v0.1 readers also accept the identical SHA-256 digest without its envelope.
+                if (
+                    observed_hash != expected_hash
+                    and observed_hash.removeprefix("sha256:") != expected_hash
+                ):
+                    reasons.append(
+                        f"  - local dependency {declared.local_path!r} content differs "
+                        "from its locked snapshot"
+                    )
+                    continue
+                # Only selected, verified local manifests can introduce further
+                # local declarations. Do not inspect orphan lock entries or
+                # expand local paths declared by untrusted remote packages.
+                if (source / "apm.yml").is_file():
+                    package = APMPackage.from_apm_yml(source / "apm.yml", source_path=source)
+                    for child in package.get_apm_dependencies():
+                        if not child.is_local:
+                            continue
+                        anchored = APMDependencyResolver._compute_dep_source_path(
+                            child, package, source
+                        )
+                        child = replace(
+                            child,
+                            declaring_parent=key,
+                            anchored_local_path=APMDependencyResolver._portable_anchor_identity(
+                                anchored, request.apm_package.source_path or package_root
+                            ),
+                        )
+                        queue.append(child)
+            except (LocalResolutionError, OSError, ValueError) as exc:
+                reasons.append(
+                    f"  - local dependency {declared.local_path!r} cannot be verified: {exc}"
+                )
+        if reasons:
+            raise FrozenInstallError(
+                "--frozen: local dependency content does not match apm.lock.yaml.",
+                reasons=reasons,
+                tip=(
+                    "Restore the locked local content, or run 'apm install' without "
+                    "--frozen to explicitly accept and record the change."
+                ),
+            )
+
+    @staticmethod
+    def _frozen_mcp_reasons(
+        package: APMPackage,
+        lockfile: LockFile,
+        modules_dir: Path,
+        *,
+        trust_transitive_mcp: bool,
+        logger: InstallLogger | None,
+        allow_pending: bool,
+        active_package_keys: frozenset[str] | None = None,
+    ) -> list[str]:
+        """Compare actual declarations, deferring only unavailable source evidence."""
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+        if allow_pending and not (
+            package.get_all_mcp_dependencies() or lockfile.mcp_configs or lockfile.mcp_servers
+        ):
+            return []
+        current = CurrentMcpConfigView.derive(
+            package,
+            lockfile,
+            modules_dir,
+            trust_transitive_self_defined=trust_transitive_mcp,
+            logger=logger,
+            allow_pending=allow_pending,
+            active_package_keys=active_package_keys,
+        )
+        pending = current.pending_servers(lockfile) if allow_pending else frozenset()
+        diff = current.diff(lockfile.mcp_configs)
+        reasons = [f"  - {problem.package_key}: {problem.message}" for problem in current.problems]
+        for name in sorted(diff.changed):
+            reasons.append(f"  - MCP server {name!r} config differs from apm.lock.yaml")
+        for name in sorted(diff.source_only):
+            reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
+        for name in sorted(diff.lock_only - pending):
+            reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
+        if set(current.configs) | pending != set(lockfile.mcp_servers) and not reasons:
+            reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")
+        return reasons
+
+    @staticmethod
+    def enforce_hydrated_mcp(
+        package: APMPackage,
+        lockfile: LockFile,
+        modules_dir: Path,
+        *,
+        trust_transitive_mcp: bool,
+        logger: InstallLogger | None,
+        active_package_keys: frozenset[str] | None = None,
+    ) -> None:
+        """Reject restored MCP drift before a package can activate native configuration."""
+        from apm_cli.install.errors import FrozenInstallError
+
+        reasons = InstallService._frozen_mcp_reasons(
+            package,
+            lockfile,
+            modules_dir,
+            trust_transitive_mcp=trust_transitive_mcp,
+            logger=logger,
+            allow_pending=False,
+            active_package_keys=active_package_keys,
+        )
+        if reasons:
+            raise FrozenInstallError(
+                "--frozen: restored MCP declarations differ from apm.lock.yaml.",
+                reasons=reasons,
+                tip=(
+                    "Tip: review the restored sources and lockfile before running "
+                    "'apm install' without --frozen to record the intended declarations. "
+                    "MCP configuration has not been activated."
+                ),
             )
 
     @staticmethod

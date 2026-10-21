@@ -1,13 +1,5 @@
-"""Dependency resolution phase.
-
-Loads inputs and populates resolution state consumed by later phases.
-
-This is the first phase of the install pipeline.  It covers:
-
-1. Lockfile loading (``apm.lock.yaml``)
-2. ``apm_modules/`` directory creation
-3. Auth resolver defaulting + downloader construction
-4. Dependency resolution, ``--only`` filtering, and intended-key computation
+"""Load the lockfile, initialize downloads, and resolve
+the selected dependency tree before integration.
 """
 
 from __future__ import annotations
@@ -155,8 +147,12 @@ def _activate_validated_candidate(
     callback_downloaded: dict[str, str | None],
     callback_lock: Any,
     tui: Any,
+    callback_content_hashes: dict[str, tuple[Path, str]] | None = None,
 ) -> Path:
     """Publish one accepted candidate, then expose its download metadata."""
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    content_hash = compute_package_hash(candidate_path)
     live_path = staging_session.publish_replacement(candidate_path)
     with callback_lock:
         pending = pending_downloads.pop(candidate_path, None)
@@ -164,6 +160,8 @@ def _activate_validated_candidate(
             raise RuntimeError(f"Validated candidate has no download record: {candidate_path}")
         dep_key, resolved_sha = pending
         callback_downloaded[dep_key] = resolved_sha
+        if callback_content_hashes is not None:
+            callback_content_hashes[dep_key] = (live_path.resolve(), content_hash)
     if tui is not None:
         tui.task_completed(dep_key)
     return live_path
@@ -366,6 +364,7 @@ def _resolve_dependencies(
         _guard_transitive_insecure_dependencies,
         _warn_insecure_dependencies,
     )
+    from apm_cli.install.package_selection import selected_dependency_keys
     from apm_cli.install.phases.local_content import _copy_local_package
 
     # 3b. Dedicated registry resolver (design §3.1, §8)
@@ -418,6 +417,11 @@ def _resolve_dependencies(
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
     update_refs = _requires_remote_ref_resolution(ctx)
+    update_keys = (
+        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps)
+        if update_refs and ctx.only_packages
+        else None
+    )
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")
     logger = ctx.logger
@@ -467,6 +471,8 @@ def _resolve_dependencies(
                     dep_ref,
                     _locked_for_recheck,
                     update_refs=update_refs,
+                    package_path=install_path,
+                    update_keys=update_keys,
                 ):
                     return install_path
             replacement_path = staging_session.prepare_replacement(install_path)
@@ -745,9 +751,11 @@ def _resolve_dependencies(
             callback_downloaded=callback_downloaded,
             callback_lock=callback_lock,
             tui=getattr(ctx, "tui", None),
+            callback_content_hashes=ctx.callback_content_hashes,
         ),
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
+        update_keys=update_keys,
         existing_lockfile=existing_lockfile,
         reference_resolver=downloader,
         frozen=ctx.frozen,
@@ -758,18 +766,7 @@ def _resolve_dependencies(
         ),
     )
 
-    # Resolver reads ``<anchor>/apm.yml``. Preserve the original
-    # ``ctx.apm_dir`` anchor for every non-``--root`` install (zero
-    # behavior change: USER -> ``~/.apm``, PROJECT -> deploy root == cwd).
-    # When ``ctx.source_root`` differs from ``ctx.project_root`` (set by
-    # ``apm install --root`` via the pipeline), the manifest read diverges
-    # to ``ctx.source_root`` ($PWD) so sources keep resolving from the
-    # user's working directory while writes land under the deploy root.
-    # Using the ctx field (rather than the global ContextVar) makes this
-    # branch reachable for any caller that sets source_root directly.
-    # ``apm_modules_dir`` is already pinned on the resolver above, so
-    # this arg selects only where ``apm.yml`` is read -- never where
-    # ``apm_modules/`` is written.
+    # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
     _fail_on_resolution_errors(ctx, dependency_graph)
 
@@ -898,9 +895,6 @@ def _resolve_dependencies(
         dep_base_dirs = {}
     ctx.dep_base_dirs = dep_base_dirs
 
-    # ------------------------------------------------------------------
-    # Write ancillary state to ctx for later phases
-    # ------------------------------------------------------------------
     ctx.callback_downloaded = callback_downloaded
     ctx.callback_failures = callback_failures
     ctx.transitive_failures = transitive_failures
@@ -925,44 +919,11 @@ def _resolve_dependencies(
 
 def _apply_only_filter(ctx: InstallContext) -> None:
     """Filter ``ctx.deps_to_install`` to the ``--only`` package(s) and their subtrees."""
-    # ------------------------------------------------------------------
-    # 7. --only filtering
-    # ------------------------------------------------------------------
-    from apm_cli.models.apm_package import DependencyReference
+    from apm_cli.install.package_selection import selected_subtree_dependencies
 
-    # Build identity set from user-supplied package specs.
-    # Accepts any input form: git URLs, FQDN, shorthand.
-    only_identities: builtins.set = builtins.set()
-    for p in ctx.only_packages:
-        try:
-            ref = DependencyReference.parse(p)
-            only_identities.add(ref.get_identity())
-        except Exception:
-            only_identities.add(p)
-
-    # Expand the set to include transitive descendants of the
-    # requested packages so their MCP servers, primitives, etc.
-    # are correctly installed and written to the lockfile.
-    tree = ctx.dependency_graph.dependency_tree
-
-    def _collect_descendants(node: object, visited: builtins.set | None = None) -> None:
-        """Walk the tree and add every child identity (cycle-safe)."""
-        if visited is None:
-            visited = builtins.set()
-        for child in node.children:  # type: ignore[attr-defined]
-            identity = child.dependency_ref.get_identity()
-            if identity not in visited:
-                visited.add(identity)
-                only_identities.add(identity)
-                _collect_descendants(child, visited)
-
-    for node in tree.nodes.values():
-        if node.dependency_ref.get_identity() in only_identities:
-            _collect_descendants(node)
-
-    ctx.deps_to_install = [
-        dep for dep in ctx.deps_to_install if dep.get_identity() in only_identities
-    ]
+    ctx.deps_to_install = selected_subtree_dependencies(
+        ctx.only_packages, ctx.dependency_graph.dependency_tree, ctx.deps_to_install
+    )
 
 
 def _record_update_plan_complete_dep_keys(ctx: InstallContext) -> None:

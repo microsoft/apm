@@ -43,6 +43,12 @@ For public `github.com` HTTPS repositories, APM makes one anonymous attempt befo
 
 Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Ordinary credentials are cached per `(host, port, org)` for the process. A private `github.com` helper fallback adds the repository path to that scope, so later phases reuse it without applying that credential to another repository. APM never writes the credential into persistent cache keys or stored remote URLs.
 
+Individual-file API throttling can select the existing sparse-Git fallback.
+A separate Git authentication challenge then unlocks the same credential chain,
+including an existing `gh` login, without requiring a new PAT. The API throttle
+alone never rotates credentials or retries the API with authentication. If Git
+also fails, diagnostics retain both failures.
+
 Managed GitHub, GitLab, and Azure DevOps credentials use process-scoped
 Authorization headers. They are never embedded in Git URL userinfo.
 

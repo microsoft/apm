@@ -550,24 +550,22 @@ def scan_project_result(
     """Return findings, discovery inventory and explicit incomplete coverage."""
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..core.scope import get_workspace_deploy_root
-    from ..install.drift import _read_apm_yml_target
-    from ..integration.targets import resolve_targets
+    from ..integration.targets import resolve_audit_targets
 
     deploy_root = get_workspace_deploy_root(project_root)
     user_scope = user_scope or deploy_root != project_root.resolve()
+    lock = lockfile if lockfile is not None else LockFile.read(get_lockfile_path(project_root))
     scoped = (
         tuple(targets)
         if targets
         else tuple(
-            resolve_targets(
-                deploy_root,
+            resolve_audit_targets(
+                project_root,
                 user_scope=user_scope,
-                explicit_target=_read_apm_yml_target(project_root),
-                create_config=False,
+                lockfile=lock,
             )
         )
     )
-    lock = lockfile if lockfile is not None else LockFile.read(get_lockfile_path(project_root))
     claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock) if lock else {}
     cache: dict[PrimitiveSurface, FileScanResult] = {}
     result = _scan_claimed_files(

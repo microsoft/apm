@@ -38,7 +38,7 @@ APM uses a tiered approach to integration testing:
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: the required expression must remain inside its hard 6-minute job timeout; hosted duration is authoritative.
+- **Duration**: the complete job has a hard 10-minute timeout, including setup and cleanup. Healthy hosted runs took 8:10 and 8:29 overall; the budget retains 91 seconds of headroom above the slower run. Hosted duration is authoritative.
 - **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
 - **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
@@ -47,10 +47,12 @@ APM uses a tiered approach to integration testing:
 - **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
 - **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
 - **Frozen under-recording**: the required smoke scenario and the generated model's mandatory project replay add a local skill without refreshing the lockfile, require frozen refusal with unchanged lockfile bytes, repair with ordinary install, and verify two byte-stable frozen replays. The scenario uses `ApmLifecycleRunner` in an isolated environment. It does not promise filesystem rollback: the new skill is deployed before refusal.
+- **Frozen local dependencies**: `test_frozen_local_path_lifecycle.py` uses the selected installed CLI to check direct and transitive source changes before deployment, including portable identities for packages inside the consumer project. It covers a fresh consumer with a separate empty cache, unchanged lock and managed bytes on refusal, preserved unrelated cache content, and recovery by restoring the source or explicitly accepting it with a normal install. This is separate from the root project's under-recording scenario above.
 - **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
 - **Run it locally** (the exact command CI runs):
   ```bash
   APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+    -n 4 --dist loadgroup --durations=20 \
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
 
@@ -125,7 +127,7 @@ what the test family you want actually requires.
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
 | `requires_ado_bearer` | Azure CLI signed in + opt-in flag | `az login` and `export APM_TEST_ADO_BEARER=1` |
 | `requires_apm_binary` | A built `apm` binary on disk or `PATH` | `scripts/build-binary.sh` (or set `APM_BINARY_PATH`) |
-| `requires_runtime_codex` | The `codex` runtime installed under `~/.apm/runtimes/` | `apm runtime setup codex` |
+| `requires_runtime_codex` | The `codex` runtime on `PATH` or under `~/.apm/runtimes/`; optional `version="0.163.0"` requires that exact version on `PATH` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
 | `live` | Tests that hit real third-party repositories; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
@@ -478,7 +480,7 @@ skill. The local fixture covers both an independent skill and a separately
 installed skill from the plugin; the network-backed case uses the same assertions.
 Cleanup wording is not the lifecycle contract.
 
-Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
+Linux Lifecycle Smoke runs the required marker subset with four bounded workers (`-n 4 --dist loadgroup`) on the public Ubuntu runner. Grouped tests stay on one worker. The ten-minute whole-job limit includes setup and cleanup; `--durations=20` reports slow cases without changing selection or assertions.
 Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.

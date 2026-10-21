@@ -134,16 +134,19 @@ never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
 
-Claude Code is the one target whose entries are merged key by key rather
-than replaced, so keys APM does not manage (a hand-authored OAuth block, for
-example) survive a reinstall. The keys describing a transport are not among
-them: an entry is rewritten to carry only the transport its declaration names,
-so redeclaring a server from `http` to `stdio` drops the previous `url` and
-`headers` instead of leaving both transports on one entry. This cleanup also
-repairs older mixed entries, but only when APM writes that server. An unchanged
-self-defined declaration with matching lock state can skip the write; repeating
-that install does not automatically repair a mixed entry. Rewriting an unchanged,
-valid entry preserves its field order.
+Claude Code merges approved updates key by key and retains runtime-owned
+`oauthAccount` metadata. A self-defined connection is updated only when its
+native configuration still matches its recorded APM baseline. Switching an
+unchanged managed server from `http` to `stdio` removes the previous `url` and
+`headers`; a user-modified or ambiguous historical entry instead requires
+[manual reconciliation](#resolve-a-connection-name-conflict). Matching entries
+are left byte-identical.
+
+For an already managed Claude stdio connection, a valid native-only `cwd`
+does not block updates when both the old and new declarations omit it.
+Stdio updates retain that directory; switching to HTTP removes the incompatible
+stdio fields. This does not adopt a user connection or relax removal checks.
+Native edits to a declared `cwd`, or other managed fields, still require reconciliation.
 
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
@@ -169,6 +172,12 @@ unresolved required entries fail closed.
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
 
+Export referenced variables in the environment that launches OpenCode. APM writes
+runtime references rather than their resolved values; authored static values remain
+literal. See [OpenCode variable handling](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for supported fields, registry overlays, and syntax, and
+[Repairing existing credentials](#repairing-existing-credentials) for older configs.
+
 For OpenCode, set the top-level `enabled` field on an MCP dependency to pass a
 value unchanged into that server's `opencode.json` entry. If omitted, APM keeps
 the existing `true` default. APM does not validate or coerce explicit values;
@@ -188,6 +197,37 @@ uses a symlink below the home directory, APM warns and fails without rewriting
 it, even on a no-op reinstall. Fix the reported config and rerun the original
 command with `--global` and the same `--target` selection. A home-directory
 alias itself remains supported.
+
+## Resolve a connection name conflict
+
+For self-defined Claude and Codex connections, APM distinguishes an unchanged
+managed connection from a same-name user connection. A normal package update
+or root override updates the unchanged managed connection. A differing user
+connection is preserved, the affected target is named, and install exits
+nonzero. Other targets may already have been configured; their successful
+writes remain recorded. This is not a whole-command rollback.
+
+For example, Claude may already have a personal `notes` connection while a
+company package requests a different `notes` connection for Claude and Codex.
+APM preserves the personal connection and reports the Claude conflict, even
+if it successfully configures Codex. Choose which connection to keep:
+
+1. To keep both, rename your personal connection in the affected runtime's
+   native config, leaving unrelated settings intact.
+2. To replace the personal connection, remove only that native entry yourself.
+3. Rerun the original install command with the same scope and targets, such as
+   `apm install --global --target claude,codex`.
+
+An identical foreign connection needs no write and does not become APM-owned.
+`--force` grants no takeover permission; `--frozen` does not turn a conflicting
+connection into a successful install or repair lock intent. Prune, target
+narrowing, and uninstall likewise preserve entries that differ from a
+trustworthy managed baseline. If an older ownership record cannot be verified,
+review and rename or remove the affected native entry, then retry; do not
+delete the lockfile or the entire native config as a workaround.
+
+These operations change connection settings, not notes or other data stored
+by the MCP service.
 
 ## How `targets:` gates which configs get written
 
@@ -307,6 +347,31 @@ apm install --target codex --mcp local-dev --url http://localhost:3000/mcp
 
 This writes the endpoint to the Codex MCP configuration.
 
+Codex's [native configuration schema](https://developers.openai.com/codex/config-schema.json)
+does not accept an MCP `id` setting. After upgrading APM, repair older generated
+entries with:
+
+```sh
+apm install --only mcp --target codex
+```
+
+Add `--global` for user-scope configuration. APM repairs only entries that
+match a trustworthy saved configuration, including the historical empty
+`id = ""` spelling of self-defined connections. A recorded owner name alone
+does not verify an entry with a nonempty registry ID, old header spelling,
+or other native edits. Such entries stay untouched and an unresolved
+self-defined connection conflict makes the install incomplete.
+
+If Codex still reports an unsupported `id` on an entry you have verified,
+back up `.codex/config.toml` (or the user-scope file) and remove only that
+entry's `id = ...` setting. Keep generated comments such as
+`# apm-registry-id: "registry-uuid"`: APM uses them to prevent duplicate
+registry installs. Regeneration may expand inline TOML tables while retaining
+their values and comments; it does not change Codex's project trust settings.
+If the connection still conflicts, follow
+[native conflict recovery](#resolve-a-connection-name-conflict) rather than
+retrying with `--force`.
+
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive
 combinations (`--url` plus stdio command, `--header` without `--url`,
@@ -378,7 +443,7 @@ For other authenticated remote servers, set headers explicitly with
 
 ## Updating and replacing a server
 
-Re-run `apm install --mcp NAME ...` against an existing entry:
+Re-run `apm install --mcp NAME ...` against an existing declaration in `apm.yml`:
 
 | Situation | Behaviour |
 |---|---|
@@ -388,6 +453,9 @@ Re-run `apm install --mcp NAME ...` against an existing entry:
 | Existing `NAME`, different config, CI | Refuses with exit 2. Re-run with `--force`. |
 
 Use `--dry-run` to preview the manifest change without writing.
+`--force` permits replacing that declaration, not taking over a conflicting
+native connection. Follow
+[native conflict recovery](#resolve-a-connection-name-conflict) for the latter.
 
 ### Repairing existing credentials
 

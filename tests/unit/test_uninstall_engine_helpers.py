@@ -526,6 +526,7 @@ class TestCleanupStaleMcp:
             user_scope=False,
             scope=None,
             fail_on_write_error=True,
+            stored_configs=lockfile.mcp_configs,
         )
         mock_mcp.update_lockfile.assert_called_once()
 
@@ -586,6 +587,7 @@ class TestCleanupStaleMcp:
             user_scope=False,
             scope="user",
             fail_on_write_error=True,
+            stored_configs=lockfile.mcp_configs,
         )
 
     def test_target_ownership_limits_cleanup_to_owning_runtime(self, tmp_path):
@@ -613,6 +615,7 @@ class TestCleanupStaleMcp:
             user_scope=False,
             scope=None,
             fail_on_write_error=True,
+            stored_configs={},
         )
 
     def test_partial_target_ownership_retains_unmapped_aggregate_server(self, tmp_path):
@@ -640,6 +643,7 @@ class TestCleanupStaleMcp:
             user_scope=False,
             scope=None,
             fail_on_write_error=True,
+            stored_configs={},
         )
         assert lockfile.mcp_servers == ["legacy-unmapped"]
         assert lockfile.mcp_target_servers == {}
@@ -687,11 +691,21 @@ class TestCleanupStaleMcp:
         if not user_scope:
             (tmp_path / ".claude").mkdir()
         config_path = tmp_path / (".claude.json" if user_scope else ".mcp.json")
-        original = b'{"mcpServers":{"stale":{"command":"old"}},"theme":"dark"}\n'
+        original = (
+            b'{"mcpServers":{"stale":{"type":"stdio","command":"old","args":[]}},"theme":"dark"}\n'
+        )
         config_path.write_bytes(original)
         lockfile = LockFile(
             mcp_servers=["stale"],
             mcp_target_servers={"claude": ["stale"]},
+            mcp_configs={
+                "stale": {
+                    "name": "stale",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "old",
+                }
+            },
         )
         before_servers = list(lockfile.mcp_servers)
         before_targets = dict(lockfile.mcp_target_servers)
@@ -704,7 +718,7 @@ class TestCleanupStaleMcp:
             patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",
                 side_effect=OSError("simulated crash"),
-            ),
+            ) as replace_file,
             patch("pathlib.Path.home", return_value=tmp_path),
             pytest.raises(MCPUninstallCleanupError, match=r"MCP cleanup failed"),
         ):
@@ -721,6 +735,7 @@ class TestCleanupStaleMcp:
             )
 
         assert config_path.read_bytes() == original
+        replace_file.assert_called_once()
         assert lockfile.mcp_servers == before_servers
         assert lockfile.mcp_target_servers == before_targets
         assert list(tmp_path.glob("apm-atomic-*")) == []

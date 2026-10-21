@@ -1455,6 +1455,7 @@ def _remove_stale_mcp_from_recorded_targets(
                 user_scope=user_scope,
                 scope=scope,
                 fail_on_write_error=True,
+                stored_configs=lockfile.mcp_configs,
             )
         except Exception as exc:
             failures.append((runtime, exc))

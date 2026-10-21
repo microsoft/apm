@@ -593,7 +593,7 @@ def _audit_ci_gate(
         from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
 
         if get_lockfile_path(cfg.project_root).exists():
-            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root:
+            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve():
                 prepared_replay_error = (
                     "installed package materialization is missing at "
                     f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "

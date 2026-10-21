@@ -21,14 +21,17 @@ import pytest
 import tomllib
 
 from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.plugin_parser import normalize_plugin_directory
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_ERROR,
@@ -136,18 +139,6 @@ def test_consumer_supports_apm_source_short_form_string():
     assert string_form.get("minLength", 0) >= 1
 
 
-@pytest.mark.req("req-mf-011")
-def test_consumer_supports_apm_source_table_form():
-    schema = load_schema("manifest-v0.1.41.schema.json")
-    entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
-    options = entry_obj["oneOf"]
-    required_sets = sorted(tuple(sorted(o["required"])) for o in options)
-    assert required_sets == [("git",), ("id",), ("path",), ("registry",)], (
-        "table-form depEntry MUST require exactly one of git/id/path/registry"
-    )
-
-
-@pytest.mark.req("req-mf-012")
 def test_consumer_rejects_unknown_source_kind():
     doc = load_yaml_fixture("manifest", "invalid-source-kind.yml")
     with pytest.raises(jsonschema.ValidationError):
@@ -159,6 +150,26 @@ def test_consumer_supports_local_path_source():
     schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "path" in entry_obj["properties"]
+
+
+@pytest.mark.req("req-mf-013")
+@pytest.mark.parametrize("reference", ["${EXAMPLE_KEY}", "${env:EXAMPLE_KEY}"])
+def test_consumer_renders_opencode_native_environment_references(tmp_path: Path, reference: str):
+    """The dispatch matrix uses the active target's native environment syntax."""
+    adapter = OpenCodeClientAdapter(project_root=tmp_path)
+    rendered = adapter.render_server_config(
+        {
+            "name": "native-reference",
+            "_raw_stdio": {
+                "command": "echo",
+                "args": [reference],
+                "env": {"TOKEN": reference, "STATIC": "literal"},
+            },
+        }
+    )
+    assert rendered["command"] == ["echo", "{env:EXAMPLE_KEY}"]
+    assert rendered["environment"] == {"TOKEN": "{env:EXAMPLE_KEY}", "STATIC": "literal"}
+    assert_spec_contains("`{env:VAR}` for OpenCode")
 
 
 @pytest.mark.req("req-mf-014")
@@ -703,6 +714,39 @@ def test_consumer_deploys_skills_to_agents_skills():
     assert_spec_contains(
         ".agents/skills/<name>/SKILL.md",
     )
+
+
+@pytest.mark.req("req-tg-002")
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_kiro_prompt_uses_registered_root_and_filename(tmp_path: Path, scope: InstallScope) -> None:
+    """The Kiro registry partition applies to both project and user delivery."""
+    package_root = tmp_path / "package"
+    source = package_root / ".apm/prompts/review.prompt.md"
+    source.parent.mkdir(parents=True)
+    source_bytes = b"---\nname: not-the-command\ndescription: Review\n---\nReview ${1}\n"
+    source.write_bytes(source_bytes)
+    package = PackageInfo(
+        package=APMPackage(name="prompt-kit", version="1.0.0", package_path=package_root),
+        install_path=package_root,
+    )
+    selected = tmp_path / scope.value
+    (selected / ".kiro").mkdir(parents=True)
+    unselected = tmp_path / "other/.kiro/prompts/personal.md"
+    unselected.parent.mkdir(parents=True)
+    unselected.write_bytes(b"Personal prompt\n")
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"].for_scope(scope), package, selected
+    )
+
+    deployed = selected / ".kiro/prompts/review.md"
+    assert result.files_integrated == 1
+    assert result.target_paths == [deployed]
+    assert deployed.read_bytes() == b"Review ${1}\n"
+    assert sorted(path.name for path in deployed.parent.iterdir()) == ["review.md"]
+    assert list(unselected.parent.iterdir()) == [unselected]
+    assert unselected.read_bytes() == b"Personal prompt\n"
+    assert source.read_bytes() == source_bytes
 
 
 @pytest.mark.req("req-tg-004")

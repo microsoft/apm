@@ -129,7 +129,7 @@ class TestLocalPathFailureReason:
         ref.local_path = str(f)
         result = _local_path_failure_reason(ref)
         assert result is not None
-        assert "not a directory" in result
+        assert "Unsupported single-file dependency" in result
 
     def test_dir_without_markers(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason

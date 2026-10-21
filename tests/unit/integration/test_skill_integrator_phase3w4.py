@@ -22,6 +22,8 @@ import filecmp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -388,8 +390,11 @@ class TestPromoteSubSkillsManagedFiles:
             mock_warn.assert_called_once()
         assert n == 0
 
-    def test_overwrite_warning_with_logger(self, tmp_path: Path) -> None:
-        """When warn=True and not self_overwrite, logger.warning is called."""
+    @pytest.mark.parametrize("previous_owner", ["other-pkg", None])
+    def test_overwrite_warning_with_logger(
+        self, tmp_path: Path, previous_owner: str | None
+    ) -> None:
+        """Replacement names known owners and tells users how to avoid the overlap."""
         skills_dir = tmp_path / ".apm" / "skills"
         sub = skills_dir / "my-skill"
         sub.mkdir(parents=True)
@@ -408,12 +413,17 @@ class TestPromoteSubSkillsManagedFiles:
             target_root,
             "parent-pkg",
             warn=True,
-            owned_by={"my-skill": "other-pkg"},
+            owned_by={"my-skill": previous_owner},
             logger=logger,
         )
-        # Overwrite warning emitted, skill is deployed (no force guard since not managed_files)
-        logger.warning.assert_called()
-        assert n >= 0
+        previous = "'other-pkg'" if previous_owner else "another package"
+        logger.warning.assert_called_once_with(
+            "Skill 'my-skill' from 'parent-pkg' replaced overlapping files "
+            f"from {previous}; separately owned assets were preserved "
+            "-- remove one package to avoid this"
+        )
+        assert n == 1
+        assert (existing / "SKILL.md").read_text(encoding="utf-8") == "# skill"
 
 
 # ---------------------------------------------------------------------------
@@ -646,8 +656,9 @@ class TestIntegrateNativeSkillCollision:
                 targets=[target],
             )
         logger.warning.assert_called_once_with(
-            "Skill 'my-skill' from 'other/repo' replaced "
-            "'prev-owner/pkg' -- remove one package to avoid this"
+            "Skill 'my-skill' from 'other/repo' replaced overlapping files "
+            "from 'prev-owner/pkg'; separately owned assets were preserved "
+            "-- remove one package to avoid this"
         )
         assert result.skill_updated is True
         assert result.skill_created is False

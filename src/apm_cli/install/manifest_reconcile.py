@@ -25,10 +25,12 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .presentation import surface_target_cleanup
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -119,24 +121,6 @@ def _scoped_known_targets_for_reconciliation(
         if scoped is not None:
             scoped_known_targets[name] = scoped
     return scoped_known_targets
-
-
-def _surface_target_cleanup(
-    logger: InstallLogger | None, dep_key: str, cleanup: CleanupResult
-) -> None:
-    """Report a target-contraction cleanup pass at default verbosity.
-
-    Deleting a dropped target's deployed file is a destructive operation in
-    the user's tracked workspace, so -- like every other caller of the
-    cleanup chokepoint (see ``install/phases/cleanup.py``) -- it must be
-    visible without ``--verbose``. Surfaces each user-edit skip as a yellow
-    inline and the deletion count as an info line.
-    """
-    if logger is None:
-        return
-    for skipped in cleanup.skipped_user_edit:
-        logger.cleanup_skipped_user_edit(skipped, dep_key)
-    logger.stale_cleanup(dep_key, len(cleanup.deleted))
 
 
 def install_governance(
@@ -330,21 +314,17 @@ def union_preserving(
     )
     manifest_declared = {name for name in declared_by_name or () if _is_manifest_target(name)}
     cleanup_retained_hashes = cleanup_retained_hashes or {}
+    attribution_profiles = _profiles_by_name(
+        [*targets, *(declared_targets or []), *scoped_known_targets.values()]
+    )
+    attribution_governance = [
+        (profile.name, *install_governance([profile])) for profile in attribution_profiles.values()
+    ]
 
     def _target_for(path: str) -> str:
-        ordered = [
-            *targets,
-            *(declared_targets or []),
-            *scoped_known_targets.values(),
-        ]
-        seen_names: set[str] = set()
-        for profile in ordered:
-            if profile.name in seen_names:
-                continue
-            seen_names.add(profile.name)
-            prefixes, schemes = install_governance([profile])
+        for name, prefixes, schemes in attribution_governance:
             if is_governed_by_install(path, prefixes, schemes):
-                return profile.name
+                return name
         return UNATTRIBUTED_TARGET
 
     def _locator(path: str) -> DeploymentLocator:
@@ -560,6 +540,68 @@ def reconcile_dropped_merge_hook_targets(
     return HookIntegrator().reconcile_dropped_targets(
         project_root, dropped_names, user_scope=user_scope
     )
+
+
+def surviving_deployed_paths(
+    lockfile: LockFile,
+    current_claims: Mapping[str, list[str]],
+    targets: list[TargetProfile],
+    declared_targets: list[TargetProfile] | None,
+    *,
+    desired_owners: frozenset[str],
+    failed_owners: frozenset[str] = frozenset(),
+    user_scope: bool = False,
+) -> frozenset[str]:
+    """Project survivor claims through the same reconciliation used to persist them."""
+    from collections import defaultdict
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import DeploymentLedger, DeploymentReconciler
+
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    records_by_path = defaultdict(dict)
+    for key, record in ledger.records.items():
+        records_by_path[record.locator.value][key] = record
+    claims = DeploymentReconciler.reconcile_package_claims(
+        package_keys=lockfile.dependencies,
+        current_claims=current_claims,
+        prior_files={key: dep.deployed_files for key, dep in lockfile.dependencies.items()},
+        prior_hashes={key: dep.deployed_file_hashes for key, dep in lockfile.dependencies.items()},
+    )
+    survivors = set(DeploymentReconciler.current_claimed_paths(current_claims))
+    for owner, claim in claims.items():
+        if owner not in desired_owners:
+            continue
+        files, _ = union_preserving(
+            list(claim.current_files if owner in current_claims else claim.prior_files),
+            {},
+            list(claim.prior_files),
+            claim.prior_hashes,
+            targets,
+            declared_targets=declared_targets,
+            prior_ledger=DeploymentLedger(
+                records={
+                    key: record
+                    for path in claim.prior_files
+                    for key, record in records_by_path.get(path, {}).items()
+                }
+            ),
+            current_run_trusted=owner not in failed_owners,
+            owner=owner,
+            user_scope=user_scope,
+        )
+        survivors.update(files)
+    survivors.update(lockfile.local_deployed_files)
+    survivors.update(DeploymentLedgerCodec.local_bundle_values(ledger))
+    # A directory claim cannot authorize removal of a surviving member.
+    parents = {
+        parent.as_posix()
+        for path in survivors
+        if "://" not in path
+        for parent in Path(path).parents
+        if parent.as_posix() != "."
+    }
+    return frozenset(survivors | parents)
 
 
 def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrapper; each knob is orthogonal
@@ -806,7 +848,7 @@ def reconcile_target_deployed_files(
             declared_targets=declared_targets,
             diagnostics=diagnostics,
             prior_ledger=dependency_ledger,
-            on_cleanup=partial(_surface_target_cleanup, logger, dep_key),
+            on_cleanup=partial(surface_target_cleanup, logger, dep_key),
             desired_owners=desired_owners,
             generic_governed_values=(
                 frozenset(prior_files) if selected_owner_removal else frozenset()
@@ -851,7 +893,7 @@ def reconcile_target_deployed_files(
             declared_targets=declared_targets,
             diagnostics=diagnostics,
             prior_ledger=local_ledger,
-            on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
+            on_cleanup=partial(surface_target_cleanup, logger, "<local .apm/>"),
             user_scope=user_scope,
         )
         if local_files != prior_local or local_hashes != prior_local_hashes:

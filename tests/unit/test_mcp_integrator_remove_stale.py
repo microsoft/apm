@@ -553,7 +553,7 @@ def test_remove_stale_claude_honors_claude_config_dir_and_isolates_profiles(tmp_
                 "projects": {"/repo": {"allowedTools": ["Write"]}},
                 "mcpServers": {
                     "server-a": {"command": "run-a"},
-                    "server-shared": {"command": "shared"},
+                    "server-shared": {"type": "stdio", "command": "shared", "args": []},
                 },
             }
         ),
@@ -580,6 +580,14 @@ def test_remove_stale_claude_honors_claude_config_dir_and_isolates_profiles(tmp_
         runtime="claude",
         scope=InstallScope.USER,
         fail_on_write_error=True,
+        stored_configs={
+            "server-shared": {
+                "name": "server-shared",
+                "registry": False,
+                "transport": "stdio",
+                "command": "shared",
+            }
+        },
     )
 
     data_a = json.loads(cfg_a.read_text(encoding="utf-8"))

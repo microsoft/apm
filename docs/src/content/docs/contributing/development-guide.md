@@ -59,6 +59,18 @@ this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
 
+The scheduled Triage Panel (also used by a blank manual dispatch) fetches
+labels and complete comments before selecting at most five issues. It
+excludes accepted/declined issues and any issue with an `apm-scope:v1`
+marker, uses pinned `grok-4.7`, and must account for every selected issue
+within the 30-minute job timeout. Read failures stop selection rather than
+turning incomplete evidence into an empty queue. Explicit `triage/requested`
+and numbered dispatches retain their existing behavior. Deterministic
+selection tests do not establish model reliability: acceptance of this
+repair still requires a week of real scheduled outcomes after deployment.
+Run logs include scanned and selected counts: the five-item cap limits
+selection, not the evidence reads needed to find eligible issues.
+
 PR review is the same shape: `panel-review` requests a fresh
 advisory pass (`autopilot-pr-review-worker`). `status/accepted`
 (on the PR or a linked issue) is the human action flag -- no

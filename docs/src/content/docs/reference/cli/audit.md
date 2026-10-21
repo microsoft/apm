@@ -16,15 +16,54 @@ apm audit [PACKAGE] [OPTIONS]
 `apm audit` is the explicit security and integrity tool. It runs in two modes:
 
 - **Content scan mode** (default). Discovers recognized deployed primitives and checks applicable prompt content for hidden Unicode, including untracked primitives and recorded files outside currently selected target directories. It replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate regular prompt documents with `--strip` or scan an arbitrary file with `--file`.
-- **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. When `apm_modules/` is absent but `apm.lock.yaml` is present, CI mode self-hydrates a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without mutating the checkout. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
+- **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. In a project checkout with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, CI mode prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without mutating the checkout. Local dependencies must remain available at their declared paths. Windows long and native 8.3 spellings of the same project use the same project scope. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Global audit also checks resolved external deployment roots such as
 `HERMES_HOME` and `CLAUDE_CONFIG_DIR`. Default audit compares tracked files in
 those roots for drift. `apm audit --ci` also scans target-governed external
 subtrees for content integrity. Neither mode modifies those roots.
+Auditing the user metadata workspace (`~/.apm`) still requires its installed
+`apm_modules/`; if missing, restore it with `apm install --global`. Project
+scratch replay does not enable cold replay for global installations.
 
 Both modes also enforce the lockfile's canonical deployment ownership; see
 [Deployment-owner integrity](#deployment-owner-integrity).
+
+Replay and coverage use the current `apm.yml` target declaration when present,
+otherwise the concrete target identities recorded by install. An unrelated
+`.github/workflows/` file does not add a Copilot deployment to a recorded
+Grok Cloud installation, and `.grok/` alone does not relabel it as Grok Build.
+Older lockfiles without a recorded `deployments` section retain directory
+discovery; identities inferred from legacy file paths do not narrow it.
+The saved `apm config target` is an install/update default, not a request to
+retarget an existing installation during audit.
+
+Experimental targets remain opt-in. If a selected target's experiment is
+disabled, audit exits with code `3` and an enable instruction on stderr, such
+as `apm experimental enable grok-cloud`, instead of silently skipping verification.
+Configuration errors do not produce a JSON audit report.
+Changing the manifest can still expose missing requested output; the existing
+[drift exit rules](#drift-detection) apply. Audit does not install, repair, or
+rewrite that state. Retained paths recorded under a previous target remain
+eligible for [CI presence and recorded-hash checks](../../baseline-checks/),
+subject to those checks' existing exclusions and hash baselines, even when
+that target is no longer selected for replay.
+
+For a native Agent Plugin installed with the `copilot` target, replay uses the
+same package interpretation as install. A plugin does not need an accompanying
+`apm.yml`; reinstalling and auditing a clean plugin remains supported. Select
+targets in the project's `apm.yml` (`targets: [copilot]`), not an audit
+`--target` option. Invalid native manifests fail replay rather than falling back
+to legacy conversion. Audit does not modify plugin sources or live harness state.
+
+Native plugins remain whole under `apm_modules/`, rather than becoming loose
+managed skills. Replay compares admitted local plugins with a scratch copy of
+their original source, using the same validated copying as install. Modified
+or missing cached skills fail audit; run `apm install` to restore them. Remote
+native plugins use their recorded package content hash, including in cold-cache
+CI; a missing hash requires reinstalling to establish that baseline. These
+checks do not turn cache files into deployed-file claims. Native registration
+files are not covered by this content comparison.
 
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
@@ -193,6 +232,9 @@ discovered/untracked when appropriate, without failing the prompt check.
 `tracked` means a file claim exists, not that every entry in a shared file
 is APM-owned or hash-verified. Hash and ownership checks remain independent.
 
+User-scope replay preserves the `~/.apm/apm_modules/` layout in relative
+asset links, so intact global prompts do not report drift from a scratch-path difference.
+
 The target registry supplies the following project patterns. Patterns are
 recursive inside their named directory; skill entry points are `SKILL.md`,
 not every file in a skill bundle.
@@ -202,7 +244,7 @@ not every file in a skill bundle.
 | Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt |
 | Claude | `.claude/rules/*.md`, `agents/*.md`, `commands/*.md`, `skills/**/SKILL.md` | `.claude/hooks/*.json`, `.claude/settings.json`; nested `prompt`/`agent` handlers' `prompt` field |
 | Cursor | `.cursor/rules/*.mdc`, `agents/*.md`, `commands/*.md`; shared skills | `.cursor/hooks/*.json`, `.cursor/hooks.json`; flat command handlers and prompt handlers' `prompt` field; nested handlers are unsupported |
-| Kiro | `.kiro/steering/*.md`, `agents/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
+| Kiro | `.kiro/steering/*.md`, `agents/*.md`, `prompts/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
 | Gemini | `.gemini/commands/*.toml`: `prompt`; shared skills | `.gemini/hooks/*.json`, `.gemini/settings.json`; nested command handlers |
 | Codex | `.codex/agents/*.toml`: `developer_instructions`; shared skills | `.codex/hooks.json`; nested command handlers |
 | Antigravity | `.agents/rules/*.md`, skills | `.agents/hooks.json`; named containers, nested tool events and flat other events |

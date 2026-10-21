@@ -263,6 +263,9 @@ def test_install_does_not_expand_unattributed_dependency_cleanup(
     _write_skill(tmp_path / "dep", "dep-extra")
     _install(tmp_path, monkeypatch)
     _mark_shared_root_rows_unattributed(tmp_path, owner="./dep")
+    shared_skill = tmp_path / ".agents/skills/dep-extra/SKILL.md"
+    expected_bytes = shared_skill.read_bytes()
+    expected_hash = compute_file_hash(shared_skill)
 
     shutil.rmtree(tmp_path / "dep" / ".apm" / "skills" / "dep-extra")
     _install(tmp_path, monkeypatch)
@@ -271,9 +274,10 @@ def test_install_does_not_expand_unattributed_dependency_cleanup(
         row for row in _lock(tmp_path)["dependencies"] if row["repo_url"] == "_local/dep"
     )
     assert ".agents/skills/dep-extra/SKILL.md" in dependency["deployed_files"]
-    # Dependency-native synchronization already removes this known package output;
-    # this project-local fix must not add a separate historical-row sweep.
-    assert not (tmp_path / ".agents" / "skills" / "dep-extra").exists()
+    # An unattributed surviving claim is not deletion authority, even when the
+    # current source no longer contains the file. The attributed twin can retire.
+    assert shared_skill.read_bytes() == expected_bytes
+    assert dependency["deployed_file_hashes"][".agents/skills/dep-extra/SKILL.md"] == expected_hash
     assert not (tmp_path / ".claude" / "skills" / "dep-extra").exists()
     assert _deployment_targets(_lock(tmp_path))[".agents/skills/dep-extra/SKILL.md"] == "legacy"
 

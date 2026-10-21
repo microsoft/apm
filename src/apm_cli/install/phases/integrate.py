@@ -223,14 +223,14 @@ def _resolve_download_strategy(
 
     # Issue #551: skip re-download when the BFS callback already fetched this
     # dep during resolution AND the remote SHA still matches what was captured.
-    # This eliminates redundant network I/O in --update mode when apm_modules/
+    # This eliminates redundant network I/O in update/refresh when apm_modules/
     # is empty but the lockfile SHA is stale: the callback downloads the latest
     # content (recording its SHA), and the sequential loop would otherwise
     # re-download identical bytes because lockfile_match=False (stale SHA).
     _callback_sha = ctx.callback_downloaded.get(dep_key)
     _already_resolved_sha_match = (
         already_resolved
-        and update_refs
+        and (update_refs or ctx.refresh)
         and bool(resolved_ref)
         and bool(_callback_sha)
         and getattr(resolved_ref, "resolved_commit", None) not in (None, "cached")
@@ -249,16 +249,17 @@ def _resolve_download_strategy(
         ref_changed=ref_changed,
     )
 
-    # Verify content integrity when lockfile has a hash.
-    # NOTE: when _already_resolved_sha_match is True, the callback has already
-    # written the correct content for the current remote SHA -- but the lockfile
-    # content_hash still refers to the *previous* content. If the remote content
-    # changed (which is the typical stale-lockfile scenario), verify_package_hash
-    # will mismatch, safe_rmtree fires, and skip_download resets to False, causing
-    # a re-download. This is the correct safety behaviour but means the
-    # optimisation is a no-op for update scenarios where content_hash is present
-    # and stale. A follow-up can target this by propagating the callback-downloaded
-    # content_hash into the verified set before this guard runs.
+    # A same-SHA callback receipt binds validated bytes to their published path.
+    # Recheck those bytes rather than comparing them with the previous revision.
+    receipt = ctx.callback_content_hashes.get(dep_key)
+    if _already_resolved_sha_match and receipt and receipt[0] == install_path.resolve():
+        from apm_cli.utils.content_hash import verify_package_hash
+
+        if verify_package_hash(install_path, receipt[1]):
+            content_hash_already_verified = True
+            ctx.content_hash_verified_deps.add(dep_key)
+
+    # Missing, stale or tampered callback evidence retains the lock hash check.
     if (
         skip_download
         and _dep_locked_chk
@@ -694,6 +695,18 @@ def run(ctx: InstallContext) -> None:
     ]
     preflight_agent_plugin_materializations(materialized)
     _fail_explicit_target_without_deploy(ctx)
+
+    if ctx.frozen and ctx.existing_lockfile is not None:
+        from apm_cli.install.service import InstallService
+
+        InstallService.enforce_hydrated_mcp(
+            ctx.apm_package,
+            ctx.existing_lockfile,
+            apm_modules_dir,
+            trust_transitive_mcp=ctx.trust_transitive_mcp,
+            logger=ctx.logger,
+            active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+        )
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:

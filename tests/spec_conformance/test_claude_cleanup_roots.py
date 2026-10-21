@@ -22,7 +22,7 @@ def test_claude_cleanup_writes_only_to_selected_registered_root(
     payload = {
         "theme": "dark",
         "mcpServers": {
-            "managed-stale": {"command": "old"},
+            "managed-stale": {"type": "stdio", "command": "old", "args": []},
             "user-owned": {"command": "keep"},
         },
     }
@@ -40,6 +40,14 @@ def test_claude_cleanup_writes_only_to_selected_registered_root(
         project_root=tmp_path,
         scope=InstallScope.USER,
         fail_on_write_error=True,
+        stored_configs={
+            "managed-stale": {
+                "name": "managed-stale",
+                "registry": False,
+                "transport": "stdio",
+                "command": "old",
+            }
+        },
     )
 
     assert {path: path.read_bytes() for path in outside_before} == outside_before

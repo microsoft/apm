@@ -1,5 +1,12 @@
 # CLI Command Reference
 
+`apm --version` shows an optional commit SHA only when embedded at build time
+or verified against the source checkout containing the loaded APM package.
+Installed wheels do not borrow an enclosing repository's SHA. Source/editable
+checkouts, including forks and worktrees, show their revision when Git can
+verify it; otherwise the SHA is omitted.
+Standalone `apm --version` does not require Git to be installed.
+
 ## Project setup
 
 | Command | Purpose | Key flags |
@@ -30,7 +37,7 @@ scope. It reads only the selected store; it does not substitute another store.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)); one effective target decision drives package, MCP, and LSP phases; dependency aliases materialize at the canonical install path, not duplicate noncanonical paths; plain/frozen installs replay matching dependency and provider lock entries, and a mutable ref without a matching lock entry resolves upstream instead of stale bare-cache refs, including with unrelated or sibling lock entries; a successful non-dry-run install also reconciles deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries for any target dropped from `targets:`; project-local `.apm/` cleanup requires recorded concrete target ownership (including after whole-tree deletion), preserves ambiguous legacy output, user edits, and surviving package/target claims, including declared targets skipped by `--target` | `--update` (deprecated; prefer `apm update`) refresh refs without accepting stale bare-cache answers, `--refresh` re-fetch all deps from upstream and re-resolve all ref pins, `--force` overwrite collisions and permit deployment after critical built-in scan findings (does NOT refresh refs by itself; `apm update --force` still requires upstream truth), `--frozen` structural install check that rejects before the pipeline when `apm.lock.yaml` is missing or no longer matches the manifest-declared refs, full commit pins, host providers or HTTP/HTTPS transport in `apm.yml`, including MCP config state (structural lockfile check, not network freshness; mutually exclusive with `--update`, package additions, and `--mcp`; use normal install to create or repair lock state, then `apm audit` for SHA integrity), `--dry-run` (no package/deployment writes; positional packages and ref changes are previewed without changing an existing `apm.yml`; project bootstrap keeps its new manifest and explicit targets, while absent global `-g` bootstrap uses temporary preview state and does not create `~/.apm`; stale-file cleanup is not previewed), `--verbose`, `--only [apm\|mcp]` (APM packages or MCP/LSP service dependencies), `--target` (comma-separated, e.g. `--target claude,cursor`; resolution chain `--target` > apm.yml `targets:` > `apm config set target ...` > auto-detect; this decision is reused by package, MCP, and LSP phases; unresolved required service work fails non-zero before manifest or package writes, and native MCP/LSP write failures also fail non-zero; `intellij` is MCP-only and writes JetBrains Copilot's user-scope config; explicit lists are exact, so `intellij,claude` writes those two MCP configs and `all,intellij` adds JetBrains to `all`; on auto-bootstrap when no `apm.yml` exists, recognized manifest target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` reuses them, except absent global dry-runs only preview targets in temporary state; `--target all` deprecated, see `apm compile --all`; use `kiro` for Kiro IDE; use `grok-build` for stable Grok Build rules, agents, commands, skills, and `AGENTS.md`; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`; use `grok-cloud` after `apm experimental enable grok-cloud` to deploy skills only to `.grok/skills/`; use explicit target `hermes` to deploy skills and home-scoped MCP servers to `$HERMES_HOME/config.yaml` (or `~/.hermes/config.yaml` when unset or blank); run `apm compile` separately for `AGENTS.md`), use explicit target `grok-bot` to deploy skills only to `agent-data/workflows/` (project) or `~/agent-data/workflows/` (`--global`), `--dev`, `-g` global (MCP deploys only to user-scope runtimes: Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when selected explicitly), `--trust-transitive-mcp`, `--parallel-downloads N`, `--trust-bin` / `--no-trust-bin` (per-invocation consent for marketplace-plugin bin/ deployment: `--trust-bin` suppresses the trust-posture warning, `--no-trust-bin` skips bin/ even if policy allows; default deploys with a warning), `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skills from a dependency that exposes selectable skills (repeatable; plugin manifests accept a leaf name or source-relative path under skills/; a CLI name or path that matches no declared skill fails before manifest or lockfile commit with available names; a non-empty persisted `skills:` selection matching no available skill fails nonzero with the dependency, requested names, and available names (or none), preserving previous skill bytes and ownership/hash records across repeated failures; correct `skills:` in apm.yml to restore normal reconciliation, including valid narrowing and dependency removal; persisted in apm.yml only on a successful CLI match; additive across separate installs -- a later `--skill X` adds to the existing pin (union) rather than replacing it, so previously deployed skills are never silently removed; `'*'` resets to the full bundle; drop a single skill by editing the `skills:` list in apm.yml then re-running install), `--legacy-skill-paths` restore per-client skill dirs, `--mcp NAME` add MCP entry using that same effective target decision (the shared decision applies, so `apm install --mcp NAME --target intellij` writes only JetBrains Copilot's MCP config; compilation target policy applies to every explicitly selected target; `apm install -g --mcp NAME` writes user-scope and bypasses the project-scope gate by design), `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry, `--root DIR` redirect writes (`apm_modules/`, lockfile, `.gitignore`, integrated harness files) under DIR while `apm.yml`/`.apm/`/local deps resolve from `$PWD` (mirrors `pip install --target`; created if missing; not valid with `-g`/`--global`, which exits 2). Explicit plugin component paths must resolve inside the plugin root; missing declarations fail before deployment and lockfile commit. |
+| `apm install [PKGS...]` | Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)); one effective target decision drives package, MCP, and LSP phases; dependency aliases materialize at the canonical install path, not duplicate noncanonical paths; plain/frozen installs replay matching dependency and provider lock entries, and a mutable ref without a matching lock entry resolves upstream instead of stale bare-cache refs, including with unrelated or sibling lock entries; a successful non-dry-run install also reconciles deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries for any target dropped from `targets:`; project-local `.apm/` cleanup requires recorded concrete target ownership (including after whole-tree deletion), preserves ambiguous legacy output, user edits, and surviving package/target claims, including declared targets skipped by `--target` | `--update` (deprecated; prefer `apm update`) refresh refs without accepting stale bare-cache answers, `--refresh` re-fetch all deps from upstream and re-resolve all ref pins, `--force` overwrite collisions and permit deployment after critical built-in scan findings (does NOT refresh refs by itself; `apm update --force` still requires upstream truth), `--frozen` requires the lockfile and checks manifest refs, pins, providers, transport, local-source content and available MCP declarations before the pipeline; unavailable package MCP evidence is verified after hydration, before deployment (see [MCP-only lock and frozen behavior](#mcp-only-lock-and-frozen-behavior); not network freshness; mutually exclusive with `--update`, package additions, and `--mcp`; normal install creates or repairs lock state, while `apm audit` checks deployed integrity), `--dry-run` (no package/deployment writes; positional packages and ref changes are previewed without changing an existing `apm.yml`; project bootstrap keeps its new manifest and explicit targets, while absent global `-g` bootstrap uses temporary preview state and does not create `~/.apm`; stale-file cleanup is not previewed), `--verbose`, `--only [apm\|mcp]` (APM packages or MCP/LSP service dependencies), `--target` (comma-separated, e.g. `--target claude,cursor`; resolution chain `--target` > apm.yml `targets:` > `apm config set target ...` > auto-detect; this decision is reused by package, MCP, and LSP phases; unresolved required service work fails non-zero before manifest or package writes, and native MCP/LSP write failures also fail non-zero; `intellij` is MCP-only and writes JetBrains Copilot's user-scope config; explicit lists are exact, so `intellij,claude` writes those two MCP configs and `all,intellij` adds JetBrains to `all`; on auto-bootstrap when no `apm.yml` exists, recognized manifest target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` reuses them, except absent global dry-runs only preview targets in temporary state; `--target all` deprecated, see `apm compile --all`; use `kiro` for Kiro IDE; use `grok-build` for stable Grok Build rules, agents, commands, skills, and `AGENTS.md`; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`; use `grok-cloud` after `apm experimental enable grok-cloud` to deploy skills only to `.grok/skills/`; use explicit target `hermes` to deploy skills and home-scoped MCP servers to `$HERMES_HOME/config.yaml` (or `~/.hermes/config.yaml` when unset or blank); run `apm compile` separately for `AGENTS.md`), use explicit target `grok-bot` to deploy skills only to `agent-data/workflows/` (project) or `~/agent-data/workflows/` (`--global`), `--dev`, `-g` global (MCP deploys only to user-scope runtimes: Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when selected explicitly), `--trust-transitive-mcp`, `--parallel-downloads N`, `--trust-bin` / `--no-trust-bin` (per-invocation consent for marketplace-plugin bin/ deployment: `--trust-bin` suppresses the trust-posture warning, `--no-trust-bin` skips bin/ even if policy allows; default deploys with a warning), `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skills from a dependency that exposes selectable skills (repeatable; plugin manifests accept a leaf name or source-relative path under skills/; a CLI name or path that matches no declared skill fails before manifest or lockfile commit with available names; a non-empty persisted `skills:` selection matching no available skill fails nonzero with the dependency, requested names, and available names (or none), preserving previous skill bytes and ownership/hash records across repeated failures; correct `skills:` in apm.yml to restore normal reconciliation, including valid narrowing and dependency removal; persisted in apm.yml only on a successful CLI match; additive across separate installs -- a later `--skill X` adds to the existing pin (union) rather than replacing it, so previously deployed skills are never silently removed; `'*'` resets to the full bundle; drop a single skill by editing the `skills:` list in apm.yml then re-running install), `--legacy-skill-paths` restore per-client skill dirs, `--mcp NAME` add MCP entry using that same effective target decision (the shared decision applies, so `apm install --mcp NAME --target intellij` writes only JetBrains Copilot's MCP config; compilation target policy applies to every explicitly selected target; `apm install -g --mcp NAME` writes user-scope and bypasses the project-scope gate by design), `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry, `--root DIR` redirect writes (`apm_modules/`, lockfile, `.gitignore`, integrated harness files) under DIR while `apm.yml`/`.apm/`/local deps resolve from `$PWD` (mirrors `pip install --target`; created if missing; not valid with `-g`/`--global`, which exits 2). Explicit plugin component paths must resolve inside the plugin root; missing declarations fail before deployment and lockfile commit. |
 | `apm targets` | Show resolved deployment targets for the current project (Click group; reads filesystem signals; works with or without `apm.yml`) | `--all` also include the stable explicit-only targets (`agent-skills`, `antigravity`, `grok-bot`, `hermes`; only meaningful with `--json`), `--json` machine-readable output. No provenance line is printed (the table is the provenance). |
 | `apm uninstall PKGS...` | Remove packages; identifier selection is atomic. Accepts `owner/repo`, `name@marketplace`, exact declared local paths, or portable `_local/<name>` keys for direct local declarations with matching lock metadata. A missing or ambiguous identifier exits nonzero before scripts or APM writes. MCP cleanup uses recorded target ownership, attempts every owning runtime, and exits nonzero if any target fails. | `--dry-run`, `-g` global |
 | `apm uninstall PKGS...` | Remove packages and reconcile their tracked files, MCP servers, and LSP servers; identifier selection is atomic. Accepts `owner/repo`, `name@marketplace`, exact declared local paths, or portable `_local/<name>` keys for direct local declarations with matching lock metadata. A missing or ambiguous identifier exits nonzero before scripts or APM writes. If safe LSP cleanup fails after package removal, the command exits nonzero and preserves the conflicting config; repair it, then run `apm install` (or `apm install --global` for user scope). | `--dry-run`, `-g` global |
@@ -57,6 +64,13 @@ outside-constraint upgrades, see the
 `apm update` remains constraint-respecting and writable; it does not take an
 outside-constraint `Latest`.
 
+Same-named skills keep other packages' unique assets and personal files;
+overlapping managed files retain last-writer behavior in project and global
+scope. Use ordinary `apm install` after source or target changes; `--frozen`
+keeps recorded ownership. Overwrite warnings name the previous owner when known.
+Fix unreadable sources before retrying, not by resetting the lockfile. See
+[shared-skill behavior](https://microsoft.github.io/apm/reference/cli/install/#behavior).
+
 For `apm install -g --mcp`, mixed target selections warn and skip
 workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
@@ -75,14 +89,44 @@ For Cursor credential repair, edit `.cursor/mcp.json` at project scope or
 `~/.cursor/mcp.json` with `--global`; replace only the affected values with
 native `${env:NAME}` references and preserve other fields and servers.
 
-Positional-package dry-runs retain any bootstrapped manifest for inspection.
+For self-defined Claude/Codex MCP connections, a same-name native entry must
+match the requested config or an unchanged APM-managed baseline. Otherwise
+install preserves it, identifies the conflicting target, and exits nonzero;
+successful writes to other targets remain managed. An identical foreign
+connection is left unowned. `--force` does not authorize takeover, and
+`--frozen` does not certify a conflicting connection. Rename or remove only
+the conflicting native entry you intend to replace, then rerun the original
+command with the same scope and targets. Cleanup also preserves modified or
+unverifiable historical entries and asks for manual reconciliation; do not
+delete the lockfile or unrelated native settings to bypass it. This concerns
+connection settings, not data held by the MCP service.
+
+An already managed Claude stdio connection may retain a valid native-only `cwd`
+when both old and requested declarations omit it. This comparison exception
+allows managed updates, not foreign adoption or removal. Native edits to a
+declared `cwd` remain conflicts; switching to HTTP removes the incompatible stdio fields.
+
+`apm install --dry-run` includes required indirect APM dependencies in its
+counts using local source metadata and unchanged installed remote metadata.
+The dependency graph pass is read-only and offline: unavailable metadata or
+required fetches/lookups make the preview incomplete and suppress orphan-removal
+predictions. Stale-file integration cleanup is not previewed; positional
+validation may still access the network.
+`--refresh`/`--update` preserve their remote-resolution intent, and `--frozen`
+checks locally discoverable transitive pins. An incomplete summary reports only
+the locally known count, not a complete install plan.
+
+Project-scope positional dry-runs retain any bootstrapped manifest for inspection.
+Global dry-run bootstrap leaves an absent `~/.apm` uncreated.
 `apm install -g --mcp ... --dry-run` does not create a user manifest, lockfile,
 or runtime configuration.
 
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download,
-validation, or activation leaves the previous package and lockfile active;
-fix the reported cause and rerun the command.
+validation, or staged activation leaves the previous package and lockfile active;
+fix the reported cause and rerun the command. Late Codex native reconciliation
+runs after APM persistence and is not part of that rollback; see its qualified
+contract below.
 
 `apm install` preserves the invoking repository's branch and HEAD when run from
 a Git hook. It rejects cross-host network rewrites for every Git host and scopes
@@ -102,7 +146,23 @@ sidecar when their runtime requires it; see
 `apm publish --package OWNER/REPO` normalizes the owner and repository to
 lowercase before constructing the package-registry path.
 
+### Local single-file dependencies
+
+Local single files use `apm install ./ai/agents/xyz.agent.md` (also
+`.instructions.md` and `.prompt.md`), or a matching string/`path:` dependency in
+`apm.yml`. They follow the ordinary package lifecycle and are copied snapshots,
+not live links. Only the selected file is included; companion assets require a
+directory package. Normal reinstall accepts deliberate edits. Missing,
+unreadable, unsupported, or invalid sources fail without authorizing removal of
+prior owned output. Global installs require absolute or `~/...` references;
+file symlinks and arbitrary Markdown are unsupported.
+
 ### Install validation chain (virtual subdirectory packages)
+
+Marketplace installation supports versioned directories produced by `apm pack`,
+such as `plugins/my-plugin-1.2.3`, including positional `--dry-run` previews.
+Directory content and path validation still apply. Git directory probes reject
+files, symbolic links, and submodules.
 
 `apm install` validates subdirectory packages (`owner/repo/path#ref`) before writing to `apm.yml` using the same credential chain as the actual install. Git-source semver ranges (for example, `owner/repo/path#^1.2.0`) defer raw-ref validation to semver tag resolution; registry-routed dependencies retain registry version validation. See [Authentication > Install validation chain](../authentication/) for the full probe sequence and troubleshooting.
 
@@ -112,14 +172,57 @@ When a default registry is configured, plain shorthand deps (`owner/repo#<ref>`)
 
 A normal project install creates or updates `apm.lock.yaml` when the manifest declares only MCP dependencies. The lock records resolved MCP configs and targets; repeating the same install leaves lock and target config bytes unchanged. A legacy `apm.lock` is migrated before this state is written.
 
-`apm install --frozen` validates package and MCP lock state before lockfile, target config, deployment, or cache mutation. A missing or stale MCP-only lock exits nonzero without writing; run normal `apm install` to repair it. `--only=mcp` follows the same guard. Add-style `--mcp NAME` is incompatible with `--frozen` because it mutates `apm.yml`.
+`apm install --frozen` validates package pins and available MCP declarations before the pipeline. A missing or stale MCP-only lock exits nonzero without writing; run normal `apm install` to repair it. `--only=mcp` follows the same guard. Add-style `--mcp NAME` is incompatible with `--frozen` because it mutates `apm.yml`.
 
-`apm install --frozen` never writes `apm.lock.yaml`. Deployment still runs, and one check comes after it: if the install deploys files the committed lockfile does not record, frozen mode exits `1` and names those paths. Those files are already on disk -- only the lockfile write is withheld. Rerun the same command without `--frozen` (keeping `--root DIR` or `--global`) and commit the updated lockfile; see the [install reference](https://microsoft.github.io/apm/reference/cli/install/#behavior) for recovery details.
+A fresh checkout can restore supported locked remote whole plugins directly with `--frozen`; no ordinary install is required first. Unavailable package MCP evidence is deferred only when its recorded origin is unambiguous, then the actual hydrated declarations are checked before deployment or native MCP writes. Real changed/removed declarations, present/shared-owner mismatches, invalid package shapes, missing local sources and insufficient pins still fail. Deferred MCP failures preserve prior native MCP configuration and user-owned settings, but downloads/cache fills may have occurred; this is not general rollback of lifecycle scripts. Root precedence, transitive trust and native-plugin MCP ownership are unchanged. Frozen replay uses pinned sources, not a refreshed discovery catalog; uncached sources still require access and credentials.
+
+`--only=mcp` cannot defer unavailable package evidence because it skips package hydration. Restore sources with the full `apm install --frozen` command before a services-only replay.
+
+`apm install --frozen` never writes `apm.lock.yaml`. Before lifecycle or deployment it verifies each selected direct or transitive local dependency against its recorded `content_hash`. The hash covers the validated local-copy image, including dereferenced in-package symlinks, before integration transforms it. Changed, added, removed, or retargeted content fails without changing installed files or the lock. Unused local lock entries are ignored by this content check; unavailable local sources can still fail MCP preflight. Missing entries or legacy locks without a hash require a normal `apm install` to establish a baseline. Deployment still runs, and one separate check comes after it: if the install deploys files the committed lockfile does not record, frozen mode exits `1` and names those paths. Those files are already on disk -- only the lockfile write is withheld. Rerun the same command without `--frozen` (keeping `--root DIR` or `--global`) and commit the updated lockfile; see the [install reference](https://microsoft.github.io/apm/reference/cli/install/#behavior) for recovery details.
+
+The local-source check is APM-specific frozen-install behavior, not a new
+lockfile schema requirement. Legacy bare SHA-256 digests are accepted without
+rewriting the lock. Normal non-frozen installs can establish missing baselines.
+
+Manifest-derived dependency versions come from the acquired package snapshot,
+not an older descriptor in `apm_modules/`. The first ordinary install after a
+branch switch records the current version. These values are inventory metadata,
+not frozen replay pins. Registry and Git-semver
+resolver-selected versions and legacy synthesized plugin versions retain their
+own meaning; absent optional versions do not become errors.
+Frozen native MCP/LSP integration also preserves exact manifest and lockfile
+bytes. It refuses a selected target/server without recorded ownership before
+writing or removing either service's native configs. For example, adding
+`intellij` to a Copilot/Claude baseline requires an ordinary install with the
+intended `--target` first; frozen mode does not create an unrecorded personal
+deployment. Retain `--only`, `--root DIR` or `--global` during recovery.
+Reordered, repeated and narrower selections work. Downloads may precede the
+check; package deployment and lifecycle scripts are not generally rolled back.
+Late MCP checks use the complete resolved package graph, not just the packages
+selected for installation.
+
+`--only mcp` does not hydrate package sources, even without `--frozen`.
+Restore the package sources and declarations matching the lock using
+`apm install` without `--only mcp` in the same deployment store (retain `--root DIR`
+or `--global`, if used) before retrying.
 
 Claude MCP rewrites remove the previous transport's fields while preserving
 unmanaged keys such as OAuth blocks. This also repairs older mixed entries
 when they are written. An unchanged self-defined declaration with matching
 lock state may skip the write, so repeating that install is not a migration.
+
+Codex keeps APM registry identity in TOML comments instead of an unsupported
+native `id` setting. After upgrading, `apm install --only mcp --target codex`
+repairs entries matching a trustworthy saved configuration, including historical
+empty `id = ""` self-defined entries; add `--global` for user scope. A recorded
+owner name alone does not verify nonempty IDs, old header spelling, or native
+edits. Unverifiable entries stay untouched; unresolved self-defined conflicts
+return nonzero. For an entry you have verified, back up the Codex config and remove only its
+unsupported `id = ...` setting. Keep comments such as
+`# apm-registry-id: "registry-uuid"` for duplicate detection. Inline containers
+being written may expand while preserving values and comments.
+When replacing a declaration with `--mcp NAME`, `--force` permits changing
+`apm.yml`, not taking over a conflicting native connection.
 
 ### Registry MCP runtime variables
 
@@ -199,6 +302,27 @@ target today. If target exclusion leaves a non-dry-run install with no deployed 
 installs that deploy at least one other package still exit `0`. For this target
 exclusion, `--dry-run` succeeds as a preview without the per-package recovery
 diagnostic; it does not certify real install success.
+
+Compatibility-only `.codex-plugin/plugin.json` bundles use
+`apm install -g <package> --target codex` with exactly Codex CLI 0.163.0 on
+`PATH`; native qualification was measured on macOS arm64 only.
+Project scope, other versions, skill subsets, and unsupported native
+shapes fail explicitly. Approve executable types through `allowExecutables`;
+new native registrations remain disabled. Reinstall/update and
+`apm install -g --frozen --target codex` preserve activation and MCP policy,
+repair owned missing/corrupt copies, and never run MCP/plugin code. Healthy
+reinstalls retain their transport generation. `apm uninstall -g <package>`
+refuses foreign or customized native settings before releasing APM ownership;
+retire those entries using Codex and retry. No loose registration or
+cross-target translation is produced. See the
+[qualified contract](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#codex-compatibility-bundles-through-apm)
+for late-failure retry and ownership-journal recovery.
+Migration names the dependency and retained paths and refuses native registration
+while cleanup retains edited or undeletable loose files. Preserve or relocate your edits, resolve the cleanup
+conflict, then retry; APM does not register duplicate native and loose copies.
+Same-pin native cache drift fails without replacing the recorded source identity.
+From the APM user directory, `apm audit --ci --format json` reports this as a failed
+drift check without starting Codex or changing native state.
 
 ## Cache management
 
@@ -314,6 +438,18 @@ descendants, are skipped.
 
 ## Security and audit
 
+Audit replay and coverage use current manifest targets, otherwise concrete
+recorded deployment targets, before directory discovery. Unrelated workflow
+files cannot add Copilot output to a recorded Grok Cloud installation.
+Legacy lockfiles without recorded `deployments` retain directory discovery,
+even when compatibility paths imply a target.
+`apm config target` remains an install/update default, not retroactive audit
+intent. A disabled selected experimental target exits `3` with an enable hint
+on stderr, not a JSON audit report. Missing or modified managed files retain
+the existing drift and CI-check rules; bare audit drift is advisory unless
+configured otherwise. Retained historical paths remain eligible for CI
+presence and recorded-hash checks. Audit does not repair them.
+
 For shared hook targets, drift compares only APM-owned hook entries. Ownership
 sidecars are compared as JSON: object-key order and formatting do not cause
 drift, but changed fields, ownership markers, or list order do. Malformed JSON,
@@ -344,7 +480,9 @@ rewriting files. Explicit `--file` remains user-directed.
 
 `apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or live `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives.
 
-Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: when `apm_modules/` is missing but `apm.lock.yaml` is present, it self-hydrates a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
+Native Copilot Agent Plugins replay through the canonical package loader, with or without a plugin `apm.yml`. A clean install or reinstall can audit successfully. Set the consumer's `targets: [copilot]` in `apm.yml`; audit has no `--target` flag. Invalid native manifests fail replay instead of entering legacy conversion. Admitted local native cache units are compared with a scratch copy of their original source using install's validated copying; modified or missing cached skills fail audit. Remote native units use the recorded package content hash, including in cold-cache CI. Run `apm install` to restore drift or establish a missing remote hash. Cache files remain outside deployed-file tracking, and native registration files are not covered by this content comparison.
+
+Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: in a project with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, it prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first, but local dependency sources must be available at their declared paths. Windows long and native 8.3 spellings of the same project retain project scope; they do not require a global install. Auditing the actual user metadata workspace (`~/.apm`) still refuses missing modules and requires `apm install --global`. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
 
 For project-local content, replay uses the same package interpretation as install.
 A sibling `skills/<name>/SKILL.md` alongside `.apm/` is not promoted to a local
@@ -536,6 +674,11 @@ Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-t
 
 By default, Copilot, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf deploy skills to `.agents/skills/` (the agentskills.io standard). Claude, Grok Build, and Kiro retain native per-client routing (`.claude/skills/`, `.grok/skills/`, `.kiro/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 
+`apm install --target kiro` also delivers Kiro CLI prompts as body-only
+`.kiro/prompts/<name>.md`; add `--global` for `~/.kiro/prompts/<name>.md`.
+This prompt mapping is qualified with Kiro CLI 2.33.0 V3, not the IDE.
+See `package-authoring.md` for native arguments and frontmatter limitations.
+
 Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 
 ## Configuration and updates
@@ -552,9 +695,9 @@ No follow-up install is needed to restore those target records.
 | `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `mcp-registry-url`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
 | `apm config unset KEY` | Remove a stored config value (`target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
 | `apm lock` | Resolve all dependencies in `apm.yml` and write `apm.lock.yaml` **without** deploying or deleting files in agent targets. Existing deployed-file provenance stays recorded while those bytes remain on disk; the next normal install performs any deferred prune. Mirrors `cargo generate-lockfile` / `pnpm lock`. | `--update` re-resolve to latest upstream SHAs without accepting stale local bare refs, `--verbose`, `-g/--global`, `--no-policy`, `--target` (comma-separated), `--parallel-downloads N` |
-| `apm lock export` | Export an SBOM/inventory from the **existing** `apm.lock.yaml` -- reads the lockfile only (no re-resolve, no re-hash, no network). Emits component identity (purl), recorded hashes, and the declared license. Output is deterministic (components sorted by purl, pinned timestamp) for byte-identical reproducibility. Diagnostics and startup notices use stderr so stdout stays machine-readable. This is an inventory export, not a security attestation. | `-f/--format [cyclonedx\|spdx]` (default `cyclonedx`), `-o/--output FILE` (default stdout), `-g/--global` read user-scope lockfile, `--timestamp ISO8601` pin the document timestamp (falls back to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`) |
+| `apm lock export` | Export an SBOM/inventory from the **existing** `apm.lock.yaml`, falling back to legacy `apm.lock` read in place without migration -- no re-resolve, re-hash, or network. Emits component identity (purl), recorded hashes, and the declared license. Output is deterministic (components sorted by purl, pinned timestamp) for byte-identical reproducibility. Diagnostics and startup notices use stderr so stdout stays machine-readable. This is an inventory export, not a security attestation. | `-f/--format [cyclonedx\|spdx]` (default `cyclonedx`), `-o/--output FILE` (default stdout), `-g/--global` read user-scope lockfile, `--timestamp ISO8601` pin the document timestamp (falls back to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`) |
 | `apm update [PKGS...]` | Refresh APM dependencies: resolves `apm.yml` against authenticated upstream refs, never stale bare-cache refs, prints a structured plan (added/updated/removed/unchanged), and prompts before changing refs (default `[y/N]`). Remote-resolution failure aborts without substituting cached ref state. Full-SHA pins move only to an eligible stable annotated semver tag. If none exists, APM keeps the current SHA, emits one summary warning, and continues unrelated updates; malformed or ambiguous tag records remain fatal before writes. Accepted pin updates are annotated as `# <tag>` in `apm.yml`. Pass `[PKGS...]` to refresh only those deps, or `-g` for user scope (`~/.apm/`). Successful no-op updates still reconcile deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries when the declared target set contracts. If the lock expects dependencies but `apm_modules/` is empty, an unchanged update restores the cache from the same refs without prompting or rewriting the manifest/lock; `--dry-run` remains read-only. `--force` changes collision/security handling, not freshness; use it only after independent verification. Strict superset of the deprecated `apm deps update`. Skips the ref-change prompt with `--yes`; previews with `--dry-run`. | `--yes`, `--dry-run`, `--verbose`, `-g/--global`, `--force`, `--parallel-downloads N`, `--target` (comma-separated) |
-| `apm lock export` | Export an SBOM/inventory from the **existing** `apm.lock.yaml` -- reads the lockfile only (no re-resolve, no re-hash, no network). Emits component identity (purl), recorded hashes, and the declared license. Output is deterministic (components sorted by purl, pinned timestamp) for byte-identical reproducibility. Diagnostics and startup notices use stderr so stdout stays machine-readable. This is an inventory export, not a security attestation. | `-f/--format [cyclonedx\|spdx]` (default `cyclonedx`), `-o/--output FILE` (default stdout), `-g/--global` read user-scope lockfile, `--timestamp ISO8601` pin the document timestamp (falls back to `SOURCE_DATE_EPOCH`, then the lockfile's legacy `generated_at`, then the Unix epoch) |
+| `apm lock export` | Export an SBOM/inventory from the **existing** `apm.lock.yaml`, falling back to legacy `apm.lock` read in place without migration -- no re-resolve, re-hash, or network. Emits component identity (purl), recorded hashes, and the declared license. Output is deterministic (components sorted by purl, pinned timestamp) for byte-identical reproducibility. Diagnostics and startup notices use stderr so stdout stays machine-readable. This is an inventory export, not a security attestation. | `-f/--format [cyclonedx\|spdx]` (default `cyclonedx`), `-o/--output FILE` (default stdout), `-g/--global` read user-scope lockfile, `--timestamp ISO8601` pin the document timestamp (falls back to `SOURCE_DATE_EPOCH`, then the lockfile's legacy `generated_at`, then the Unix epoch) |
 | `apm update [PKGS...]` | Refresh APM dependencies: resolves `apm.yml` against authenticated upstream refs, never stale bare-cache refs, prints a structured plan (added/updated/removed/unchanged), and prompts before changing refs (default `[y/N]`). Remote-resolution failure aborts without substituting cached ref state. Full-SHA pins are resolved against the latest annotated semver tag, rewritten to that tag's SHA, and annotated as `# <tag>` in `apm.yml`. Pass `[PKGS...]` to refresh only those deps, or `-g` for user scope (`~/.apm/`). Successful no-op updates still reconcile deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries when the declared target set contracts. If the lock expects dependencies but `apm_modules/` is empty, an unchanged update restores the cache from the same refs without prompting or rewriting the manifest/lock; `--dry-run` remains read-only. `--force` changes collision/security handling, not freshness; use it only after independent verification. Strict superset of the deprecated `apm deps update`. Skips the ref-change prompt with `--yes`; previews with `--dry-run`. | `--yes`, `--dry-run`, `--verbose`, `-g/--global`, `--force`, `--parallel-downloads N`, `--target` (comma-separated) |
 | `apm self-update` | Update a standalone APM installation. Homebrew core disables this command; use `brew upgrade apm` instead. | `--check` only check (standalone installs) |
 

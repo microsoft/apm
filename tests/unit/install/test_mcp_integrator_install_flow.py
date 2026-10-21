@@ -436,18 +436,21 @@ class TestRunMcpInstallNoTargetRuntimes:
 
 
 class TestRunMcpInstallSelfDefined:
-    def test_self_defined_dep_separated_correctly(self) -> None:
+    def test_self_defined_dep_separated_correctly(self, tmp_path: Path) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
         sd_dep = _make_self_defined_dep("my-server")
         logger = MagicMock()
 
-        # We only care that a self_defined dep is recognized and processed
-        # The actual install path will raise in unit context; that's OK.
-        with contextlib.suppress(Exception):
-            run_mcp_install([sd_dep], runtime="copilot", logger=logger)
-
-        # Function reached without crash is the assertion
+        with patch(
+            "apm_cli.integration.mcp_integrator_install._install_self_defined_deps",
+            return_value=1,
+        ) as install:
+            result = run_mcp_install(
+                [sd_dep], runtime="copilot", logger=logger, project_root=tmp_path
+            )
+        assert result == 1
+        assert install.call_args.kwargs["self_defined_deps"] == [sd_dep]
 
     @pytest.mark.parametrize(
         ("runtime", "signal_dir", "config_relpath"),

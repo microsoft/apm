@@ -525,7 +525,7 @@ def test_install_codex_exact_runtime_headers_do_not_materialize_secrets(
         "mcp.example.invalid",
         "/mcp",
     )
-    server.pop("id")
+    assert "id" not in server
     assert server == {"http_headers": {"X-Static": "literal-header"}, **expected}
     assert secret not in config_text
     assert secret not in result.output

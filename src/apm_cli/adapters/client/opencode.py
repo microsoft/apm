@@ -29,11 +29,15 @@ At project scope APM only writes to ``opencode.json`` when the
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
 from .copilot import CopilotClientAdapter
+
+_ENV_REF_TEMPLATE = "{env:%s}"
+_ENV_REF_RE = re.compile(re.escape(_ENV_REF_TEMPLATE) % r"([A-Za-z_][A-Za-z0-9_]*)")
 
 
 class OpenCodeClientAdapter(CopilotClientAdapter):
@@ -47,11 +51,43 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     target_name: str = "opencode"
     mcp_servers_key: str = "mcp"
 
-    # OpenCode's config runtime-substitution support has not yet been
-    # individually audited (see #1152). Pin to legacy install-time
-    # resolution so this adapter is unchanged by the Copilot security fix;
-    # revisit in a follow-up.
-    _supports_runtime_env_substitution: bool = False
+    # OpenCode resolves {env:NAME} throughout config strings, including MCP
+    # environment, headers and command args (https://opencode.ai/docs/config/#env-vars).
+    # Keep referenced secrets out of generated configuration; see #3051.
+    _supports_runtime_env_substitution: bool = True
+
+    def _format_runtime_env_placeholder(self, name: str) -> str:
+        """Return OpenCode's native environment reference."""
+        return _ENV_REF_TEMPLATE % name
+
+    def _resolve_environment_variables(
+        self,
+        env_vars: dict[str, object] | list[dict[str, object]],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Preserve explicit literals; translate references for runtime lookup."""
+        if not isinstance(env_vars, dict):
+            return super()._resolve_environment_variables(env_vars, env_overrides)
+        return self._resolve_explicit_environment_values(env_vars, env_overrides)
+
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Preserve per-server authored registry env values after normal rendering."""
+        config = super()._format_server_config(server_info, env_overrides, runtime_vars)
+        overlay = server_info.get("_apm_env_overlay")
+        env = config.get("env")
+        if server_info.get("_raw_stdio") or not overlay or not isinstance(env, dict):
+            return config
+
+        # Only declared/emitted keys participate, as on the legacy registry path.
+        # Never recover authored values from the shared collected overrides.
+        authored = {name: value for name, value in overlay.items() if name in env}
+        previous_keys = self._last_env_placeholder_keys - set(env)
+        # Deliberately omit collected overrides: only authored values belong here.
+        env.update(self._resolve_explicit_environment_values(authored))
+        self._last_env_placeholder_keys = previous_keys | {
+            name for value in env.values() for name in _ENV_REF_RE.findall(value)
+        }
+        return config
 
     @staticmethod
     def config_path_for(project_root: Path, user_scope: bool) -> Path:

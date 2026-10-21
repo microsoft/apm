@@ -380,6 +380,16 @@ class MCPClientAdapter(ABC):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
 
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """Compare the native connection with the adapter's rendered baseline."""
+        return native == expected
+
+    def project_managed_server_config(
+        self, native: object, *, baseline: dict, requested: dict
+    ) -> object:
+        """Return a comparison-only view for an already recorded managed connection."""
+        return native
+
     @abstractmethod
     def get_config_path(self):
         """Get the path to the MCP configuration file."""
@@ -1117,6 +1127,28 @@ class MCPClientAdapter(ABC):
         if os.getenv("APM_E2E_TESTS") == "1":
             return True
         return not (sys.stdin.isatty() and sys.stdout.isatty())
+
+    def _resolve_explicit_environment_values(
+        self,
+        env_vars: dict[str, object],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Translate authored references while preserving explicit env literals.
+
+        Resets placeholder tracking; mid-render callers must preserve prior keys.
+        """
+        resolved: dict[str, str] = {}
+        self._last_env_placeholder_keys = set()
+        for name, value in env_vars.items():
+            if not name or value is None:
+                continue
+            if isinstance(value, TrustedEnvLiteral):
+                resolved[name] = value
+            elif isinstance(value, str):
+                resolved[name] = self._resolve_env_variable(name, value, env_overrides)
+            else:
+                resolved[name] = _stringify_env_literal(value)
+        return resolved
 
     def _resolve_environment_variables(self, env_vars, env_overrides=None):
         """Resolve (or translate) declared environment variables.

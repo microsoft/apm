@@ -53,7 +53,13 @@ def build_copy_ignore(
 
 @dataclass
 class SkillIntegrationResult:
-    """Compatibility result returned by skill-specific integration APIs."""
+    """Skill outputs and completion of the admitted skill-processing domain.
+
+    ``complete`` is false unless all selected physical targets materialized every
+    admitted source root/member, including final rewrites and hashes. It is not
+    inferred from ``skill_skipped`` or the successful-file inventory, and does
+    not certify other primitive domains or whole-package success.
+    """
 
     skill_created: bool
     skill_updated: bool
@@ -66,6 +72,8 @@ class SkillIntegrationResult:
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None
     materializations: tuple[MaterializationResult, ...] = ()
+    deployed_files: tuple[Path, ...] = ()
+    complete: bool = False
 
     def __post_init__(self) -> None:
         if self.target_paths is None:

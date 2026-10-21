@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-APM supports six source layouts plus catalog-only marketplace packages.
+APM supports these source layouts plus catalog-only marketplace packages.
 Pick the form that matches the author's intent -- APM preserves it.
 
 ## Layout summary
@@ -14,15 +14,35 @@ Pick the form that matches the author's intent -- APM preserves it.
 | `.apm/` (with or without apm.yml) | "I have N independent primitives" | Hoist each primitive into the target's runtime dirs |
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
-| `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
+| `hooks/*.json` or `.apm/hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Register hooks and referenced resources for the selected targets |
 | `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
+| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native registration with Codex CLI 0.163.0 at user scope only |
 | Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
 An `apm.yml` is eligible when the root also has `.apm/` or the manifest
 declares APM or MCP dependencies. To intentionally select a plugin layout,
 omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
+
+Root `plugin.json` and `.claude-plugin/plugin.json` also take precedence
+over a co-located Codex compatibility overlay.
+
+## Codex compatibility bundle
+
+Use `apm install -g <package> --target codex` with Codex CLI **0.163.0**
+on `PATH`. APM preserves the full `.codex-plugin/plugin.json` bundle and
+its manifest-referenced MCP resources, without loose skill/MCP registration
+or translation for other targets. Executable approval is required; fresh
+registrations stay disabled and existing native settings are preserved.
+Native qualification was measured on macOS arm64 only.
+
+The qualified shape needs a native-discoverable skill with an unambiguous
+installed path, plus either inline MCP servers or a package-relative JSON
+file containing `mcpServers`. Project scope, other versions, skill subsets,
+symlinks, and unsupported shapes fail explicitly. This does not change
+`apm pack` output or certify MCP execution/authentication. See the
+[native lifecycle and ownership limits](../../consumer/installing-from-marketplaces/#codex-compatibility-bundles-through-apm).
 
 ## APM package (`.apm/` directory)
 
@@ -180,23 +200,40 @@ primitives.
 in one repository (e.g. all Azure skills, all Firebase skills). Consumers
 can install the full set or cherry-pick with `--skill`.
 
-## Hook package (`hooks/*.json` only)
+## Hook package (`hooks/*.json` or `.apm/hooks/*.json`)
 
-A package whose root contains `hooks/*.json` files but no `apm.yml`,
-`SKILL.md`, or `plugin.json`. APM treats the whole directory as a hook
-bundle: each hook JSON is deployed to the target's runtime hooks
-directory.
+A package containing `hooks/*.json` or `.apm/hooks/*.json` but no
+`apm.yml`, `SKILL.md`, or `plugin.json` needs no generated manifest or
+placeholder skill. Use a Git dependency's `path` to select the package
+directory, not its inner hooks directory:
 
+```yaml
+dependencies:
+  apm:
+    - git: acme/agent-packages
+      path: packages/my-hooks
+      ref: v1.0.0
 ```
-my-hooks/
-+-- hooks/
-    +-- pre-commit.json
-    +-- post-merge.json
-```
 
-**What gets installed:** every file under `hooks/` is deployed to the
-target's hooks runtime path (e.g. `.github/hooks/` for Copilot,
-`.claude/hooks/` for Claude).
+Here, `packages/my-hooks/hooks/lint.json` or
+`packages/my-hooks/.apm/hooks/lint.json` declares the hooks.
+Discovery is non-recursive; arbitrary directories are not packages.
+
+**What gets installed:** hook registrations and referenced script bundles
+follow the selected targets and existing executable approval rules. Claude
+and Codex use their native configuration files; Copilot uses `.github/hooks/`.
+Installation does not execute the hooks. See
+[hook authoring](../../producer/author-primitives/hooks-and-commands/)
+for command paths, resource selection, and target restrictions.
+
+`apm install` restores the locked revision; `apm update` refreshes it.
+`apm update <package>` and `apm install <package> --refresh` preserve unrelated
+installed hook packages, despite invalid upstream descriptors.
+Malformed hook JSON or an invalid replacement package fails before activation,
+leaving the previous installation, lockfile, and deployment ownership intact.
+This also applies to `apm install plugin@marketplace --refresh` when a catalog
+selects a versioned hook-package directory, such as `plugins/hooks-1.2.3`.
+`apm uninstall` removes the package's managed hooks and resources.
 
 **When to choose:** you ship a set of harness hooks with no other
 primitives. If you also ship skills or instructions, prefer the `.apm/`

@@ -38,6 +38,7 @@ from .validation import (
 
 if TYPE_CHECKING:
     from apm_cli.agent_plugins.ir import AgentPlugin
+    from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
     from apm_cli.deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
@@ -439,6 +440,7 @@ class APMPackage:
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
     agent_plugin: "AgentPlugin | None" = None
+    codex_plugin: "CodexCompatibilityPlugin | None" = None
     # Vendor extension keys (``x-*``) from apm.yml, in declaration order.
     # Empty when the manifest declares none. Values are not interpreted.
     extensions: dict[str, Any] = field(default_factory=dict)

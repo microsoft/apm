@@ -221,39 +221,15 @@ def copy_skill_to_target(
     *,
     source_plan: "DeployableSourcePlan | None" = None,
 ) -> list[Path]:
-    """Copy skill directory to all active target skills/ directories.
+    """Copy admitted skill members to selected targets, preserving destination siblings.
 
-    This is a standalone function for direct skill copy operations.
-    It handles:
-    - Package type routing via should_install_skill()
-    - Skill name validation/normalization
-    - Directory structure preservation
-    - Deployment to every active target that supports skills
-
-    When *targets* is provided, only those targets are used.
-    Otherwise falls back to ``active_targets()``.
-
-    Source SKILL.md gets no metadata injection; outbound package links are rewritten.
-
-    Copies:
-    - SKILL.md (required)
-    - scripts/ (optional)
-    - references/ (optional)
-    - assets/ (optional)
-    - Any other subdirectories the package contains
-
-    Args:
-        package_info: PackageInfo object with package metadata
-        source_path: Path to skill in apm_modules/
-        target_base: Usually project root
-        targets: Optional explicit list of TargetProfile objects.
-        source_plan: Authorized source files from the canonical install
-            materialization path. Direct callers without a plan receive a
-            conservative skills-only plan for their resolved targets.
-
-    Returns:
-        List of all deployed skill directory paths (empty if skipped).
+    Direct callers without an authorized source plan receive a conservative
+    skills-only plan. Missing targets fall back to ``active_targets()``.
+    Return successful skill directories; rewrite outbound package links without
+    injecting metadata into SKILL.md.
     """
+    if not should_install_skill(package_info):
+        return []
     if targets is None:
         from apm_cli.integration.targets import active_targets
 
@@ -282,10 +258,6 @@ def copy_skill_to_target(
 
     verdict = source_plan.scan_security(policy=BLOCK_POLICY)
     if verdict.should_block:
-        return []
-
-    # Check if package type allows skill installation (T4 routing)
-    if not should_install_skill(package_info):
         return []
 
     # Check for SKILL.md existence
@@ -363,18 +335,20 @@ def copy_skill_to_target(
             continue
         seen_skill_dirs.add(resolved)
 
-        skill_dir.parent.mkdir(parents=True, exist_ok=True)
-        if skill_dir.exists():
-            shutil.rmtree(skill_dir)
-        shutil.copytree(
-            source_path,
-            skill_dir,
-            ignore=_build_deployable_copy_ignore(source_plan=source_plan),
-        )
         rewriter = SkillIntegrator()
         rewriter.init_link_resolver(package_info, target_base)
-        rewriter._resolve_markdown_links_in_skill_bundle(source_path, skill_dir)
-        deployed.append(skill_dir)
+        _, managed = rewriter._ownership_maps(target_base)
+        copied = rewriter._copy_skill_bundle(
+            source_path,
+            skill_dir,
+            target_base,
+            ignore=_build_deployable_copy_ignore(source_plan=source_plan),
+            managed_files=set(managed),
+            force=True,
+            diagnostics=None,
+        )
+        if copied:
+            deployed.append(skill_dir)
 
     return deployed
 
@@ -390,23 +364,146 @@ class SkillIntegrator(BaseIntegrator):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         # Only successful writes establish same-run ownership, keyed by the
         # actual destination rather than a basename shared by several targets.
         self._native_skill_session_owners: dict[Path, str | None] = {}
         self._ownership_snapshots: (
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
+        self._skill_files: list[Path] = []
+        self._skill_recorded_hashes: dict[str, str] = {}
+        self._skill_session_hashes: dict[str, str] = {}
+        self._hash_snapshots: dict[Path, dict[str, str]] | None = None
+        self._skill_targets: list[TargetProfile] | None = None
+        self._replay_owners: Mapping[str, str] | None = None
+        self._skill_current_owner: str | None = None
+        self._skill_source_plan: DeployableSourcePlan | None = None
+        # Any skipped member or unverified rewrite invalidates this call's completion proof.
+        self._skill_can_complete = False
+        self._skill_completed_roots: dict[Path, set[str]] = {}
+        self._skill_completed_files: dict[Path, set[str]] = {}
 
     @contextmanager
-    def ownership_snapshot(self) -> Iterator[None]:
+    def ownership_snapshot(self, *, replay_lockfile=None) -> Iterator[None]:
         """Reuse immutable durable ownership during one sequential deployment batch."""
         if self._ownership_snapshots is not None:
             raise RuntimeError("A skill ownership snapshot is already active")
         self._ownership_snapshots = {}
+        self._hash_snapshots = {}
+        if replay_lockfile is not None:
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            self._replay_owners = DeploymentLedgerCodec.active_file_owners(replay_lockfile)
         try:
             yield
         finally:
             self._ownership_snapshots = None
+            self._hash_snapshots = None
+            self._skill_session_hashes.clear()
+            self._replay_owners = None
+
+    def _skill_member_skipped(self, _path: Path) -> None:
+        self._skill_can_complete = False
+
+    def _skill_materialization_complete(self, project_root: Path) -> bool:
+        """Require positive discovery and every admitted source at every physical target."""
+        plan = self._skill_source_plan
+        if (
+            plan is None
+            or plan.skill_discovery_complete is not True
+            or not self._skill_can_complete
+            or self._replay_owners is not None
+        ):
+            return False
+        roots = {
+            self._target_skills_root(target, project_root).resolve()
+            for target in self._skill_targets or ()
+            if target.supports("skills")
+        }
+        return bool(roots) and all(
+            plan.skill_source_roots <= self._skill_completed_roots.get(root, set())
+            and plan.skill_source_files <= self._skill_completed_files.get(root, set())
+            for root in roots
+        )
+
+    def _skill_path_entry(self, path: Path, project_root: Path) -> str:
+        """Use one canonical locator for collision checks and materialized members."""
+        if self._skill_targets is None and not path.is_relative_to(project_root):
+            return path.as_posix()
+        return deployed_path_entry(path, project_root, self._skill_targets)
+
+    def _copy_skill_bundle(
+        self,
+        source: Path,
+        destination: Path,
+        project_root: Path,
+        *,
+        ignore: Callable[[str, list[str]], list[str]],
+        managed_files: set[str] | None,
+        force: bool,
+        diagnostics,
+        unchanged: bool = False,
+    ) -> list[Path]:
+        """Record only successfully copied source members, never surviving sibling assets."""
+        from collections import ChainMap
+
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        def entry(path: Path) -> str:
+            return self._skill_path_entry(path, project_root)
+
+        hashes = ChainMap(
+            self._skill_session_hashes if self._hash_snapshots is not None else {},
+            self._skill_recorded_hashes,
+        )
+        directory_entry = entry(destination)
+        anchor = entry(destination / "SKILL.md")
+        copied = self.copy_directory_files(
+            source,
+            destination,
+            ignore=ignore,
+            path_entry=entry,
+            is_managed=lambda path: (
+                path in self._skill_session_hashes
+                or (
+                    managed_files is not None
+                    and (
+                        path in managed_files
+                        or (path == anchor and directory_entry in managed_files)
+                    )
+                )
+            ),
+            recorded_hashes=hashes,
+            on_member_skipped=self._skill_member_skipped,
+            unchanged=unchanged,
+            write_allowed=lambda path: (
+                self._replay_owners is None
+                or self._replay_owners.get(path, self._skill_current_owner)
+                == self._skill_current_owner
+            ),
+            force=force or managed_files is None,
+            diagnostics=diagnostics,
+        )
+        if not unchanged:
+            if self.link_resolver is None:
+                self._skill_can_complete = False
+            self._resolve_markdown_links_in_skill_bundle(source, destination, copied)
+        written_hashes = {entry(path): compute_file_hash(path) for path in copied}
+        self._skill_session_hashes.update(written_hashes)
+        self._skill_files.extend(copied)
+        plan = self._skill_source_plan
+        if plan is not None and plan.skill_discovery_complete is True:
+            source_root = plan.source_root
+            physical_root = destination.parent.resolve()
+            self._skill_completed_roots.setdefault(physical_root, set()).add(
+                source.relative_to(source_root).as_posix()
+            )
+            self._skill_completed_files.setdefault(physical_root, set()).update(
+                (source / path.relative_to(destination)).relative_to(source_root).as_posix()
+                for path in copied
+            )
+        return copied
 
     def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
         """Read durable ownership once per used root in the current integration phase."""
@@ -551,14 +648,20 @@ class SkillIntegrator(BaseIntegrator):
         self,
         source_root: Path,
         target_root: Path,
+        copied_files: list[Path] | None = None,
     ) -> int:
-        """Read copied skill markdown from source and write resolved target content."""
+        """Rewrite copied markdown; a vanished admitted member is not a successful copy."""
         links_resolved = 0
-        for target_file in target_root.rglob("*.md"):
-            if not target_file.is_file() or target_file.is_symlink():
+        for target_file in copied_files if copied_files is not None else target_root.rglob("*.md"):
+            if target_file.suffix != ".md":
                 continue
             source_file = source_root / target_file.relative_to(target_root)
-            if not source_file.is_file() or source_file.is_symlink():
+            if any(not path.is_file() or path.is_symlink() for path in (source_file, target_file)):
+                if copied_files is not None:
+                    raise OSError(
+                        f"Cannot finalize copied skill member {target_file}: source or destination "
+                        "changed during deployment. Restore regular files and retry installation."
+                    )
                 continue
             content = source_file.read_text(encoding="utf-8")
             resolved, count = self.resolve_links(
@@ -762,24 +865,10 @@ class SkillIntegrator(BaseIntegrator):
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
     ) -> tuple[int, list[Path]]:
-        """Promote named skill directories to top-level skill entries.
+        """Promote selected skills; return their count and successful anchor directories.
 
-        Args:
-            sub_skills_dir: Default source directory when ``source_paths`` is absent.
-            target_skills_root: Root skills directory (e.g. .github/skills/ or .claude/skills/).
-            parent_name: Name of the parent skill (used in warning messages).
-            warn: Whether to emit a warning on name collisions.
-            owned_by: Map of skill_name -> owner_package_name from the lockfile.
-                When provided, warnings are suppressed for self-overwrites.
-            diagnostics: Optional DiagnosticCollector for deferred warning output.
-            project_root: Project root for computing relative diagnostic paths.
-            source_paths: Explicit name -> source directory map. Plugins resolve
-                each declared skill individually, so their sources do not all
-                share one parent directory. When omitted, every child of
-                *sub_skills_dir* is a candidate.
-
-        Returns:
-            tuple[int, list[Path]]: (count of promoted sub-skills, list of deployed dir paths)
+        Plugin ``source_paths`` resolve each declared skill independently, rather
+        than assuming one parent. Declarations never authorize directory deletion.
         """
         promoted = 0
         deployed = []
@@ -791,16 +880,7 @@ class SkillIntegrator(BaseIntegrator):
         else:
             candidates = [source_paths[name] for name in sorted(source_paths)]
 
-        # Compute project-relative prefix for consistent path reporting
-        if project_root is not None:
-            try:
-                rel_prefix = target_skills_root.relative_to(project_root).as_posix()
-            except ValueError:
-                # Dynamic-root targets (cowork): use synthetic prefix
-                # when the skills root lives outside the project tree.
-                rel_prefix = target_skills_root.name
-        else:
-            rel_prefix = target_skills_root.name
+        materialization_root = project_root or target_skills_root.parent.parent
 
         for sub_skill_path in candidates:
             if not sub_skill_path.is_dir():
@@ -814,24 +894,33 @@ class SkillIntegrator(BaseIntegrator):
             is_valid, _ = validate_skill_name(raw_sub_name)
             sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
             target = target_skills_root / sub_name
-            rel_path = f"{rel_prefix}/{sub_name}"
-            if target.exists():
-                # Content-identical: skip entirely (no copy, no warning)
-                if SkillIntegrator.is_skill_dir_identical_to_source(sub_skill_path, target):
-                    promoted += 1
-                    deployed.append(target)
-                    continue
-
+            rewriter = link_rewriter or SkillIntegrator()
+            rel_path = rewriter._skill_path_entry(target, materialization_root)
+            target_existed = target.exists()
+            unchanged = target_existed and SkillIntegrator.is_skill_dir_identical_to_source(
+                sub_skill_path, target
+            )
+            is_self_overwrite = False
+            if target_existed:
                 # Check if this is a user-authored skill (not managed by APM)
                 is_managed = (
                     managed_files is not None and rel_path.replace("\\", "/") in managed_files
+                ) or (
+                    rewriter._ownership_snapshots is not None
+                    and target.resolve() in rewriter._native_skill_session_owners
                 )
                 prev_owner = (owned_by or {}).get(sub_name)
                 is_self_overwrite = prev_owner is not None and prev_owner == parent_name
 
-                if managed_files is not None and not is_managed and not is_self_overwrite:
+                if (
+                    managed_files is not None
+                    and not is_managed
+                    and not is_self_overwrite
+                    and not unchanged
+                ):
                     # User-authored skill: respect force flag
                     if not force:
+                        rewriter._skill_can_complete = False
                         if diagnostics is not None:
                             diagnostics.skip(rel_path, package=parent_name)
                         elif logger:
@@ -851,41 +940,40 @@ class SkillIntegrator(BaseIntegrator):
                                 pass
                         continue  # SKIP: protect user content
 
-                if warn and not is_self_overwrite:
-                    if diagnostics is not None:
-                        diagnostics.overwrite(
-                            path=rel_path,
-                            package=parent_name,
-                            detail=f"Skill '{sub_name}' replaced -- previously from another package",
-                        )
-                    elif logger:
-                        logger.warning(
-                            f"Sub-skill '{sub_name}' from '{parent_name}' overwrites existing skill at {rel_path}"
-                        )
-                    else:
-                        try:
-                            from apm_cli.utils.console import _rich_warning
-
-                            _rich_warning(
-                                f"Sub-skill '{sub_name}' from '{parent_name}' overwrites existing skill at {rel_path}"
-                            )
-                        except ImportError:
-                            pass
-                shutil.rmtree(target)
-            target.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(
+            copied = rewriter._copy_skill_bundle(
                 sub_skill_path,
                 target,
-                dirs_exist_ok=True,
+                materialization_root,
                 ignore=_build_deployable_copy_ignore(
                     skip_bin=skip_bin,
                     source_plan=source_plan,
                 ),
+                managed_files=managed_files,
+                force=force,
+                diagnostics=diagnostics,
+                unchanged=unchanged,
             )
-            if link_rewriter is not None:
-                link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
+            if not copied:
+                continue
+            rewriter._native_skill_session_owners[target.resolve()] = parent_name
             promoted += 1
-            deployed.append(target)
+            if target / "SKILL.md" in copied:
+                deployed.append(target)
+                if warn and target_existed and not is_self_overwrite and not unchanged:
+                    previous = f"'{prev_owner}'" if prev_owner else "another package"
+                    detail = (
+                        f"Skill '{sub_name}' from '{parent_name}' replaced overlapping files "
+                        f"from {previous}; separately owned assets were preserved "
+                        "-- remove one package to avoid this"
+                    )
+                    if diagnostics is not None:
+                        diagnostics.overwrite(path=rel_path, package=parent_name, detail=detail)
+                    elif logger:
+                        logger.warning(detail)
+                    else:
+                        from apm_cli.utils.console import _rich_warning
+
+                        _rich_warning(detail)
         return promoted, deployed
 
     _build_ownership_maps = staticmethod(build_skill_ownership_maps)
@@ -936,6 +1024,7 @@ class SkillIntegrator(BaseIntegrator):
             from apm_cli.integration.targets import active_targets
 
             targets = active_targets(project_root)
+        self._skill_targets = targets
 
         # Durable identity for self-overwrite comparison -- NOT package_path.name,
         # which is just the repo/leaf name and collides across owners (see
@@ -977,7 +1066,7 @@ class SkillIntegrator(BaseIntegrator):
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
                 diagnostics=diagnostics if is_primary else None,
-                managed_files=managed_files if is_primary else None,
+                managed_files=managed_files,
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
@@ -991,6 +1080,7 @@ class SkillIntegrator(BaseIntegrator):
             all_deployed.extend(deployed)
 
         if self._skill_filter_misses_available(name_filter, available_names):
+            self._skill_can_complete = False
             self._error_no_skill_filter_match(
                 available_names,
                 tuple(skill_subset or ()),
@@ -1016,33 +1106,7 @@ class SkillIntegrator(BaseIntegrator):
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
     ) -> SkillIntegrationResult:
-        """Copy a native Skill (with existing SKILL.md) to all active targets.
-
-        For packages that already have a SKILL.md at their root (like those from
-        awesome-claude-skills), we copy the entire skill folder to every active
-        target that supports skills (driven by ``active_targets()``).
-
-        The skill folder name is the source folder name (e.g., ``mcp-builder``),
-        validated and normalized per the agentskills.io spec.
-
-        Source SKILL.md gets no metadata injection; outbound package links are rewritten.
-        Orphan detection uses apm.lock via directory name matching instead.
-
-        Copies:
-        - SKILL.md (required)
-        - scripts/ (optional)
-        - references/ (optional)
-        - assets/ (optional)
-        - Any other subdirectories the package contains
-
-        Args:
-            package_info: PackageInfo object with package metadata
-            project_root: Root directory of the project
-            source_skill_md: Path to the source SKILL.md file
-
-        Returns:
-            SkillIntegrationResult: Results of the integration operation
-        """
+        """Copy admitted native skill members, preserving separately owned destination files."""
         self.init_link_resolver(package_info, project_root)
         package_path = package_info.install_path
 
@@ -1083,6 +1147,7 @@ class SkillIntegrator(BaseIntegrator):
             from apm_cli.integration.targets import active_targets
 
             targets = active_targets(project_root)
+        self._skill_targets = targets
         skill_created = False
         skill_updated = False
         files_copied = 0
@@ -1144,15 +1209,34 @@ class SkillIntegrator(BaseIntegrator):
                 force,
                 diagnostics=diagnostics,
             ):
+                self._skill_can_complete = False
                 continue
 
-            if is_primary:
-                skill_created = not target_skill_dir.exists()
-                skill_updated = not skill_created
-                primary_skill_md = target_skill_dir / "SKILL.md"
+            target_existed = target_skill_dir.exists()
+            from apm_cli.models.apm_package import PackageType as _PackageType
 
-            if target_skill_dir.exists():
+            copied = self._copy_skill_bundle(
+                package_path,
+                target_skill_dir,
+                project_root,
+                ignore=_build_deployable_copy_ignore(
+                    skip_bin=skip_bin,
+                    source_plan=source_plan,
+                    exclude_apm=True,
+                    exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
+                ),
+                managed_files=collision_managed,
+                force=force,
+                diagnostics=diagnostics,
+            )
+            if target_skill_dir / "SKILL.md" in copied:
+                all_target_paths.append(target_skill_dir)
                 if is_primary:
+                    skill_created = not target_existed
+                    skill_updated = target_existed
+                    primary_skill_md = target_skill_dir / "SKILL.md"
+                    files_copied = len(copied)
+                if target_existed and is_primary:
                     # Check both the lockfile (previous runs) and the in-memory session
                     # map (current run) so that same-manifest collisions are caught even
                     # before the lockfile has been written for this run.
@@ -1175,8 +1259,9 @@ class SkillIntegrator(BaseIntegrator):
                         # groups diagnostics by the package responsible.
                         # Issue 2: message must tell the user what to do ("So What?" test).
                         detail = (
-                            f"Skill '{skill_name}' from '{current_key}' replaced "
-                            f"'{prev_owner}' -- remove one package to avoid this"
+                            f"Skill '{skill_name}' from '{current_key}' replaced overlapping files "
+                            f"from '{prev_owner}'; separately owned assets were preserved "
+                            "-- remove one package to avoid this"
                         )
                         if diagnostics is not None:
                             diagnostics.overwrite(
@@ -1191,27 +1276,7 @@ class SkillIntegrator(BaseIntegrator):
                             from apm_cli.utils.console import _rich_warning
 
                             _rich_warning(detail)
-                shutil.rmtree(target_skill_dir)
-            target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            from apm_cli.models.apm_package import PackageType as _PackageType
-
-            shutil.copytree(
-                package_path,
-                target_skill_dir,
-                ignore=_build_deployable_copy_ignore(
-                    skip_bin=skip_bin,
-                    source_plan=source_plan,
-                    exclude_apm=True,
-                    exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
-                ),
-            )
-            self._resolve_markdown_links_in_skill_bundle(package_path, target_skill_dir)
-            all_target_paths.append(target_skill_dir)
-            self._native_skill_session_owners[resolved] = current_key
-
-            if is_primary:
-                files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
+                self._native_skill_session_owners[resolved] = current_key
 
             # Promote sub-skills for this target. Identify the parent by its
             # durable unique key (current_key), not skill_name -- the folder
@@ -1224,7 +1289,7 @@ class SkillIntegrator(BaseIntegrator):
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
                 diagnostics=diagnostics if is_primary else None,
-                managed_files=managed_files if is_primary else None,
+                managed_files=managed_files,
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
@@ -1243,12 +1308,14 @@ class SkillIntegrator(BaseIntegrator):
         return SkillIntegrationResult(
             skill_created=skill_created,
             skill_updated=skill_updated,
-            skill_skipped=not all_target_paths,
+            skill_skipped=not self._skill_files,
             skill_path=primary_skill_md,
             references_copied=files_copied,
             links_resolved=0,
             sub_skills_promoted=sub_skills_count,
             target_paths=all_target_paths,
+            deployed_files=tuple(self._skill_files),
+            complete=self._skill_materialization_complete(project_root),
         )
 
     def _integrate_skill_bundle(
@@ -1268,34 +1335,13 @@ class SkillIntegrator(BaseIntegrator):
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
     ) -> SkillIntegrationResult:
-        """Promote every skill in a SKILL_BUNDLE's top-level skills/ directory.
-
-        Reuses the same promotion logic as _promote_sub_skills but sources
-        from package_root/skills/ instead of .apm/skills/.  Each nested
-        skill directory becomes a top-level skill in every target.
-
-        Args:
-            package_info: PackageInfo with package metadata.
-            project_root: Root directory of the project.
-            skills_dir: The package's skills/ directory.
-            diagnostics: Optional DiagnosticCollector.
-            managed_files: Set of managed file paths.
-            force: Whether to overwrite locally-authored files.
-            logger: Optional InstallLogger.
-            targets: Optional explicit list of TargetProfile objects.
-            skill_subset: Optional tuple of skill names to install (None = all).
-            source_paths: Explicit name -> source directory map, for packages
-                whose deployable skills do not all share one parent directory.
-                When omitted, every child of *skills_dir* is a candidate.
-
-        Returns:
-            SkillIntegrationResult with all promoted skills.
-        """
+        """Promote admitted bundle skills using the shared file-level materializer."""
         self.init_link_resolver(package_info, project_root)
         if targets is None:
             from apm_cli.integration.targets import active_targets
 
             targets = active_targets(project_root)
+        self._skill_targets = targets
 
         # Durable identity for self-overwrite comparison -- NOT install_path.name,
         # which is just the repo/leaf name and collides across owners (see
@@ -1352,7 +1398,7 @@ class SkillIntegrator(BaseIntegrator):
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
                 diagnostics=diagnostics if is_primary else None,
-                managed_files=managed_files if is_primary else None,
+                managed_files=managed_files,
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
@@ -1369,6 +1415,7 @@ class SkillIntegrator(BaseIntegrator):
             all_deployed.extend(deployed)
 
         if self._skill_filter_misses_available(_name_filter, available_names):
+            self._skill_can_complete = False
             self._error_no_skill_filter_match(
                 available_names,
                 tuple(skill_subset or ()),
@@ -1386,6 +1433,8 @@ class SkillIntegrator(BaseIntegrator):
             links_resolved=0,
             sub_skills_promoted=total_promoted,
             target_paths=all_deployed,
+            deployed_files=tuple(self._skill_files),
+            complete=self._skill_materialization_complete(project_root),
         )
 
     def integrate_package_skill(
@@ -1405,39 +1454,13 @@ class SkillIntegrator(BaseIntegrator):
         trust_bin: bool | None = None,
         source_plan=None,
     ) -> SkillIntegrationResult:
-        """Integrate a package's skill into all active target directories.
+        """Deploy admitted native skills, bundles and promoted sub-skills.
 
-        Copies native skills (packages with SKILL.md at root) to every active
-        target that supports skills (e.g. .github/skills/, .claude/skills/,
-        .opencode/skills/). Also promotes any sub-skills from .apm/skills/.
-
-        When *targets* is provided (e.g. from ``--target cursor``), only those
-        targets are considered.  Otherwise falls back to ``active_targets()``.
-
-        Packages without SKILL.md at root are not installed as skills -- only their
-        sub-skills (if any) are promoted.
-
-        Args:
-            package_info: PackageInfo object with package metadata
-            project_root: Root directory of the project
-            targets: Optional explicit list of TargetProfile objects.
-            skill_subset: Optional tuple of skill names or paths to install (None = all).
-            skip_bin: When True, skip bin/ executable deployment even if the
-                package ships one.  Used by the executable approval gate to
-                block unapproved bin/ executables while still deploying text
-                primitives (skills, sub-skills).
-            bin_skip_reason_override: When *skip_bin* is True, use this
-                string as ``bin_skipped_reason`` instead of the default
-                ``"not_approved"``.  Lets the caller distinguish
-                ``--no-trust-bin`` (``"not_trusted"``) from the
-                ``allowExecutables`` gate.
-            trust_bin: Tri-state consent flag.  ``True`` suppresses the
-                trust-posture warning; ``False`` is handled upstream by
-                setting *skip_bin*; ``None`` (default) emits the warning
-                when bin/ is deployed.
-
-        Returns:
-            SkillIntegrationResult: Results of the integration operation
+        Explicit targets and subsets narrow deployment; absent targets use
+        normal discovery. Executable consent is supplied separately through
+        ``skip_bin`` and ``trust_bin``. The result distinguishes skill directories
+        from successfully materialized files so shared destination contents
+        never become a package's ownership proof.
         """
         enforce_agent_plugin_deployment_boundary(package_info)
         from apm_cli.core.scope import InstallScope, get_apm_dir
@@ -1445,6 +1468,27 @@ class SkillIntegrator(BaseIntegrator):
         lockfile_root = (
             get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root
         )
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        self._skill_files = []
+        self._skill_targets = targets
+        self._skill_source_plan = source_plan
+        self._skill_can_complete = True
+        self._skill_completed_roots = {}
+        self._skill_completed_files = {}
+        self._skill_current_owner = (
+            package_info.dependency_ref.get_unique_key()
+            if package_info.dependency_ref is not None
+            else "."
+        )
+        snapshots = self._hash_snapshots if self._hash_snapshots is not None else {}
+        if lockfile_root not in snapshots:
+            lockfile = LockFile.read(get_lockfile_path(lockfile_root))
+            snapshots[lockfile_root] = (
+                DeploymentLedgerCodec.deployed_file_hashes(lockfile) if lockfile else {}
+            )
+        self._skill_recorded_hashes = snapshots[lockfile_root]
 
         # Canonicalize only the root; preserve descendant links and caller metadata.
         package_info = copy(package_info)
@@ -1474,6 +1518,8 @@ class SkillIntegrator(BaseIntegrator):
                 links_resolved=0,
                 sub_skills_promoted=sub_skills_count,
                 target_paths=sub_deployed,
+                deployed_files=tuple(self._skill_files),
+                complete=self._skill_materialization_complete(project_root),
             )
 
         # Skip virtual FILE packages - they're individual files, not full packages
@@ -1628,6 +1674,8 @@ class SkillIntegrator(BaseIntegrator):
                 links_resolved=0,
                 sub_skills_promoted=sub_skills_count,
                 target_paths=sub_deployed,
+                deployed_files=tuple(self._skill_files),
+                complete=self._skill_materialization_complete(project_root),
             ),
             bin_paths,
             bin_skip_reason,
@@ -1639,25 +1687,22 @@ class SkillIntegrator(BaseIntegrator):
         bin_paths: list[Path],
         skip_reason: str | None = None,
     ) -> SkillIntegrationResult:
-        """Fold deployed plugin bin/manifest paths into a skill result.
+        """Return a new result including plugin bins without claiming a skill was created.
 
-        Pure: returns a NEW result via ``dataclasses.replace`` rather than
-        mutating the argument, so callers never observe surprise in-place
-        edits.  ``skill_created`` is intentionally left untouched -- deploying
-        executables is not the same as creating a skill, so reporting and
-        sync semantics stay honest.  When bins were deployed the result is no
-        longer "skipped" (work happened) and the paths are tracked for the
-        lockfile / uninstall manifest.  ``skip_reason`` records why a plugin
-        that ships bin/ was NOT deployed, for the install layer to surface.
+        Bin writes clear ``skill_skipped`` and retain deployment paths; a refusal
+        retains its reason. Neither supplies complete skill-materialization proof.
         """
         if not bin_paths and skip_reason is None:
             return result
         updates: dict = {}
         if bin_paths:
+            updates["complete"] = False
             updates["bin_deployed"] = len(bin_paths)
             updates["skill_skipped"] = False
             updates["target_paths"] = (result.target_paths or []) + bin_paths
+            updates["deployed_files"] = (*result.deployed_files, *bin_paths)
         if skip_reason is not None:
+            updates["complete"] = False
             updates["bin_skipped_reason"] = skip_reason
         return replace(result, **updates)
 
@@ -1674,37 +1719,13 @@ class SkillIntegrator(BaseIntegrator):
         skip_bin: bool = True,
         source_plan=None,
     ) -> tuple[list[Path], str | None]:
-        """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
+        """Deploy authorized legacy-plugin bin/ and manifest to user-scope Claude.
 
-        Only activates when ALL of:
-        - The package has a bin/ directory
-        - At least one Claude target that supports skills is active
-        - scope is InstallScope.USER (bin/ deploy is user-scope only, v1)
-        - policy does not deny the package
-
-        This realizes Claude Code's "skills-directory plugin" contract: a folder
-        under a skills directory containing ``.claude-plugin/plugin.json`` is
-        loaded as ``<name>@skills-dir`` and its root ``bin/`` is added to the
-        Bash tool PATH.  The contract is Claude-specific by design; other
-        harnesses have no equivalent, so only Claude targets are considered.
-
-        Each binary is tightened to user-only ``0o700``-style permissions
-        (owner read/write/execute; all group/other bits cleared) on POSIX
-        systems.  The deployed root is user-scoped (~/.claude/skills/), so
-        tighter-than-0o755 permissions are correct.
-
-        When *trust_bin* is ``None`` (no ``--trust-bin`` / ``--no-trust-bin``
-        flag), a prominent trust-posture warning is emitted after deployment
-        so the user is aware that executables are on Claude Code's PATH.
-        When *trust_bin* is ``True`` (``--trust-bin``), the warning is
-        suppressed.  ``False`` is never passed here (handled upstream by
-        the caller setting ``skip_bin=True``).
-
-        Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
-        ONLY when the package ships a bin/ but it could not be deployed for an
-        actionable reason ("project_scope", "no_claude_target"), so the install
-        layer can surface a hint.  Policy-deny and "no bin/ at all" return
-        ``None`` -- they are intentional, not traps.
+        Claude loads ``.claude-plugin/plugin.json`` as ``<name>@skills-dir``
+        and exposes bin/ on PATH. POSIX executables receive user-only permissions.
+        Warn unless explicit ``trust_bin=True`` consent was supplied; refusal
+        arrives through ``skip_bin``. Return paths plus an actionable skip reason
+        for project scope or missing Claude target, not for absent/denied binaries.
         """
         from apm_cli.core.scope import InstallScope
         from apm_cli.utils.path_security import validate_path_segments
@@ -1894,26 +1915,11 @@ class SkillIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         targets=None,
     ) -> dict[str, int]:
-        """Sync skill directories with currently installed packages.
+        """Sync recorded skill paths, or use legacy package-name orphan detection.
 
-        Derives skill prefixes dynamically from *targets* (or
-        ``KNOWN_TARGETS``) so user-scope paths like ``.copilot/skills/``
-        and ``.config/opencode/skills/`` are handled correctly.
-
-        When *managed_files* is provided, only removes skill directories
-        whose paths appear in the set.  Otherwise falls back to
-        npm-style orphan detection (derives expected names from installed
-        dependencies).
-
-        Args:
-            apm_package: APMPackage with current dependencies
-            project_root: Root directory of the project
-            managed_files: Set of relative paths known to be APM-managed
-            targets: Optional list of (scope-resolved) TargetProfile objects.
-                     When ``None``, uses ``KNOWN_TARGETS``.
-
-        Returns:
-            Dict with cleanup statistics
+        Scope-resolved ``targets`` supply skill prefixes; absent targets use the
+        catalog. An explicit managed set limits cleanup to those recorded paths.
+        Return removed-file and error counts.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
 

@@ -392,17 +392,35 @@ class LockfileBuilder:
                     dep.marketplace_plugin_name = previous.marketplace_plugin_name
                     dep.source_url = previous.source_url
                     dep.source_digest = previous.source_digest
+                    if (
+                        previous.constraint
+                        and previous.resolved_tag
+                        and previous.resolved_ref == dep.resolved_ref
+                        and previous.resolved_commit == dep.resolved_commit
+                        and not dep.constraint
+                    ):
+                        dep.constraint = previous.constraint
+                        dep.resolved_tag = previous.resolved_tag
+                        dep.version = previous.version
+                        dep.resolved_at = previous.resolved_at
 
         # Fresh discovery replaces the entire snapshot, including absent fields.
         if self.ctx.marketplace_provenance:
             for dep_key, prov in self.ctx.marketplace_provenance.items():
                 if dep_key in lockfile.dependencies:
-                    lockfile.dependencies[dep_key].discovered_via = prov.get("discovered_via")
-                    lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get(
-                        "marketplace_plugin_name"
-                    )
-                    lockfile.dependencies[dep_key].source_url = prov.get("source_url")
-                    lockfile.dependencies[dep_key].source_digest = prov.get("source_digest")
+                    dep = lockfile.dependencies[dep_key]
+                    dep.discovered_via = prov.get("discovered_via")
+                    dep.marketplace_plugin_name = prov.get("marketplace_plugin_name")
+                    dep.source_url = prov.get("source_url")
+                    dep.source_digest = prov.get("source_digest")
+                    if prov.get("constraint"):
+                        dep.constraint = prov.get("constraint")
+                    if prov.get("resolved_tag"):
+                        dep.resolved_tag = prov.get("resolved_tag")
+                    if prov.get("resolved_version"):
+                        dep.version = prov["resolved_version"]
+                    if prov.get("resolved_at"):
+                        dep.resolved_at = prov["resolved_at"]
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         # Partial operations merge untouched dependencies and their canonical

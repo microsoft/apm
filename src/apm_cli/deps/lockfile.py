@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -125,6 +126,29 @@ class LockfileFormatError(ValueError):
 
 class UnsupportedLockfileVersionError(LockfileFormatError):
     """Raised when a lockfile declares a version this client cannot read."""
+
+
+class LockfileConflictError(LockfileFormatError):
+    """Raised when a lockfile still contains git merge conflict markers."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(
+            f"{path} contains unresolved git merge conflict markers.\n"
+            "Resolve the conflict in that file or restore a known-good lockfile, "
+            "then retry your original command."
+        )
+
+
+# Git writes each marker at the start of a line, followed by a space and a label
+# (or nothing, for a bare ``=======`` separator). A separator alone is not
+# evidence of a conflict, so only the labelled markers are matched here.
+_CONFLICT_MARKER_RE = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: |$)", re.MULTILINE)
+
+
+def has_conflict_markers(text: str) -> bool:
+    """Return True when *text* contains a git merge conflict marker at line start."""
+    return _CONFLICT_MARKER_RE.search(text) is not None
 
 
 def require_supported_lockfile_version(data: object) -> str:
@@ -863,9 +887,46 @@ class LockFile:
         ):
             self.lockfile_version = "2"
 
-    def get_dependency(self, key: str) -> LockedDependency | None:
-        """Get a dependency by its unique key."""
+    def get_dependency(
+        self,
+        key: str,
+        *,
+        marketplace_index: dict[tuple[str, str], LockedDependency | None] | None = None,
+    ) -> LockedDependency | None:
+        """Look up a key, using a fresh provenance snapshot for marketplace keys.
+
+        Batch consumers can supply one snapshot to keep lookup linear overall.
+        No index is cached on this mutable lockfile.
+        """
+        if key.startswith("_marketplace/"):
+            parts = key.split("/", 2)
+            if len(parts) == 3:
+                index = self.marketplace_index() if marketplace_index is None else marketplace_index
+                return index.get((parts[1], parts[2]))
         return self.dependencies.get(key)
+
+    def marketplace_index(self) -> dict[tuple[str, str], LockedDependency | None]:
+        """Index recorded discovery labels, with None for ambiguous associations.
+
+        These labels associate declarations with locked coordinates; they are
+        not a catalog trust identity and never authorize a catalog refresh.
+        """
+        index: dict[tuple[str, str], LockedDependency | None] = {}
+        for dep in self.dependencies.values():
+            if dep.discovered_via and dep.marketplace_plugin_name:
+                pair = (dep.discovered_via, dep.marketplace_plugin_name)
+                index[pair] = None if pair in index else dep
+        return index
+
+    def get_dependency_by_marketplace(
+        self, marketplace_name: str, plugin_name: str
+    ) -> LockedDependency | None:
+        """Find a locked dependency by its marketplace provenance.
+
+        Fails closed (returns None) if no matching dependency is found or if
+        multiple rows share the same marketplace provenance.
+        """
+        return self.marketplace_index().get((marketplace_name, plugin_name))
 
     def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
         """Rename one locally deployed path and carry its content hash."""
@@ -875,7 +936,7 @@ class LockFile:
 
     def has_dependency(self, key: str) -> bool:
         """Check if a dependency exists."""
-        return key in self.dependencies
+        return self.get_dependency(key) is not None
 
     def get_all_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies sorted by depth then repo_url."""
@@ -1107,11 +1168,14 @@ class LockFile:
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
-        """Read lock file from disk. Returns None if not exists or corrupt."""
+        """Read lock file from disk. Returns None when the file does not exist."""
         if not path.exists() and not path.is_symlink():
             return None
         try:
-            return cls.from_yaml(path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            if has_conflict_markers(text):
+                raise LockfileConflictError(path)
+            return cls.from_yaml(text)
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:

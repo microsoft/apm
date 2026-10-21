@@ -7,9 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.agent_integrator import KIRO_AGENT_ALLOWED_TOOLS, AgentIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import (
@@ -19,7 +22,7 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
-from apm_cli.utils.diagnostics import CATEGORY_ERROR, DiagnosticCollector
+from apm_cli.utils.diagnostics import CATEGORY_ERROR, CATEGORY_WARNING, DiagnosticCollector
 
 
 def _make_package_info(
@@ -66,7 +69,7 @@ def test_kiro_target_profile_matches_ratified_layout() -> None:
     assert target.detect_by_dir is True
     assert target.user_supported is True
     assert target.user_root_dir == ".kiro"
-    assert set(target.primitives) == {"agents", "instructions", "skills", "hooks"}
+    assert set(target.primitives) == {"agents", "instructions", "prompts", "skills", "hooks"}
 
     agents = target.primitives["agents"]
     assert agents.subdir == "agents"
@@ -882,3 +885,246 @@ def test_kiro_agents_stale_managed_file_removed_when_tools_become_incompatible(
         "sync_for_target must remove the stale APM-managed file"
     )
     assert not stale_path.exists(), "Stale managed Kiro agent must be removed after sync"
+
+
+# ---------------------------------------------------------------------------
+# Kiro CLI prompts (#3216) - .kiro/prompts/<name>.md
+# ---------------------------------------------------------------------------
+
+
+def test_kiro_prompts_deploy_to_kiro_prompts_dir(tmp_path: Path) -> None:
+    """Prompts are deployed to .kiro/prompts/ when the kiro target is used."""
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "pkg"
+    apm_prompts = package_dir / ".apm" / "prompts"
+    apm_prompts.mkdir(parents=True)
+    (apm_prompts / "review.prompt.md").write_text(
+        "---\ndescription: Review code\n---\n\n# Review\n\nReview the code.\n",
+        encoding="utf-8",
+    )
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".kiro" / "prompts" / "review.md"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "\n# Review\n\nReview the code.\n"
+
+
+def test_kiro_prompts_skip_when_no_kiro_dir(tmp_path: Path) -> None:
+    """Prompt integration is skipped when .kiro/ does not exist."""
+    package_dir = tmp_path / "pkg"
+    apm_prompts = package_dir / ".apm" / "prompts"
+    apm_prompts.mkdir(parents=True)
+    (apm_prompts / "review.prompt.md").write_text(
+        "---\ndescription: Review\n---\n\n# Review\n",
+        encoding="utf-8",
+    )
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 0
+    assert not (tmp_path / ".kiro").exists()
+
+
+def test_kiro_prompts_primitive_mapping(tmp_path: Path) -> None:
+    """Verify the kiro target profile has a prompts primitive mapping."""
+    target = KNOWN_TARGETS["kiro"]
+    assert "prompts" in target.primitives
+    mapping = target.primitives["prompts"]
+    assert mapping.subdir == "prompts"
+    assert mapping.extension == ".md"
+    assert mapping.format_id == "kiro_prompt"
+    assert mapping.output_compare is False
+
+
+def test_kiro_prompts_sync_removes_managed_file(tmp_path: Path) -> None:
+    """sync_for_target removes APM-managed Kiro prompt files."""
+    (tmp_path / ".kiro" / "prompts").mkdir(parents=True)
+    managed_prompt = tmp_path / ".kiro" / "prompts" / "obsolete.md"
+    managed_prompt.write_text(
+        "---\ndescription: Old\n---\n\n# Old\n",
+        encoding="utf-8",
+    )
+
+    pkg = APMPackage(
+        name="test-pkg",
+        version="1.0.0",
+        package_path=tmp_path,
+        source="github.com/test/test-pkg",
+    )
+    managed_files = {".kiro/prompts/obsolete.md"}
+
+    result = PromptIntegrator().sync_for_target(
+        KNOWN_TARGETS["kiro"],
+        pkg,
+        tmp_path,
+        managed_files=managed_files,
+    )
+
+    assert result["files_removed"] == 1
+    assert not managed_prompt.exists()
+
+
+def test_kiro_prompts_coexist_with_agents_and_hooks(tmp_path: Path) -> None:
+    """Kiro prompts coexist with agents and hooks under .kiro/."""
+    kiro_dir = tmp_path / ".kiro"
+    kiro_dir.mkdir()
+    (kiro_dir / "agents").mkdir()
+    (kiro_dir / "hooks").mkdir()
+
+    package_dir = tmp_path / "pkg"
+    apm_prompts = package_dir / ".apm" / "prompts"
+    apm_prompts.mkdir(parents=True)
+    (apm_prompts / "review.prompt.md").write_text(
+        "---\ndescription: Review\n---\n\n# Review\n",
+        encoding="utf-8",
+    )
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    assert (tmp_path / ".kiro" / "prompts" / "review.md").exists()
+    # Existing agents and hooks directories are untouched
+    assert (tmp_path / ".kiro" / "agents").exists()
+    assert (tmp_path / ".kiro" / "hooks").exists()
+
+
+@pytest.fixture
+def kiro_prompt_source(tmp_path: Path) -> Path:
+    """Author one real source prompt outside the selected native target."""
+    (tmp_path / ".kiro").mkdir()
+    source = tmp_path / "pkg" / ".apm" / "prompts" / "review.prompt.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("---\nname: ignored\ndescription: Review\n---\nReview ${1}\n")
+    return source
+
+
+def _install_prompt(tmp_path: Path, **kwargs):
+    return PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"], _make_package_info(tmp_path / "pkg"), tmp_path, **kwargs
+    )
+
+
+def test_kiro_prompt_body_arguments_and_loss_diagnostics(
+    tmp_path: Path, kiro_prompt_source: Path
+) -> None:
+    body = "\nReview ${1} ${10} $ARGUMENTS ${@} ${input:name}\n\n"
+    kiro_prompt_source.write_bytes(
+        ("\ufeff---\nname: ignored\nmodel: ignored\ntools: [read]\n---\n" + body)
+        .replace("\n", "\r\n")
+        .encode("utf-8")
+    )
+    diagnostics = DiagnosticCollector()
+    result = _install_prompt(tmp_path, diagnostics=diagnostics)
+    assert result.files_integrated == 1
+    assert (tmp_path / ".kiro/prompts/review.md").read_bytes() == body.encode()
+    assert not (tmp_path / ".kiro/prompts/ignored.md").exists()
+    warnings = diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(warnings) == 2
+    assert "model, tools" in warnings[0].message
+    assert "${input:name}" in warnings[1].message
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_kiro_prompt_collision_adoption_and_force(
+    tmp_path: Path, kiro_prompt_source: Path, force: bool
+) -> None:
+    target = tmp_path / ".kiro/prompts/review.md"
+    target.parent.mkdir()
+    target.write_text("User-authored prompt\n")
+    result = _install_prompt(tmp_path, force=force)
+    assert result.files_integrated == int(force)
+    assert result.files_skipped == int(not force)
+    assert target.read_text() == ("Review ${1}\n" if force else "User-authored prompt\n")
+    target.write_text("Review ${1}\n")
+    before = target.stat().st_mtime_ns
+    adopted = _install_prompt(tmp_path)
+    assert adopted.files_adopted == 1
+    assert adopted.target_paths == [target]
+    assert target.stat().st_mtime_ns == before
+
+
+@pytest.mark.parametrize(
+    "content", ["---\nmodel: [\n---\nBad\n", "---\ninterval: daily\n---\nWorkflow\n"]
+)
+def test_kiro_prompt_rejects_invalid_or_workflow_source_before_adoption(
+    tmp_path: Path, kiro_prompt_source: Path, content: str
+) -> None:
+    kiro_prompt_source.write_text(content)
+    target = tmp_path / ".kiro/prompts/review.md"
+    target.parent.mkdir()
+    target.write_text(content)
+    result = _install_prompt(tmp_path, force=True)
+    assert result.files_skipped == 1
+    assert result.files_adopted == 0
+    assert result.target_paths == []
+    assert target.read_text() == content
+
+
+@pytest.mark.parametrize("component", ["root", "prompts", "file", "internal-file", "source"])
+def test_kiro_prompt_rejects_symlink_writes_even_with_force(
+    tmp_path: Path, kiro_prompt_source: Path, component: str
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "review.md"
+    sentinel.write_text("untouched\n")
+    target = tmp_path / ".kiro/prompts/review.md"
+    if component == "root":
+        (tmp_path / ".kiro").rmdir()
+        (tmp_path / ".kiro").symlink_to(outside, target_is_directory=True)
+    elif component == "prompts":
+        target.parent.symlink_to(outside, target_is_directory=True)
+    elif component in {"file", "internal-file"}:
+        target.parent.mkdir()
+        if component == "internal-file":
+            sentinel = target.parent / "user.md"
+            sentinel.write_text("untouched\n")
+        target.symlink_to(sentinel)
+    else:
+        kiro_prompt_source.unlink()
+        kiro_prompt_source.symlink_to(sentinel)
+    result = _install_prompt(tmp_path, force=True)
+    assert result.files_integrated == 0
+    assert result.target_paths == []
+    assert sentinel.read_text() == "untouched\n"
+    assert not (outside / "prompts").exists()
+
+
+def test_kiro_prompt_resolves_body_links_and_preserves_copilot_source(
+    tmp_path: Path, kiro_prompt_source: Path
+) -> None:
+    from urllib.parse import unquote, urlparse
+
+    content = "---\ndescription: Review\n---\n[Guide](../../guide.md)\n"
+    kiro_prompt_source.write_text(content)
+    (tmp_path / "pkg/guide.md").write_text("Guide\n")
+    result = _install_prompt(tmp_path)
+    assert result.links_resolved == 1
+    deployed = (tmp_path / ".kiro/prompts/review.md").read_text()
+    link = deployed.split("](", 1)[1].split(")", 1)[0]
+    parsed = urlparse(link)
+    assert parsed.scheme == ""
+    assert parsed.netloc == ""
+    assert (tmp_path / ".kiro/prompts" / unquote(parsed.path)).resolve() == (
+        tmp_path / "pkg/guide.md"
+    ).resolve()
+    PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["copilot"], _make_package_info(tmp_path / "pkg"), tmp_path
+    )
+    copilot = (tmp_path / ".github/prompts/review.prompt.md").read_text()
+    assert copilot.startswith("---\ndescription: Review\n---\n")
+    assert kiro_prompt_source.read_text() == content

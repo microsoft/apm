@@ -35,6 +35,7 @@ resolves it, validates it, and appends it to `dependencies.apm:` in
 apm install microsoft/apm-sample-package#v1.0.0
 apm install github/awesome-copilot/skills/review-and-refactor
 apm install ./packages/my-shared-skills        # local path
+apm install ./ai/agents/xyz.agent.md            # one local primitive
 apm install --dev acme/internal-debug-agents   # devDependencies
 ```
 
@@ -64,6 +65,17 @@ Supported reference forms: `owner/repo` shorthand (with optional
 virtual subdirectory paths into a monorepo, single-file references,
 and local paths starting with `./`, `../`, or `/`. For private hosts
 and tokens, see [Authentication](../authentication/).
+
+Local files must end in `.agent.md`, `.instructions.md`, or `.prompt.md`.
+APM copies only the selected file into an ordinary package, then applies the
+same policy, rendering, ownership, update, and removal flow as other packages.
+It does not link to the source or collect neighboring assets. Use a directory
+package with `apm.yml` when the primitive needs companion files.
+
+Relative paths are anchored to the manifest that declares them, including
+nested local packages. `--root` redirects output, not source lookup. With
+`--global`, use an absolute path or `~/...`; project-relative paths remain
+unsupported. Select a real file, not a file symlink.
 
 ## What `apm install` does
 
@@ -181,7 +193,7 @@ runnable scripts your manifest exposes (see
 ## Useful flags
 
 ```bash
-apm install --dry-run                  # resolve and print the plan; no writes
+apm install --dry-run                  # preview locally known dependencies
 apm install --target claude,cursor     # only deploy to these harnesses
 apm install --exclude gemini           # deploy to all targets except gemini
 apm install --only apm                 # skip MCP server integration this run
@@ -205,8 +217,11 @@ For project-scope installs, targets that require
 print a hint when dependency instructions require `apm compile`. The hint names
 the root context files that compile will update.
 
-For the full flag reference, run `apm install --help` or see
-[CLI commands](../../reference/cli/install/).
+`--dry-run` includes required indirect APM dependencies when metadata is
+available locally. Offline gaps make the preview incomplete and suppress
+orphan-removal predictions; stale-file integration cleanup is not previewed.
+See [preview limits](../../reference/cli/install/#preview-without-writing)
+and the full flag reference, or run `apm install --help`.
 
 ## When things go wrong
 

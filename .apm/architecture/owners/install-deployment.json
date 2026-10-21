@@ -2,6 +2,17 @@
   "version": 1,
   "owners": [
     {
+      "id": "single-file-package-materialization",
+      "decision": "Single-file dependency package layout and local source admission for replacement, audit replay and frozen hash images",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, compute_local_package_hash); DependencyReference owns suffix vocabulary",
+      "selectors": [
+        "src/apm_cli/deps/virtual_file.py",
+        "src/apm_cli/deps/github_downloader.py",
+        "src/apm_cli/install/phases/local_content.py"
+      ],
+      "guards": ["install-deployment-single-file-materialization"]
+    },
+    {
       "id": "orphan-package-selection",
       "decision": "Declaration-aware selection of orphaned installed packages",
       "owner": "commands/_helpers.py (_find_orphaned_packages)",
@@ -24,7 +35,7 @@
     },
     {
       "id": "legacy-mcp-ownership-key-migration",
-      "decision": "Legacy MCP target ownership migration and adoption",
+      "decision": "MCP native connection baseline comparison and safe removal, plus legacy target ownership migration and adoption",
       "owner": "install/mcp/ownership.py",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
       "guards": ["install-deployment-mcp-ownership-migration"]
@@ -43,7 +54,7 @@
     {
       "id": "target-scoped-deployed-file-contraction",
       "decision": "Target-scoped deployed-file contraction",
-      "owner": "install/manifest_reconcile.py (reconcile_target_deployed_files)",
+      "owner": "install/manifest_reconcile.py (reconcile_target_deployed_files, surviving_deployed_paths delegates claim/target decisions to DeploymentReconciler)",
       "selectors": ["src/apm_cli/install/manifest_reconcile.py"],
       "guards": ["install-deployment-target-file-contraction"]
     },
@@ -69,16 +80,26 @@
       "guards": ["install-deployment-frozen-mutation-eligibility"]
     },
     {
+      "id": "materialized-manifest-evidence",
+      "decision": "Acquired manifest metadata snapshot",
+      "owner": "install/source_helpers.py (materialized_manifest_snapshot) delegates manifest interpretation to APMPackage.from_mapping; existing lock construction retains resolver version precedence",
+      "selectors": [
+        "src/apm_cli/install/source_helpers.py",
+        "src/apm_cli/install/sources.py"
+      ],
+      "guards": ["install-deployment-manifest-snapshot"]
+    },
+    {
       "id": "prospective-dry-run-install-plan",
-      "decision": "Prospective dry-run install plan",
-      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan)",
-      "selectors": ["src/apm_cli/install/dry_run_plan.py"],
+      "decision": "Prospective dry-run install plan and interpreted package selection",
+      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan) delegates selector identity and subtree filtering to install/package_selection.py and offline dependency closure to deps/apm_resolver.py",
+      "selectors": ["src/apm_cli/install/dry_run_plan.py", "src/apm_cli/install/package_selection.py"],
       "guards": ["install-deployment-prospective-dry-run-plan"]
     },
     {
       "id": "authorized-deployable-source-paths",
       "decision": "Authorized deployable source paths",
-      "owner": "install/deployable_source_plan.py (DeployableSourcePlan)",
+      "owner": "install/deployable_source_plan.py (DeployableSourcePlan, including explicit skill-source discovery completeness)",
       "selectors": ["src/apm_cli/install/deployable_source_plan.py"],
       "guards": ["install-deployment-source-plan"]
     },
@@ -123,8 +144,11 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (see integrators.instructions.md)",
-      "selectors": ["src/apm_cli/integration/base_integrator.py"],
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; see integrators.instructions.md)",
+      "selectors": [
+        "src/apm_cli/integration/base_integrator.py",
+        "src/apm_cli/install/services.py"
+      ],
       "guards": ["install-deployment-base-integrator"]
     },
     {

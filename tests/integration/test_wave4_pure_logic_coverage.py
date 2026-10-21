@@ -479,13 +479,49 @@ class TestLockfileSatisfiesManifest:
         assert len(reasons) == 1
         assert "missing" in reasons[0]
 
-    def test_local_deps_skipped(self) -> None:
-        from apm_cli.install.plan import lockfile_satisfies_manifest
+    @pytest.mark.parametrize(
+        "baseline", ["missing-entry", "missing-hash", "empty-hash", "wrong-source", "valid"]
+    )
+    def test_local_deps_require_locked_evidence(self, baseline: str) -> None:
+        """Require local locked evidence without mutating the compared inputs."""
+        from copy import deepcopy
 
-        lockfile = _FakeLockFile({})
-        dep = _FakeDepRef(is_local=True, local_path="./local")
-        satisfied, _reasons = lockfile_satisfies_manifest(lockfile, [dep])
-        assert satisfied is True
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.install.plan import lockfile_satisfies_manifest
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        lockfile = LockFile()
+        dep = DependencyReference(repo_url="local", local_path="./local")
+        dep.is_local = True
+        if baseline != "missing-entry":
+            content_hash = {"missing-hash": None, "empty-hash": ""}.get(
+                baseline, "sha256:" + "a" * 64
+            )
+            lockfile.add_dependency(
+                LockedDependency(
+                    repo_url="./local",
+                    source="git" if baseline == "wrong-source" else "local",
+                    local_path="./local",
+                    content_hash=content_hash,
+                )
+            )
+            assert list(lockfile.dependencies) == [dep.get_unique_key()]
+        before = deepcopy((lockfile, dep))
+
+        satisfied, reasons = lockfile_satisfies_manifest(lockfile, [dep])
+
+        assert (lockfile, dep) == before
+        if baseline == "valid":
+            assert satisfied is True
+            assert reasons == []
+        else:
+            assert satisfied is False
+            expected = (
+                "  - ./local is declared in apm.yml but missing from apm.lock.yaml"
+                if baseline == "missing-entry"
+                else "  - local dependency './local' has no locked content hash"
+            )
+            assert reasons == [expected]
 
 
 class TestDisplayName:

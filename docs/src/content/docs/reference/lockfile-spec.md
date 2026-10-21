@@ -229,6 +229,17 @@ are written by `apm install`, `apm prune`, and related commands.
 
 Each item in `dependencies` describes one resolved package.
 
+Marketplace semver selections reuse the Git-semver fields: `constraint`,
+`resolved_tag`, and `version` record the requested selector, selected tag, and
+selected version. Here `version` comes from the publisher's tag pattern, not
+the package's display version. `resolved_at` records the resolution's UTC
+timestamp and is advisory, never an audit or replay tie-breaker.
+`resolved_ref` agrees with `resolved_tag`, and
+`resolved_commit` pins the installed bytes. Audit requires this locked evidence
+for version selections; it neither guesses a tag pattern nor re-resolves the
+catalog. `discovered_via` + `marketplace_plugin_name` associate a declaration
+with one locked coordinate, not a durable catalog trust identity.
+
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
@@ -241,7 +252,7 @@ Each item in `dependencies` describes one resolved package.
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
 | `resolved_commit` | string | no | Exact 40-char commit SHA installed. The pin. |
 | `name` | string | no | Package name as declared in the dependency's own `apm.yml` at resolution time. For `package_type: claude_skill`, the name comes from `SKILL.md` frontmatter with the directory name as fallback. **SELF-ASSERTED** author-claim metadata -- NOT integrity-verified and MUST NOT be used for trust decisions or identity keying. Always cross-reference `repo_url` + `resolved_commit` (or `resolved_hash`) for provenance. Omitted when absent. |
-| `version` | string | no | Resolved package version. For registry entries: the exact version selected from the registry for reinstall; `resolved_hash` remains the integrity anchor. For git/local entries: the `version` field from the dependency's `apm.yml` at resolution time (display/inventory metadata only -- replay always uses `resolved_ref`/`resolved_commit`). For `package_type: claude_skill` (which has no `apm.yml`), the value is always `unknown`. For git-semver entries: the resolved semver version. **SELF-ASSERTED** for git/local entries; see `name` boundary note above. |
+| `version` | string | no | Resolved package version. For registry entries: the exact version selected from the registry for reinstall; `resolved_hash` remains the integrity anchor. For Git-semver selections, including marketplace object-form `version`, this is the selected semver recorded with `constraint` and `resolved_tag`. Otherwise Git/local entries carry the dependency's `apm.yml` version as display/inventory metadata, or `unknown` for `package_type: claude_skill` without `apm.yml`. Replay uses `resolved_ref`/`resolved_commit`, not inventory versions. Inventory metadata is **SELF-ASSERTED**; see `name` above. |
 | `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
@@ -264,7 +275,7 @@ Each item in `dependencies` describes one resolved package.
 | `source_digest` | string | no | `sha256:<hex>` digest of the hosted `marketplace.json` bytes used for resolution. |
 | `is_insecure` | bool | no | `true` when the source URL was `http://`. |
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
-| `constraint` | string | git-source semver only | The original semver range from `apm.yml` (`^1.2.0`, `~1.4`). Present when `ref:` was a range; used by drift detection so a manifest range vs. a locked tag (`v1.5.3`) is not a false positive, and by lockfile replay to pin the resolved tag deterministically across installs. |
+| `constraint` | string | git-source semver only | The original semver selector from Git `ref:` or marketplace object-form `version` in `apm.yml` (`^1.2.0`, `~1.4`, `1.2.3`). Together with `resolved_tag` and selected `version`, distinguishes a resolved selection from package inventory metadata. Replay pins the selected tag and commit rather than re-resolving the selector. |
 | `resolved_tag` | string | git-source semver or SHA-pin updates | The concrete annotated git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint` or justified the latest full-SHA revision-pin update. |
 | `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution. Surfaces "how stale is this pin?" in `apm why`. |
 | `declared_license` | string | no | The license the package *manifest declares* (`license:` in `apm.yml`, or `license` in a `plugin.json`), recorded verbatim at resolve time and syntax-validated offline against the bundled SPDX id set. An author **claim**, not a conclusion from `LICENSE` text -- APM never reads the license file. Omitted when undeclared (absence means unknown; no sentinel is stored). Surfaced by `apm lock export`. |
@@ -444,6 +455,15 @@ malformed container fields, and invalid deployment rows fail closed before APM
 constructs lock state. Pre-versioned legacy files migrate as v1 inputs. Fix or
 remove other invalid files explicitly; APM does not silently replace them with
 an empty lockfile.
+
+A lockfile left with unresolved git merge conflict markers (`<<<<<<<`,
+`>>>>>>>`, or `|||||||` at the start of a line) is reported as a merge conflict
+rather than a YAML scanner error. Commands that require the lockfile name the
+file and the cause, and direct you to resolve the conflict or restore a
+known-good lockfile before retrying your original command. APM does not
+discard, rewrite, or re-resolve the conflicted file. Preview and best-effort
+readers retain their existing exit behavior. A bare `=======` separator is
+not treated as a conflict marker. See [manual repair guidance](../../troubleshooting/install-failures/#merge-conflict-markers-in-the-lockfile).
 
 ## Example
 

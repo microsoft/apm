@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.install.errors import AuthenticationError
+from apm_cli.install.errors import AuthenticationError, FrozenInstallError
 from apm_cli.install.pipeline import _preflight_auth_check, _run_phase
 
 # ---------------------------------------------------------------------------
@@ -360,8 +360,9 @@ class TestRunInstallPipelineExceptionContracts:
         pkg.get_dev_apm_dependencies.return_value = []
         return pkg
 
-    def test_authentication_error_re_raised(self) -> None:
-        """AuthenticationError must propagate (not get wrapped in RuntimeError)."""
+    @pytest.mark.parametrize("error_type", [AuthenticationError, FrozenInstallError])
+    def test_typed_install_error_re_raised(self, error_type: type[Exception]) -> None:
+        """Typed install refusals propagate instead of becoming generic RuntimeError."""
         from apm_cli.install.pipeline import run_install_pipeline
 
         pkg = self._make_pkg_with_deps()
@@ -389,11 +390,11 @@ class TestRunInstallPipelineExceptionContracts:
                     resolve_called[0] = True
                     ctx.deps_to_install = [MagicMock()]
                     return None
-                raise AuthenticationError("auth failed")
+                raise error_type("install refused")
 
             mock_phase.side_effect = _phase_side
 
-            with pytest.raises(AuthenticationError):
+            with pytest.raises(error_type, match="install refused"):
                 run_install_pipeline(pkg, target="claude")
 
     def test_generic_exception_wrapped_in_runtime_error(self) -> None:

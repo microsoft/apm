@@ -67,14 +67,19 @@ requirements:
     keyword: MUST
     section: "4.3.2"
     conformance_class: consumer
+    fixture: tests/fixtures/spec-conformance/manifest/dependency-schema-cases.json
+    notes: "conflicting-git-id exercises rejection by the corrected schema and CLI loader; Git plus path is not an identity conflict"
   - id: req-mf-012
     keyword: MUST
     section: "4.3.6"
     conformance_class: consumer
+    fixture: tests/fixtures/spec-conformance/manifest/dependency-schema-cases.json
+    notes: "self-defined MCP cases exercise missing transport, command and URL, whitespace commands without args, and explicit empty args acceptance"
   - id: req-mf-013
     keyword: MUST
     section: "4.5"
     conformance_class: consumer
+    notes: "Environment references use the target-native syntax, including {env:VAR} for OpenCode."
   - id: req-mf-014
     keyword: MUST
     section: "4.2.3"

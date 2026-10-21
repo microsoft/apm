@@ -65,7 +65,7 @@ parser. The supported forms:
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
-| Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
+| Local path | `./packages/shared` or `./ai/agents/xyz.agent.md` | Directory package or one `.agent.md`, `.instructions.md`, or `.prompt.md` file on disk. |
 | Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name>, type: gitlab }` | Aliases, nested groups, monorepo subpaths, bespoke GitLab hosts, or anything string forms cannot express. |
 | Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). The publisher controls the tag naming convention. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
@@ -101,6 +101,7 @@ dependencies:
 
     # Local: filesystem path (development only)
     - path: ./packages/shared-skills
+    - path: ./ai/agents/xyz.agent.md
 
     # Remote monorepo sibling: inside owner/mono/packages/frontend/apm.yml
     - path: ../shared
@@ -138,6 +139,17 @@ path stays inside that same cloned repo. APM expands it to the parent's remote
 host/repo/ref and downloads the sibling from the same origin. Absolute paths,
 paths that escape the repo root, and cross-repo local paths are rejected.
 This is for same-repo monorepo siblings, not general workspace semantics.
+
+Local single-file entries also work as strings, for example
+`- ./ai/agents/xyz.agent.md`. The file is copied, not linked; sibling assets
+and dependencies mentioned in prose are not collected. Use a directory package
+for bundles. Normal install accepts deliberate source edits and records the
+copied package's content hash. `apm install --frozen` verifies that same image
+against the locked hash; changed bytes fail without replacing the deployment
+or rewriting the lockfile. A missing, unreadable, unsupported, or invalid source
+also fails rather than removing its previously deployed output.
+Use normal `apm install` to refresh local edits. `apm update` compares dependency
+refs; do not use it as a local-content refresh.
 
 Use `type: gitlab` only on `git` object entries for self-managed GitLab
 instances whose hostname does not make the platform obvious:

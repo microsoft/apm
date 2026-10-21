@@ -457,7 +457,7 @@ def test_required_codex_runtime_headers_follow_declaration_changes(
             "mcp.example.invalid",
             "/mcp",
         )
-        rendered.pop("id")
+        assert "id" not in rendered
         assert rendered == expected_fields
         assert document["model"] == "user-selected-model"
         assert document["mcp_servers"]["user-authored"] == {"command": "user-command"}
@@ -504,7 +504,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     apm_binary_path: Path,
     scope: str,
 ) -> None:
-    """An unchanged legacy render is not migrated; a source rewrite repairs it."""
+    """Legacy headers and native edits survive until the operator reconciles them."""
     scenario = _new_scenario(tmp_path / "codex-headers", apm_binary_path)
     consumer, manifest_path, config_path, opposite_path, args = _codex_header_lifecycle(
         scenario, scope
@@ -522,7 +522,8 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
         environment=scenario.environment,
         scenario_id="codex-legacy-header-install",
     )
-    # Seed the bytes emitted by the old formatter, retaining real install ownership.
+    baseline = config_path.read_bytes()
+    # Old header spelling plus a manual addition is not a verifiable managed baseline.
     legacy = tomlkit.parse(config_path.read_text(encoding="utf-8"))
     server = legacy["mcp_servers"]["runtime-headers"]
     del server["env_http_headers"]
@@ -530,13 +531,16 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     server["startup_timeout_sec"] = 91
     config_path.write_text(tomlkit.dumps(legacy), encoding="utf-8")
     before = _codex_header_snapshot(manifest_path, config_path)
-    _run_success(
-        scenario,
-        consumer,
-        args,
-        environment=scenario.environment,
-        scenario_id="codex-legacy-header-unchanged-noop",
-    )
+    for flags in ((), ("--force",), ("--frozen",)):
+        result = scenario.runner.run(
+            (*args, *flags),
+            cwd=consumer.root,
+            env=scenario.environment,
+            scenario_id="codex-legacy-header-unchanged-conflict",
+        )
+        assert result.returncode != 0, _result_evidence(result)
+        assert "conflicts with the existing codex" in result.stdout
+        assert _codex_header_snapshot(manifest_path, config_path) == before
     unchanged = _codex_header_snapshot(manifest_path, config_path)
     assert unchanged.files == before.files
     assert unchanged.lockfile_bytes == before.lockfile_bytes
@@ -545,6 +549,21 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     assert opposite_path.read_bytes() == opposite_bytes
 
     _rewrite_codex_headers(manifest_path, {"X-Runtime": "${env:APM_TEST_HEADER}"})
+    changed = _codex_header_snapshot(manifest_path, config_path)
+    for flags in ((), ("--force",)):
+        result = scenario.runner.run(
+            (*args, *flags),
+            cwd=consumer.root,
+            env=scenario.environment,
+            scenario_id="codex-legacy-header-declaration-conflict",
+        )
+        assert result.returncode != 0, _result_evidence(result)
+        assert "conflicts with the existing codex" in result.stdout
+        assert _codex_header_snapshot(manifest_path, config_path) == changed
+        assert opposite_path.read_bytes() == opposite_bytes
+        assert unrelated_file.read_bytes() == unrelated_bytes
+
+    config_path.write_bytes(baseline)
     _run_success(
         scenario,
         consumer,
@@ -558,7 +577,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     assert "http_headers" not in server
     assert "bearer_token_env_var" not in server
     assert "env" not in server
-    # A changed declaration replaces its selected entry, including manual additions.
+    # Only the operator removed the manual addition before this managed update.
     assert "startup_timeout_sec" not in server
     assert scenario.environment["APM_TEST_HEADER"] not in config_path.read_text(encoding="utf-8")
     assert repaired["model"] == "user-selected-model"
@@ -1057,6 +1076,51 @@ def test_required_lsp_only_dry_run_reports_plan_without_writing_state(
     assert after.file("apm.yml", root_id="apm-home").kind == "missing"
     assert after.file("config.json", root_id="apm-home").kind == "missing"
     _assert_same_state(before, after)
+
+
+def test_required_conflicted_lockfile_preserves_durable_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Required readers fail and preview warns without repairing conflicted state."""
+    scenario = _new_scenario(tmp_path / "conflicted-lockfile", apm_binary_path)
+    source = _publish(scenario, "conflict-kit", skill="preserved")
+    consumer = scenario.consumers.create(
+        "conflict-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="conflict-seed",
+    )
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (PurePosixPath("apm_modules"),),
+    }
+    before = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    lockfile = consumer.root / "apm.lock.yaml"
+    good_bytes = lockfile.read_bytes()
+    conflicted = good_bytes + b"\n<<<<<<< HEAD\n=======\n>>>>>>> feature\n"
+    for suffix, exit_code in (((), 1), (("--frozen",), 1), (("--dry-run",), 0)):
+        lockfile.write_bytes(conflicted)
+        result = scenario.runner.run(
+            (*_INSTALL_ARGS, *suffix),
+            cwd=consumer.root,
+            env=source.environment,
+            scenario_id=f"conflict-{suffix[0] if suffix else 'install'}",
+        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == exit_code, _result_evidence(result)
+        assert "unresolved git merge conflict markers" in output
+        assert "".join(str(lockfile).split()) in "".join(output.split())
+        assert "retry your original command" in output
+        assert lockfile.read_bytes() == conflicted
+        # The semantic snapshot requires parseable YAML. Assert conflicted bytes
+        # first, then restore only the test fixture to compare all other state.
+        lockfile.write_bytes(good_bytes)
+        _assert_same_state(before, LifecycleStateSnapshot.capture(consumer.root, **capture_args))
 
 
 def test_required_unknown_host_qualified_virtual_install_fails_before_state_write(
@@ -1724,6 +1788,100 @@ def test_required_cursor_metadata_survives_install_compile_update(
         )
         for relative, data in sentinels.items():
             assert (consumer.root / relative).read_bytes() == data
+
+
+@pytest.mark.parametrize("with_native_group", [False, True], ids=["standalone", "merged"])
+def test_required_claude_untyped_hook_upgrade_preserves_ownership_and_converges(
+    tmp_path: Path, apm_binary_path: Path, with_native_group: bool
+) -> None:
+    """Real installs heal pre-fix handlers without executing or claiming user hooks."""
+    scenario = _new_scenario(tmp_path / "claude-untyped", apm_binary_path)
+    source = _publish(scenario, "flat-kit", hook_command="echo native")
+    hook_root = source.repository.worktree / ".apm" / "hooks"
+    if not with_native_group:
+        (hook_root / "pretool.json").unlink()
+    command = "echo must-not-run > hook-executed"
+    flat = {"command": command, "matcher": "Write", "timeout": 10}
+    (hook_root / "flat.json").write_text(
+        json.dumps({"hooks": {"preToolUse": [flat]}}), encoding="ascii"
+    )
+    commit = scenario.repositories.commit(source.repository, message="publish untyped flat hook")
+    consumer = scenario.consumers.create(
+        "claude-consumer",
+        dependencies=({**source.dependency, "ref": commit.sha},),
+        targets=("claude",),
+    )
+    scenario.consumers.add_hook(
+        consumer, "root", {"hooks": {"PreToolUse": [{"command": "echo root"}]}}
+    )
+    settings_path = consumer.root / ".claude/settings.json"
+    sidecar_path = consumer.root / ".claude/apm-hooks.json"
+    settings_path.parent.mkdir()
+    user_group = {"matcher": "Read", "hooks": [{"type": "prompt", "prompt": "Keep user hook"}]}
+    settings_path.write_text(
+        json.dumps(
+            {"permissions": {"deny": ["Bash(rm:*)"]}, "hooks": {"PreToolUse": [user_group]}}
+        ),
+        encoding="ascii",
+    )
+    sentinel = consumer.root / ".codex/hooks.json"
+    sentinel.parent.mkdir()
+    sentinel.write_bytes(b'{"hooks": {}, "user": "unchanged"}\n')
+    authored = ArtifactSnapshot.capture(consumer.root / ".apm")
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "claude"),
+        environment=source.environment,
+        scenario_id="claude-untyped-install",
+    )
+    expected_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    expected_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    groups = expected_settings["hooks"]["PreToolUse"]
+    handlers = [handler for group in groups for handler in group["hooks"]]
+    assert {"type": "command", "command": command, "timeout": 10} in handlers
+    assert {"type": "command", "command": "echo root"} in handlers
+    assert all(handler["type"] in {"command", "prompt"} for handler in handlers)
+    assert user_group in groups
+    assert len(groups) == 3 + int(with_native_group)
+    assert {entry["_apm_source"] for entry in expected_sidecar["PreToolUse"]} == {
+        f"{_OWNER}/flat-kit",
+        "_local/claude-consumer",
+    }
+    assert all(entry["hooks"] != user_group["hooks"] for entry in expected_sidecar["PreToolUse"])
+
+    # Recreate the previous renderer's untyped output and a renamed root source.
+    legacy_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    legacy_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    for entries in (legacy_settings["hooks"]["PreToolUse"], legacy_sidecar["PreToolUse"]):
+        for entry in entries:
+            for handler in entry["hooks"]:
+                if handler.get("command") in {command, "echo root"}:
+                    handler.pop("type")
+            if entry.get("_apm_source") == "_local/claude-consumer":
+                entry["_apm_source"] = "old-checkout-name"
+    settings_path.write_text(json.dumps(legacy_settings), encoding="ascii")
+    sidecar_path.write_text(json.dumps(legacy_sidecar), encoding="ascii")
+
+    baseline = None
+    for cycle in range(2):
+        _run_success(
+            scenario,
+            consumer,
+            (*_INSTALL_ARGS, "--target", "claude"),
+            environment=source.environment,
+            scenario_id=f"claude-untyped-reinstall-{cycle}",
+        )
+        assert json.loads(settings_path.read_text(encoding="utf-8")) == expected_settings
+        assert json.loads(sidecar_path.read_text(encoding="utf-8")) == expected_sidecar
+        assert sentinel.read_bytes() == b'{"hooks": {}, "user": "unchanged"}\n'
+        assert not (consumer.root / "hook-executed").exists()
+        assert_unchanged(authored, ArtifactSnapshot.capture(consumer.root / ".apm"))
+        snapshot = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
+        if baseline is not None:
+            _assert_same_state(baseline, snapshot)
+        baseline = snapshot
 
 
 @pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])

@@ -26,12 +26,88 @@ or when the runtime owns the install surface (VS Code Copilot Chat).
 | Cursor                          | Settings -> Plugins -> add marketplace URL.                             | Cursor account.                     | `~/.cursor/extensions/` per-user.                                            |
 | GitHub Copilot CLI              | `gh copilot marketplace add <owner>/<repo>` then `gh copilot plugin install <pkg>`. | `gh auth login`.                    | `~/.config/gh/copilot/` per-user.                                            |
 | Claude Code                     | `/plugin marketplace add <owner>/<repo>` then `/plugin install <pkg>`.  | Anthropic sign-in.                  | `~/.claude/plugins/` per-user; `.claude/` in-project when wired.             |
-| OpenAI Codex CLI                | `codex plugin add <owner>/<repo>` then `codex plugin install <pkg>`.    | OpenAI sign-in.                     | `~/.codex/plugins/` per-user; `.codex/` in-project when wired.               |
+| OpenAI Codex CLI 0.163.0        | `codex plugin marketplace add ...` then `codex plugin add <pkg>@<marketplace>`. | Native activation and authentication remain with Codex. | User cache managed by Codex; not an APM project registration. |
 
 Native commands above read whichever artifact the runtime expects.
 Most read `.claude-plugin/marketplace.json` (Anthropic-compatible
 schema); Codex reads `.agents/plugins/marketplace.json`. Producers
 who enable both outputs reach every runtime from one repo.
+
+## Codex compatibility bundles through APM
+
+APM recognizes a compatibility-only `.codex-plugin/plugin.json` without
+reducing its bundle to loose skills. This route is qualified for **Codex CLI
+0.163.0 on `PATH`, user scope only**:
+
+```sh
+apm install -g <package> --target codex
+apm install -g --frozen --target codex
+apm uninstall -g <package>
+```
+
+Native qualification was measured on **macOS arm64 only**. Other platforms
+are not qualified by that evidence; APM checks the version and scope, not the OS.
+
+Approve the package's executable types in `allowExecutables` first. APM scans
+and transfers the complete bundle, including sibling assets and referenced MCP
+resources, then uses Codex's public app-server configuration and marketplace
+operations. New registrations are **disabled**. Reinstall, update, and repair
+preserve existing activation, explicit disables, MCP policy, and unrelated
+settings. APM never runs plugin/MCP code or grants native trust or authentication.
+
+The initial contract supports MCP server objects and package-relative JSON
+files containing `mcpServers`. At least one native-discoverable `SKILL.md` must
+provide an unambiguous installed path so APM can verify the complete native
+copy. Symlinks, skill subsets, unsupported MCP shapes, other Codex versions,
+and project-scope registration fail explicitly rather than silently dropping
+resources or claiming native loading. This is a content-discovery contract,
+not evidence that an MCP process can start or authenticate.
+
+APM keeps its transport snapshots and ownership journal in
+`$APM_HOME/.codex-native/` (normally `~/.apm/.codex-native/`), outside disposable
+`apm_modules/`. Missing or corrupt native copies are restored through a
+selected native marketplace refresh with a new transport generation. Publisher
+bytes, publisher version, and original dependency pins remain unchanged;
+a healthy reinstall does not create a new generation. Keep the ownership
+journal: APM refuses to adopt a matching native registration without it.
+Native fingerprints include publisher `__pycache__` assets and executable
+bits; existing APM lockfile hashes are unchanged. The validated ownership
+journal also identifies native bundles during a cold-cache frozen restore
+alongside unrelated loose MCP declarations. A missing or `0.0.0` native
+version does not authorize rewriting publisher `apm.yml` metadata.
+Running `apm audit --ci` from the APM user directory checks the cached source
+bundle without starting Codex. Native-copy verification happens during install.
+The journal binds each remote bundle's native fingerprint to its original Git
+commit. Changed cache bytes or executable bits at the same commit are refused,
+not adopted as an update. Remove only that dependency's disposable
+`apm_modules/` directory and rerun `apm install -g --frozen --target codex`.
+Local source edits and newly selected Git commits remain valid updates.
+For a legacy remote record without source-pin provenance, save its pinned
+declaration, run `apm uninstall -g <dependency>`, then
+`apm install -g <saved-pinned-dependency> --target codex`. APM does not infer
+missing provenance from the current cache. `apm audit --ci --format json`
+reports native cache refusal as a failed drift check without changing native state.
+
+Native registration runs after APM persistence. A late failure can leave the
+acquired package, lockfile, or some native changes in place: pending ownership
+supports retry, not atomic rollback across APM and Codex. Keep the journal,
+resolve the reported native error, then rerun `apm install -g --target codex`.
+Migration also refuses native registration if cleanup retains edited or
+undeletable loose files. Preserve or relocate your edits and resolve that
+cleanup conflict before retrying; APM does not register both copies.
+The error names the dependency and retained paths.
+
+Removal fails and retains APM declarations when native ownership has changed,
+another plugin shares the owned marketplace, or the entry contains activation
+or customized MCP settings. Retire that entry explicitly using Codex, then
+retry APM removal. Native removal has no atomic compare-and-swap API; avoid
+concurrent native configuration edits while uninstalling.
+
+Existing eligible `apm.yml`, portable/root `plugin.json`, and
+`.claude-plugin/plugin.json` precedence is unchanged. A co-located Codex
+compatibility overlay does not replace those formats. This route neither
+changes `apm pack` output nor translates Codex data for other targets, and
+does not also generate loose skill or MCP registrations.
 
 ## What you give up with native installs
 
@@ -52,6 +128,11 @@ reproducible across machines and CI.
 | Cross-harness deploy from one ref   | yes           | no (per-runtime install) |
 
 ## Picking the install path
+
+After `apm install`, `apm audit --ci` checks marketplace declarations against
+their locked source and version evidence, without refreshing the catalog.
+Missing or ambiguous provenance fails rather than guessing. See
+[baseline checks](../../reference/baseline-checks/#ref-consistency).
 
 - **You are the only user on a workstation and the plugin is simple.**
   A native install is fine. Treat it as a personal tool, not project
@@ -113,6 +194,12 @@ An explicit SSH source stays SSH. Lookup and installation use the same package
 identity; bare cross-repository entries retain their normal dependency defaults.
 Invalid URLs and unsafe subdirectory
 paths fail before manifest, lockfile, or deployment writes.
+
+Catalog paths can point to versioned directories generated by `apm pack`, such
+as `plugins/my-plugin-1.2.3`. APM keeps their repository/path coordinates through
+installation and `--dry-run` instead of treating the version suffix as a file
+extension. Directory content and path checks still apply. Git directory probes
+reject files, symbolic links, and submodules.
 
 Use `apm install pkg@catalog#v1.0.1` for a literal Git tag. For a range, declare
 the marketplace dependency in `apm.yml`:

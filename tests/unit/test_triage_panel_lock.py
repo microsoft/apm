@@ -190,6 +190,52 @@ def test_triage_panel_lock_pins_copilot_cli_version() -> None:
     assert installed_versions == {copilot_version}
 
 
+def test_scheduled_sweep_prefetch_and_model_are_scoped_and_compiled() -> None:
+    """Pre-agent evidence and model pin must not alter explicit issue requests."""
+    source = LOCK_PATH.with_suffix("").with_suffix(".md").read_text()
+    frontmatter = yaml.safe_load(source.split("---", 2)[1])
+    condition = (
+        "${{ github.event_name == 'schedule'\n"
+        "    || (github.event_name == 'workflow_dispatch' && inputs.issue_number == '') }}"
+    )
+    prefetch = next(
+        step
+        for step in frontmatter["pre-agent-steps"]
+        if step["name"] == "Fetch scheduled triage evidence"
+    )
+    assert prefetch["if"] == condition
+    assert prefetch["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert "--scheduled-sweep --repo" in prefetch["run"]
+    assert frontmatter["timeout-minutes"] == 30
+    model = frontmatter["engine"]["env"]["COPILOT_MODEL"]
+    assert model == (
+        "${{ github.job == 'detection' && 'detection' || (github.event_name == 'schedule' "
+        "|| (github.event_name == 'workflow_dispatch' && inputs.issue_number == '')) "
+        "&& 'grok-4.7' "
+        "|| vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'auto' }}"
+    )
+    lock = yaml.safe_load(LOCK_PATH.read_text())
+    steps = lock["jobs"]["agent"]["steps"]
+    compiled = next(step for step in steps if step.get("name") == prefetch["name"])
+    assert compiled["env"]["GH_TOKEN"] == prefetch["env"]["GH_TOKEN"]
+    assert compiled["if"].strip() == prefetch["if"].strip()
+    assert compiled["run"].strip() == prefetch["run"].strip()
+    execution = next(step for step in steps if "COPILOT_MODEL" in step.get("env", {}))
+    assert execution["env"]["COPILOT_MODEL"].strip() == model
+    assert steps.index(compiled) < steps.index(execution)
+    assert "GH_TOKEN" not in execution["env"]
+    setup = next(
+        step for step in steps if step.get("name") == "Setup scheduled triage Python environment"
+    )
+    assert setup["if"].strip() == condition
+    assert setup["uses"] == "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7"
+    assert steps.index(setup) < steps.index(compiled)
+    assert "uv run --frozen --no-dev python" in compiled["run"]
+    detection_steps = lock["jobs"]["detection"]["steps"]
+    detection = next(step for step in detection_steps if "COPILOT_MODEL" in step.get("env", {}))
+    assert detection["env"]["COPILOT_MODEL"] == model
+
+
 def test_triage_source_and_compiled_writers_are_advisory_only() -> None:
     """Check real agent and privileged handler allowlists, not prompt promises."""
     source = LOCK_PATH.with_name("triage-panel.md").read_text(encoding="ascii")

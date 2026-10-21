@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.cursor/rules/*.mdc` for the Cursor target. Previously they were skipped
   based on an incorrect assumption that Cursor global rules were
   Settings-UI-only. (closes #3054) (#2506)
+- OpenCode MCP references now use native `{env:VAR}` syntax without saving resolved values; authored literals and registry overlays are preserved. Export referenced variables when launching OpenCode. -- by @leninworld (#3303)
+- Legacy Claude plugin packing preserves hook scripts and sibling assets, rewrites commands to packed paths, and declares hooks in the native manifest; unsafe or excluded resources fail before replacing an existing bundle. (#3301)
+- Lockfile conflict diagnostics now name the affected file and direct manual resolution or restoration before retrying the original command, preserving bytes and frozen/preview behavior. Automatic recovery remains deferred to #2979. -- by @lachieh (#3028)
+- Hook-only Git-path packages using `hooks/*.json` or `.apm/hooks/*.json` install without a placeholder manifest or skill, and invalid updates preserve the installed source, lockfile and deployment ownership. (#3282)
+- Codex MCP entries no longer emit the unsupported `id` setting; reinstalling repairs recorded APM-owned entries while preserving registry identity, user settings, and ownership safeguards. -- by @Pybsama (#3157)
+- Git marketplace installs accept versioned plugin directories while rejecting file, symlink, and submodule responses during directory validation. -- by @Pybsama (#3156)
+- `apm install` and `apm update` no longer fail with `Object of type mappingproxy is not JSON serializable` when a hook carries nested metadata such as `env`; Claude, Codex, Gemini and Antigravity hook files keep that metadata as plain JSON. (by @abhishekacharya200, with regression coverage from @MohammedAlkindi in #3199, closes #3167) (#3211)
+- `apm install` now writes untyped flat command hooks as Claude `"type": "command"` handlers, including alongside Claude-shaped hook files. Explicit types and other targets are unchanged; reinstall to refresh existing entries. -- by @Parth-Vasave (#3153, closes #3130)
 
 ## [0.34.0] - 2026-10-16
 

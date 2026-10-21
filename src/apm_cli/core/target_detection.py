@@ -987,6 +987,41 @@ def resolve_package_target_decision(
     )
 
 
+def resolve_audit_target_decision(
+    *,
+    manifest_target: str | list[str] | None,
+    recorded_targets: tuple[str, ...],
+) -> EffectiveTargetDecision:
+    """Reconcile current manifest intent with the recorded installation.
+
+    A saved install default is not a request to retarget an existing deployment.
+    Without declared or recorded intent, preserve audit's discovery fallback.
+    """
+    if manifest_target:
+        return EffectiveTargetDecision(manifest_target, "apm.yml")
+    if recorded_targets:
+        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
+    return EffectiveTargetDecision(None, "auto-detect")
+
+
+def read_manifest_target(project_root: Path) -> list[str] | None:
+    """Read audit's manifest target hint; manifest checks own parse failures."""
+    import yaml
+
+    from apm_cli.core.apm_yml import parse_targets_field
+    from apm_cli.utils.yaml_io import load_yaml
+
+    apm_yml = project_root / "apm.yml"
+    if not apm_yml.exists():
+        return None
+    try:
+        data = load_yaml(apm_yml) or {}
+        tokens = parse_targets_field(data)
+        return tokens if tokens else None
+    except (OSError, ValueError, TypeError, yaml.YAMLError, click.UsageError):
+        return None
+
+
 def resolve_manifest_target_decision(
     project_root: Path,
     *,

@@ -59,6 +59,8 @@ _BASE_INTEGRATOR_OWNER = "src/apm_cli/integration/base_integrator.py"
 
 _BASE_INTEGRATOR_METHODS = (
     "check_collision",
+    "copy_directory_files",
+    "walk_source_tree",
     "sync_remove_files",
     "cleanup_empty_parents",
     "validate_deploy_path",
@@ -106,7 +108,80 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Native root skills must route collision protection through BaseIntegrator.check_collision",
             ),
         )
-    return ()
+    failures: list[Violation] = []
+    if (
+        not _present(owner, "onerror=fail")
+        or not _present(owner, "self.walk_source_tree(source)")
+        or sum("on_member_skipped(target_file)" in line for line in owner.lines) != 3
+        or not _present(native, "on_member_skipped=self._skill_member_skipped")
+        or not _present(native, "or plan.skill_discovery_complete is not True")
+        or not _present(native, "plan.skill_source_roots <= self._skill_completed_roots")
+        or not _present(native, "plan.skill_source_files <= self._skill_completed_files")
+        or not _present(owner, "if not destination_existed:")
+        or not _present(owner, "self.cleanup_empty_parents([target_file], destination.parent)")
+        or not _present(
+            native, "written_hashes = {entry(path): compute_file_hash(path) for path in copied}"
+        )
+    ):
+        failures.append(
+            _summary(
+                rule_id,
+                native_path,
+                "Skill completion must consume explicit source discovery and canonical copy outcomes",
+            )
+        )
+    replacement_functions = {
+        "copy_skill_to_target",
+        "_promote_sub_skills",
+        "_integrate_native_skill",
+    }
+    for definition in native.definitions:
+        if definition.name not in replacement_functions:
+            continue
+        calls = {
+            call.qualname
+            for call in native.calls
+            if definition.line <= call.line <= definition.end_line
+        }
+        if any(call.endswith((".rmtree", ".copytree")) for call in calls):
+            failures.append(
+                _summary(
+                    rule_id,
+                    native_path,
+                    "Skill replacement must preserve sibling assets through file-level copying",
+                )
+            )
+    if "self.copy_directory_files" not in {call.qualname for call in native.calls}:
+        failures.append(
+            _summary(
+                rule_id, native_path, "Skill materialization must route through BaseIntegrator"
+            )
+        )
+    if not _present(
+        native, "rel_path = rewriter._skill_path_entry(target, materialization_root)"
+    ) or not _present(native, "return self._skill_path_entry(path, project_root)"):
+        failures.append(
+            _summary(
+                rule_id,
+                native_path,
+                "Skill collisions and copied members must share canonical deployed-path identity",
+            )
+        )
+    services_path = "src/apm_cli/install/services.py"
+    services, services_fail = _facts_for(provider, services_path, rule_id)
+    failures.extend(services_fail)
+    if not services_fail and (
+        not _present(services, "for path in skill_result.deployed_files")
+        or any("skill_bundle_file_entries" in call.qualname for call in services.calls)
+    ):
+        failures.append(
+            _summary(
+                rule_id,
+                services_path,
+                "Skill ownership must consume successful source members, not destination inventory",
+            )
+        )
+    return tuple(failures)
 
 
 def _defines_function(facts: object, name: str) -> bool:
@@ -628,7 +703,8 @@ def _skill_lockfile_root_findings(provider: FactsProvider, rule_id: str) -> list
     if not pipeline_failures and (
         not re.search(
             r"with \(\s*contextlib\.nullcontext\(\)\s*if ctx\.lockfile_only\s*"
-            r'else ctx\.integrators\["skill"\]\.ownership_snapshot\(\)\s*\):\s*'
+            r'else ctx\.integrators\["skill"\]\.ownership_snapshot\(\s*'
+            r"replay_lockfile=ctx\.existing_lockfile if ctx\.frozen else None\s*\)\s*\):\s*"
             r'_run_phase\("integrate", _integrate_phase, ctx\)',
             "\n".join(pipeline.lines),
         )
@@ -698,13 +774,11 @@ _CLAIM_AGGREGATION_METHODS = frozenset({"add", "update", "union"})
 
 
 def _cleanup_owner_call(node: ast.AST) -> bool:
-    """Return whether `node` is ``DeploymentReconciler.current_claimed_paths(...)``."""
+    """Return whether cleanup delegates to the canonical survivor projection."""
     return (
         isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "DeploymentReconciler"
-        and node.func.attr == "current_claimed_paths"
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "surviving_deployed_paths"
     )
 
 
@@ -740,21 +814,37 @@ def _loop_aggregates_claims(index: TreeIndex, node: ast.For) -> bool:
 
 def _cleanup_claim_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
     """Port check_cleanup_claim_owner over the shared tree index."""
-    _facts, fail = _facts_for(provider, _CLEANUP_OWNER, rule_id)
-    if fail:
-        return list(fail)
+    facts, fail = _facts_for(provider, _CLEANUP_OWNER, rule_id)
+    manifest, manifest_fail = _facts_for(provider, _CONTRACTION_MANIFEST, rule_id)
+    if fail or manifest_fail:
+        return list(fail) + list(manifest_fail)
     index = provider.tree_index(_CLEANUP_OWNER)
     if index is None or index.root is None:
         return []
     findings: list[Violation] = []
     owner_calls = [node for node in index.walk(index.root) if _cleanup_owner_call(node)]
-    if len(owner_calls) != 2:
+    survivor_body = _awk_body(
+        manifest, re.compile(r"^def surviving_deployed_paths\("), re.compile(r"^def ")
+    )
+    if (
+        len(owner_calls) != 1
+        or not _present(facts, "if deployed_file not in surviving_files")
+        or not _present(facts, "other_deployed = surviving_files - set(new_deployed)")
+        or not all(
+            _body_has(survivor_body, snippet)
+            for snippet in (
+                "DeploymentReconciler.reconcile_package_claims(",
+                "DeploymentReconciler.current_claimed_paths(current_claims)",
+                "files, _ = union_preserving(",
+            )
+        )
+    ):
         findings.append(
             _summary(
                 rule_id,
                 _CLEANUP_OWNER,
-                "cleanup must delegate both current-claim decisions to "
-                "DeploymentReconciler.current_claimed_paths",
+                "cleanup must protect both deletion passes through surviving_deployed_paths "
+                "and its canonical claim/target reconciliation",
             )
         )
     for node in index.walk(index.root):

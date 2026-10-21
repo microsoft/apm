@@ -128,6 +128,31 @@ class TestRenderApmDeps:
         assert plan.selected_apm_dependencies[0].source == "registry"
         assert plan.selected_apm_dependencies[0].registry_name == "private"
 
+    def test_plan_retains_structured_versioned_path_for_selection_and_updates(self) -> None:
+        requested = DependencyReference.parse_from_dict(
+            {
+                "git": "https://github.com/acme/catalog",
+                "path": "plugins/tool-1.2.3",
+                "ref": "release",
+            }
+        )
+        package = MagicMock()
+        package.get_apm_dependencies.return_value = [requested]
+        package.get_dev_apm_dependencies.return_value = []
+        package.get_all_mcp_dependencies.return_value = []
+        package.get_lsp_dependencies.return_value = []
+
+        plan = ProspectiveInstallPlan.from_apm_package(
+            package,
+            should_install_apm=True,
+            should_install_mcp=False,
+            only_packages=["acme/catalog/plugins/tool-1.2.3#release"],
+            updated_packages=["acme/catalog/plugins/tool-1.2.3#release"],
+        )
+
+        assert plan.selected_apm_dependencies == (requested,)
+        assert plan.updated_apm_identities == {"acme/catalog/plugins/tool-1.2.3"}
+
     def test_plan_excludes_apm_selection_when_only_mcp_is_requested(self) -> None:
         """The prospective plan does not leak APM work into --only=mcp previews."""
         dep = DependencyReference.parse("owner/repo#main")
@@ -322,6 +347,27 @@ class TestRenderApmDeps:
 
 
 class TestOrphanPreview:
+    def test_incomplete_plan_never_claims_orphan_removals(self, tmp_path: Path) -> None:
+        logger = _make_logger()
+        plan = ProspectiveInstallPlan(
+            apm_dependencies=(),
+            dev_apm_dependencies=(),
+            selected_apm_dependencies=(),
+            mcp_dependencies=(),
+            should_install_apm=True,
+            should_install_mcp=False,
+            only_packages=None,
+            dependency_preview_errors=("unknown parent metadata",),
+        )
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
+            patch("apm_cli.drift.detect_orphans") as orphans,
+        ):
+            render_and_exit(logger=logger, plan=plan, update=False, apm_dir=tmp_path)
+        orphans.assert_not_called()
+        logger.dry_run_notice.assert_called_once()
+        assert "Dependency preview incomplete" in logger.dry_run_notice.call_args.args[0]
+
     def test_orphan_preview_header_shown(self, tmp_path: Path) -> None:
         """Orphan preview header is printed when orphans are found (lines 64-81)."""
         logger = _make_logger()
@@ -447,7 +493,7 @@ class TestOrphanPreview:
         ):
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
+                should_install_apm=True,
                 apm_deps=[],
                 mcp_deps=[],
                 dev_apm_deps=[dev_dep],
@@ -612,7 +658,7 @@ class TestDryRunNoticeAndSuccess:
         ):
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
+                should_install_apm=True,
                 apm_deps=[],
                 mcp_deps=[],
                 dev_apm_deps=[],

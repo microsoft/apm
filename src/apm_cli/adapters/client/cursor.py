@@ -13,8 +13,6 @@ import os
 from pathlib import Path
 
 from ...core.token_manager import GitHubTokenManager
-from ...models.dependency.mcp import TrustedEnvLiteral
-from .base import _stringify_env_literal
 from .copilot import CopilotClientAdapter
 
 
@@ -55,18 +53,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         if not isinstance(env_vars, dict):
             return super()._resolve_environment_variables(env_vars, env_overrides)
 
-        resolved: dict[str, str] = {}
-        self._last_env_placeholder_keys = set()
-        for name, value in env_vars.items():
-            if not name or value is None:
-                continue
-            if isinstance(value, TrustedEnvLiteral):
-                resolved[name] = value
-            elif isinstance(value, str):
-                resolved[name] = self._resolve_env_variable(name, value, env_overrides)
-            else:
-                resolved[name] = _stringify_env_literal(value)
-        return resolved
+        return self._resolve_explicit_environment_values(env_vars, env_overrides)
 
     # ------------------------------------------------------------------ #
     # Auth-header injection override (for testability)

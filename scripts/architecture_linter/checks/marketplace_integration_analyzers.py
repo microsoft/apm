@@ -25,6 +25,9 @@ from scripts.architecture_linter.checks.marketplace_component_and_admission impo
 from scripts.architecture_linter.checks.marketplace_component_and_admission import (
     RULES as _COMPONENT_ADMISSION_RULES,
 )
+from scripts.architecture_linter.checks.marketplace_locked_evidence import (
+    RULES as _LOCKED_EVIDENCE_RULES,
+)
 from scripts.architecture_linter.checks.marketplace_package_and_registration import (
     COLLECTORS as _PACKAGE_REGISTRATION_COLLECTORS,
 )
@@ -44,6 +47,7 @@ RULES = (
     + _COMPONENT_ADMISSION_RULES
     + _PACKAGE_REGISTRATION_RULES
     + _BUNDLE_AUDIT_RULES
+    + _LOCKED_EVIDENCE_RULES
 )
 COLLECTORS = (
     _TAG_VERSION_COLLECTORS

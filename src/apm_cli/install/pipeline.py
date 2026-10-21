@@ -43,19 +43,24 @@ from __future__ import annotations
 import builtins
 import contextlib
 import time
-from functools import wraps
 from typing import TYPE_CHECKING
 
 from ..agent_plugins.errors import AgentPluginError
+from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .errors import AuthenticationError, DirectDependencyError, InstallFailureAlreadyRendered
+from .errors import (
+    AuthenticationError,
+    DirectDependencyError,
+    FrozenInstallError,
+    InstallFailureAlreadyRendered,
+)
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
-from .transaction import InstallTransaction
+from .transaction import InstallTransaction, transactional_pipeline
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -75,12 +80,8 @@ dict = builtins.dict
 def _run_phase(name: str, phase, ctx):
     """Invoke ``phase.run(ctx)`` with verbose-only timing (F6, #1116).
 
-    Returns whatever ``phase.run(ctx)`` returns (most phases return
-    ``None``; ``finalize`` returns the :class:`InstallResult`).
-
-    Best-effort: any failure to render the timing line is swallowed so
-    it cannot mask the phase's own exception. The phase exception
-    propagates after the timing attempt.
+    Return the phase result. Timing output is best-effort and must not
+    mask the phase's own exception.
 
     Verbose mode shows ``[i] Phase: <name> -> 1.234s`` so users (and
     CI logs) can locate the phase responsible for a slow install
@@ -106,7 +107,9 @@ def _run_integration_phase(ctx: InstallContext) -> None:
     with (
         contextlib.nullcontext()
         if ctx.lockfile_only
-        else ctx.integrators["skill"].ownership_snapshot()
+        else ctx.integrators["skill"].ownership_snapshot(
+            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None
+        )
     ):
         _run_phase("integrate", _integrate_phase, ctx)
 
@@ -327,48 +330,8 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
-def _transactional_pipeline(run):
-    """Supply a compatibility transaction and rollback every exceptional exit."""
-
-    @wraps(run)
-    def wrapped(*args, **kwargs):
-        transaction = kwargs.get("transaction")
-        owns_transaction = transaction is None
-        if transaction is None:
-            from ..core.scope import InstallScope, get_manifest_path, get_modules_dir
-
-            scope = kwargs.get("scope") or InstallScope.PROJECT
-            try:
-                manifest_path = get_manifest_path(scope)
-                modules_dir = get_modules_dir(scope)
-            except (AttributeError, TypeError):
-                from pathlib import Path
-
-                manifest_path = Path.cwd() / "apm.yml"
-                modules_dir = Path.cwd() / "apm_modules"
-            transaction = InstallTransaction(
-                manifest_path=manifest_path,
-                apm_modules_dir=modules_dir,
-                validation=None,
-                logger=kwargs.get("logger"),
-            )
-            kwargs["transaction"] = transaction
-        try:
-            result = run(*args, **kwargs)
-        except BaseException:
-            transaction.rollback()
-            raise
-        if result is None:
-            result = InstallResult()
-        if owns_transaction:
-            result = transaction.complete(result)
-        return result
-
-    return wrapped
-
-
-@_transactional_pipeline
-def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
+@transactional_pipeline
+def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     apm_package: APMPackage,
     update_refs: bool = False,
     verbose: bool = False,
@@ -396,6 +359,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     trust_bin: bool | None = None,
     transaction: InstallTransaction | None = None,
     frozen: bool = False,
+    trust_transitive_mcp: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -514,6 +478,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     from .context import InstallContext
 
     ctx = InstallContext(
+        trust_transitive_mcp=trust_transitive_mcp,
         project_root=project_root,
         apm_dir=apm_dir,
         source_root=source_root,
@@ -663,11 +628,11 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # can be admitted and resolving the capability would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
-            from .phases import copilot_plugins as _copilot_plugins_phase
+            from .phases import codex_plugins, copilot_plugins
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
-            _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
+            _run_phase("copilot_activate", copilot_plugins.ActivatePhase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
@@ -946,7 +911,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # later gate refused.
         # ------------------------------------------------------------------
         if not lockfile_only:
-            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
+            _run_phase("copilot_plugins", copilot_plugins, ctx)
+            _run_phase("codex_plugins", codex_plugins, ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
@@ -954,7 +920,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return _run_phase("finalize", _finalize_phase, ctx)
 
-    except AgentPluginError:
+    except (AgentPluginError, CodexNativeError):
         # Preserve schema-routing and native-boundary diagnostics verbatim.
         raise
     except AuthenticationError:
@@ -975,20 +941,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # the typed exception lets the caller render the policy message
         # as-is.
         raise
-    except DirectDependencyError:
+    except (DirectDependencyError, FrozenInstallError):
         # #946: same pattern -- surface the message as-is instead of
         # double-wrapping it through the generic RuntimeError below.
         raise
     except InstallFailureAlreadyRendered:
         raise
     except (PathTraversalError, MaterializationPathCollisionError, CopilotSettingsCollisionError):
-        # Path-safety, package-directory collision, and Copilot settings
-        # collision errors already include actionable guidance; re-raise them
-        # verbatim. A settings collision in particular means dependency
-        # resolution SUCCEEDED and the lockfile is written -- only the Copilot
-        # merge collided -- so wrapping it into "Failed to resolve APM
-        # dependencies: ..." would mis-attribute the failure and double-wrap
-        # once commands/install.py prefixes again.
+        # These actionable failures can occur after resolution and persistence.
+        # Preserve their diagnostics rather than misreporting a resolution error.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904

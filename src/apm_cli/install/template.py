@@ -192,11 +192,13 @@ def preflight_agent_plugin_dry_run(
                     package_path,
                     source_path=package_path,
                     agent_plugin_detection=detection,
+                    read_only=True,
                 )
             else:
                 validation = validate_apm_package(
                     package_path,
                     agent_plugin_detection=detection,
+                    read_only=True,
                 )
             if validation.is_valid and validation.package is not None:
                 try:

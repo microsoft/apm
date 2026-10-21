@@ -144,9 +144,9 @@ pages:
     persona: consumer
     promise: 1
     documents_symbols:
-      cli: [apm marketplace add, apm install]
-      flags: []
-      schemas: [marketplace.json]
+      cli: [apm marketplace add, apm install, apm uninstall]
+      flags: [--target, -g, --frozen]
+      schemas: [marketplace.json, .codex-plugin/plugin.json]
 
   - path: docs/src/content/docs/consumer/copilot-agent-plugins.md
     title: "Install Agent Plugins for Copilot"
@@ -288,6 +288,7 @@ symbol_index:
     "apm.yml.marketplace": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
     "apm.yml.marketplace.versioning": [docs/src/content/docs/producer/versioning-strategies.md]
     "marketplace.json": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
+    ".codex-plugin/plugin.json": [docs/src/content/docs/consumer/installing-from-marketplaces.md, docs/src/content/docs/reference/package-types.md]
     "apm-policy.yml": [docs/src/content/docs/enterprise/apm-policy.md]
     "SKILL.md": [docs/src/content/docs/producer/author-primitives/skills.md]
     ".agent.md": [docs/src/content/docs/producer/author-primitives/instructions-and-agents.md]

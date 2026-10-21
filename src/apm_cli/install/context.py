@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.codex_plugins.admission import CodexNativeDeployment
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
@@ -70,6 +71,7 @@ class InstallContext:
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
     trust_bin: bool | None = None
+    trust_transitive_mcp: bool = False
     transaction: Any = None  # InstallTransaction
 
     dry_run: bool = False
@@ -158,6 +160,7 @@ class InstallContext:
     # never backfilled with a sentinel.
     package_declared_licenses: dict[str, str] = field(default_factory=dict)
     content_hash_verified_deps: set[str] = field(default_factory=set)
+    callback_content_hashes: dict[str, tuple[Path, str]] = field(default_factory=dict)
     # Deps whose content hash is expected to change legitimately:
     # populated by _resolve_download_strategy in phases/integrate.py
     # (branch-ref `remote_drifted` guard and v<=0.12.2 self-heal block),
@@ -194,6 +197,7 @@ class InstallContext:
     # once per install so the deployment boundary and the registrar agree.
     copilot_registration: Any = None  # Optional[NativeRegistrationCapability]
     _copilot_registration_token: Any = field(default=None, repr=False, compare=False)
+    codex_native_plugins: dict[str, CodexNativeDeployment] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # policy_gate

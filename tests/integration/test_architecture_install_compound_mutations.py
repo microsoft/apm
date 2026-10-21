@@ -550,6 +550,15 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "audit-replay-workspace-identity",
+        AUDIT_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
+            "get_workspace_deploy_root(cfg.project_root) != cfg.project_root",
+        ),
+    ),
+    CompoundMutation(
         "audit-replay-command-direct-replay",
         AUDIT_RULE,
         "src/apm_cli/commands/audit.py",

@@ -34,7 +34,8 @@ from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.git_env import get_git_executable
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
-from ..version import get_build_sha, get_version
+from ..version import get_version
+from ..version_output import print_version  # noqa: F401 -- compatibility re-export
 from .deps._utils import _scan_installed_packages
 
 # Thin compatibility aliases only; core/project_name.py remains the AC18 owner.
@@ -454,50 +455,6 @@ def resolve_requested_packages(
             seen.add(canonical)
             resolved.append(canonical)
     return resolved
-
-
-def print_version(ctx, param, value):
-    """Print version and exit."""
-    if not value or ctx.resilient_parsing:
-        return
-
-    version_str = get_version()
-    sha = get_build_sha()
-    if sha:
-        version_str += f" ({sha})"
-
-    console = _get_console()
-    if console:
-        try:
-            console.print(
-                f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
-            )
-        except Exception:
-            click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
-    else:
-        # Graceful fallback when Rich isn't available (e.g., stripped automation environment)
-        click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
-
-    # Gated verbose-version output (experimental flag)
-    try:
-        from ..core.experimental import is_enabled
-
-        if is_enabled("verbose_version"):
-            import platform
-            import sys
-
-            python_ver = platform.python_version()
-            plat = f"{sys.platform}-{platform.machine()}"
-            install_path = str(Path(__file__).resolve().parent.parent)
-
-            _rich_echo(f"  {'Python:':<14}{python_ver}", color="dim")
-            _rich_echo(f"  {'Platform:':<14}{plat}", color="dim")
-            _rich_echo(f"  {'Install path:':<14}{install_path}", color="dim")
-    except Exception:
-        # Never let experimental flag logic break --version
-        pass
-
-    ctx.exit()
 
 
 def _check_and_notify_updates():

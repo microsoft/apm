@@ -26,7 +26,7 @@ from pathlib import Path
 
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
-from ...utils.path_security import PathTraversalError
+from ...utils.path_security import PathTraversalError, validate_path_segments
 from .copilot import CopilotClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -82,6 +82,37 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         if isinstance(config, dict) and "command" in config:
             config["command"] = self._rewrite_self_defined_skill_command(config["command"])
         return config
+
+    def render_server_config(self, server_info: dict) -> dict:
+        """Compare against the normalized shape actually written to Claude."""
+        return self._normalize_mcp_entry_for_claude_code(super().render_server_config(server_info))
+
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """OAuth metadata is runtime-owned, not part of an APM connection declaration."""
+        if not isinstance(native, dict):
+            return False
+        return {key: value for key, value in native.items() if key != "oauthAccount"} == expected
+
+    def project_managed_server_config(
+        self, native: object, *, baseline: dict, requested: dict
+    ) -> object:
+        """Exclude a valid native-only cwd from managed reconciliation, never cleanup."""
+        if (
+            not isinstance(native, dict)
+            or native.get("type") != "stdio"
+            or baseline.get("type") != "stdio"
+            or "cwd" in baseline
+            or "cwd" in requested
+        ):
+            return native
+        cwd = native.get("cwd")
+        if not isinstance(cwd, str) or not cwd.strip() or "\x00" in cwd:
+            return native
+        try:
+            validate_path_segments(cwd, context="MCP cwd", allow_current_dir=True)
+        except PathTraversalError:
+            return native
+        return {key: value for key, value in native.items() if key != "cwd"}
 
     @classmethod
     def _is_remote_mcp_entry(cls, entry: dict) -> bool:

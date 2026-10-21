@@ -380,6 +380,20 @@ class TestInstallLogger:
         )
         assert "would configure 1 LSP server" in mock_info.call_args[0][0]
 
+    @pytest.mark.parametrize(
+        "count,noun", [(0, "dependencies"), (1, "dependency"), (2, "dependencies")]
+    )
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_incomplete_preview_summary_does_not_claim_completion(self, mock_warning, count, noun):
+        logger = InstallLogger()
+        logger.record_dry_run_incomplete(True)
+        logger.install_summary(apm_count=count, mcp_count=0, disposition=InstallDisposition.DRY_RUN)
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args.args[0] == (
+            f"Dry run incomplete: {count} locally known APM {noun}. "
+            "Run 'apm install' without --dry-run to resolve the full plan."
+        )
+
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_install_summary_with_errors(self, mock_warning):
         logger = InstallLogger()

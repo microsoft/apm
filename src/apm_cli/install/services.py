@@ -27,7 +27,6 @@ from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundar
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
-from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .exec_gate import check_executable_approval
 from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
@@ -348,21 +347,41 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _skip_bin and bin_skip_reason_override is not None
         else _bin_skip_reason_override
     )
+    from apm_cli.codex_plugins.admission import finalize_codex_native, plan_native_codex_plugin
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
+    codex_native = plan_native_codex_plugin(
+        package_info,
+        package_name,
+        targets,
+        scope=scope,
+        skill_subset=skill_subset,
+        approvals={
+            "hooks": _hooks_approved,
+            "mcp": _mcp_approved,
+            "bin": _bin_approved and not _skip_bin,
+            "canvas": _canvas_approved,
+            "lsp": _lsp_approved,
+        },
+        ctx=ctx,
+        read_only=scratch_root is not None,
+    )
+    # Compatibility-only Codex data is opaque to every loose target adapter.
+    projection_targets = [] if codex_native is not None else targets
     source_plan = DeployableSourcePlan.create(
         package_info,
-        targets,
+        projection_targets,
         skill_subset=skill_subset,
         hooks_approved=_hooks_approved,
         canvas_approved=_canvas_approved or is_first_party,
         skip_bin=_skip_bin,
         diagnostics=diagnostics,
         package_name=package_name,
+        native_plugin_root=codex_native.source_root if codex_native else None,
         plugin_bin_deployable=_plugin_bin_deployable(
             package_info,
-            targets,
+            projection_targets,
             project_root=project_root,
             scope=scope,
             policy=policy,
@@ -425,7 +444,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     }
 
     preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
-    if _hooks_approved and callable(preflight_hooks):
+    if _hooks_approved and callable(preflight_hooks) and codex_native is None:
         preflight_hooks(
             package_info,
             project_root,
@@ -439,7 +458,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     # or identity-target instructions from the same package active.
     if integrators.instruction is not None:
         integrators.instruction.preflight_instructions_for_targets(
-            targets,
+            projection_targets,
             package_info,
             project_root,
             source_plan,
@@ -448,6 +467,14 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+
+    if codex_native is not None:
+        _rc = (
+            reconcile_package_targets(package_info, project_root, targets)
+            if callable(reconcile_package_targets)
+            else None
+        )
+        return finalize_codex_native(result, codex_native, source_plan, _rc, ctx, scratch_root)
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
@@ -493,6 +520,8 @@ def integrate_package_primitives(  # noqa: PLR0913
         _agg_hook_payloads: list = []
         _label = _prim_name
         for _target in targets:
+            if _target not in projection_targets:
+                continue
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:
                 continue
@@ -623,7 +652,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         diagnostics=diagnostics,
         managed_files=managed_files,
         force=force,
-        targets=targets,
+        targets=projection_targets,
         skill_subset=skill_subset,
         scope=scope,
         policy=policy,
@@ -660,13 +689,9 @@ def integrate_package_primitives(  # noqa: PLR0913
         log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
-        # #1716: also record the bundle's contained files so per-file
-        # content hashes cover SKILL.md / assets / scripts. The directory
-        # entry above is retained (cleanup's directory-rejection gate and
-        # the manifest dir-exclusion contract depend on it); the file
-        # entries give ``content-integrity`` its per-file coverage so skill
-        # drift is caught under ``apm audit --ci --no-drift``.
-        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
+    deployed.extend(
+        _deployed_path_entry(path, project_root, targets) for path in skill_result.deployed_files
+    )
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep

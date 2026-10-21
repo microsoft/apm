@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.commands.uninstall.cli import _cleanup_stale_lsp, uninstall
 from apm_cli.commands.uninstall.engine import (
     IntegrationCleanupOutcome,
@@ -32,6 +33,37 @@ def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
         },
         project / "apm.yml",
     )
+
+
+def test_native_codex_refusal_reports_retained_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A native refusal must name its cause and retained APM state, not filesystem failure."""
+    package = "owner/installed"
+    _write_manifest(tmp_path, [package])
+    dependency = LockedDependency(repo_url=package)
+    lock_path = tmp_path / "apm.lock.yaml"
+    LockFile(dependencies={dependency.get_unique_key(): dependency}).write(lock_path)
+    content = tmp_path / "apm_modules/owner/installed/SKILL.md"
+    content.parent.mkdir(parents=True)
+    content.write_text("owned package")
+    before = {path: path.read_bytes() for path in (tmp_path / "apm.yml", lock_path, content)}
+    monkeypatch.chdir(tmp_path)
+    with (
+        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts"),
+        patch(
+            "apm_cli.codex_plugins.registrar.remove_codex_plugins",
+            side_effect=CodexNativeError("Retire customized native settings using Codex."),
+        ),
+    ):
+        result = CliRunner().invoke(uninstall, [package])
+    assert result.exit_code == 1
+    output = " ".join(result.output.split())
+    assert "Codex native removal incomplete" in output
+    assert "Retire customized native settings using Codex." in output
+    assert "APM package files, declarations, and lockfile ownership were retained" in output
+    assert "Traceback" not in output
+    assert before == {path: path.read_bytes() for path in before}
 
 
 def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path) -> None:

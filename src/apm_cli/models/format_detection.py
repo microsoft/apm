@@ -285,6 +285,8 @@ class ClaudePluginDetector:
             else find_plugin_json(package_path)
         )
         has_claude_plugin_dir = (package_path / ".claude-plugin").is_dir()
+        if plugin_json_path is None and not has_claude_plugin_dir:
+            plugin_json_path = find_plugin_json(package_path, include_codex=True)
         plugin_dirs_present = tuple(name for name in _PLUGIN_DIRS if (package_path / name).is_dir())
         if plugin_json_path is None and not has_claude_plugin_dir:
             return None

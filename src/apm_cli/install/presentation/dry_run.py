@@ -31,7 +31,7 @@ def render_and_exit(
     The caller is responsible for ``return``-ing after this function
     completes -- this function does NOT exit or return early on its own.
     """
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.deps.lockfile import LockFile, LockfileConflictError, get_lockfile_path
     from apm_cli.drift import detect_orphans
 
     logger.progress("Dry run mode - showing what would change:")
@@ -80,13 +80,23 @@ def render_and_exit(
         else:
             logger.progress("No dependencies found in apm.yml")
 
-    # Orphan preview: lockfile + manifest difference -- no integration
-    # required, accurate to compute.
+    if plan.dependency_preview_errors:
+        logger.dry_run_notice(
+            "Dependency preview incomplete; showing only locally known dependencies. "
+            "Orphan removals are not previewed. Run 'apm install' without --dry-run "
+            "to resolve dependencies."
+        )
+        for error in plan.dependency_preview_errors:
+            logger.verbose_detail(error)
+
     try:
         _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))
+    except LockfileConflictError as exc:
+        logger.warning(str(exc))
+        _dryrun_lock = None
     except Exception:
         _dryrun_lock = None
-    if _dryrun_lock:
+    if _dryrun_lock and plan.should_install_apm and not plan.dependency_preview_errors:
         _orphan_preview = detect_orphans(
             _dryrun_lock,
             plan.intended_dependency_keys,

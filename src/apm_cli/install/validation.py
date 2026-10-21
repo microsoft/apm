@@ -50,6 +50,7 @@ from ..utils.github_host import (
     is_gitlab_hostname,
 )
 from .errors import AuthenticationError
+from .phases.local_content import LocalPackageError, read_local_package_source
 
 # ---------------------------------------------------------------------------
 # TLS failure helpers
@@ -158,16 +159,11 @@ def _local_path_failure_reason(dep_ref):
     """Return a specific failure reason for local path deps, or None for remote."""
     if not (dep_ref.is_local and dep_ref.local_path):
         return None
-    local = Path(dep_ref.local_path).expanduser()
-    if not local.is_absolute():
-        local = Path.cwd() / local
-    local = local.resolve()
-    if not local.exists():
-        return "path does not exist"
-    if not local.is_dir():
-        return "path is not a directory"
-    # Directory exists but has no package markers
-    return "no apm.yml, SKILL.md, or plugin.json found"
+    try:
+        read_local_package_source(dep_ref, Path.cwd())
+    except LocalPackageError as exc:
+        return str(exc)
+    return None
 
 
 def _generic_host_ambiguous_subpath_hint(dep_ref) -> str | None:
@@ -241,28 +237,15 @@ def _local_path_no_markers_hint(local_dir, logger=None):
 
 
 def _validate_local_package(dep_ref, logger) -> bool:
-    """Validate a local-path package: directory must exist and contain package markers.
-
-    Returns True if the directory exists and has ``apm.yml``, ``SKILL.md``, or
-    a ``plugin.json`` file.  Returns False and optionally surfaces a sub-package
-    hint when markers are absent.
-    """
-    local = Path(dep_ref.local_path).expanduser()
-    if not local.is_absolute():
-        local = Path.cwd() / local
-    local = local.resolve()
-    if not local.is_dir():
+    """Validate local files and directories through the copy path's admission owner."""
+    try:
+        read_local_package_source(dep_ref, Path.cwd())
+    except LocalPackageError:
+        local = Path(dep_ref.local_path).expanduser()
+        if local.is_dir():
+            _local_path_no_markers_hint(local, logger=logger)
         return False
-    # Must contain apm.yml, SKILL.md, or plugin.json
-    if (local / "apm.yml").exists() or (local / "SKILL.md").exists():
-        return True
-    from apm_cli.utils.helpers import find_plugin_json
-
-    if find_plugin_json(local) is not None:
-        return True
-    # Directory exists but lacks package markers -- surface a hint
-    _local_path_no_markers_hint(local, logger=logger)
-    return False
+    return True
 
 
 def _validate_virtual_package(

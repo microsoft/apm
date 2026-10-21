@@ -69,6 +69,15 @@ the [policy schema](../policy-schema/).
 
 - **What it verifies.** That every dependency's `reference` in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`) matches the `resolved_ref` recorded in the lockfile.
 - **Fails when.** A manifest ref differs from the lockfile entry, or the manifest declares a dependency that is missing from the lockfile.
+- **Marketplace declarations.** Object-form `name` + `marketplace` entries match
+  one locked dependency through recorded marketplace/plugin provenance. Missing
+  or ambiguous provenance fails; APM does not guess from package names or paths.
+  Version selections require the locked selected version and tag to satisfy the
+  requested range; literal refs and full commit pins must match their locked
+  evidence. A package's display version or a repeated selector alone is not proof.
+  Audit reads this evidence without fetching today's catalog or changing the
+  manifest, lockfile, or deployment. An unavailable catalog does not invalidate
+  an otherwise valid installed dependency.
 - **Remediation.** Run the command the check message names: `apm install --update`
   when the lockfile already holds a resolution that must be refreshed or re-keyed
   (the source-identity rewrite and commit-pin mismatch cases), or plain `apm install`
@@ -114,6 +123,9 @@ the [policy schema](../policy-schema/).
 
 - **What it verifies.** That every dependency in the lockfile is still declared in `apm.yml` (in either `dependencies.apm` or `devDependencies.apm`). The synthesized self-entry is excluded.
 - **Fails when.** The lockfile holds a package that the manifest no longer lists.
+- **Marketplace declarations.** Only the uniquely associated locked coordinate
+  counts as declared. Marketplace provenance does not exempt other entries from
+  orphan detection.
 - **Remediation.** Run `apm install` to prune the orphan, then commit `apm.lock.yaml`.
 
 ### `skill-subset-consistency`

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import click
 
-from ..errors import InstallFailureAlreadyRendered
+from ..errors import InstallFailureAlreadyRendered, MCPNativeConflictError
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -34,7 +34,12 @@ from .writer import add_mcp_to_apm_yml
 # code paths (package install vs. MCP install).
 APM_DEPS_AVAILABLE = False
 try:
-    from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ...deps.lockfile import (
+        LockFile,
+        LockfileConflictError,
+        get_lockfile_path,
+        migrate_lockfile_if_needed,
+    )
     from ...integration.mcp_integrator import MCPIntegrator
 
     APM_DEPS_AVAILABLE = True
@@ -268,21 +273,27 @@ def run_mcp_install(  # noqa: PLR0913
                 )
                 # Legacy --runtime remains a direct override. Target values
                 # are projected through the shared decision below.
-                MCPIntegrator.install(
-                    [dep],
-                    runtime,
-                    exclude,
-                    verbose,
-                    stored_mcp_configs=old_configs,
-                    explicit_target=target,
-                    target_decision=target_decision,
-                    fail_on_write_error=True,
-                    scope=scope,
-                    project_root=apm_dir,
-                    user_scope=user_scope,
-                    managed_target_servers=requested_target_servers,
-                    prevalidated_registry_servers=prevalidated_registry_servers,
-                )
+                conflict = None
+                try:
+                    MCPIntegrator.install(
+                        [dep],
+                        runtime,
+                        exclude,
+                        verbose,
+                        stored_mcp_configs=old_configs,
+                        explicit_target=target,
+                        target_decision=target_decision,
+                        fail_on_write_error=True,
+                        scope=scope,
+                        project_root=apm_dir,
+                        user_scope=user_scope,
+                        managed_target_servers=requested_target_servers,
+                        prevalidated_registry_servers=prevalidated_registry_servers,
+                    )
+                except MCPNativeConflictError as exc:
+                    if not exc.wrote_connections:
+                        raise
+                    conflict = exc
                 new_names = MCPIntegrator.get_server_names([dep])
                 new_configs = MCPIntegrator.get_server_configs([dep])
                 merged_names = old_servers | new_names
@@ -295,6 +306,7 @@ def run_mcp_install(  # noqa: PLR0913
                     for target_name, server_names in old_target_servers.items()
                 }
                 for target_name, server_names in requested_target_servers.items():
+                    merged_target_servers.setdefault(target_name, set()).discard(mcp_name)
                     merged_target_servers.setdefault(target_name, set()).update(server_names)
                 retired_targets = {
                     previous_target: {mcp_name}
@@ -302,7 +314,7 @@ def run_mcp_install(  # noqa: PLR0913
                     if mcp_name in server_names
                     and mcp_name not in requested_target_servers.get(previous_target, set())
                 }
-                if retired_targets:
+                if retired_targets and conflict is None:
                     # Cleanup can fail after a destination write. Keep both deployments
                     # durably owned until removal succeeds, so retry cannot orphan either.
                     MCPIntegrator.update_lockfile(
@@ -322,6 +334,7 @@ def run_mcp_install(  # noqa: PLR0913
                             user_scope=user_scope,
                             scope=scope,
                             fail_on_write_error=True,
+                            stored_configs=old_configs,
                         )
                         merged_target_servers[previous_target].difference_update(retired)
                 MCPIntegrator.update_lockfile(
@@ -333,8 +346,16 @@ def run_mcp_install(  # noqa: PLR0913
                     logger=logger,
                     fail_on_write_error=True,
                 )
+                if conflict is not None:
+                    raise conflict
             except InstallFailureAlreadyRendered:
                 raise
+            except LockfileConflictError as exc:
+                # The conflict diagnostic names only the lockfile path and the
+                # manual next step, so it carries no raw parser content.
+                logger.error(str(exc))
+                logger.error("MCP server written to apm.yml but tool integration failed.")
+                raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
             except Exception as exc:
                 # Keep the raw exception (which may contain internal paths,
                 # credentials, or stack-trace fragments) at verbose level

@@ -442,6 +442,11 @@ Do not configure two different registries whose names sanitize identically -- th
 
 ## Full example
 
+This schema-less example uses the CLI's working-draft contract. The older
+published manifest schemas reject `id` plus `registry`; see
+[explicit schema adoption](../../reference/manifest-schema/#2-document-structure)
+for the corrected candidate, publication status and supporting-CLI requirement.
+
 ```yaml
 # apm.yml
 name: my-project

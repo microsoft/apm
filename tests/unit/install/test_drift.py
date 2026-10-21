@@ -755,6 +755,7 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     def _bad_integrator(*args, **kwargs):
         # Simulate a leaky integrator that writes to project tree, not scratch.
         (project_root / ".apm" / "leaked.md").write_text("oops\n", encoding="utf-8")
+        return {"deployed_files": []}
 
     monkeypatch.setattr(
         "apm_cli.install.services.integrate_package_primitives",
@@ -853,33 +854,36 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
 def test_run_replay_threads_locked_skill_subset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    user_scope: bool,
 ) -> None:
-    """Replay must preserve the locked skill subset through dependency reconstruction."""
+    """Replay preserves the skill subset and scope-specific deployment source root."""
     from apm_cli.install.drift import run_replay
 
     project_root = tmp_path / "proj"
     project_root.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: project_root)
+    scratch_root = tmp_path / "scratch"
     (project_root / "apm.yml").write_text(
         "name: test-project\ntarget: copilot\n",
         encoding="utf-8",
     )
 
     lock = LockFile()
-    lock.add_dependency(
-        LockedDependency(
-            repo_url="./skill-bundle",
-            source="local",
-            local_path="./skill-bundle",
-            resolved_commit=None,
-            skill_subset=[
-                "productivity/grill-me",
-                "productivity/grilling",
-            ],
-        )
+    dep = LockedDependency(
+        repo_url="./skill-bundle",
+        source="local",
+        local_path="./skill-bundle",
+        resolved_commit=None,
+        skill_subset=[
+            "productivity/grill-me",
+            "productivity/grilling",
+        ],
     )
+    lock.add_dependency(dep)
     (project_root / "skill-bundle").mkdir()
     lockfile_path = project_root / "apm.lock.yaml"
     lock.write(lockfile_path)
@@ -892,6 +896,7 @@ def test_run_replay_threads_locked_skill_subset(
             {
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
                 "skill_subset": kwargs.get("skill_subset"),
+                "deployment_package_root": package_info.deployment_package_root,
             }
         )
         return {"deployed_files": []}
@@ -907,6 +912,8 @@ def test_run_replay_threads_locked_skill_subset(
             lockfile_path=lockfile_path,
             targets=None,
             cache_only=True,
+            scratch_root=scratch_root,
+            user_scope=user_scope,
         ),
         CheckLogger(verbose=False),
     )
@@ -920,6 +927,11 @@ def test_run_replay_threads_locked_skill_subset(
             "skill_subset": (
                 "productivity/grill-me",
                 "productivity/grilling",
+            ),
+            "deployment_package_root": dep.to_dependency_ref().get_install_path(
+                scratch_root / ".apm" / "apm_modules"
+                if user_scope
+                else scratch_root / "apm_modules"
             ),
         }
     ]

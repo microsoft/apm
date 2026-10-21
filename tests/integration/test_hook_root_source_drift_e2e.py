@@ -127,20 +127,7 @@ def _user_owned_entry(target: str) -> dict:
     }
 
 
-def _is_user_owned(entry: object) -> bool:
-    if not isinstance(entry, dict):
-        return False
-    if entry.get("command") == "echo user-owned":
-        return True
-    handlers = entry.get("hooks")
-    return (
-        isinstance(handlers, list)
-        and bool(handlers)
-        and isinstance(handlers[0], dict)
-        and handlers[0].get("command") == "echo user-owned"
-    )
-
-
+@pytest.mark.lifecycle_smoke
 @pytest.mark.parametrize("target, settings_rel, sidecar_rel, event_key", _HARNESS_CASES)
 def test_root_hook_source_drift_heals_on_reinstall(
     tmp_path: Path,
@@ -203,9 +190,8 @@ def test_root_hook_source_drift_heals_on_reinstall(
     # Append a user-owned entry directly to the settings file (never in the sidecar).
     settings_path = project / settings_rel
     settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
-    settings_data.setdefault("hooks", {}).setdefault(event_key, []).append(
-        _user_owned_entry(target)
-    )
+    user_entry = _user_owned_entry(target)
+    settings_data.setdefault("hooks", {}).setdefault(event_key, []).append(user_entry)
     settings_path.write_text(json.dumps(settings_data), encoding="utf-8")
 
     # Second install: must heal the stale marker without touching the user-owned entry.
@@ -219,7 +205,7 @@ def test_root_hook_source_drift_heals_on_reinstall(
 
     settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
     entries = settings_data.get("hooks", {}).get(event_key, [])
-    user_owned = [e for e in entries if _is_user_owned(e)]
+    user_owned = [e for e in entries if e == user_entry]
     assert len(user_owned) == 1, (
         f"User-owned hook entry must survive healing for {target}; entries={entries}"
     )

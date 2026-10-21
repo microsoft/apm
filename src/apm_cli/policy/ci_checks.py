@@ -102,16 +102,31 @@ def _check_ref_consistency(
 ) -> CheckResult:
     """Verify manifest refs match the lockfile's resolved ref and commit."""
     from ..deps.revision_pins import is_full_revision_pin
-    from ..drift import detect_ref_change
+    from ..drift import detect_ref_change, marketplace_ref_mismatch
 
     mismatches: list[str] = []
     requires_update = False
+    marketplace_index = lock.marketplace_index()
     for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key)
+        display = dep_ref.get_display_name() if dep_ref.is_marketplace else key
+        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
         if locked_dep is None:
-            mismatches.append(f"{key}: not found in lockfile")
+            if dep_ref.is_marketplace:
+                pair = (dep_ref.marketplace_name, dep_ref.marketplace_plugin_name)
+                reason = "ambiguous" if pair in marketplace_index else "missing"
+                mismatches.append(
+                    f"{display}: {reason} marketplace provenance in lockfile; "
+                    "inspect the locked sources before reinstalling"
+                )
+            else:
+                mismatches.append(f"{key}: not found in lockfile")
             requires_update = requires_update or bool(lock.dependencies)
+            continue
+        if dep_ref.is_marketplace:
+            if reason := marketplace_ref_mismatch(dep_ref, locked_dep):
+                mismatches.append(f"{display}: {reason}")
+                requires_update = True
             continue
         if is_full_revision_pin(dep_ref.reference) and (
             locked_dep.resolved_commit != dep_ref.reference
@@ -207,8 +222,14 @@ def _resolve_deployed_file_path(
     candidate = Path(value.rstrip("/"))
     if not candidate.is_absolute():
         rel_path = candidate.as_posix()
-        allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets or None)
-        if ".." in rel_path or not rel_path.startswith(allowed_prefixes):
+        # Historical claims remain verifiable after current replay intent changes.
+        allowed_prefixes = (
+            *BaseIntegrator._get_integration_prefixes(),
+            *BaseIntegrator._get_integration_prefixes(targets=targets),
+        )
+        if not BaseIntegrator.validate_deploy_path(
+            rel_path, project_root, allowed_prefixes=allowed_prefixes
+        ):
             return None
         return project_root / candidate
     for target in targets:
@@ -317,11 +338,22 @@ def _check_no_orphans(
     sub-package's manifest, not the root manifest, so the root manifest
     cannot make them go away by editing its dependency lists.
     """
-    manifest_keys = {dep.get_unique_key() for dep in manifest.get_all_apm_dependencies()}
+    declared_lock_keys: set[str] = set()
+    marketplace_index = lock.marketplace_index()
+    for dep in manifest.get_all_apm_dependencies():
+        key = dep.get_unique_key()
+        declared_lock_keys.add(key)
+        if dep.is_marketplace or key.startswith("_marketplace/"):
+            locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
+            if locked_dep is not None:
+                declared_lock_keys.add(locked_dep.get_unique_key())
+
     orphaned = [
         dep_key
         for dep_key, locked_dep in lock.dependencies.items()
-        if dep_key not in manifest_keys and dep_key != _SELF_KEY and locked_dep.resolved_by is None
+        if dep_key not in declared_lock_keys
+        and dep_key != _SELF_KEY
+        and locked_dep.resolved_by is None
     ]
     if not orphaned:
         return CheckResult(
@@ -363,9 +395,10 @@ def _check_skill_subset_consistency(
         else project_root / APM_MODULES_DIR
     )
     mismatches: list[str] = []
+    marketplace_index = lock.marketplace_index()
     for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key)
+        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
         if locked_dep is None:
             continue
         if not dep_ref.skill_subset and not locked_dep.skill_subset:
@@ -764,6 +797,7 @@ def _check_drift(
     fresh checkout that has never installed.
     """
     from ..agent_plugins.errors import AgentPluginDeploymentBoundaryError
+    from ..codex_plugins.client import CodexNativeError
     from ..core.scope import get_workspace_deploy_root
     from ..deps.lockfile import get_lockfile_path
     from ..deps.path_anchoring import LocalResolutionError
@@ -772,11 +806,10 @@ def _check_drift(
         CacheMissError,
         CheckLogger,
         ReplayConfig,
-        _read_apm_yml_target,
         diff_scratch_against_project,
         run_replay,
     )
-    from ..integration.targets import resolve_targets
+    from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
     deployment_root = get_workspace_deploy_root(project_root)
@@ -792,7 +825,7 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
-        except AgentPluginDeploymentBoundaryError as exc:
+        except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
             return (
                 CheckResult(
                     name="drift",
@@ -835,11 +868,10 @@ def _check_drift(
                 ),
                 [],
             )
-        resolved_targets = resolve_targets(
+        resolved_targets = resolve_audit_targets(
             project_root,
             user_scope=user_scope,
-            explicit_target=_read_apm_yml_target(project_root),
-            create_config=False,
+            lockfile=lockfile,
         )
         tracked_files = None
     else:
@@ -931,13 +963,14 @@ def run_baseline_checks(
     result = CIAuditResult()
     deployment_root = get_workspace_deploy_root(project_root)
     user_scope = deployment_root != project_root.resolve()
-    from ..install.drift import _read_apm_yml_target
-    from ..integration.targets import resolve_targets
+    from ..integration.targets import resolve_audit_targets
 
-    resolved_targets = resolve_targets(
-        deployment_root,
+    lockfile_path = get_lockfile_path(project_root)
+    lock = LockFile.read(lockfile_path)
+    resolved_targets = resolve_audit_targets(
+        project_root,
         user_scope=user_scope,
-        explicit_target=_read_apm_yml_target(project_root),
+        lockfile=lock if lock is not None else LockFile(),
     )
     apm_yml_path = project_root / "apm.yml"
 
@@ -954,8 +987,6 @@ def run_baseline_checks(
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
         return result
-
-    lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
     # (no deps needed).  Skip remaining checks -- but warn if APM artifacts
@@ -984,7 +1015,6 @@ def run_baseline_checks(
         )
         return result
 
-    lock = LockFile.read(lockfile_path)
     if lock is None or manifest is None:
         return result
 

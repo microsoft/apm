@@ -8,6 +8,9 @@ OPENAPM_V01_SCHEMA_URI = "https://microsoft.github.io/apm/specs/schemas/manifest
 OPENAPM_V0141_SCHEMA_URI = (
     "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json"
 )
+OPENAPM_V0148_SCHEMA_URI = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.48.schema.json"
+)
 
 
 class ManifestContract(str, Enum):
@@ -26,11 +29,12 @@ def negotiate_manifest_contract(data: dict) -> ManifestContract:
     schema_uri = data.get("$schema")
     if schema_uri is None:
         return ManifestContract.WORKING_DRAFT
-    if schema_uri in (OPENAPM_V01_SCHEMA_URI, OPENAPM_V0141_SCHEMA_URI):
+    if schema_uri in (OPENAPM_V01_SCHEMA_URI, OPENAPM_V0141_SCHEMA_URI, OPENAPM_V0148_SCHEMA_URI):
         return ManifestContract.OPENAPM_V01
     raise UnsupportedManifestContractError(
         f"Unsupported apm.yml $schema contract: {schema_uri!r}.\n"
         "Use a supported explicit contract:\n"
         f"  {OPENAPM_V01_SCHEMA_URI}\n"
-        f"  {OPENAPM_V0141_SCHEMA_URI}"
+        f"  {OPENAPM_V0141_SCHEMA_URI}\n"
+        f"  {OPENAPM_V0148_SCHEMA_URI}"
     )

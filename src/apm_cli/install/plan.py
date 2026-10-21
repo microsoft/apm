@@ -465,29 +465,29 @@ def lockfile_satisfies_manifest(
     Args:
         lockfile: The on-disk lockfile.
         manifest_deps: Direct deps from the apm.yml manifest (regular +
-            dev).  Local deps are skipped as they have no remote ref to
-            satisfy.
+            dev). Local deps require an entry but have no remote ref.
 
     Returns:
         ``(satisfied, reasons)`` -- ``reasons`` is a list of
         human-readable strings explaining each mismatch, empty when
         ``satisfied`` is True.
     """
-    from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.deps.revision_pins import is_full_revision_pin
     from apm_cli.drift import detect_ref_change
 
-    locked_keys = {key for key in lockfile.dependencies if key != _SELF_KEY}
-
+    marketplace_index = lockfile.marketplace_index()
     reasons: list[str] = []
     for dep in manifest_deps:
-        if getattr(dep, "is_local", False):
-            continue
         key = _dep_ref_key(dep)
-        if key not in locked_keys:
-            reasons.append(f"  - {key} is declared in apm.yml but missing from apm.lock.yaml")
+        display = dep.get_display_name() if dep.is_marketplace else key
+        locked_dep = lockfile.get_dependency(key, marketplace_index=marketplace_index)
+        if locked_dep is None or key == ".":
+            reasons.append(f"  - {display} is declared in apm.yml but missing from apm.lock.yaml")
             continue
-        locked_dep = lockfile.dependencies[key]
+        if getattr(dep, "is_local", False):
+            if locked_dep.source != "local" or not locked_dep.content_hash:
+                reasons.append(f"  - local dependency {key!r} has no locked content hash")
+            continue
         reference = dep.reference
         if (
             reference
@@ -495,13 +495,13 @@ def lockfile_satisfies_manifest(
             and (locked_dep.resolved_commit or "").lower() != reference.lower()
         ):
             reasons.append(
-                f"  - {key}: manifest commit '{dep.reference}' != "
+                f"  - {display}: manifest commit '{dep.reference}' != "
                 f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
             )
             continue
         if detect_ref_change(dep, locked_dep):
             reasons.append(
-                f"  - {key}: declared source, ref, host provider, or transport "
+                f"  - {display}: declared source, ref, host provider, or transport "
                 "differs from apm.lock.yaml"
             )
 

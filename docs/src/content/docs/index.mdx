@@ -69,6 +69,10 @@ apm install microsoft/apm-sample-package
 
 ## The manifest
 
+This example omits `$schema` and uses APM's working-draft contract. For an
+explicit schema, see [contract selection and the corrected schema candidate](./reference/manifest-schema/#2-document-structure);
+the older published schemas reject the Git-plus-path form shown below.
+
 ```yaml
 # apm.yml -- ships with your repo, like package.json
 name: my-project

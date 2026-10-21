@@ -53,9 +53,13 @@
     },
     {
       "id": "plugin-root-hook-command-vocabulary",
-      "decision": "Plugin-root hook command vocabulary + parsing",
-      "owner": "integration/hook_command_paths.py",
-      "selectors": ["src/apm_cli/integration/hook_command_paths.py"],
+      "decision": "Plugin-root hook command vocabulary, parsing and contained source resolution",
+      "owner": "integration/hook_command_paths.py; integration/hook_source_selection.py (resolve_plugin_root_hook_script)",
+      "selectors": [
+        "src/apm_cli/integration/hook_command_paths.py",
+        "src/apm_cli/integration/hook_source_selection.py",
+        "src/apm_cli/bundle/plugin_hooks.py"
+      ],
       "guards": ["hooks-integrations-hook-command-vocabulary"]
     },
     {

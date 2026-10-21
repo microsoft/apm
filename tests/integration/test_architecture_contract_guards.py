@@ -12,6 +12,23 @@ from scripts.architecture_linter.runner import registered_rules, run_selected_ru
 _RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
 
 
+def test_legacy_hook_shapes_boundary_rejects_cleanup_bypass() -> None:
+    """A second legacy-shape policy cannot silently bypass the native owner."""
+    root = Path(__file__).parents[2]
+    path = "src/apm_cli/integration/hook_integrator.py"
+    source = (root / path).read_text(encoding="utf-8")
+    old = "_legacy_hook_entries(entries, config.target_key)"
+    assert old in source
+    rule_id = "mutation_writes.neutral_hook_contract"
+    result = run_selected_rules(
+        root, (rule_id,), source_overrides={path: source.replace(old, "[]", 1)}
+    )
+    assert any(
+        finding.rule_id == rule_id and "_legacy_hook_entries" in finding.message
+        for finding in result.violations
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "old", "new"),
     [
@@ -50,7 +67,43 @@ def test_cursor_native_edge_boundary_rejects_bypass_and_second_owner(
     assert any(finding.rule_id == rule.id for finding in result.violations)
 
 
-def _write_portable_hook_package(tmp_path: Path) -> object:
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("result = _thaw(handler.metadata)", "result = dict(handler.metadata)"),
+        ("outer = _thaw(binding.metadata)", "outer = dict(binding.metadata)"),
+        (
+            'result.append(_thaw(binding.metadata["raw_entry"]))',
+            'result.append(binding.metadata["raw_entry"])',
+        ),
+        (
+            'flat.append(_thaw(binding.metadata["raw_entry"]))',
+            'flat.append(binding.metadata["raw_entry"])',
+        ),
+    ],
+)
+def test_native_hook_renderers_reject_shallow_metadata_copies(old: str, new: str) -> None:
+    """Restoring a shallow metadata copy at a render boundary must fail the guard (#3167)."""
+    root = Path(__file__).parents[2]
+    path = "src/apm_cli/integration/hook_native_formats.py"
+    source = (root / path).read_text(encoding="utf-8")
+    assert old in source
+    rule = _RULES_BY_ID["mutation_writes.neutral_hook_contract"]
+    result = run_selected_rules(
+        root, (rule.id,), source_overrides={path: source.replace(old, new, 1)}
+    )
+    assert any(finding.rule_id == rule.id for finding in result.violations)
+
+
+def test_neutral_hook_contract_passes_on_current_sources() -> None:
+    """The unmodified tree satisfies the neutral hook contract rule."""
+    root = Path(__file__).parents[2]
+    rule = _RULES_BY_ID["mutation_writes.neutral_hook_contract"]
+    result = run_selected_rules(root, (rule.id,))
+    assert [finding for finding in result.violations if finding.rule_id == rule.id] == []
+
+
+def _write_portable_hook_package(tmp_path: Path, *, nested_metadata: bool = False) -> object:
     """Create one package carrying the flat portable hook shape."""
     from apm_cli.models.apm_package import APMPackage, PackageInfo
 
@@ -67,6 +120,7 @@ def _write_portable_hook_package(tmp_path: Path) -> object:
                             "command": "echo check",
                             "timeout": 10,
                             "matcher": "fs_write|str_replace",
+                            **(_NESTED_HOOK_METADATA if nested_metadata else {}),
                         }
                     ]
                 }
@@ -119,13 +173,160 @@ def test_codex_native_edge_preserves_nested_entries() -> None:
     assert _to_codex_hook_entries(source) == source
 
 
-def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path) -> None:
+_NESTED_HOOK_METADATA = {
+    "env": {"APM_TEST": "value", "PATHS": ["a", "b"]},
+    "x-extension": {"tags": [{"name": "t"}], "enabled": True, "weight": 1.5, "note": None},
+}
+
+
+def _rendered_handler(target: str) -> tuple[object, dict]:
+    """Render one portable handler carrying nested metadata for one native edge."""
+    from apm_cli.integration.hook_native_formats import (
+        _to_antigravity_hook_entries,
+        _to_claude_hook_entries,
+        _to_codex_hook_entries,
+        _to_gemini_hook_entries,
+    )
+
+    source = [{"command": "echo ok", "timeoutSec": 3, **_NESTED_HOOK_METADATA}]
+    if target == "antigravity-flat":
+        rendered = _to_antigravity_hook_entries(source, "PreInvocation")
+        return rendered, rendered[0]
+    renderers = {
+        "claude": _to_claude_hook_entries,
+        "codex": _to_codex_hook_entries,
+        "gemini": _to_gemini_hook_entries,
+        "antigravity-nested": lambda entries: _to_antigravity_hook_entries(entries, "PreToolUse"),
+    }
+    rendered = renderers[target](source)
+    return rendered, rendered[0]["hooks"][0]
+
+
+@pytest.mark.parametrize(
+    ("target", "timeout"),
+    [
+        ("claude", 3),
+        ("codex", 3),
+        ("gemini", 3000),
+        ("antigravity-nested", 3),
+        ("antigravity-flat", 3),
+    ],
+)
+def test_native_edges_render_nested_hook_metadata_as_json(target: str, timeout: int) -> None:
+    """Nested hook metadata must reach native JSON documents intact (#3167)."""
+    rendered, handler = _rendered_handler(target)
+
+    assert json.loads(json.dumps(rendered)) == rendered
+    assert handler["command"] == "echo ok"
+    assert handler["timeout"] == timeout
+    assert handler["env"] == _NESTED_HOOK_METADATA["env"]
+    assert handler["x-extension"] == _NESTED_HOOK_METADATA["x-extension"]
+
+
+def test_native_edges_render_nested_binding_metadata_and_raw_entries_as_json() -> None:
+    """Matcher-group metadata and raw entries must round-trip through JSON."""
+    from apm_cli.integration.hook_native_formats import (
+        _to_antigravity_hook_entries,
+        _to_codex_hook_entries,
+    )
+
+    nested = [
+        {
+            "matcher": "Bash",
+            "x-group": {"labels": ["a", {"b": 1}]},
+            "hooks": [{"type": "command", "command": "echo check", "env": {"K": "v"}}],
+        }
+    ]
+    raw = [["opaque", {"inner": {"value": 1}}]]
+
+    for rendered, expected in (
+        (_to_codex_hook_entries(nested), nested),
+        (_to_codex_hook_entries(raw), raw),
+        (_to_antigravity_hook_entries(raw, "PreInvocation"), raw),
+    ):
+        assert json.loads(json.dumps(rendered)) == expected
+
+
+def test_rendered_hook_metadata_is_independent_of_the_frozen_ir() -> None:
+    """Mutating native output must not reach the immutable hook IR."""
+    from apm_cli.hook_contract import _entries_to_ir
+    from apm_cli.integration.hook_native_formats import _handler_from_ir
+
+    document = _entries_to_ir([{"command": "echo ok", **_NESTED_HOOK_METADATA}])
+    handler = document.bindings[0].handlers[0]
+
+    rendered = _handler_from_ir(handler, timeout_milliseconds=False)
+    rendered["env"]["APM_TEST"] = "changed"
+    rendered["env"]["PATHS"].append("c")
+
+    assert handler.metadata["env"]["APM_TEST"] == "value"
+    assert tuple(handler.metadata["env"]["PATHS"]) == ("a", "b")
+    assert (
+        _handler_from_ir(handler, timeout_milliseconds=False)["env"] == _NESTED_HOOK_METADATA["env"]
+    )
+
+
+def test_gemini_compatibility_conversion_preserves_nested_env() -> None:
+    """The in-place Gemini key conversion must keep nested env as plain JSON."""
+    from apm_cli.integration.hook_native_formats import _copilot_keys_to_gemini
+
+    hook = {"bash": "echo ok", "timeoutSec": 2, "env": {"APM_TEST": "value"}}
+    _copilot_keys_to_gemini(hook)
+
+    assert hook["env"] == {"APM_TEST": "value"}
+    assert hook["timeout"] == 2000
+    assert json.loads(json.dumps(hook)) == hook
+
+
+@pytest.mark.parametrize(
+    ("target", "namespace", "event", "timeout"),
+    [
+        ("claude", "hooks", "PreToolUse", 10),
+        ("codex", "hooks", "PreToolUse", 10),
+        ("gemini", "hooks", "BeforeTool", 10000),
+        ("antigravity", "apm", "PreToolUse", 10),
+    ],
+)
+def test_integrator_writes_nested_hook_metadata_to_native_json(
+    tmp_path: Path, target: str, namespace: str, event: str, timeout: int
+) -> None:
+    """Real native file writes must preserve nested metadata without executing hooks."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    profile = KNOWN_TARGETS[target]
+    (tmp_path / profile.root_dir).mkdir()
+    package_info = _write_portable_hook_package(tmp_path, nested_metadata=True)
+    source = package_info.install_path / ".apm" / "hooks" / "check.json"
+    original = source.read_bytes()
+
+    result = HookIntegrator().integrate_hooks_for_target(profile, package_info, tmp_path)
+
+    assert result.files_integrated == 1
+    payload = json.loads((tmp_path / profile.hooks_config_display).read_text(encoding="utf-8"))
+    binding = payload[namespace][event][0]
+    handler = binding["hooks"][0]
+    assert binding["matcher"] == "fs_write|str_replace"
+    assert handler["command"] == "echo check"
+    assert handler["timeout"] == timeout
+    assert handler["env"] == _NESTED_HOOK_METADATA["env"]
+    assert handler["x-extension"] == _NESTED_HOOK_METADATA["x-extension"]
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("typed", [True, False], ids=["explicit-type", "default-type"])
+def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path, typed: bool) -> None:
     """Claude output must wrap portable handlers in matcher/hooks entries."""
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     (tmp_path / ".claude").mkdir()
     package_info = _write_portable_hook_package(tmp_path)
+    if not typed:
+        hook_path = package_info.install_path / ".apm/hooks/check.json"
+        hook = json.loads(hook_path.read_text(encoding="utf-8"))
+        hook["hooks"]["PreToolUse"][0].pop("type")
+        hook_path.write_text(json.dumps(hook), encoding="utf-8")
 
     HookIntegrator().integrate_hooks_for_target(
         KNOWN_TARGETS["claude"],
@@ -300,7 +501,7 @@ def test_neutral_hook_walker_preserves_tolerant_integrator_inspection() -> None:
     )
 
 
-@pytest.mark.parametrize("schema_revision", ["0.1", "0.1.41"])
+@pytest.mark.parametrize("schema_revision", ["0.1", "0.1.41", "0.1.48"])
 def test_manifest_schema_negotiates_normative_v01_registry_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema_revision: str
 ) -> None:
@@ -353,6 +554,7 @@ def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:
     assert [(url.scheme, url.hostname, url.path) for url in urls] == [
         ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.schema.json"),
         ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.41.schema.json"),
+        ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.48.schema.json"),
     ]
 
 

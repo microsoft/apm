@@ -387,6 +387,13 @@ These checks run without a policy file:
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
+Marketplace object declarations must match one locked coordinate through
+recorded marketplace/plugin provenance. Missing or ambiguous evidence fails.
+Version ranges require the locked selected version and tag; literal refs and
+full commit pins must agree with their locked evidence. Other locked coordinates
+remain subject to orphan detection. Audit does not refresh the catalog or
+modify the manifest, lockfile, or deployment.
+
 ## Policy checks (with --policy)
 
 Additional checks when a policy is provided:

@@ -20,11 +20,10 @@ from apm_cli.install.drift import (
     CheckLogger,
     ReplayConfig,
     _make_scratch_root,
-    _read_apm_yml_target,
     run_replay,
 )
 from apm_cli.install.plan import lockfile_satisfies_manifest
-from apm_cli.integration.targets import TargetProfile, resolve_targets
+from apm_cli.integration.targets import TargetProfile, resolve_audit_targets
 from apm_cli.models.apm_package import APMPackage
 
 
@@ -107,17 +106,16 @@ def prepare_ci_audit_replay(
     except Exception as exc:
         raise CiAuditReplayError(str(exc)) from exc
 
-    explicit_target = _read_apm_yml_target(project_root)
     return PreparedCiAuditReplay(
         scratch_root=scratch_root,
         modules_root=modules_root,
         lockfile_path=lockfile_path,
         tracked_files=_git_tracked_files(project_root),
         targets=tuple(
-            resolve_targets(
-                scratch_root,
+            resolve_audit_targets(
+                project_root,
                 user_scope=user_scope,
-                explicit_target=explicit_target,
+                lockfile=lockfile,
             )
         ),
     )

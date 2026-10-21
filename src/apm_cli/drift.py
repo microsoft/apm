@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.host_providers import effective_host_provider_identity
@@ -92,6 +93,45 @@ def _optional_string_attr(dep: Any, name: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def marketplace_ref_mismatch(
+    dep_ref: DependencyReference,
+    locked_dep: LockedDependency,
+) -> str | None:
+    """Compare a marketplace selection to locked evidence without catalog I/O."""
+    from apm_cli.deps.revision_pins import is_full_revision_pin
+    from apm_cli.marketplace.semver import parse_semver, satisfies_range
+    from apm_cli.marketplace.version_resolver import is_version_constraint
+
+    spec = dep_ref.marketplace_version_spec
+    if not is_full_revision_pin(locked_dep.resolved_commit):
+        return "missing locked commit evidence"
+    if not spec:
+        return None
+    if is_full_revision_pin(spec):
+        if locked_dep.resolved_commit.lower() != spec.lower():
+            return (
+                f"manifest commit '{spec}' != "
+                f"lockfile resolved_commit '{locked_dep.resolved_commit}'"
+            )
+    elif is_version_constraint(spec):
+        # Git semver locks already distinguish selected versions from package
+        # inventory using constraint + resolved_tag. Never infer tag patterns
+        # from a suffix or accept the requested selector as resolution proof.
+        if (
+            not locked_dep.constraint
+            or not locked_dep.resolved_tag
+            or locked_dep.resolved_ref != locked_dep.resolved_tag
+            or not locked_dep.version
+        ):
+            return f"missing locked version evidence for manifest version '{spec}'"
+        version = parse_semver(locked_dep.version)
+        if version is None or not satisfies_range(version, spec):
+            return f"manifest version '{spec}' != lockfile selected version '{locked_dep.version}'"
+    elif spec != locked_dep.resolved_ref:
+        return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
+    return None
+
+
 def detect_ref_change(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency | None,
@@ -129,6 +169,8 @@ def detect_ref_change(
         return False
     if locked_dep is None:
         return False  # new package — not drift, just a first install
+    if getattr(dep_ref, "is_marketplace", False) is True:
+        return marketplace_ref_mismatch(dep_ref, locked_dep) is not None
 
     # Source flip drift: manifest changed resolver between installs (e.g.
     # was ``- git: ...``, now ``acme/foo@corp#^1.0.0``). The install path,
@@ -201,20 +243,32 @@ def should_force_ref_recheck(
     locked_dep: LockedDependency | None,
     *,
     update_refs: bool,
+    package_path: Path | None = None,
+    update_keys: set[str] | None = None,
 ) -> bool:
     """Return whether an existing install path must reach the download owner.
 
     This is the single gate shared by the dependency resolver and its download
     callback. A normal install rechecks only manifest/lock drift. An explicit
-    update rechecks semver ranges so they can discover a newer matching tag,
-    while literal revision pins retain their dedicated update semantics.
+    update rechecks semver ranges and hook-only packages. Hook replacements
+    must pass staged admission before any live content is replaced.
     """
     if dep_ref.is_local or getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:
         return True
     if update_refs:
-        return getattr(dep_ref, "ref_kind", None) == "semver"
+        if update_keys is not None and dep_ref.get_unique_key() not in update_keys:
+            return False
+        if getattr(dep_ref, "ref_kind", None) == "semver":
+            return True
+        if package_path is not None:
+            from apm_cli.models.validation import PackageType, detect_package_type
+
+            package_type, _ = detect_package_type(package_path)
+            if package_type is PackageType.HOOK_PACKAGE:
+                return True
+        return False
     return detect_ref_change(dep_ref, locked_dep, update_refs=False)
 
 
@@ -347,6 +401,7 @@ def build_download_ref(
     update_refs: bool,
     ref_changed: bool,
     logger=None,
+    require_locked: bool = False,
 ) -> DependencyReference:
     """Build the dependency reference passed to the package downloader.
 
@@ -370,6 +425,22 @@ def build_download_ref(
         A :class:`DependencyReference` suitable for
         ``GitHubPackageDownloader.download_package``.
     """
+    if require_locked:
+        from apm_cli.deps.revision_pins import is_full_revision_pin
+
+        locked = (
+            existing_lockfile.get_dependency(dep_ref.get_unique_key())
+            if existing_lockfile is not None
+            else None
+        )
+        if locked is None or update_refs or ref_changed or locked.source == "local":
+            raise ValueError("source has no unchanged remote lock pin")
+        if locked.source == "registry":
+            if not (locked.version and locked.resolved_url and locked.resolved_hash):
+                raise ValueError("registry source has no complete locked version, URL and hash")
+        elif not is_full_revision_pin(locked.resolved_commit):
+            raise ValueError("remote source has no immutable locked commit")
+
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if locked_dep:

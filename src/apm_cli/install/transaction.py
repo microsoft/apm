@@ -7,6 +7,8 @@ import os
 import tempfile
 import threading
 import weakref
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -260,3 +262,43 @@ def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
             acquire_lock=False,
         )
     return cast(ResolutionStagingSession, ctx.transaction.resolution)
+
+
+def transactional_pipeline(
+    run: Callable[..., InstallResult | None],
+) -> Callable[..., InstallResult]:
+    """Supply a compatibility transaction and rollback every exceptional exit."""
+
+    @wraps(run)
+    def wrapped(*args: Any, **kwargs: Any) -> InstallResult:
+        transaction = kwargs.get("transaction")
+        owns_transaction = transaction is None
+        if transaction is None:
+            from apm_cli.core.scope import InstallScope, get_manifest_path, get_modules_dir
+
+            scope = kwargs.get("scope") or InstallScope.PROJECT
+            try:
+                manifest_path = get_manifest_path(scope)
+                modules_dir = get_modules_dir(scope)
+            except (AttributeError, TypeError):
+                manifest_path = Path.cwd() / "apm.yml"
+                modules_dir = Path.cwd() / "apm_modules"
+            transaction = InstallTransaction(
+                manifest_path=manifest_path,
+                apm_modules_dir=modules_dir,
+                validation=None,
+                logger=kwargs.get("logger"),
+            )
+            kwargs["transaction"] = transaction
+        try:
+            result = run(*args, **kwargs)
+        except BaseException:
+            transaction.rollback()
+            raise
+        if result is None:
+            result = InstallResult()
+        if owns_transaction:
+            result = transaction.complete(result)
+        return result
+
+    return wrapped

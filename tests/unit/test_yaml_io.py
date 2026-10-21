@@ -14,8 +14,18 @@ from apm_cli.utils.yaml_io import (
     load_yaml,
     load_yaml_roundtrip,
     load_yaml_str,
+    loads_frontmatter,
     yaml_to_str,
 )
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("body", ["\n  indented\n\n", "  indented\n", "", "\n\n"])
+def test_frontmatter_preserves_body_after_closing_fence(newline, body):
+    text = ("\ufeff---\ndescription: Prompt\n---\n" + body).replace("\n", newline)
+    post = loads_frontmatter(text, preserve_body=True)
+    assert post.metadata == {"description": "Prompt"}
+    assert post.content == body.replace("\n", newline)
 
 
 class TestLoadYaml:

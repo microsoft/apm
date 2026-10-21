@@ -48,6 +48,7 @@ from apm_cli.integration.hook_command_warnings import warn_unresolved_plugin_roo
 from apm_cli.integration.hook_cursor_preflight import preflight_cursor_hooks
 from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.integration.hook_native_formats import (
+    _legacy_hook_entries,
     _to_antigravity_hook_entries,
     _to_claude_hook_entries,
     _to_codex_hook_entries,
@@ -70,6 +71,7 @@ from apm_cli.integration.hook_source_selection import (
     _parse_hook_json,
     _referenced_hook_source_files,
     _resolve_relative_hook_script,
+    resolve_plugin_root_hook_script,
     select_hook_sources,
 )
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -77,7 +79,6 @@ from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
     PathTraversalError,
-    ensure_path_within,
 )
 from apm_cli.utils.paths import portable_relpath
 
@@ -640,7 +641,7 @@ class HookIntegrator(BaseIntegrator):
             rel_path = plugin_root_relative_path(match.group(1))
 
             try:
-                source_file = ensure_path_within(package_path / rel_path, package_path)
+                source_file = resolve_plugin_root_hook_script(package_path, rel_path)
             except PathTraversalError:
                 traversal_plugin_root_refs.add(full_var)
                 continue
@@ -1362,7 +1363,11 @@ class HookIntegrator(BaseIntegrator):
                 event_name = event_map.get(raw_event_name, raw_event_name)
                 if event_name not in json_config[container]:
                     json_config[container][event_name] = []
-                legacy_content_keys: set[str] = set()
+                legacy_content_keys = {
+                    self._hook_entry_content_key(entry)
+                    for entry in _legacy_hook_entries(entries, config.target_key)
+                    if isinstance(entry, dict)
+                }
                 if config.target_key == "claude":
                     entries = _to_claude_hook_entries(entries)
                 elif config.target_key == "cursor":
@@ -1370,12 +1375,6 @@ class HookIntegrator(BaseIntegrator):
                         entries, event_name, foreign=raw_event_name in event_map
                     )
                 elif config.target_key == "codex":
-                    # Match owned flat entries from installs before Codex nesting.
-                    legacy_content_keys = {
-                        self._hook_entry_content_key(entry)
-                        for entry in entries
-                        if isinstance(entry, dict)
-                    }
                     entries = _to_codex_hook_entries(entries)
                 elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)

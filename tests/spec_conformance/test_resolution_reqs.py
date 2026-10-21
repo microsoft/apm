@@ -64,7 +64,9 @@ from tests.unit.adopt.test_native_skill_collision import (
 from tests.unit.deps.test_immutable_requirement_conflicts import (
     test_conflicting_commit_requirements_fail_with_both_chains as _run_immutable_chain_contract,
 )
+from tests.unit.install.test_dry_run_graph import _preview
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
+from tests.utils.local_package import LocalPackageFactory
 
 # --- req-rs-001..014 ---------------------------------------------------
 
@@ -76,6 +78,25 @@ def test_resolver_walks_dependency_graph_deterministically():
         "declaration order",
         "Intersection-pick",
     )
+
+
+@pytest.mark.req("req-rs-001")
+def test_offline_preview_preserves_breadth_first_declaration_order(tmp_path: Path) -> None:
+    """The preview consumer preserves the existing resolution traversal contract."""
+    factory = LocalPackageFactory(tmp_path)
+    factory.create("left-child")
+    factory.create("right-child")
+    factory.create("left", dependencies=("../left-child",))
+    factory.create("right", dependencies=("../right-child",))
+    consumer = factory.create("consumer", dependencies=("../left", "../right"))
+    plan = _preview(consumer.root)
+    assert not plan.dependency_preview_errors
+    assert [dependency.local_path for dependency in plan.selected_apm_dependencies] == [
+        "../left",
+        "../right",
+        "../left-child",
+        "../right-child",
+    ]
 
 
 @pytest.mark.req("req-rs-001")

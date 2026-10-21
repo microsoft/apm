@@ -39,8 +39,8 @@ PIPELINE = "src/apm_cli/install/pipeline.py"
         ),
         (
             PIPELINE,
-            'else ctx.integrators["skill"].ownership_snapshot()',
-            "else contextlib.nullcontext()",
+            'else ctx.integrators["skill"].ownership_snapshot(',
+            "else contextlib.nullcontext(",
             "snapshot lifetime must enclose only integration",
         ),
         (

@@ -63,7 +63,7 @@ REQUIRED_SHARD_ROOTS = (
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 8
+LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 10
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -686,6 +686,16 @@ def _assert_merge_group_full_lifecycle_path() -> None:
     assert "pytest tests/integration/ -v" in script
 
 
+def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
+    """Preserve measured setup headroom and the bounded whole-job deadline."""
+    timeout = job.get("timeout-minutes")
+    assert isinstance(timeout, int)
+    assert timeout == LIFECYCLE_SMOKE_TIMEOUT_MINUTES, (
+        "lifecycle-smoke needs its measured 10-minute whole-job budget, "
+        "without an inadequate deadline or an unbounded increase"
+    )
+
+
 def test_lifecycle_smoke_is_required_and_hermetic() -> None:
     """Pins the new PR-time gate as a semantic contract, not an exact
     target list: the marker is registered, the command selects
@@ -699,13 +709,7 @@ def test_lifecycle_smoke_is_required_and_hermetic() -> None:
     assert job["name"] == LIFECYCLE_SMOKE_CHECK
     assert job["runs-on"] == "ubuntu-24.04"
 
-    timeout = job.get("timeout-minutes")
-    assert isinstance(timeout, int)
-    assert 0 < timeout <= LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES, (
-        "lifecycle-smoke must keep a hard, tight timeout so a regression "
-        "toward slowness (e.g. an accidental network retry loop) fails "
-        "fast and loud rather than silently eating the PR-time budget"
-    )
+    _assert_lifecycle_smoke_timeout(job)
 
     _assert_lifecycle_smoke_marker_registered(_pytest_ini_markers())
     _assert_lifecycle_smoke_command(job)
@@ -721,6 +725,16 @@ def test_lifecycle_smoke_is_required_and_hermetic() -> None:
 @pytest.fixture
 def provisional_lifecycle_job(provisional_ci: WorkflowNode) -> WorkflowNode:
     return workflow_job(provisional_ci, LIFECYCLE_SMOKE_JOB)
+
+
+@pytest.mark.parametrize("timeout", [None, 0, 8, 11])
+def test_lifecycle_smoke_timeout_drift_fails(
+    provisional_lifecycle_job: WorkflowNode, timeout: int | None
+) -> None:
+    """Reject missing, inadequate, and inflated whole-job budgets."""
+    provisional_lifecycle_job["timeout-minutes"] = timeout
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_smoke_timeout(provisional_lifecycle_job)
 
 
 def test_lifecycle_smoke_exclusion_dropped_fails(

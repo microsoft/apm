@@ -60,7 +60,7 @@ build = [
 ]
 
 [project.scripts]
-apm = "apm_cli.cli:main"
+apm = "apm_cli.entrypoint:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

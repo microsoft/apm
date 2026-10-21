@@ -345,21 +345,21 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     failed_this_run = False
     inject_failure = True
     copies: list[str] = []
-    copytree = shutil.copytree
+    copy_file = shutil.copy2
     evidence = _observe_pipeline(monkeypatch, fixture, failed_dependency=lambda: failed_this_run)
 
     def fail_first_skill_copy(src: Any, dst: Any, *args: Any, **kwargs: Any) -> Any:
         nonlocal failed_this_run, inject_failure
-        if Path(dst).parent == fixture.deployed.parent.parent:
-            copies.append(Path(dst).name)
-        if inject_failure and Path(dst) == fixture.deployed.parent:
+        if Path(dst).parent.parent == fixture.deployed.parent.parent:
+            copies.append(Path(dst).parent.name)
+        if inject_failure and Path(dst) == fixture.deployed:
             assert evidence.contexts[-1].integrators["skill"]._ownership_snapshots
             inject_failure = False
             failed_this_run = True
             raise OSError("injected package copy failure")
-        return copytree(src, dst, *args, **kwargs)
+        return copy_file(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(shutil, "copytree", fail_first_skill_copy)
+    monkeypatch.setattr(shutil, "copy2", fail_first_skill_copy)
     failed = pipeline.run_install_pipeline(
         fixture.package,
         target="copilot",

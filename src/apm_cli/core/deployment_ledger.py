@@ -87,6 +87,45 @@ class DeploymentLedgerCodec:
     """Translate canonical deployment records to and from lockfile views."""
 
     @staticmethod
+    def deployed_file_hashes(lockfile: LockFile) -> dict[str, str]:
+        """Project recorded physical-file hashes without adopting current disk content."""
+        return {
+            DeploymentLedgerCodec.legacy_value(record.locator): record.content_hash
+            for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values()
+            if record.content_hash is not None
+        }
+
+    @staticmethod
+    def active_file_owners(lockfile: LockFile) -> dict[str, str]:
+        """Return the recorded last writer for each compatibility path."""
+        return {
+            DeploymentLedgerCodec.legacy_value(record.locator): record.active_owner
+            for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values()
+        }
+
+    @staticmethod
+    def recorded_target_names(
+        lockfile: LockFile,
+        *,
+        scope: str,
+        supported_targets: Collection[str],
+    ) -> tuple[str, ...]:
+        """Project concrete target identities from recorded deployment state."""
+        ledger = lockfile.deployment_ledger
+        # A compatibility ledger inferred from paths is not installed target intent.
+        if not lockfile._deployments_present or ledger is None:
+            return ()
+        return tuple(
+            sorted(
+                {
+                    record.locator.target
+                    for record in ledger.records.values()
+                    if record.locator.scope == scope and record.locator.target in supported_targets
+                }
+            )
+        )
+
+    @staticmethod
     def legacy_deployed_file_claims(lockfile: LockFile) -> dict[str, str]:
         """Return the compatibility ``deployed_files`` view by owning package."""
         claims: dict[str, str] = {}
