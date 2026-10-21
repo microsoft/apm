@@ -11,6 +11,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_frontmatter, load_yaml, yaml_to_str
+from tests.unit.copilot_plugins._builders import write_agent_plugin
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -585,8 +586,10 @@ def test_inline_withholding_does_not_change_other_target(
 
 
 @pytest.mark.parametrize("kind", ["command", "skill", "agent"])
+@pytest.mark.parametrize("user_scope", [False, True])
+@pytest.mark.parametrize("damage", ["edited", "missing-hash"])
 def test_edited_inline_primitive_is_not_silently_revoked(
-    tmp_path: Path, apm_binary_path: Path, kind: str
+    tmp_path: Path, apm_binary_path: Path, kind: str, user_scope: bool, damage: str
 ) -> None:
     isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
     factory = LocalPackageFactory(isolated.work_root)
@@ -595,29 +598,55 @@ def test_edited_inline_primitive_is_not_silently_revoked(
     consumer = factory.create(
         "consumer", dependencies=({"path": "../guarded"},), targets=("claude",)
     )
-    runner = ApmLifecycleRunner((str(apm_binary_path),))
-    installed = runner.run(
-        ("install", "--no-policy"), cwd=consumer.root, env=isolated.subprocess_env()
-    )
-    assert installed.returncode == 0, installed.stdout + installed.stderr
-    [deployed] = list((consumer.root / ".claude").rglob("*.md"))
-    edited = deployed.read_text() + "\nPersonal changes.\n"
-    deployed.write_text(edited)
+    workspace = isolated.config_root if user_scope else consumer.root
+    deployment = isolated.home if user_scope else consumer.root
+    identity = dependency.root.as_posix() if user_scope else "../guarded"
     manifest = load_yaml(consumer.manifest_path)
-    manifest["executables"] = {"deny": {"../guarded": {"hooks": True}}}
-    dump_yaml(manifest, consumer.manifest_path)
-    revoked = runner.run(
-        ("install", "--no-policy"), cwd=consumer.root, env=isolated.subprocess_env()
-    )
+    manifest["dependencies"] = {"apm": [{"path": identity}]}
+    dump_yaml(manifest, workspace / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    install_args = ("install", "--no-policy", *(("--global",) if user_scope else ()))
+    installed = runner.run(install_args, cwd=workspace, env=isolated.subprocess_env())
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    [deployed] = list((deployment / ".claude").rglob("*.md"))
+    if damage == "edited":
+        deployed.write_text(deployed.read_text() + "\nPersonal changes.\n")
+    else:
+        lock_path = workspace / "apm.lock.yaml"
+        document = load_yaml(lock_path)
+        for dependency_record in document["dependencies"]:
+            dependency_record.pop("deployed_file_hashes", None)
+        for deployment_record in document["deployments"]:
+            deployment_record["content_hash"] = None
+        dump_yaml(document, lock_path)
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        assert any(record.deployed_files for record in lock.dependencies.values())
+        assert not any(record.deployed_file_hashes for record in lock.dependencies.values())
+    retained = deployed.read_bytes()
+    manifest["executables"] = {"deny": {identity: {"hooks": True}}}
+    dump_yaml(manifest, workspace / "apm.yml")
+    revoked = runner.run(install_args, cwd=workspace, env=isolated.subprocess_env())
     assert revoked.returncode != 0, revoked.stdout + revoked.stderr
-    assert deployed.read_text() == edited
-    assert "revocation is incomplete" in revoked.stdout
+    assert deployed.read_bytes() == retained
+    diagnostic = " ".join(revoked.stdout.split())
+    assert "revocation is incomplete" in diagnostic
+    assert "restart" in diagnostic.lower()
+    if damage == "missing-hash":
+        assert "no recorded APM content hash" in diagnostic, revoked.stdout + revoked.stderr
+    before_audit = {
+        path: path.read_bytes()
+        for root in (workspace, deployment / ".claude")
+        for path in root.rglob("*")
+        if path.is_file()
+    }
     audit = runner.run(
         ("audit", "--ci", "--no-policy", "--format", "json"),
-        cwd=consumer.root,
+        cwd=workspace,
         env=isolated.subprocess_env(),
     )
     assert audit.returncode != 0, audit.stdout + audit.stderr
+    assert all(path.read_bytes() == content for path, content in before_audit.items())
 
 
 @pytest.mark.parametrize("kind", ["command", "skill", "agent"])
@@ -633,7 +662,7 @@ def test_first_party_inline_hooks_do_not_need_dependency_approval(
         local.parent.mkdir(parents=True)
         source.rename(local)
     manifest = load_yaml(consumer.manifest_path)
-    manifest["executables"] = {"deny": {"*": {"hooks": True}}}
+    manifest["executables"] = {"allow": {}}
     dump_yaml(manifest, consumer.manifest_path)
     runner = ApmLifecycleRunner((str(apm_binary_path),))
     installed = runner.run(
@@ -645,6 +674,80 @@ def test_first_party_inline_hooks_do_not_need_dependency_approval(
     audited = runner.run(
         ("audit", "--ci", "--no-policy", "--format", "json"),
         cwd=consumer.root,
+        env=isolated.subprocess_env(),
+    )
+    assert audited.returncode == 0, audited.stdout + audited.stderr
+
+
+@pytest.mark.parametrize("kind", ["command", "skill", "agent"])
+@pytest.mark.parametrize("user_scope", [False, True])
+@pytest.mark.parametrize("approved", [False, True])
+def test_inline_json_and_opaque_plugin_controls_remain_separate(
+    tmp_path: Path, apm_binary_path: Path, kind: str, user_scope: bool, approved: bool
+) -> None:
+    """Configuration-only witnesses never enable or invoke a native plugin."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    dependency = factory.create("guarded")
+    _primitive(factory, dependency, kind, "protected", hooks=True)
+    _primitive(factory, dependency, kind, "plain", hooks=False)
+    global_hooks = deepcopy(_HOOKS)
+    global_hooks["PreToolUse"][0]["hooks"][0]["command"] = "echo json-hook-control"
+    factory.add_hook(dependency, "control", {"hooks": global_hooks})
+    plugin = write_agent_plugin(isolated.work_root / "opaque", name="opaque", with_mcp=False)
+    ignored = plugin / "agents/ignored.md"
+    ignored.parent.mkdir()
+    ignored.write_text("---\nname: ignored\nhooks: opaque-native-field\n---\nOpaque content.\n")
+    original = {
+        path.relative_to(plugin): path.read_bytes() for path in plugin.rglob("*") if path.is_file()
+    }
+    consumer = factory.create("consumer", targets=("claude",))
+    workspace = isolated.config_root if user_scope else consumer.root
+    deployment = isolated.home if user_scope else consumer.root
+    identity = dependency.root.as_posix() if user_scope else "../guarded"
+    plugin_identity = plugin.as_posix() if user_scope else "../opaque"
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"] = {"apm": [{"path": identity}, {"path": plugin_identity}]}
+    manifest["executables"] = {"allow": {identity: {"hooks": True}} if approved else {}}
+    dump_yaml(manifest, workspace / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    result = runner.run(
+        ("install", "--no-policy", *(("--global",) if user_scope else ())),
+        cwd=workspace,
+        env=isolated.subprocess_env(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    markdown = list((deployment / ".claude").rglob("*.md"))
+    assert any("plain" in path.as_posix() for path in markdown)
+    protected = [path for path in markdown if "protected" in path.as_posix()]
+    assert bool(protected) is approved
+    if approved:
+        assert load_frontmatter(protected[0]).metadata["hooks"] == _HOOKS
+    assert not any(
+        "ignored" in path.as_posix() or "opaque-skill" in path.as_posix() for path in markdown
+    )
+    settings_path = deployment / ".claude/settings.json"
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    assert not settings.get("enabledPlugins")
+    assert bool(settings.get("hooks")) is approved
+    if approved:
+        commands = [
+            handler["command"]
+            for group in settings["hooks"]["PreToolUse"]
+            for handler in group["hooks"]
+        ]
+        assert commands == ["echo json-hook-control"]
+    lock = LockFile.read(workspace / "apm.lock.yaml")
+    assert lock is not None
+    record = lock.get_dependency(plugin_identity)
+    assert record is not None
+    materialized = record.to_dependency_ref().get_install_path(workspace / "apm_modules")
+    assert all(
+        (materialized / relative).read_bytes() == content for relative, content in original.items()
+    )
+    audited = runner.run(
+        ("audit", "--ci", "--no-policy", "--format", "json"),
+        cwd=workspace,
         env=isolated.subprocess_env(),
     )
     assert audited.returncode == 0, audited.stdout + audited.stderr

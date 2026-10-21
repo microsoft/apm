@@ -574,6 +574,12 @@ requirements:
     conformance_class: consumer
     oracle: tests/fixtures/spec-conformance/source-plan/req-sc-015.json
     notes: "one post-authorization source-file set drives every install and uninstall re-integration scan and primitive materialization; source-only files and symlink entries are excluded"
+  - id: req-sc-016
+    keyword: MUST
+    section: "10.18"
+    conformance_class: consumer
+    oracle: tests/fixtures/spec-conformance/inline-hooks/req-sc-016.json
+    notes: "conditional standalone inline-hook capability: whole-primitive hooks consent, preserved native scope, shared authorized resources, current-consent read-only audit and ownership-safe revocation; proposed amendment and native acceptance remain pending"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

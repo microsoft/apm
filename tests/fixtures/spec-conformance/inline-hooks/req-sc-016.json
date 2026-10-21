@@ -1,0 +1,23 @@
+{
+  "_comment": "req-sc-016: installed consumer output only, not native hook invocation or trust acceptance. exec_status is APM-specific recording vocabulary, not a portable lockfile requirement.",
+  "spec_anchor": "req-sc-016",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo inline-hook-witness"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "gate-disabled": {"deployed": true, "exec_status": null},
+    "approved": {"deployed": true, "exec_status": "deployed"},
+    "pending": {"deployed": false, "exec_status": "gated_pending_approval"},
+    "denied": {"deployed": false, "exec_status": "denied"}
+  }
+}

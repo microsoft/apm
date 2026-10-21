@@ -26,6 +26,10 @@ APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020
 
 APM implements the proposed staged-replacement recovery capability (req-lk-023). Section 9.3 review and public comment remain pending; this source statement does not establish specification adoption or released CLI support. The conformance oracles exercise real filesystem state with injected operation denials. Actual non-admin Windows acceptance is established separately by the native lifecycle job, not inferred from collection or portable tests.
 
+## Proposed scoped inline-hook consent
+
+APM stages the proposed scoped inline-hook consent capability (req-sc-016). Section 9.2 amendment classification and Section 9.3 review and public comment remain pending; this source statement is not adoption or released-support evidence. The installed-consumer oracles exercise Claude command, skill and non-plugin agent output in project and user scopes. They do not invoke native clients or hooks, grant native trust or permissions, or qualify a native host version. Each primitive/scope combination requires separate native version qualification. The oracle exec_status values are APM-specific observations, not portable lockfile requirements or approval authority.
+
 ## Consumer user-scope disclosure
 
 - Manifest: `~/.apm/apm.yml`
@@ -37,7 +41,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 101 | 1 | 0 | 0 |
+| Consumer | 102 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 21 | 0 | 0 | 0 |
 
@@ -164,6 +168,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 | - |
 | [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | active | 1 | - |
 | [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 8 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
+| [req-sc-016](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-016) | MUST | 10.18 | consumer | active | 24 | tests/fixtures/spec-conformance/inline-hooks/req-sc-016.json |
 | [req-tg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-001) | MUST | 8.4 | consumer | active | 1 | - |
 | [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 4 | - |
 | [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | active | 1 | - |

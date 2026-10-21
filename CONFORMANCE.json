@@ -7,6 +7,7 @@
   "generator": "gen_statement.py v1",
   "optional_features": {
     "deployed-prompt-audit": "APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020), subject to the pending Section 9.3 amendment process, not adopted-spec approval. APM's own Consumer deployment implementation supplies the definitions: project and user scopes follow TargetProfile deployment roots and PrimitiveMapping formats, including shared native hook settings via native_hook_config. The target-by-target locations, supported formats, prompt applicability and exclusions are published in docs/src/content/docs/reference/cli/audit.md. ContentScanner checks hidden or suspicious Unicode code points that may conceal instructions, not semantic prompt-injection detection; a clean result is not a guarantee that prompt text is safe. App SQLite state and unrelated transcripts are excluded. Detection does not grant execution, ownership or remediation authority.",
+    "scoped-inline-hook-consent": "APM stages the proposed scoped inline-hook consent capability (req-sc-016). Section 9.2 amendment classification and Section 9.3 review and public comment remain pending; this source statement is not adoption or released-support evidence. The installed-consumer oracles exercise Claude command, skill and non-plugin agent output in project and user scopes. They do not invoke native clients or hooks, grant native trust or permissions, or qualify a native host version. Each primitive/scope combination requires separate native version qualification. The oracle exec_status values are APM-specific observations, not portable lockfile requirements or approval authority.",
     "staged-replacement-recovery": "APM implements the proposed staged-replacement recovery capability (req-lk-023). Section 9.3 review and public comment remain pending; this source statement does not establish specification adoption or released CLI support. The conformance oracles exercise real filesystem state with injected operation denials. Actual non-admin Windows acceptance is established separately by the native lifecycle job, not inferred from collection or portable tests."
   },
   "requirements": [
@@ -1627,6 +1628,41 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-016",
+      "keyword": "MUST",
+      "oracle": "tests/fixtures/spec-conformance/inline-hooks/req-sc-016.json",
+      "section": "10.18",
+      "status": "active",
+      "test_count": 24,
+      "tests": [
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[approved-False-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[approved-False-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[approved-False-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[approved-True-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[approved-True-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[approved-True-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[denied-False-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[denied-False-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[denied-False-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[denied-True-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[denied-True-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[denied-True-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[gate-disabled-False-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[gate-disabled-False-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[gate-disabled-False-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[gate-disabled-True-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[gate-disabled-True-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[gate-disabled-True-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[pending-False-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[pending-False-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[pending-False-skill]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[pending-True-agent]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[pending-True-command]",
+        "tests/spec_conformance/test_inline_hook_consent_reqs.py::test_scoped_inline_consent_matches_installed_and_audited_state[pending-True-skill]"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1838,7 +1874,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 101,
+      "active": 102,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1862,5 +1898,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 136
+  "total_requirements": 137
 }

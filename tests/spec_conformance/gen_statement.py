@@ -62,6 +62,17 @@ STAGED_REPLACEMENT_RECOVERY = (
     "denials. Actual non-admin Windows acceptance is established separately by the "
     "native lifecycle job, not inferred from collection or portable tests."
 )
+SCOPED_INLINE_HOOK_CONSENT = (
+    "APM stages the proposed scoped inline-hook consent capability (req-sc-016). "
+    "Section 9.2 amendment classification and Section 9.3 review and public comment "
+    "remain pending; this source statement is not adoption or released-support evidence. "
+    "The installed-consumer oracles exercise Claude command, skill and non-plugin agent "
+    "output in project and user scopes. They do not invoke native clients or hooks, "
+    "grant native trust or permissions, or qualify a native host version. "
+    "Each primitive/scope combination requires separate native version qualification. "
+    "The oracle exec_status values are APM-specific observations, not portable lockfile "
+    "requirements or approval authority."
+)
 
 
 def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
@@ -179,6 +190,7 @@ def build_json() -> dict:
         "optional_features": {
             "deployed-prompt-audit": DEPLOYED_PROMPT_AUDIT,
             "staged-replacement-recovery": STAGED_REPLACEMENT_RECOVERY,
+            "scoped-inline-hook-consent": SCOPED_INLINE_HOOK_CONSENT,
         },
         "requirements": entries,
     }
@@ -232,6 +244,8 @@ def build_md(doc: dict) -> str:
         f"{doc['optional_features']['deployed-prompt-audit']}\n\n"
         "## Proposed staged-replacement recovery\n\n"
         f"{doc['optional_features']['staged-replacement-recovery']}\n\n"
+        "## Proposed scoped inline-hook consent\n\n"
+        f"{doc['optional_features']['scoped-inline-hook-consent']}\n\n"
     )
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"

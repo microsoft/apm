@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **136 normative statements (131 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **137 normative statements (132 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -3845,6 +3845,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 22| Silent hook passthrough or double-activation via native-format conversion | [req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017) | Consumer-default |
 | 23| Partial native deployment with false successful-state persistence | [req-pr-008](#req-pr-008) | Consumer-default |
 | 24| Manifest-directed dependency redirection via a root replacement table | [req-rpl-001](#req-rpl-001), [req-rpl-002](#req-rpl-002), [req-rpl-004](#req-rpl-004) | Consumer-default when capability is provided |
+| 25| Consent bypass or removal of protective hooks from a standalone primitive | [req-sc-016](#req-sc-016) | Consumer-default when capability is provided |
 
 For Codex conversion metadata diagnostics, [req-tg-015](#req-tg-015)
 separately constrains field-name display and excludes dropped values.
@@ -3998,6 +3999,63 @@ foreign collision, reconciles only the declared reserved activation-key
 suffix, preserves unrelated JSON values semantically, and commits catalog,
 ledger, and settings writes as one rollback unit.
 
+### 10.18 Scoped inline hook consent (proposed capability)
+
+**Threat.** A standalone primitive carries executable hooks in structured
+native metadata. Treating the entire file as pure text bypasses executable
+consent; stripping its hooks can instead remove the protection on which its
+instructions depend.
+
+**Mitigation.**
+
+<a id="req-sc-016"></a>
+**[req-sc-016]** A conforming **consumer** that supports structured native
+inline hooks in standalone commands, skills, or non-plugin agents MUST
+apply the package identity, executable `hooks` consent, and deny precedence
+of [req-sc-009](#req-sc-009) and [req-sc-011](#req-sc-011) to each selected
+hook-bearing primitive in the authorized source set of
+[req-sc-015](#req-sc-015). The same `hooks` executable type covers both
+merge-based and inline declarations; no separate consent type is introduced.
+These obligations apply equally to direct and transitive dependencies.
+When that gate is enabled and its hooks are pending
+or denied, the consumer MUST withhold the whole affected primitive rather
+than remove its hooks and deploy the remainder as equivalent text.
+Unrelated pure-text primitives remain eligible under their ordinary rules.
+
+For admitted content, the consumer MUST preserve the native hook definition,
+lifetime, matcher, tool and invocation restrictions, except for bounded
+resource-reference resolution through the authorized source set of
+[req-sc-015](#req-sc-015). It MUST NOT promote a scoped definition into
+global settings, infer another target's support, or activate fields ignored
+in an opaque native plugin. Malformed, unsupported or unrepresentable hook
+content in selected primitives MUST fail the operation before any affected
+executable is activated, with a diagnostic naming the source, target and
+failure reason. This capability does not require interpretation of arbitrary
+shell code or Markdown bodies as executable declarations.
+
+Install, reinstall, update and read-only audit MUST derive deployed and
+deliberately withheld expectations from the same selected sources, identity
+and effective consent computed from current inputs under
+[req-sc-009](#req-sc-009) and [req-sc-011](#req-sc-011).
+A recorded deployment status is not an
+approval grant. Audit MUST distinguish deliberate withholding from missing
+or altered output that was expected to be deployed, and report missing
+source evidence rather than assert compliance. Revocation MUST remove only
+output with a consumer-recorded ownership claim for that destination and a
+matching deployed-file hash under [req-lk-012](#req-lk-012).
+Edited, foreign or unverifiable content is preserved and any resulting
+conflict is reported without claiming successful revocation. Diagnostics
+MUST NOT imply that removing files revokes hooks already registered in a
+running native session. The consumer MUST disclose the applicable reload or
+restart limitation when reporting revocation of hook-bearing content.
+
+This proposed capability is conditional on the consumer's declared native
+primitive and scope support. Native version qualification is separate for
+commands, skills and non-plugin agents in each supported project/user
+scope. A conformance claim for this capability MUST NOT cite
+source-materialization or installed-consumer-output tests as evidence of
+native invocation, runtime permission or native-host trust acceptance.
+
 ---
 
 ## 11. Conformance
@@ -4126,6 +4184,9 @@ Consumers providing the proposed root-source-replacement capability
 additionally conform to [req-rpl-001](#req-rpl-001),
 [req-rpl-002](#req-rpl-002), [req-rpl-003](#req-rpl-003),
 [req-rpl-004](#req-rpl-004).
+
+Consumers providing the proposed inline-hook consent capability
+additionally conform to [req-sc-016](#req-sc-016).
 
 #### 11.3.3 Registry
 
@@ -4328,6 +4389,8 @@ tests/fixtures/spec-conformance/
     semver-dialect.json
   source-plan/
     req-sc-015.json
+  inline-hooks/
+    req-sc-016.json
 ```
 
 Conformance-suite expansion (additional fixtures for archive
@@ -4347,6 +4410,14 @@ for [req-sc-015](#req-sc-015). A consumer uses the oracle to demonstrate
 that scanning and materialization share the same authorized source set
 through both install and re-integration; each lifecycle result matches
 the oracle's authorized paths.
+
+The `inline-hooks/req-sc-016.json` oracle covers gate-disabled, approved,
+pending and denied standalone hook-bearing primitives, paired pure-text
+content, preserved native definitions and read-only audit. Its installed
+consumer checks cover command, skill and non-plugin agent output in project
+and user scopes. They do not invoke or enable a native host. The oracle's
+`exec_status` values are APM-specific recording vocabulary, not a portable
+lockfile field required by this specification.
 
 ### 12.5 Round-trip conformance (normative)
 
@@ -4633,6 +4704,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-sc-013](#req-sc-013)                | MUST    | 10.3    | consumer    |
 | [req-sc-014](#req-sc-014)                | MUST    | 10.15   | consumer    |
 | [req-sc-015](#req-sc-015)                | MUST    | 10.16   | consumer    |
+| [req-sc-016](#req-sc-016)                | MUST    | 10.18   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
@@ -4641,7 +4713,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 136** (131 MUST, 5 SHOULD).
+**Total normative statements: 137** (132 MUST, 5 SHOULD).
 
 ---
 
@@ -4704,9 +4776,21 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.54 (proposed) | 2026-10-21 | Opt-in root source-replacement proposal for #3180 / PR #3309. Added four conditional consumer requirements [req-rpl-001] through [req-rpl-004] for exact root-owned graph binding, original ownership with selected-source lifecycle/security, proposed lock version 3 evidence, and frozen full-table/content verification. Distinct candidate schema identities preserve earlier published bytes; version 1/2 semantics remain unchanged. This is a new opt-in capability and explicit versioned lock extension, not behavior-neutral errata. Section 9.3 review/public comment and first supporting release remain pending; source staging is not adoption. Statement count: 130 -> 134 (129 MUST, 5 SHOULD). |
 | 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 
-The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one
-MUST; 0.1.54 adds four. Together, this working draft contains 136 statements
-(131 MUST, 5 SHOULD). Combining the proposals does not establish
+Proposed amendment **0.1.56** adds [req-sc-016](#req-sc-016), conditional on
+providing structured standalone inline hooks. This defines their executable
+consent and preservation boundary rather than changing a field's type or
+relaxing an existing fail-closed obligation. Hook-bearing standalone content
+previously deployed without approval or with its hooks removed becomes
+deliberately withheld; unsupported selected inline definitions are rejected;
+unverifiable revocation is reported as a conflict. Pure text, gate-disabled
+operation and opaque plugin handling retain their separate contracts.
+Section 9.2 amendment classification, Section 9.3 review and public comment,
+and native acceptance remain pending. These source changes are not adoption
+or a release claim. Statement count: 136 -> 137 (132 MUST, 5 SHOULD).
+
+The independently drafted 0.1.52, 0.1.53, 0.1.55 and 0.1.56 proposals each add
+one MUST; 0.1.54 adds four. Together, this working draft contains 137 statements
+(132 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
 Errata (none at publication).

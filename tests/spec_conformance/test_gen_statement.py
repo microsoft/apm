@@ -81,3 +81,21 @@ def test_gen_statement_publishes_user_scope_disclosure():
     markdown = CONFORMANCE_MD.read_text(encoding="ascii")
     for value in USER_SCOPE_DISCLOSURE.values():
         assert value in markdown
+
+
+def test_gen_statement_does_not_claim_inline_native_acceptance() -> None:
+    """Installed-consumer coverage cannot silently become native qualification."""
+    _run_gen()
+    document = json.loads(CONFORMANCE_JSON.read_text(encoding="ascii"))
+    disclosure = document["optional_features"]["scoped-inline-hook-consent"]
+    assert "Section 9.2 amendment classification" in disclosure
+    assert "Section 9.3 review and public comment remain pending" in disclosure
+    assert "They do not invoke native clients or hooks" in disclosure
+    assert (
+        "Each primitive/scope combination requires separate native version qualification"
+        in disclosure
+    )
+    assert "not portable lockfile requirements or approval authority" in disclosure
+    markdown = CONFORMANCE_MD.read_text(encoding="ascii")
+    assert "## Proposed scoped inline-hook consent" in markdown
+    assert disclosure in markdown
