@@ -26,8 +26,11 @@ from apm_cli.security.executables import (
     TRUST_DEPLOYED,
     TRUST_GATED,
     ExecTrustContext,
+    ExecutableDeclaration,
     exec_status_for_declaration,
     materialize_exec_map,
+    partition_executable_declarations,
+    prompt_executable_approval,
     resolve_exec_decision,
 )
 
@@ -52,6 +55,35 @@ def _ctx(**kw) -> ExecTrustContext:
     )
     base.update(kw)
     return ExecTrustContext(**base)
+
+
+def test_prompt_partition_keeps_denied_types_out_of_personal_grants() -> None:
+    """A mixed declaration keeps provenance and independent pending types."""
+    declaration = ExecutableDeclaration(
+        package_key=PKG,
+        package_name=NAME,
+        is_transitive=True,
+        parent_name="owner/parent",
+        hook_count=1,
+        bin_count=1,
+        hook_details=["protected.agent.md"],
+        bin_details=["tool"],
+    )
+    pending, denied = partition_executable_declarations(
+        [declaration], _ctx(project_deny={NAME: {EXEC_TYPE_HOOKS: True}})
+    )
+    assert pending[0].exec_types == [EXEC_TYPE_BIN]
+    assert pending[0].hook_details == []
+    assert pending[0].bin_details == ["tool"]
+    assert pending[0].is_transitive is True
+    assert pending[0].parent_name == "owner/parent"
+    assert denied[0].exec_types == [EXEC_TYPE_HOOKS]
+    assert denied[0].bin_details == []
+    assert declaration.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+    approved = prompt_executable_approval(
+        pending, allow_executables={PKG: {EXEC_TYPE_LSP: True}}, trust_all=True
+    )
+    assert approved == {PKG: {EXEC_TYPE_BIN: True, EXEC_TYPE_LSP: True}}
 
 
 class TestGateDisabled:

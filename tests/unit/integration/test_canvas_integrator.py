@@ -569,6 +569,7 @@ def test_dispatch_dependency_named_local_is_not_first_party(tmp_path: Path, enab
     bypass the trust gate by naming their package ``_local``.
     Canvas blocking now requires allowExecutables enforcement (non-None dict).
     """
+    from apm_cli.install.context import InstallContext
     from apm_cli.install.services import integrate_package_primitives
 
     _make_canvas(tmp_path, "widget")
@@ -585,7 +586,7 @@ def test_dispatch_dependency_named_local_is_not_first_party(tmp_path: Path, enab
         managed_files=set(),
         diagnostics=diags,
         package_name="_local",
-        ctx=SimpleNamespace(verbose=False),
+        ctx=InstallContext(project_root=project_root, apm_dir=project_root / ".apm"),
         # is_first_party defaults to False (dependency call path)
         # allow_executables enforcement active, canvas NOT approved for _local
         allow_executables={"other/pkg": {"canvas": True}},
@@ -597,6 +598,7 @@ def test_dispatch_dependency_named_local_is_not_first_party(tmp_path: Path, enab
 
 def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
     """The local-content call path passes is_first_party=True and deploys."""
+    from apm_cli.install.context import InstallContext
     from apm_cli.install.services import integrate_package_primitives
 
     _make_canvas(tmp_path, "widget")
@@ -613,7 +615,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
         managed_files=set(),
         diagnostics=diags,
         package_name="owner/dep",
-        ctx=SimpleNamespace(verbose=False),
+        ctx=InstallContext(project_root=project_root, apm_dir=project_root / ".apm"),
         is_first_party=True,
     )
 
@@ -623,6 +625,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
 
 def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
     """A dependency canvas deploys when allowExecutables is None (no enforcement)."""
+    from apm_cli.install.context import InstallContext
     from apm_cli.install.services import integrate_package_primitives
 
     _make_canvas(tmp_path, "widget")
@@ -639,7 +642,7 @@ def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
         managed_files=set(),
         diagnostics=diags,
         package_name="owner/dep",
-        ctx=SimpleNamespace(verbose=False),
+        ctx=InstallContext(project_root=project_root, apm_dir=project_root / ".apm"),
         # allow_executables=None means no enforcement; canvas deploys freely
     )
 

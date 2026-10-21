@@ -74,7 +74,9 @@ class ApmLifecycleRunner:
         scenario_id: str = "single-command",
         cwd: Path,
         env: Mapping[str, str],
+        stdin_fd: int | None = None,
     ) -> CommandResult:
+        """Run one command, optionally reading an explicitly owned input descriptor."""
         return self._run_with_timeout(
             args,
             cwd=cwd,
@@ -82,6 +84,7 @@ class ApmLifecycleRunner:
             timeout_seconds=self._timeout_seconds,
             scenario_id=scenario_id,
             budget_seconds=self._timeout_seconds,
+            stdin_fd=stdin_fd,
         )
 
     def _run_with_timeout(
@@ -93,12 +96,14 @@ class ApmLifecycleRunner:
         timeout_seconds: float,
         scenario_id: str,
         budget_seconds: float,
+        stdin_fd: int | None = None,
     ) -> CommandResult:
         command = (*self._command, *args)
         process = subprocess.Popen(
             command,
             cwd=cwd,
             env=dict(env),
+            stdin=stdin_fd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

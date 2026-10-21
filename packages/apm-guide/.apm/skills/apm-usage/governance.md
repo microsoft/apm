@@ -219,13 +219,18 @@ labels its deciding layer `org-enforce-degraded` to make the v1 degrade explicit
 The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
+These maps accept exact or version-blind keys, not globs. Local dependency
+grants use resolver-owned identities (anchored for transitive paths) with
+package versions.
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, `absent`).
 This field is observational, not approval authority. Selected structured
 inline hooks in standalone Claude commands, skills and non-plugin agents use
 the same package/type consent. Pending or denied hooks withhold the whole
 affected primitive, not just its protective hook; separate pure text remains
-available. Read-only audit replays current consent and selection. Revocation
+available. Interactive install offers only pending executable types; a deny
+must be resolved before approval can take effect. Read-only audit replays
+current consent and selection. Revocation
 preserves edited or unverifiable output and reports unresolved conflicts.
 Native trust still applies, and a running session may need restarting after
 files are removed.

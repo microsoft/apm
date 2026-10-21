@@ -74,10 +74,15 @@ def check_executable_approval(
         from apm_cli.security.executables import scan_package_executables
 
         _install = Path(package_info.install_path)
+        tree = getattr(getattr(ctx, "dependency_graph", None), "dependency_tree", None)
+        reference = getattr(package_info, "dependency_ref", None)
+        node = tree.get_node(reference.get_unique_key()) if tree is not None and reference else None
         _decl = scan_package_executables(
             _install,
             package_name,
             "",
+            is_transitive=node is not None and node.depth > 1,
+            parent_name=node.parent.get_id() if node is not None and node.parent else None,
             approval_identity=pkg_key,
             source_plan=source_plan,
         )
@@ -105,14 +110,20 @@ def check_executable_approval(
 def resolve_package_key(package_info: Any, package_name: str) -> str:
     """Build the ``allowExecutables`` lookup key for a package.
 
-    Tries ``dependency_ref`` first (canonical dependency string), then
+    Tries the resolver-owned source identity first, then
     falls back to ``name#version`` from the package's own metadata.
     """
     from apm_cli.security.executables import build_approval_key
 
-    # Prefer the dependency reference's canonical string (includes version/ref)
+    # Local approvals use the same package version as the locked inventory.
     dep_ref = getattr(package_info, "dependency_ref", None)
     if dep_ref is not None:
+        from apm_cli.models.dependency import DependencyReference
+
+        if isinstance(dep_ref, DependencyReference) and dep_ref.is_local:
+            source = dep_ref.source_reference
+            version = getattr(getattr(package_info, "package", None), "version", "") or ""
+            return build_approval_key(source.get_unique_key(), version)
         canonical = getattr(dep_ref, "canonical_string", None)
         if callable(canonical):
             cs = canonical()

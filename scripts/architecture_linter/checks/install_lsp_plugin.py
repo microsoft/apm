@@ -57,6 +57,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
         {
             _EXECUTABLES: (
                 "def exec_trust_context_for_project(",
+                "def partition_executable_declarations(",
+                "resolve_exec_decision(trust_context, declaration.package_key, kind)",
                 "def locked_dependency_approval_keys(",
                 "def local_bundle_approval_key(",
                 'owner = getattr(dependency, "resolved_by", None)',
@@ -65,6 +67,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _APPROVE_COMMAND: ("approval_identity=locked.get_unique_key()",),
             _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
             _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
+            "src/apm_cli/install/phases/integrate.py": (
+                "pending, denied = partition_executable_declarations(pending, trust_context)",
+                "pending, replace(trust_context, user_allow=updated)",
+            ),
             _LSP_PIPELINE: (
                 "effective_allow_executables = effective_exec_map_for_project(",
                 "if not effective_allow_resolved:",

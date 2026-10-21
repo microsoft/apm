@@ -9,9 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_frontmatter, load_yaml, yaml_to_str
-from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
 pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
@@ -33,9 +35,283 @@ def _primitive(
     return getattr(factory, f"add_{kind}")(package, name, content)
 
 
+def _interactive_install(
+    runner: ApmLifecycleRunner,
+    args: tuple[str, ...],
+    workspace: Path,
+    env: dict[str, str],
+    answer: bool,
+) -> CommandResult:
+    """Give the real APM process a real TTY, without invoking a native client."""
+    import pty
+
+    interactive_env = dict(env)
+    interactive_env.pop("CI", None)
+    interactive_env.pop("APM_NON_INTERACTIVE", None)
+    master, slave = pty.openpty()
+    try:
+        os.write(master, b"y\n" if answer else b"n\n")
+        return runner.run(
+            args,
+            cwd=workspace,
+            env=interactive_env,
+            stdin_fd=slave,
+            scenario_id="inline-real-tty",
+        )
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Real TTY fixture uses POSIX pty.openpty")
 @pytest.mark.parametrize("kind", ["command", "skill", "agent"])
-def test_denied_inline_hook_withholds_whole_primitive(
+@pytest.mark.parametrize("user_scope", [False, True])
+@pytest.mark.parametrize("answer", [False, True])
+def test_inline_interactive_consent_uses_personal_grant_and_later_install(
+    tmp_path: Path, apm_binary_path: Path, kind: str, user_scope: bool, answer: bool
+) -> None:
+    """A real consent prompt never activates hooks in the already-parked install."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    dependency = factory.create("guarded")
+    _primitive(factory, dependency, kind, "protected", hooks=True)
+    _primitive(factory, dependency, kind, "plain", hooks=False)
+    consumer = factory.create(
+        "consumer", dependencies=({"path": "../guarded"},), targets=("claude",)
+    )
+    workspace = isolated.config_root if user_scope else consumer.root
+    deployment = isolated.home if user_scope else consumer.root
+    identity = dependency.root.as_posix() if user_scope else "../guarded"
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"] = {"apm": [{"path": identity}]}
+    manifest["executables"] = {"allow": {}}
+    dump_yaml(manifest, workspace / "apm.yml")
+    manifest_before = (workspace / "apm.yml").read_bytes()
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    args = ("install", "--no-policy", *(("--global",) if user_scope else ()))
+    result = _interactive_install(runner, args, workspace, isolated.subprocess_env(), answer)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Trust " in result.stdout
+    assert "direct dependency" in result.stdout
+    assert (workspace / "apm.yml").read_bytes() == manifest_before
+    subdir, suffix = {
+        "command": ("commands", ".md"),
+        "skill": ("skills", "/SKILL.md"),
+        "agent": ("agents", ".md"),
+    }[kind]
+    protected = deployment / ".claude" / subdir / f"protected{suffix}"
+    assert not protected.exists()
+    assert (deployment / ".claude" / subdir / f"plain{suffix}").is_file()
+    config_path = isolated.config_root / "config.json"
+    config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    assert (
+        bool(
+            config.get("executables", {}).get("allow", {}).get(f"{identity}#0.1.0", {}).get("hooks")
+        )
+        is answer
+    )
+    later = runner.run(args, cwd=workspace, env=isolated.subprocess_env())
+    assert later.returncode == 0, later.stdout + later.stderr
+    assert protected.exists() is answer
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Real TTY fixture uses POSIX pty.openpty")
+@pytest.mark.parametrize("kind", ["command", "skill", "agent"])
+@pytest.mark.parametrize("denying_layer", ["project", "user"])
+def test_inline_hard_deny_is_not_offered_as_personal_approval(
+    tmp_path: Path, apm_binary_path: Path, kind: str, denying_layer: str
+) -> None:
+    """A fixture answer cannot create a dormant grant beneath a higher-priority deny."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    dependency = factory.create("guarded")
+    _primitive(factory, dependency, kind, "protected", hooks=True)
+    consumer = factory.create(
+        "consumer", dependencies=({"path": "../guarded"},), targets=("claude",)
+    )
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["executables"] = {"allow": {}}
+    deny = {"deny": {"../guarded": {"hooks": True}}}
+    if denying_layer == "project":
+        manifest["executables"].update(deny)
+    else:
+        (isolated.config_root / "config.json").write_text(
+            json.dumps({"executables": deny}), encoding="utf-8"
+        )
+    dump_yaml(manifest, consumer.manifest_path)
+    result = _interactive_install(
+        ApmLifecycleRunner((str(apm_binary_path),)),
+        ("install", "--no-policy"),
+        consumer.root,
+        isolated.subprocess_env(),
+        True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Trust " not in result.stdout
+    assert "denied" in result.stdout.lower()
+    assert "pending approval" not in result.stdout.lower()
+    config_path = isolated.config_root / "config.json"
+    config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    assert config.get("executables", {}).get("allow", {}) == {}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Real TTY fixture uses POSIX pty.openpty")
+@pytest.mark.parametrize("kind", ["command", "skill", "agent"])
+def test_transitive_inline_prompt_and_approval_keep_resolver_identity(
     tmp_path: Path, apm_binary_path: Path, kind: str
+) -> None:
+    """Transitive provenance and grants use the actual resolved child, not its parent."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    dependency = factory.create("guarded")
+    _primitive(factory, dependency, kind, "protected", hooks=True)
+    factory.create("parent", dependencies=({"path": "../guarded"},))
+    consumer = factory.create(
+        "consumer", dependencies=({"path": "../parent"},), targets=("claude",)
+    )
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["executables"] = {"allow": {}}
+    dump_yaml(manifest, consumer.manifest_path)
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    pending = _interactive_install(
+        runner, ("install", "--no-policy"), consumer.root, isolated.subprocess_env(), False
+    )
+    assert pending.returncode == 0, pending.stdout + pending.stderr
+    assert "transitive via ../parent" in pending.stdout
+    lock = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert lock is not None
+    [child] = [dependency for dependency in lock.dependencies.values() if dependency.depth == 2]
+    identity = child.get_unique_key()
+    approved = runner.run(("approve", identity), cwd=consumer.root, env=isolated.subprocess_env())
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    assert load_yaml(consumer.manifest_path)["executables"]["allow"] == {
+        f"{identity}#0.1.0": {"hooks": True}
+    }
+    installed = runner.run(
+        ("install", "--no-policy"), cwd=consumer.root, env=isolated.subprocess_env()
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    [deployed] = list((consumer.root / ".claude").rglob("*.md"))
+    assert load_frontmatter(deployed).metadata["hooks"] == _HOOKS
+
+
+@pytest.mark.parametrize("kind", ["command", "skill", "agent"])
+@pytest.mark.parametrize("user_scope", [False, True])
+def test_inline_update_cold_policy_replay_and_lock_status_are_consistent(
+    tmp_path: Path, apm_binary_path: Path, kind: str, user_scope: bool
+) -> None:
+    """Real update and cold audit retain current consent instead of trusting lock status."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    dependency = factory.create("guarded")
+    source = _primitive(factory, dependency, kind, "protected", hooks=True)
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    repository = repositories.create("guarded", source_tree=dependency.root)
+    repositories.commit(repository, message="Initial harmless inline hook")
+    source = repository.worktree / source.relative_to(dependency.root)
+    identity = "fixture/inline-hooks"
+    env = repositories.url_rewrite_subprocess_env(
+        repository, "https://github.com/fixture/inline-hooks"
+    )
+    consumer = factory.create(
+        "consumer", dependencies=({"git": identity, "ref": "main"},), targets=("claude",)
+    )
+    workspace = isolated.config_root if user_scope else consumer.root
+    deployment = isolated.home if user_scope else consumer.root
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["executables"] = {"allow": {identity: {"hooks": True}}}
+    dump_yaml(manifest, workspace / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    install_args = ("install", "--no-policy", *(("--global",) if user_scope else ()))
+    installed = runner.run(install_args, cwd=workspace, env=env)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    subdir, suffix = {
+        "command": ("commands", ".md"),
+        "skill": ("skills", "/SKILL.md"),
+        "agent": ("agents", ".md"),
+    }[kind]
+    deployed = deployment / ".claude" / subdir / f"protected{suffix}"
+    metadata = load_frontmatter(source).metadata
+    metadata["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "echo updated-inline-witness"
+    source.write_text(f"---\n{yaml_to_str(metadata)}---\nDo not execute commands.\n")
+    updated_commit = repositories.commit(repository, message="Update harmless inline hook")
+    updated = runner.run(
+        ("update", "--yes", *(("--global",) if user_scope else ())),
+        cwd=workspace,
+        env=env,
+    )
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert load_frontmatter(deployed).metadata["hooks"] == metadata["hooks"]
+    updated_lock = LockFile.read(workspace / "apm.lock.yaml")
+    assert updated_lock is not None
+    assert updated_lock.get_dependency(identity).resolved_commit == updated_commit.sha
+
+    policy_path = isolated.root / "policy.yml"
+    dump_yaml(
+        {"name": "inline-deny", "enforcement": "block", "executables": {"deny_all": True}},
+        policy_path,
+    )
+    modules = workspace / "apm_modules"
+    saved_modules = isolated.temp_root / "saved-modules"
+
+    def audit_readonly(*policy_args: str, expected: bool) -> None:
+        def snapshot() -> dict[Path, bytes]:
+            return {
+                path: path.read_bytes()
+                for path in isolated.root.rglob("*")
+                if path.is_file() and not path.is_relative_to(isolated.temp_root)
+            }
+
+        before = snapshot()
+        materialized_before = modules.exists()
+        result = runner.run(
+            ("audit", "--ci", "--format", "json", *policy_args),
+            cwd=workspace,
+            env=env,
+        )
+        assert snapshot() == before
+        report = json.loads(result.stdout)
+        assert report["passed"] is expected, result.stdout + result.stderr
+        assert (result.returncode == 0) is expected, result.stdout + result.stderr
+        assert modules.exists() is materialized_before
+        if user_scope and not materialized_before:
+            assert any(
+                "installed package materialization is missing" in check["message"]
+                for check in report["checks"]
+                if not check["passed"]
+            )
+
+    audit_readonly("--no-policy", expected=True)
+    audit_readonly("--policy", str(policy_path), expected=False)
+    modules.rename(saved_modules)
+    audit_readonly("--no-policy", expected=not user_scope)
+    audit_readonly("--policy", str(policy_path), expected=False)
+    saved_modules.rename(modules)
+    denied = runner.run(("deny", identity), cwd=workspace, env=env)
+    assert denied.returncode == 0, denied.stdout + denied.stderr
+    revoked = runner.run(install_args, cwd=workspace, env=env)
+    assert revoked.returncode == 0, revoked.stdout + revoked.stderr
+    assert not deployed.exists()
+    lock_path = workspace / "apm.lock.yaml"
+    lock = LockFile.read(lock_path)
+    assert lock is not None
+    assert [record.exec_status for record in lock.dependencies.values()] == ["denied"]
+    for dependency_record in lock.dependencies.values():
+        dependency_record.exec_status = "deployed"
+    lock.write(lock_path)
+    audit_readonly("--no-policy", expected=True)
+    audit_readonly("--policy", str(policy_path), expected=True)
+    modules.rename(saved_modules)
+    audit_readonly("--no-policy", expected=not user_scope)
+    audit_readonly("--policy", str(policy_path), expected=not user_scope)
+
+
+@pytest.mark.parametrize("kind", ["command", "skill", "agent"])
+@pytest.mark.parametrize("versioned_deny", [False, True])
+def test_denied_inline_hook_withholds_whole_primitive(
+    tmp_path: Path, apm_binary_path: Path, kind: str, versioned_deny: bool
 ) -> None:
     """Denying hooks never installs a primitive with its protection removed."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
@@ -47,7 +323,11 @@ def test_denied_inline_hook_withholds_whole_primitive(
         "consumer", dependencies=({"path": "../guarded"},), targets=("claude",)
     )
     manifest = load_yaml(consumer.manifest_path)
-    manifest["executables"] = {"deny": {"*": {"hooks": True}}}
+    deny_key = "../guarded#0.1.0" if versioned_deny else "../guarded"
+    manifest["executables"] = {
+        "allow": {"../guarded": {"hooks": True}},
+        "deny": {deny_key: {"hooks": True}},
+    }
     dump_yaml(manifest, consumer.manifest_path)
     result = ApmLifecycleRunner((str(apm_binary_path),)).run(
         ("install", "--no-policy"),
@@ -65,6 +345,9 @@ def test_denied_inline_hook_withholds_whole_primitive(
     assert (native / f"plain{suffix}").is_file(), result.stdout + result.stderr
     assert not (native / f"protected{suffix}").exists(), result.stdout + result.stderr
     assert "withheld" in result.stdout.lower(), result.stdout + result.stderr
+    lock = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert lock is not None
+    assert [record.exec_status for record in lock.dependencies.values()] == ["denied"]
 
 
 @pytest.mark.parametrize("kind", ["command", "skill", "agent"])
@@ -321,7 +604,7 @@ def test_edited_inline_primitive_is_not_silently_revoked(
     edited = deployed.read_text() + "\nPersonal changes.\n"
     deployed.write_text(edited)
     manifest = load_yaml(consumer.manifest_path)
-    manifest["executables"] = {"deny": {"*": {"hooks": True}}}
+    manifest["executables"] = {"deny": {"../guarded": {"hooks": True}}}
     dump_yaml(manifest, consumer.manifest_path)
     revoked = runner.run(
         ("install", "--no-policy"), cwd=consumer.root, env=isolated.subprocess_env()

@@ -51,7 +51,9 @@ display name does not make it first-party.
 | Pure-text primitives | No | Not interpreted as structured executable declarations |
 
 Approval inventory respects the installed dependency's selected skills and
-targets. After approval or revocation, rerun the scope-appropriate install
+targets. Interactive installation offers only pending executable types, not
+types blocked by an org, project or personal deny. Resolve the denying rule
+before granting approval. After approval or revocation, rerun the scope-appropriate install
 command (`apm install` or `apm install --global`). Revocation removes only
 verified, unchanged APM-owned output; edited or unverifiable files remain with
 an unresolved-conflict diagnostic. Restart Claude as needed to discard hooks
@@ -124,7 +126,12 @@ policy explain` for the per-package detail.
 
 The project `executables.allow` / `executables.deny` maps are keyed by
 `owner/repo#version` (or version-blind `owner/repo`) with per-type boolean
-flags:
+flags.
+
+Local dependency grants use the resolver's identity and package version,
+including the anchored identity of a transitive local dependency. A
+dependency's display name is not an approval key. Project and user maps do
+not support globs.
 
 ```yaml
 # apm.yml  (committed)

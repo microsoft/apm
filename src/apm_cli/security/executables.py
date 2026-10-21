@@ -21,7 +21,7 @@ import fnmatch
 import hashlib
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -658,6 +658,30 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def partition_executable_declarations(
+    declarations: list[ExecutableDeclaration], trust_context: ExecTrustContext
+) -> tuple[list[ExecutableDeclaration], list[ExecutableDeclaration]]:
+    """Project resolver decisions into pending and denied per-type prompt inventory."""
+    groups: dict[str, list[ExecutableDeclaration]] = {TRUST_GATED: [], TRUST_DENIED: []}
+    for declaration in declarations:
+        states = {
+            kind: resolve_exec_decision(trust_context, declaration.package_key, kind).trust_state
+            for kind in declaration.exec_types
+        }
+        for state, output in groups.items():
+            selected = {kind for kind, decision in states.items() if decision == state}
+            if not selected:
+                continue
+            omitted: dict[str, int | list[str]] = {}
+            for kind in ALL_EXEC_TYPES:
+                if kind not in selected:
+                    prefix = "hook" if kind == EXEC_TYPE_HOOKS else kind
+                    omitted[f"{prefix}_count"] = 0
+                    omitted[f"{prefix}_details"] = []
+            output.append(replace(declaration, **omitted))
+    return groups[TRUST_GATED], groups[TRUST_DENIED]
+
+
 def prompt_executable_approval(
     declarations: list[ExecutableDeclaration],
     *,
@@ -705,7 +729,10 @@ def prompt_executable_approval(
     # --trust-all: approve everything
     if trust_all:
         for decl in pending:
-            result[decl.package_key] = {t: True for t in decl.exec_types}
+            result[decl.package_key] = {
+                **result.get(decl.package_key, {}),
+                **dict.fromkeys(decl.exec_types, True),
+            }
         return result
 
     # Non-interactive (CI): hard error
@@ -745,7 +772,10 @@ def prompt_executable_approval(
             default=False,
         )
         if approved:
-            result[decl.package_key] = {t: True for t in decl.exec_types}
+            result[decl.package_key] = {
+                **result.get(decl.package_key, {}),
+                **dict.fromkeys(decl.exec_types, True),
+            }
         _rich_echo("")
 
     return result

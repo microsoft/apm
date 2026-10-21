@@ -39,6 +39,18 @@ def test_runner_requires_explicit_command() -> None:
     assert command.default is inspect.Parameter.empty
 
 
+def test_runner_reads_only_explicit_input_descriptor(tmp_path: Path) -> None:
+    """Input injection retains the runner's existing capture and timeout boundary."""
+    input_path = tmp_path / "input.txt"
+    input_path.write_text("owned input\n", encoding="utf-8")
+    runner = ApmLifecycleRunner((sys.executable, "-c", "print(input())"))
+    with input_path.open() as stream:
+        result = runner.run((), cwd=tmp_path, env=os.environ, stdin_fd=stream.fileno())
+    assert result.returncode == 0
+    assert result.stdout == "owned input\n"
+    assert result.stderr == ""
+
+
 def test_runner_passes_explicit_cwd_and_environment(tmp_path: Path) -> None:
     parent_cwd = Path.cwd()
     parent_environment = dict(os.environ)

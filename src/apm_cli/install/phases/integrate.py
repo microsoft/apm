@@ -18,6 +18,7 @@ from __future__ import annotations
 import builtins
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,7 @@ from apm_cli.install.template import (
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.install.deployment_plan import PackageDeploymentPlan
+    from apm_cli.security.executables import ExecutableDeclaration
 
 
 # ======================================================================
@@ -485,7 +487,8 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
 
     After the integration loop, any package that had hooks or bin/
     blocked is collected in ``ctx.blocked_executables``.  This function
-    runs the interactive approval flow (or hard-errors in CI) and
+    separates hard denies from approvable types, runs the interactive flow
+    (or reports parked types in CI), and
     persists approved entries to the personal ``~/.apm/config.json``
     ``executables`` block (lowest authority, never committed to source
     control) so the next install deploys them (#1873).
@@ -493,10 +496,35 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     if not ctx.blocked_executables:
         return
 
+    from apm_cli.security.executables import partition_executable_declarations
+
+    pending = ctx.blocked_executables
+    trust_context = getattr(ctx, "exec_trust_ctx", None)
+    logger = ctx.logger
+    if logger is None:
+        from apm_cli.core.command_logger import CommandLogger
+
+        logger = CommandLogger("install")
+    if trust_context is not None:
+        pending, denied = partition_executable_declarations(pending, trust_context)
+        if denied:
+            logger.warning(
+                f"{len(denied)} package(s) have executable primitives denied by policy or "
+                "user configuration; install completed without deploying those primitives.",
+                symbol="warning",
+            )
+            logger.info(
+                "Resolve the denying rule before approval can take effect. "
+                f"Inspect: apm policy explain {denied[0].package_key}",
+                symbol="info",
+            )
+    if not pending:
+        return
+
     if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
-        first = ctx.blocked_executables[0].package_name
+        first = pending[0].package_key
         msg = (
-            f"{len(ctx.blocked_executables)} package(s) have executable primitives "
+            f"{len(pending)} package(s) have executable primitives "
             "parked pending approval; install completed without deploying them."
         )
         remedy = (
@@ -504,15 +532,8 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             f"Trust one: apm approve {first}  |  "
             f"Inspect: apm policy explain {first}"
         )
-        if ctx.logger:
-            ctx.logger.warning(msg, symbol="warning")
-            ctx.logger.info(remedy, symbol="info")
-        else:
-            from apm_cli.core.command_logger import CommandLogger
-
-            logger = CommandLogger("install")
-            logger.warning(msg, symbol="warning")
-            logger.info(remedy, symbol="info")
+        logger.warning(msg, symbol="warning")
+        logger.info(remedy, symbol="info")
         return
 
     from apm_cli.security.executables import (
@@ -526,7 +547,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     allow_exec, deny_exec = load_user_executables()
 
     updated = prompt_executable_approval(
-        ctx.blocked_executables,
+        pending,
         allow_executables=allow_exec,
     )
 
@@ -543,16 +564,17 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
 
     # Any package the user declined stays parked -- always surface a remedy
     # so the present-but-parked path is actionable on the decline branch too.
-    parked = [d for d in ctx.blocked_executables if not _decl_fully_trusted(updated, d)]
+    if trust_context is not None:
+        parked, _ = partition_executable_declarations(
+            pending, replace(trust_context, user_allow=updated)
+        )
+    else:
+        parked = [d for d in pending if not _decl_fully_trusted(updated, d)]
     if parked:
-        first = parked[0].package_name
-        logger = ctx.logger
-        if logger is None:
-            from apm_cli.core.command_logger import CommandLogger
-
-            logger = CommandLogger("install")
+        first = parked[0].package_key
         logger.info(
-            f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
+            f"{len(parked)} package(s) left parked. "
+            "Unapproved executable primitives remain withheld from this install.",
             symbol="info",
         )
         logger.info(
@@ -562,10 +584,11 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         )
 
 
-def _decl_fully_trusted(allow: dict, decl) -> bool:
+def _decl_fully_trusted(allow: dict, decl: ExecutableDeclaration) -> bool:
     """Return True when *allow* grants every exec type *decl* declares."""
-    grant = allow.get(decl.package_key) or allow.get(decl.package_name) or {}
-    return all(grant.get(t, False) for t in decl.exec_types)
+    from apm_cli.security.executables import is_package_approved
+
+    return all(is_package_approved(allow, decl.package_key, kind) for kind in decl.exec_types)
 
 
 # ======================================================================

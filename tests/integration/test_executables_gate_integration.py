@@ -440,6 +440,8 @@ class TestCheckExecutableApprovalIntegration:
         assert bin_ok is True
 
     def test_canonical_dependency_does_not_fallback_to_manifest_name(self, tmp_path: Path) -> None:
+        from apm_cli.install.context import InstallContext
+
         hooks_dir = tmp_path / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "hook.json").write_text("{}", encoding="utf-8")
@@ -447,8 +449,7 @@ class TestCheckExecutableApprovalIntegration:
         dep_ref = MagicMock()
         dep_ref.canonical_string.return_value = "./packages/local-ref"
         pkg_info.dependency_ref = dep_ref
-        ctx = MagicMock()
-        ctx.blocked_executables = []
+        ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path / ".apm")
 
         # A package-controlled manifest name is not an authorization identity.
         allow = {"pkg#1.0": {"hooks": True, "bin": True}}
@@ -483,6 +484,26 @@ class TestCheckExecutableApprovalIntegration:
 class TestResolvePackageKeyIntegration:
     """Integration: key resolution with different package_info shapes."""
 
+    @pytest.mark.parametrize("transitive", [False, True])
+    def test_local_identity_matches_locked_approval(self, tmp_path: Path, transitive: bool) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.models.dependency import DependencyReference
+
+        source = tmp_path / "guarded"
+        reference = DependencyReference(
+            repo_url="",
+            is_local=True,
+            local_path="../guarded",
+            anchored_local_path=source.as_posix() if transitive else None,
+            declaring_parent="../parent" if transitive else None,
+        )
+        package = SimpleNamespace(
+            dependency_ref=reference, package=SimpleNamespace(version="0.1.0")
+        )
+        identity = f"local:{source.as_posix()}" if transitive else "../guarded"
+        assert resolve_package_key(package, "display-name") == f"{identity}#0.1.0"
+
     def test_dep_ref_canonical_string(self) -> None:
         pkg_info = MagicMock()
         dep_ref = MagicMock()
@@ -490,6 +511,23 @@ class TestResolvePackageKeyIntegration:
         pkg_info.dependency_ref = dep_ref
 
         assert resolve_package_key(pkg_info, "fallback") == "github:owner/repo@main"
+
+    def test_remote_source_key_retains_existing_format(self) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.models.dependency import DependencyReference
+
+        reference = DependencyReference(
+            repo_url="owner/repo",
+            host="ghe.example.test",
+            port=8443,
+            reference="main",
+            alias="tools",
+        )
+        package = SimpleNamespace(dependency_ref=reference)
+        assert (
+            resolve_package_key(package, "display") == "ghe.example.test:8443/owner/repo#main@tools"
+        )
 
     def test_dep_ref_str_fallback(self) -> None:
         pkg_info = MagicMock()
