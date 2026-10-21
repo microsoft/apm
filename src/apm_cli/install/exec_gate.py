@@ -115,12 +115,20 @@ def resolve_package_key(package_info: Any, package_name: str) -> str:
     """
     from apm_cli.security.executables import build_approval_key
 
-    # Local approvals use the same package version as the locked inventory.
+    # Approval inventory uses source identity, not display host/ref/alias text.
+    # Other source families and explicit-port Git references keep their format.
     dep_ref = getattr(package_info, "dependency_ref", None)
     if dep_ref is not None:
         from apm_cli.models.dependency import DependencyReference
 
-        if isinstance(dep_ref, DependencyReference) and dep_ref.is_local:
+        if isinstance(dep_ref, DependencyReference) and (
+            dep_ref.is_local
+            or (
+                dep_ref.source in (None, "git")
+                and not dep_ref.is_marketplace
+                and dep_ref.port is None
+            )
+        ):
             source = dep_ref.source_reference
             version = getattr(getattr(package_info, "package", None), "version", "") or ""
             return build_approval_key(source.get_unique_key(), version)

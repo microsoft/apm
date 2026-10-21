@@ -196,10 +196,15 @@ def test_transitive_inline_prompt_and_approval_keep_resolver_identity(
     assert load_frontmatter(deployed).metadata["hooks"] == _HOOKS
 
 
+@pytest.mark.parametrize("approval_version", ["", "0.1.0"], ids=["unversioned", "versioned"])
 @pytest.mark.parametrize("kind", ["command", "skill", "agent"])
 @pytest.mark.parametrize("user_scope", [False, True])
 def test_inline_update_cold_policy_replay_and_lock_status_are_consistent(
-    tmp_path: Path, apm_binary_path: Path, kind: str, user_scope: bool
+    tmp_path: Path,
+    apm_binary_path: Path,
+    kind: str,
+    user_scope: bool,
+    approval_version: str,
 ) -> None:
     """Real update and cold audit retain current consent instead of trusting lock status."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "case", base_env=dict(os.environ))
@@ -222,7 +227,8 @@ def test_inline_update_cold_policy_replay_and_lock_status_are_consistent(
     workspace = isolated.config_root if user_scope else consumer.root
     deployment = isolated.home if user_scope else consumer.root
     manifest = load_yaml(consumer.manifest_path)
-    manifest["executables"] = {"allow": {identity: {"hooks": True}}}
+    approval_key = f"{identity}#{approval_version}" if approval_version else identity
+    manifest["executables"] = {"allow": {approval_key: {"hooks": True}}}
     dump_yaml(manifest, workspace / "apm.yml")
     runner = ApmLifecycleRunner((str(apm_binary_path),))
     install_args = ("install", "--no-policy", *(("--global",) if user_scope else ()))
@@ -234,6 +240,11 @@ def test_inline_update_cold_policy_replay_and_lock_status_are_consistent(
         "agent": ("agents", ".md"),
     }[kind]
     deployed = deployment / ".claude" / subdir / f"protected{suffix}"
+    assert deployed.is_file(), installed.stdout + installed.stderr
+    assert load_frontmatter(deployed).metadata["hooks"] == _HOOKS
+    initial_lock = LockFile.read(workspace / "apm.lock.yaml")
+    assert initial_lock is not None
+    assert initial_lock.get_dependency(identity).exec_status == "deployed"
     metadata = load_frontmatter(source).metadata
     metadata["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "echo updated-inline-witness"
     source.write_text(f"---\n{yaml_to_str(metadata)}---\nDo not execute commands.\n")
@@ -244,10 +255,12 @@ def test_inline_update_cold_policy_replay_and_lock_status_are_consistent(
         env=env,
     )
     assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert deployed.is_file(), updated.stdout + updated.stderr
     assert load_frontmatter(deployed).metadata["hooks"] == metadata["hooks"]
     updated_lock = LockFile.read(workspace / "apm.lock.yaml")
     assert updated_lock is not None
     assert updated_lock.get_dependency(identity).resolved_commit == updated_commit.sha
+    assert updated_lock.get_dependency(identity).exec_status == "deployed"
 
     policy_path = isolated.root / "policy.yml"
     dump_yaml(

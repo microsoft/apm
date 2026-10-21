@@ -219,9 +219,11 @@ labels its deciding layer `org-enforce-degraded` to make the v1 degrade explicit
 The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
-These maps accept exact or version-blind keys, not globs. Local dependency
-grants use resolver-owned identities (anchored for transitive paths) with
-package versions.
+These maps accept exact or version-blind keys, not globs. Local and default-port
+Git dependency grants use resolver-owned identities (anchored for transitive
+local paths) with package versions. Lock replay does not turn an implicit
+GitHub host into a different approval identity. Ref names remain resolution
+inputs, not separately scoped executable approvals.
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, `absent`).
 This field is observational, not approval authority. Selected structured

@@ -164,6 +164,34 @@ def test_local_bundle_canvas_approval_bypass_is_rejected() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('dep_ref.source in (None, "git")', "True"),
+        ("not dep_ref.is_marketplace", "True"),
+        ("and dep_ref.port is None", ""),
+        ("source = dep_ref.source_reference", "source = dep_ref.ownership_reference"),
+        (
+            "return build_approval_key(source.get_unique_key(), version)",
+            "return build_approval_key(str(source), version)",
+        ),
+    ],
+)
+def test_executable_source_identity_bypass_is_rejected(old: str, new: str) -> None:
+    """The gate must retain source identity and the explicit-port boundary."""
+    path = "src/apm_cli/install/exec_gate.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-executable-trust-context",),
+        source_overrides={path: source.replace(old, new, 1)},
+    )
+    assert {item.rule_id for item in report.violations} == {
+        "install-deployment-executable-trust-context"
+    }
+
+
 def test_multitarget_lsp_preflight_bypass_is_rejected() -> None:
     path = "src/apm_cli/integration/lsp_integrator.py"
     source = (ROOT / path).read_text(encoding="utf-8")

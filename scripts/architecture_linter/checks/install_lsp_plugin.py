@@ -67,6 +67,13 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _APPROVE_COMMAND: ("approval_identity=locked.get_unique_key()",),
             _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
             _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
+            "src/apm_cli/install/exec_gate.py": (
+                'dep_ref.source in (None, "git")',
+                "not dep_ref.is_marketplace",
+                "and dep_ref.port is None",
+                "source = dep_ref.source_reference",
+                "return build_approval_key(source.get_unique_key(), version)",
+            ),
             "src/apm_cli/install/phases/integrate.py": (
                 "pending, denied = partition_executable_declarations(pending, trust_context)",
                 "pending, replace(trust_context, user_allow=updated)",

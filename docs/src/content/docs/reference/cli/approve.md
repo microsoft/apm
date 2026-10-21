@@ -38,6 +38,11 @@ than remove its protection. Unrelated text remains available. Genuine local
 project content (the root `.apm/` directory) remains trusted; a dependency's
 display name does not make it first-party.
 
+Local and default-port Git dependencies keep the same resolver-owned approval
+identity across install, update and audit. Making the default GitHub host
+explicit in the lockfile does not require a new grant. Ref names remain
+resolution inputs, not separately scoped executable approvals.
+
 ### What is gated
 
 | Type | Gated | Notes |

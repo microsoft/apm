@@ -512,22 +512,181 @@ class TestResolvePackageKeyIntegration:
 
         assert resolve_package_key(pkg_info, "fallback") == "github:owner/repo@main"
 
-    def test_remote_source_key_retains_existing_format(self) -> None:
+    @pytest.mark.parametrize(
+        ("host", "identity"),
+        [
+            (None, "owner/repo"),
+            ("github.com", "owner/repo"),
+            ("GitHub.COM", "owner/repo"),
+            ("first.example.test", "first.example.test/owner/repo"),
+            ("second.example.test", "second.example.test/owner/repo"),
+        ],
+    )
+    @pytest.mark.parametrize("subpath", [None, "packages/check"])
+    @pytest.mark.parametrize("reference", ["main", "release"])
+    @pytest.mark.parametrize("version", ["0.1.0", "0.2.0"])
+    def test_git_approval_identity_survives_lock_roundtrip(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        host: str | None,
+        identity: str,
+        subpath: str | None,
+        reference: str,
+        version: str,
+    ) -> None:
+        from apm_cli.models.dependency import DependencyReference
+
+        monkeypatch.setenv("GITHUB_HOST", "different-default.example.test")
+        declared = DependencyReference(
+            repo_url="owner/repo",
+            host=host,
+            reference=reference,
+            alias="display-only",
+            is_virtual=subpath is not None,
+            virtual_path=subpath,
+        )
+        commit = ("a" if reference == "main" else "b") * 40
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host=host or "github.com",
+            resolved_ref=reference,
+            resolved_commit=commit,
+            version=version,
+            alias="display-only",
+            is_virtual=subpath is not None,
+            virtual_path=subpath,
+        )
+        expected_identity = f"{identity}/{subpath}" if subpath else identity
+        expected_key = f"{expected_identity}#{version}"
+        assert declared.get_resolution_key() == f"{expected_identity}#{reference}"
+        restored = LockedDependency.from_dict(locked.to_dict())
+        assert restored.resolved_ref == reference
+        assert restored.resolved_commit == commit
+        for dependency_ref in (declared, restored.to_dependency_ref()):
+            package = SimpleNamespace(
+                dependency_ref=dependency_ref,
+                package=SimpleNamespace(name="untrusted/display", version=version),
+            )
+            assert resolve_package_key(package, "display-only") == expected_key
+            assert check_executable_approval(
+                "display-only", package, {expected_key: {"hooks": True}}
+            ) == (True, False, False, False, False)
+            if expected_identity != "owner/repo":
+                assert (
+                    check_executable_approval(
+                        "display-only", package, {"owner/repo": {"hooks": True}}
+                    )
+                    == (False,) * 5
+                )
+
+    @pytest.mark.parametrize("posture", ["allowed", "denied", "pending"])
+    @pytest.mark.parametrize("reference", ["main", "release"])
+    @pytest.mark.parametrize("version", ["0.1.0", "0.2.0"])
+    def test_persisted_git_grants_keep_version_blind_deny_precedence(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        posture: str,
+        reference: str,
+        version: str,
+    ) -> None:
+        from apm_cli.models.dependency import DependencyReference
+        from apm_cli.security.executables import (
+            build_exec_trust_context,
+            materialize_exec_map,
+            resolve_exec_decision,
+        )
+        from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+
+        monkeypatch.setattr(
+            "apm_cli.security.executables.load_user_executables", lambda **kwargs: ({}, {})
+        )
+        grants = {"owner/repo#0.1.0": {"hooks": True}}
+        manifest = tmp_path / "apm.yml"
+        dump_yaml(
+            {
+                "executables": {
+                    "allow": {} if posture == "pending" else grants,
+                    "deny": {"owner/repo": {"hooks": True}} if posture == "denied" else {},
+                }
+            },
+            manifest,
+        )
+        trust = build_exec_trust_context(policy=None, project_data=load_yaml(manifest))
+        package = SimpleNamespace(
+            dependency_ref=DependencyReference(
+                repo_url="owner/repo", host="github.com", reference=reference
+            ),
+            package=SimpleNamespace(version=version),
+        )
+        key = resolve_package_key(package, "display")
+        decision = resolve_exec_decision(trust, key, "hooks")
+        assert (
+            decision.trust_state
+            == {
+                "allowed": "deployed",
+                "denied": "denied",
+                "pending": "gated_pending_approval",
+            }[posture]
+        )
+        assert check_executable_approval("display", package, materialize_exec_map(trust)) == (
+            posture == "allowed",
+            False,
+            False,
+            False,
+            False,
+        )
+
+    @pytest.mark.parametrize("host", ["github.com", "ghe.example.test"])
+    @pytest.mark.parametrize("port", [443, 8443, 9443])
+    @pytest.mark.parametrize("reference", ["main", "release"])
+    def test_remote_source_key_retains_existing_format(
+        self, host: str, port: int, reference: str
+    ) -> None:
         from types import SimpleNamespace
 
         from apm_cli.models.dependency import DependencyReference
 
-        reference = DependencyReference(
+        dependency_ref = DependencyReference(
             repo_url="owner/repo",
-            host="ghe.example.test",
-            port=8443,
-            reference="main",
+            host=host,
+            port=port,
+            reference=reference,
             alias="tools",
+            is_virtual=True,
+            virtual_path="packages/check",
         )
-        package = SimpleNamespace(dependency_ref=reference)
+        package = SimpleNamespace(dependency_ref=dependency_ref)
         assert (
-            resolve_package_key(package, "display") == "ghe.example.test:8443/owner/repo#main@tools"
+            resolve_package_key(package, "display")
+            == f"{host}:{port}/owner/repo/packages/check#{reference}@tools"
         )
+
+    @pytest.mark.parametrize(
+        ("source", "is_marketplace", "repo"),
+        [
+            ("registry", False, "owner/registry-package"),
+            (None, True, "widget@catalog"),
+            ("git", True, "widget@catalog"),
+        ],
+    )
+    def test_other_source_families_retain_existing_approval_format(
+        self, source: str | None, is_marketplace: bool, repo: str
+    ) -> None:
+        from apm_cli.models.dependency import DependencyReference
+
+        package = SimpleNamespace(
+            dependency_ref=DependencyReference(
+                repo_url=repo,
+                host="catalog.example.test",
+                reference="main",
+                alias="tools",
+                source=source,
+                is_marketplace=is_marketplace,
+            ),
+            package=SimpleNamespace(version="0.1.0"),
+        )
+        assert resolve_package_key(package, "display") == f"catalog.example.test/{repo}#main@tools"
 
     def test_dep_ref_str_fallback(self) -> None:
         pkg_info = MagicMock()
