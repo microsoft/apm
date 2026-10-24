@@ -250,6 +250,64 @@ class TestPromiseCDirectDepKeysWiring:
         )
 
 
+class TestDeclaredRefsWiring:
+    """#3224: the gate must forward the manifest-declared refs to the runner.
+
+    The resolve phase rewrites ``dep_ref.reference`` to the selected tag
+    before the gate runs, so without ``declared_refs`` the pinned-constraint
+    check would judge the tag instead of the range the author wrote.
+    """
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    @patch(_PATCH_RUN_DEP_CHECKS)
+    def test_policy_gate_forwards_declared_refs_to_runner(
+        self,
+        mock_run_checks,
+        mock_gate,
+        mock_preflight,
+        mock_dl,
+        mock_updates,
+        project,
+    ):
+        project_dir, runner = project
+        _write_apm_yml(
+            project_dir / "apm.yml",
+            deps=["test-org/skills#^1.2.0"],
+        )
+        fetch = _fetch(_load_fixture("apm-policy-block.yml"))
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        from apm_cli.policy.models import CIAuditResult
+
+        mock_run_checks.return_value = CIAuditResult(checks=[])
+
+        _invoke_install(runner)
+
+        # The gate is the call that carries ``fetch_outcome`` with no
+        # ``effective_target`` (preflight passes neither; the post-targets
+        # re-check passes a target). Pin the assertion to that call so a
+        # regression in the gate cannot hide behind the other callers.
+        gate_calls = [
+            c
+            for c in mock_run_checks.call_args_list
+            if "fetch_outcome" in c.kwargs and c.kwargs.get("effective_target") is None
+        ]
+        assert gate_calls, (
+            f"policy_gate did not run the dep checks: {mock_run_checks.call_args_list}"
+        )
+        for call in gate_calls:
+            declared = call.kwargs.get("declared_refs") or {}
+            matching = [ref for key, ref in declared.items() if "test-org/skills" in str(key)]
+            assert matching == ["^1.2.0"], (
+                "policy_gate did not forward the manifest-declared range for the "
+                f"direct dep; it would judge the resolved tag instead. kwargs: {call.kwargs!r}"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Promise D + G: actionable diagnostic + exit code 1
 # ---------------------------------------------------------------------------

@@ -9,6 +9,9 @@ A dependency is "pinned" when its declared constraint is bounded:
 * Caret / tilde / bounded semver ranges (``^1.2.3``, ``~1.2.3``,
   ``>=1.0 <2.0``, ``1.x``).
 * Literal tag refs (``v1.2.3``, ``v1.2.3-beta.1``).
+* Package-qualified literal tags in the layouts the git-semver resolver
+  selects from (``pkg-a-v1.2.3``, ``pkg-a--v1.2.3``), when ``pkg-a`` is
+  the dependency's own package name.
 * Full 40-char SHA refs.
 
 A dependency is "unbounded" when any of the following hold:
@@ -25,6 +28,11 @@ The classification is deterministic and operates on the declared
 constraint string only; no remote calls and no subprocess.  Used by
 ``policy.dependencies.require_pinned_constraint`` (see
 ``policy_checks.py::_check_pinned_constraints``).
+
+The install pipeline rewrites ``dep.reference`` to the selected tag once
+a semver range is resolved, so callers that run after that point pass
+the manifest-declared ref through ``declared_ref`` and the classifier
+never judges the replacement (#3224).
 """
 
 from __future__ import annotations
@@ -52,6 +60,9 @@ _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 # Literal version tag: ``v1.2.3`` / ``v1.2.3-rc.1`` / ``v1.2.3+meta``.
 _LITERAL_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([-+][0-9A-Za-z.\-+]+)?$")
+
+# Placeholder the git-dependency tag layouts use for the package name.
+_NAME_PLACEHOLDER = "{name}"
 
 # Wildcard token in any range component.
 _WILDCARD_TOKEN_RE = re.compile(r"(^|\s)[\*xX](\s|$)")
@@ -114,8 +125,59 @@ def _classify_range(spec: str) -> UnboundedReason | None:
     return None
 
 
-def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | None:
+def package_tag_name(dep: DependencyReference) -> str | None:
+    """Return the ``{name}`` the git-semver resolver matches tags with for *dep*.
+
+    Same rule as ``apm_cli.install.helpers.ref_reuse._git_semver_package_name``
+    and OpenAPM 7.3: the final virtual-path component for a selected
+    subdirectory package, otherwise the final repository path component
+    without a trailing ``.git``.
+    """
+    virtual_path = getattr(dep, "virtual_path", None)
+    is_subdirectory = getattr(dep, "is_virtual_subdirectory", None)
+    if callable(is_subdirectory) and is_subdirectory() and virtual_path:
+        return virtual_path.rstrip("/").rsplit("/", 1)[-1] or None
+    repo_url = getattr(dep, "repo_url", None) or ""
+    name = repo_url.rstrip("/").rsplit("/", 1)[-1]
+    if name.endswith(".git"):
+        name = name[: -len(".git")]
+    return name or None
+
+
+def _is_package_literal_tag(spec: str, dep: DependencyReference) -> bool:
+    """True when *spec* is a literal tag in a ``{name}`` layout for *dep*'s own name.
+
+    Reuses the resolver's tag layouts and regex builder, so the version
+    grammar is the one the resolver already selects with. ``{name}`` is
+    bound to this dependency's package name: ``pkg-b-v1.1.0`` on a
+    ``pkg-a`` dependency, or ``anything-v1.1.0`` on a repository named
+    differently, is still a bare branch.
+    """
+    name = package_tag_name(dep)
+    if not name:
+        return False
+    # Lazy imports keep the policy import graph free of resolver modules.
+    from apm_cli.deps.git_semver_resolver import DEFAULT_TAG_PATTERNS
+    from apm_cli.marketplace.tag_pattern import build_tag_regex
+
+    for pattern in DEFAULT_TAG_PATTERNS:
+        if _NAME_PLACEHOLDER not in pattern:
+            continue
+        if build_tag_regex(pattern, name=name).match(spec):
+            return True
+    return False
+
+
+def classify_unbounded_reason(
+    dep: DependencyReference,
+    *,
+    declared_ref: str | None = None,
+) -> UnboundedReason | None:
     """Return ``None`` if *dep*'s constraint is pinned, otherwise the reason.
+
+    ``declared_ref`` is the manifest-declared ref when the caller knows
+    ``dep.reference`` has since been rewritten to a resolved tag; when
+    given it is classified in place of ``dep.reference``.
 
     Classification order (first match wins):
 
@@ -124,6 +186,7 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     3. Empty / missing ref         -> ``NO_REF``.
     4. 40-char hex SHA             -> ``None``.
     5. Literal ``v\\d+\\.\\d+\\.\\d+`` tag -> ``None``.
+    5a. ``{name}-v…`` / ``{name}--v…`` tag for this dep's own name -> ``None``.
     6. Parses as semver range      -> range-shape check.
     7. Else                        -> ``BARE_BRANCH``.
     """
@@ -131,7 +194,7 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     if getattr(dep, "is_local", False):
         return None
 
-    ref = getattr(dep, "reference", None)
+    ref = declared_ref if declared_ref is not None else getattr(dep, "reference", None)
     source = getattr(dep, "source", None)
 
     # Lazy import: avoid pulling marketplace.semver into policy import graph.
@@ -162,6 +225,14 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     if _LITERAL_TAG_RE.match(spec):
         return None
 
+    # 5a. Package-qualified literal tag for this dependency's own name
+    #     (``pkg-a-v1.1.0``, ``pkg-a--v1.1.0``) -> pinned. The resolver
+    #     selects from exactly these layouts, and the dependency guide
+    #     recommends pinning them. Any other ``...-vX.Y.Z`` string stays
+    #     a bare branch below.
+    if _is_package_literal_tag(spec, dep):
+        return None
+
     # 5b. Bare wildcard tokens ('*', 'x', 'X') -- handled before the
     # semver-range probe because the registry grammar rejects them as
     # standalone components, but they unambiguously express "any
@@ -184,13 +255,22 @@ def is_pinned_constraint(dep: DependencyReference) -> bool:
     return classify_unbounded_reason(dep) is None
 
 
-def humanize_reason(reason: UnboundedReason, dep: DependencyReference) -> str:
+def humanize_reason(
+    reason: UnboundedReason,
+    dep: DependencyReference,
+    *,
+    ref: str | None = None,
+) -> str:
     """Render a one-line actionable hint for the given reason.
+
+    ``ref`` is the declared ref to name in the hint when the caller
+    classified something other than ``dep.reference``.
 
     Emitted in ``[x]``/``[!]`` policy diagnostics; ASCII only per
     ``.github/instructions/encoding.instructions.md``.
     """
-    ref = getattr(dep, "reference", None) or ""
+    if ref is None:
+        ref = getattr(dep, "reference", None) or ""
     if reason is UnboundedReason.NO_REF:
         return "no ref; resolves to default branch"
     if reason is UnboundedReason.BARE_BRANCH:

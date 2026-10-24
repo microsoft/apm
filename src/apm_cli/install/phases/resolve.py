@@ -411,6 +411,14 @@ def _resolve_dependencies(
 
     # 4. Tracking variables (phase-local except where noted)
     direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
+    # Keep the manifest-declared refs of the direct deps before resolution
+    # rewrites ``dep_ref.reference`` to a selected tag further down. The
+    # policy gate reads these so ``require_pinned_constraint`` judges what
+    # the author wrote; the resolved ref stays in place for every other
+    # consumer (download, drift, lockfile).
+    ctx.declared_direct_refs = {
+        dep.get_unique_key(): dep.reference for dep in ctx.all_apm_deps if dep.reference is not None
+    }
     callback_downloaded: builtins.dict = {}
     pending_callback_downloads: builtins.dict[Path, tuple[str, str | None]] = {}
     transitive_failures: builtins.list = []

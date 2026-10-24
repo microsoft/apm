@@ -454,7 +454,10 @@ lockfile alongside the resolved tag, so `apm install` on a fresh clone
 replays the same tag deterministically. A malformed range-like ref is
 rejected; use a plain range such as `^1.2.0` or pin a literal tag such as
 `pkg-a-v1.2.0`. Only `apm update` (or legacy `apm install --update`) or a
-manifest change re-resolves to a newer tag.
+manifest change re-resolves to a newer tag. Under an org policy with
+`require_pinned_constraint: true`, both forms count as bounded: the range
+is judged as the range you wrote, and `pkg-a-v1.2.0` is recognised as
+this package's own release tag.
 
 Marketplace object-form ranges use the marketplace package name in the tag
 pattern:

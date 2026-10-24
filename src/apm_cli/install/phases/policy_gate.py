@@ -118,6 +118,7 @@ def run(ctx: InstallContext) -> None:
         fetch_outcome=fetch_result.outcome,
         fail_fast=(enforcement == "block"),
         direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
+        declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
         **extra_kwargs,
     )
 
