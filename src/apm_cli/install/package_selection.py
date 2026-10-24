@@ -16,10 +16,11 @@ def _selected_dependency_reference(
     package: str, dependencies: Sequence[DependencyReference]
 ) -> DependencyReference:
     """Preserve interpreted coordinates before falling back to shorthand parsing."""
+    package_identity = package.partition("#")[0]
     for dependency in dependencies:
         # Explicit git+path coordinates can contain dotted bundle directories
         # whose canonical display is not a valid shorthand file reference.
-        if dependency.to_canonical() == package:
+        if dependency.to_canonical() == package or dependency.get_identity() == package_identity:
             return dependency
     return DependencyReference.parse(package)
 

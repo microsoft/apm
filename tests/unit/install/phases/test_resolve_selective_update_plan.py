@@ -71,3 +71,30 @@ def test_only_filter_preserves_structured_versioned_path_and_descendants() -> No
     resolve._apply_only_filter(ctx)
 
     assert ctx.deps_to_install == [selected, child]
+
+
+def test_only_filter_preserves_github_enterprise_dependency() -> None:
+    manifest_ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    resolved_ref = "0123456789abcdef0123456789abcdef01234567"
+    selected_dependency = DependencyReference.parse_from_dict(
+        {
+            "git": "git@github.example.com:acme/catalog.git",
+            "path": "plugins/tool",
+            "ref": manifest_ref,
+        }
+    )
+    unselected_dependency = DependencyReference(repo_url="acme/other")
+    dependencies = (selected_dependency, unselected_dependency)
+    nodes = {
+        dependency.get_unique_key(): SimpleNamespace(dependency_ref=dependency, children=[])
+        for dependency in dependencies
+    }
+    ctx = SimpleNamespace(
+        only_packages=[f"github.example.com/acme/catalog/plugins/tool#{resolved_ref}"],
+        deps_to_install=list(dependencies),
+        dependency_graph=SimpleNamespace(dependency_tree=SimpleNamespace(nodes=nodes)),
+    )
+
+    resolve._apply_only_filter(ctx)
+
+    assert ctx.deps_to_install == [selected_dependency]
