@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install` and `apm update` now write untyped flat command hooks as Codex `"type": "command"` handlers in `.codex/hooks.json`, as Codex's hook schema requires, including alongside Codex-shaped hook files. Reinstalling replaces older APM-owned untyped entries; explicit types, already-nested source handlers, manual hooks and other targets are unchanged. -- by @Parth-Vasave (closes #3249)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

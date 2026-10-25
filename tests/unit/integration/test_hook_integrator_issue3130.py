@@ -12,7 +12,8 @@ These tests assert the post-fix contract:
 - Explicit handler types and untyped entries that are not command handlers
   are preserved unchanged.
 - Untyped handlers already inside a nested Claude group are left unchanged.
-- Other targets do not receive the Claude-only default.
+- Targets without a required handler ``type`` do not receive the default
+  (Codex shares it since #3249).
 - Reinstalling over settings written before the fix leaves one typed group,
   including content-matched healing of stale root-package entries.
 """
@@ -199,22 +200,22 @@ def test_untyped_handler_inside_nested_claude_group_is_unchanged(tmp_path: Path)
 @pytest.mark.parametrize(
     ("target", "config_dir", "config_file"),
     [
-        pytest.param("codex", ".codex", "hooks.json", id="codex"),
         pytest.param("cursor", ".cursor", "hooks.json", id="cursor"),
+        pytest.param("gemini", ".gemini", "settings.json", id="gemini"),
     ],
 )
-def test_claude_handler_default_does_not_reach_other_targets(
+def test_handler_type_default_does_not_reach_other_targets(
     tmp_path: Path, target: str, config_dir: str, config_file: str
 ) -> None:
     (tmp_path / config_dir).mkdir()
     package_info = _write_package(tmp_path, {"flat.json": _FLAT_UNTYPED_HOOK})
 
     with patch(
-        "apm_cli.integration.hook_native_formats._with_claude_default_handler_type",
-        side_effect=AssertionError("Claude handler typing reached another target"),
-    ) as claude_default:
+        "apm_cli.integration.hook_native_formats._with_default_command_type",
+        side_effect=AssertionError("handler typing reached another target"),
+    ) as default_type:
         _integrate(tmp_path, package_info, target)
-    claude_default.assert_not_called()
+    default_type.assert_not_called()
 
     config = _read_json(tmp_path / config_dir / config_file)
     rendered = json.dumps(config["hooks"])

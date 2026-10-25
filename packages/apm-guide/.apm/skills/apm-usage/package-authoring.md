@@ -233,7 +233,9 @@ when a flat command entry omits `type`. Explicit handler types are kept.
 Handlers already inside nested Claude groups and other targets are unchanged.
 
 For Codex, APM wraps flat command entries in hook groups containing a
-nested `hooks` array in `.codex/hooks.json`.
+nested `hooks` array in `.codex/hooks.json` and adds the required
+`"type": "command"` when a flat command entry omits `type`. Explicit handler
+types are kept. Handlers already inside nested Codex groups are unchanged.
 Claude, Codex, Gemini, and Antigravity preserve nested handler and
 hook-group metadata, including `env` objects and arrays, in native JSON.
 

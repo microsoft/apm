@@ -416,12 +416,15 @@ def _legacy_hook_entries(entries: list, target: str) -> list:
     """Render old native shapes for ownership matching, never for deployment."""
     if target == "claude":
         return _to_claude_hook_entries(entries, default_handler_type=False)
-    # Codex installs before native nesting wrote the original flat entries.
-    return entries if target == "codex" else []
+    if target == "codex":
+        # Codex installs wrote the original flat entries before native nesting,
+        # then nested them without typing untyped flat command entries.
+        return [*entries, *_to_codex_hook_entries(entries, default_handler_type=False)]
+    return []
 
 
-def _with_claude_default_handler_type(entry: object) -> object:
-    """Supply Claude's required ``type`` for an untyped flat command entry.
+def _with_default_command_type(entry: object) -> object:
+    """Supply the required ``type`` for an untyped flat command entry.
 
     Only flat entries that the neutral grammar reads as a command handler are
     defaulted; explicit types, nested groups, and non-command entries pass
@@ -442,7 +445,7 @@ def _to_claude_hook_entries(entries: list, *, default_handler_type: bool = True)
     still be matched on reinstall.
     """
     if default_handler_type:
-        entries = [_with_claude_default_handler_type(entry) for entry in entries]
+        entries = [_with_default_command_type(entry) for entry in entries]
     return _render_nested_document(
         _entries_to_ir(entries),
         timeout_milliseconds=False,
@@ -450,8 +453,15 @@ def _to_claude_hook_entries(entries: list, *, default_handler_type: bool = True)
     )
 
 
-def _to_codex_hook_entries(entries: list) -> list:
-    """Render portable bindings in Codex's nested hook schema."""
+def _to_codex_hook_entries(entries: list, *, default_handler_type: bool = True) -> list:
+    """Render portable bindings in Codex's nested hook schema.
+
+    ``default_handler_type=False`` reproduces the output of installs before
+    untyped flat command entries were typed, so owned entries they wrote can
+    still be matched on reinstall.
+    """
+    if default_handler_type:
+        entries = [_with_default_command_type(entry) for entry in entries]
     return _render_nested_document(
         _entries_to_ir(entries),
         timeout_milliseconds=False,
