@@ -481,6 +481,66 @@ class TestDetectTargetOpencode:
         assert should_compile_claude_md("opencode") is False
 
 
+class TestDetectTargetOpenfox:
+    """Tests for auto-detection and explicit openfox target."""
+
+    def test_explicit_target_openfox(self, tmp_path):
+        """Explicit --target openfox always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="openfox",
+        )
+        assert target == "openfox"
+        assert reason == "explicit --target flag"
+
+    def test_config_target_openfox(self, tmp_path):
+        """Config target openfox is used when no explicit target."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="openfox",
+        )
+        assert target == "openfox"
+        assert reason == "apm.yml target"
+
+    def test_auto_detect_openfox_only(self, tmp_path):
+        """Auto-detect openfox when only .openfox/ exists."""
+        (tmp_path / ".openfox").mkdir()
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "openfox"
+        assert ".openfox/" in reason
+
+    def test_auto_detect_openfox_plus_github(self, tmp_path):
+        """Auto-detect all when .openfox/ and .github/ exist."""
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".openfox").mkdir()
+        target, _ = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "all"
+
+    def test_openfox_compile_agents_md(self):
+        """OpenFox target should compile AGENTS.md."""
+        assert should_compile_agents_md("openfox") is True
+
+    def test_openfox_no_compile_claude_md(self):
+        """OpenFox target should NOT compile CLAUDE.md."""
+        assert should_compile_claude_md("openfox") is False
+
+    def test_openfox_description(self):
+        """Description for openfox target."""
+        desc = get_target_description("openfox")
+        assert "AGENTS.md" in desc
+        assert ".openfox/agents/" in desc
+        assert ".openfox/skills/" in desc
+
+
 class TestDetectTargetWindsurf:
     """Tests for auto-detection and explicit windsurf target."""
 
@@ -550,6 +610,14 @@ class TestDetectTargetWindsurf:
     def test_windsurf_in_valid_target_values(self):
         """Windsurf must be accepted by the --target parser."""
         assert "windsurf" in VALID_TARGET_VALUES
+
+    def test_openfox_in_all_canonical_targets(self):
+        """OpenFox must appear in ALL_CANONICAL_TARGETS."""
+        assert "openfox" in ALL_CANONICAL_TARGETS
+
+    def test_openfox_in_valid_target_values(self):
+        """OpenFox must be accepted by the --target parser."""
+        assert "openfox" in VALID_TARGET_VALUES
 
 
 # ---------------------------------------------------------------------------

@@ -180,6 +180,7 @@ class TestTargetProfileUserScope:
             "copilot-app",
             "agent-skills",
             "openclaw",
+            "openfox",
             "hermes",
             "grok-bot",
         }
@@ -210,6 +211,10 @@ class TestTargetProfileUserScope:
     def test_kiro_is_supported_at_user_scope(self):
         assert KNOWN_TARGETS["kiro"].user_supported is True
         assert KNOWN_TARGETS["kiro"].user_root_dir == ".kiro"
+
+    def test_openfox_is_not_supported_at_user_scope(self):
+        assert KNOWN_TARGETS["openfox"].user_supported is False
+        assert KNOWN_TARGETS["openfox"].for_scope(user_scope=True) is None
 
     def test_copilot_user_root_dir(self):
         assert KNOWN_TARGETS["copilot"].user_root_dir == ".copilot"

@@ -24,6 +24,7 @@ TARGET_NAMES = frozenset(
         "kiro",
         "openclaw",
         "opencode",
+        "openfox",
         "vscode",
         "windsurf",
     }

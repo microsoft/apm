@@ -46,6 +46,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "grok-build",
                 "kiro",
                 "opencode",
+                "openfox",
                 "vscode",
                 "windsurf",
             }
@@ -90,6 +91,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "kiro",
                 "openclaw",
                 "opencode",
+                "openfox",
                 "vscode",
                 "windsurf",
             }
@@ -266,6 +268,15 @@ def test_current_native_profiles_are_characterized() -> None:
                 "agents": ("agents", ".md", "opencode_agent", None, False),
                 "commands": ("commands", ".md", "opencode_command", None, False),
                 "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
+            },
+            "agents",
+            None,
+        ),
+        "openfox": (
+            ".openfox",
+            {
+                "agents": ("agents", ".agent.md", "openfox_agent", None, False),
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
             },
             "agents",
             None,

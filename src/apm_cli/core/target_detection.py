@@ -74,6 +74,7 @@ TargetType = Literal[
     "hermes",
     "kiro",
     "opencode",
+    "openfox",
     "vscode",
     "windsurf",
     "all",
@@ -118,6 +119,7 @@ UserTargetType = Literal[
     "hermes",
     "kiro",
     "opencode",
+    "openfox",
     "vscode",
     "windsurf",
     "all",
@@ -125,7 +127,7 @@ UserTargetType = Literal[
 ]
 
 
-def detect_target(  # noqa: PLR0911
+def detect_target(  # noqa: C901, PLR0911
     project_root: Path,
     explicit_target: str | None = None,
     config_target: str | None = None,
@@ -155,6 +157,8 @@ def detect_target(  # noqa: PLR0911
             return "cursor", "explicit --target flag"
         elif explicit_target == "opencode":
             return "opencode", "explicit --target flag"
+        elif explicit_target == "openfox":
+            return "openfox", "explicit --target flag"
         elif explicit_target == "codex":
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
@@ -186,6 +190,8 @@ def detect_target(  # noqa: PLR0911
             return "cursor", "apm.yml target"
         elif config_target == "opencode":
             return "opencode", "apm.yml target"
+        elif config_target == "openfox":
+            return "openfox", "apm.yml target"
         elif config_target == "codex":
             return "codex", "apm.yml target"
         elif config_target == "gemini":
@@ -212,6 +218,7 @@ def detect_target(  # noqa: PLR0911
     claude_exists = (project_root / ".claude").exists()
     cursor_exists = (project_root / ".cursor").is_dir()
     opencode_exists = (project_root / ".opencode").is_dir()
+    openfox_exists = (project_root / ".openfox").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
@@ -226,6 +233,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".cursor/")
     if opencode_exists:
         detected.append(".opencode/")
+    if openfox_exists:
+        detected.append(".openfox/")
     if codex_exists:
         detected.append(".codex/")
     if gemini_exists:
@@ -247,6 +256,8 @@ def detect_target(  # noqa: PLR0911
         return "cursor", "detected .cursor/ folder"
     elif opencode_exists:
         return "opencode", "detected .opencode/ folder"
+    elif openfox_exists:
+        return "openfox", "detected .openfox/ folder"
     elif codex_exists:
         return "codex", "detected .codex/ folder"
     elif gemini_exists:
@@ -281,6 +292,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "vscode",
         "cursor",
         "opencode",
+        "openfox",
         "codex",
         "gemini",
         "antigravity",
@@ -427,9 +439,10 @@ def get_target_description(target: UserTargetType) -> str:
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
+        "openfox": "AGENTS.md + .openfox/agents/ + .openfox/skills/",
         "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .openfox/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -1064,6 +1077,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("gemini", "file", "GEMINI.md"),
     ("grok-build", "dir", ".grok"),
     ("opencode", "dir", ".opencode"),
+    ("openfox", "dir", ".openfox"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
 ]
@@ -1077,6 +1091,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "gemini",
     "grok-build",
     "opencode",
+    "openfox",
     "windsurf",
     "kiro",
 ]
@@ -1090,6 +1105,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "gemini": ".gemini/",
     "grok-build": ".grok/",
     "opencode": ".opencode/",
+    "openfox": ".openfox/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
 }
@@ -1104,6 +1120,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "gemini": "GEMINI.md",
     "grok-build": ".grok/",
     "opencode": ".opencode/",
+    "openfox": ".openfox/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
 }

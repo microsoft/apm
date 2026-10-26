@@ -63,6 +63,7 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     "claude",
     "cursor",
     "opencode",
+    "openfox",
     "codex",
     "gemini",
     "windsurf",

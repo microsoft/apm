@@ -92,6 +92,15 @@ class TestActiveTargets:
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["opencode"]
 
+    def test_only_openfox_returns_openfox(self):
+        (self.root / ".openfox").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["openfox"]
+
+    def test_explicit_openfox(self):
+        targets = active_targets(self.root, explicit_target="openfox")
+        assert [t.name for t in targets] == ["openfox"]
+
     def test_github_and_claude_returns_both(self):
         (self.root / ".github").mkdir()
         (self.root / ".claude").mkdir()

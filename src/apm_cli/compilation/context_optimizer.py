@@ -63,6 +63,7 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
         ".github",
         ".kiro",
         ".opencode",
+        ".openfox",
         ".windsurf",
     }
 )

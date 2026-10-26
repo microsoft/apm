@@ -42,6 +42,7 @@ _LEGACY_TARGET_PREFIXES = {
     ".gemini/": "gemini",
     ".codex/": "codex",
     ".opencode/": "opencode",
+    ".openfox/": "openfox",
 }
 _LEGACY_USER_TARGET_PREFIXES = {
     ".copilot/": "copilot",

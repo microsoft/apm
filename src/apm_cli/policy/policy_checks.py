@@ -777,6 +777,7 @@ _DEFAULT_GOVERNANCE_DIRS = [
     ".cursor/rules",
     ".claude",
     ".opencode",
+    ".openfox",
     ".kiro",
 ]
 

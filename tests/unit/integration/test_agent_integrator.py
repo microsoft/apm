@@ -1119,7 +1119,7 @@ def _verbatim_copy_agent_targets() -> list[str]:
         name
         for name, profile in KNOWN_TARGETS.items()
         if (mapping := profile.primitives.get("agents")) is not None
-        and mapping.format_id not in {"codex_agent", "kiro_agent"}
+        and mapping.format_id not in {"codex_agent", "kiro_agent", "openfox_agent"}
     )
 
 

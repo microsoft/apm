@@ -230,6 +230,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "openfox",
+            "OpenFox native .openfox configuration",
+            in_all=True,
+            primitive_profile="openfox",
+            compile_family="agents",
+        ),
+        _capability(
             "windsurf",
             "Windsurf native .windsurf and .agents configuration",
             in_all=True,

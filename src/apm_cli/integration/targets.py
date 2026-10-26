@@ -996,6 +996,23 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         },
         include_scoped_in_user_root_context=True,
     ),
+    # OpenFox -- project-scope only (.openfox/skills/ and .openfox/agents/).
+    # No MCP support.
+    "openfox": TargetProfile(
+        capability=TARGET_CAPABILITIES["openfox"],
+        root_dir=".openfox",
+        primitives={
+            "agents": PrimitiveMapping("agents", ".agent.md", "openfox_agent"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=True,
+        user_supported=False,
+    ),
     # Windsurf/Cascade (now Devin Desktop) -- .windsurf/ is the workspace
     # config directory.
     # Rules are markdown files with trigger/globs frontmatter under .windsurf/rules/.

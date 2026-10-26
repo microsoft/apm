@@ -316,6 +316,7 @@ class TestExhaustivenessChecks:
             "agents_cursor",
             "agents_kiro",
             "agents_opencode",
+            "agents_openfox",
             "agents_codex",
             # NOTE: windsurf no longer exposes an 'agents' primitive
             # (its content deploys as skills under .agents/skills/).

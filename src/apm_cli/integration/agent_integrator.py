@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import frontmatter
 import yaml
 
 from apm_cli.install.primitive_classification import (
@@ -25,7 +26,7 @@ from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
+from apm_cli.utils.yaml_io import load_yaml_str, loads_frontmatter, yaml_to_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -262,8 +263,27 @@ class AgentIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            rendered_openfox_content: str | None = None
+            openfox_links_resolved = 0
+            expected_content: str | None = None
+            if mapping.format_id == "openfox_agent":
+                rendered_openfox_content, openfox_links_resolved = self.render_openfox_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
+                expected_content = rendered_openfox_content
+
             skip, adopted = self._check_adopt_or_skip(
-                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+                target_path,
+                source_file,
+                rel_path,
+                managed_files,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=expected_content,
             )
             if skip:
                 if adopted:
@@ -280,6 +300,10 @@ class AgentIntegrator(BaseIntegrator):
                     package_name=package_info.package.name,
                 )
                 links_resolved = 0
+            elif mapping.format_id == "openfox_agent":
+                if rendered_openfox_content is not None:
+                    write_text_lf(target_path, rendered_openfox_content)
+                links_resolved = openfox_links_resolved
             else:
                 if mapping.format_id == "opencode_agent":
                     self._warn_opencode_frontmatter(
@@ -360,6 +384,110 @@ class AgentIntegrator(BaseIntegrator):
             raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
+        write_text_lf(target, content)
+        return links_resolved
+
+    @staticmethod
+    def _normalize_openfox_tools(
+        tools: Any,
+        source_name: str,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str | None = None,
+    ) -> list[str] | None:
+        """Convert tools (list, comma-separated str, or bool mapping) to allowedTools list."""
+        pkg_tag = f"{package_name}/" if package_name else ""
+        if tools is None:
+            return None
+        if isinstance(tools, list):
+            return [str(t).strip() for t in tools if str(t).strip()]
+        if isinstance(tools, str):
+            return [t.strip() for t in tools.split(",") if t.strip()]
+        if isinstance(tools, dict):
+            allowed: list[str] = []
+            for k, v in tools.items():
+                if isinstance(v, bool):
+                    if v:
+                        allowed.append(str(k).strip())
+                elif diagnostics is not None:
+                    diagnostics.warn(
+                        message=(
+                            f"OpenFox agent {pkg_tag}{printable_ascii_text(source_name)}: "
+                            f"mapping tool '{printable_ascii_text(str(k))}' has non-boolean value ({type(v).__name__}); "
+                            "omitted from allowedTools."
+                        ),
+                        package=printable_ascii_text(package_name or ""),
+                    )
+            return allowed
+        if diagnostics is not None:
+            diagnostics.warn(
+                message=(
+                    f"OpenFox agent {pkg_tag}{printable_ascii_text(source_name)}: "
+                    f"unsupported 'tools' format ({type(tools).__name__}); could not convert to allowedTools."
+                ),
+                package=printable_ascii_text(package_name or ""),
+            )
+        return None
+
+    def render_openfox_agent(
+        self,
+        source: Path,
+        target: Path,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str | None = None,
+    ) -> tuple[str, int]:
+        """Render OpenFox agent content ensuring required id and allowedTools in frontmatter."""
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
+        content = source.read_text(encoding="utf-8")
+        content, links_resolved = self.resolve_links(content, source, target)
+
+        stem = source.name[:-9] if source.name.endswith(".agent.md") else source.stem
+        try:
+            post = loads_frontmatter(content)
+            metadata = getattr(post, "metadata", None)
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if not metadata.get("id"):
+                metadata["id"] = metadata.get("name") or stem
+            if "tools" in metadata and "allowedTools" not in metadata:
+                converted = self._normalize_openfox_tools(
+                    metadata["tools"],
+                    source.name,
+                    diagnostics=diagnostics,
+                    package_name=package_name,
+                )
+                if converted is not None:
+                    metadata["allowedTools"] = converted
+            post.metadata = metadata
+            content = frontmatter.dumps(post, sort_keys=False)
+        except Exception as exc:
+            if diagnostics is not None:
+                pkg_tag = f"{package_name}/" if package_name else ""
+                diagnostics.warn(
+                    message=(
+                        f"OpenFox agent {pkg_tag}{printable_ascii_text(source.name)}: "
+                        f"failed to parse frontmatter ({exc}); agent written without metadata normalization."
+                    ),
+                    package=printable_ascii_text(package_name or ""),
+                )
+        if not content.endswith("\n"):
+            content += "\n"
+        return content, links_resolved
+
+    def _write_openfox_agent(
+        self,
+        source: Path,
+        target: Path,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str | None = None,
+    ) -> int:
+        """Write an OpenFox agent file ensuring required id in frontmatter."""
+        content, links_resolved = self.render_openfox_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        )
         write_text_lf(target, content)
         return links_resolved
 
