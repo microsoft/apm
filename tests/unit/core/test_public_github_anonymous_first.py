@@ -793,10 +793,7 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
                 stderr="remote: Repository not found\nfatal: HTTP 404",
             )
 
-    inherited = _poisoned_environment()
-    for name in tuple(inherited):
-        if name in _GITHUB_TOKEN_ENV_NAMES or name.startswith("GITHUB_APM_PAT_"):
-            inherited.pop(name)
+    inherited = _poisoned_environment_without_credentials()
     with patch.dict(os.environ, inherited, clear=True):
         downloader = _public_downloader(resolver)
         downloader._execute_transport_plan(
