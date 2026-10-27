@@ -13,6 +13,24 @@ your repo with `apm marketplace add`. This page covers the
 authoring surface: the registry schema and the `apm marketplace`
 verbs.
 
+For a local preview, register the authoring file directly instead of generating
+JSON first:
+
+```bash
+apm marketplace add ./apm.yml --name alice-dev
+apm marketplace browse alice-dev
+```
+
+This registers a live local discovery source. Later explicit operations reread
+the file, resolving relative package paths from its directory. Registration
+does not build, install inventory, execute hooks or publish packages. Use
+`--offline` with `add` or `browse` for local entries or remote entries pinned to
+full commit SHAs; remote tags and ranges need fresh resolution in a new CLI
+invocation. Continue using `apm pack`
+for native generated outputs and publication. A local package path is not a
+portable distribution source. See the [CLI reference](../../reference/cli/marketplace/)
+for resolution and locked replay semantics.
+
 For the operational concerns that surround a marketplace, see:
 
 - [Repo shapes](../repo-shapes/) -- single-plugin, aggregator, and

@@ -14,9 +14,9 @@ validating it, and preparing artifacts for consumer repositories).
 
 ```bash
 # Consume
-apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN]
+apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--offline]
 apm marketplace list
-apm marketplace browse NAME
+apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
 apm marketplace remove NAME
 apm marketplace validate NAME
@@ -71,8 +71,46 @@ Register a marketplace from a source reference. Accepted forms:
   select a branch, tag, or commit.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
-  direct `marketplace.json` file.
+  direct `marketplace.json` file, or an explicitly selected local `apm.yml`.
 - `file://` URI -- `file:///srv/marketplaces/agent-forge.git`.
+
+#### Live local authoring catalogs
+
+```bash
+apm marketplace add ./apm.yml --name alice-dev
+apm marketplace browse alice-dev
+apm view my-tool@alice-dev
+apm install my-tool@alice-dev
+```
+
+The selected file must contain a valid `marketplace:` declaration. APM uses
+the existing authoring parser, ref resolver and catalog composer in memory;
+it does not run `apm pack` or write generated catalogs. Relative package
+sources are anchored to the authoring file's directory, with the existing
+path containment checks. Native `metadata.pluginRoot` layout hints do not
+rebase authored package paths. Each invocation reads one configuration
+snapshot; later explicit browse, view, update or selected-install operations
+reread the file. A failed registration leaves an existing registration unchanged.
+
+Registration and browsing do not install inventory, activate plugins, execute
+package hooks or publish packages. Remote tags and version ranges may require
+Git network access to resolve. Cosmetic remote package metadata is not fetched.
+For this local YAML workflow, `add --offline` and `browse --offline` use the
+existing cached-ref resolver: local entries and explicit commit SHAs work
+without network; an uncached tag or range fails with an actionable error.
+Ref caches are in memory for one invocation; an earlier online registration
+does not make tags or ranges available in a later offline invocation. Pin
+remote entries to full commit SHAs for an offline authoring preview.
+These flags do not add offline support to JSON, Git or HTTPS catalog sources.
+
+Installing a remote entry records its actual package dependency and existing
+locked resolution. Locked replay does not require the preview file or its
+registration. Local entries remain local filesystem dependencies: their
+paths and hashes do not distribute files to another machine. Publishing and
+selecting a distributed source remain explicit operations. Remote YAML
+catalog URLs, automatic watching and automatic source promotion are unsupported.
+
+Generated JSON catalogs and repository registration continue to work as before.
 
 ```bash
 # GitHub shorthand

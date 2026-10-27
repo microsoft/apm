@@ -25,7 +25,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -744,11 +744,13 @@ class MarketplaceBuilder:
         profile: MarketplaceOutputProfile,
         resolved: tuple[ResolvedPackage, ...],
         remote_metadata: Mapping[str, dict[str, str]] | None = None,
+        *,
+        config: MarketplaceYml | None = None,
     ) -> MapperResult:
         """Map resolved packages into one marketplace output format."""
         mapper = self._mapper_for_profile(profile)
         return mapper.compose(
-            config=self._load_yml(),
+            config=config if config is not None else self._load_yml(),
             resolved=resolved,
             remote_metadata=remote_metadata,
         )
@@ -1064,14 +1066,16 @@ class MarketplaceBuilder:
         # Eagerly resolve auth + create the shared RefResolver before
         # spawning workers -- avoids a race on _ensure_auth() and
         # matches the pattern used in _prefetch_metadata().
-        self._get_resolver()
+        remote_entries = [entry for entry in entries if not entry.is_local]
+        if remote_entries:
+            self._get_resolver()
         # Pre-warm per-host resolvers on the main thread so workers never race
         # to create the same resolver. Include the sourceBase host because
         # base-relative entries derive their host during composition.
-        source_base_parts = self._get_source_base_parts()
+        source_base_parts = self._get_source_base_parts() if remote_entries else None
         if source_base_parts is not None:
             self._get_resolver_for_host(source_base_parts.host, org=source_base_parts.org_hint)
-        for entry in entries:
+        for entry in remote_entries:
             if entry.host:
                 self._get_resolver_for_host(entry.host)
 
@@ -1511,6 +1515,32 @@ class MarketplaceBuilder:
         self._compose_warnings = mapper_result.warnings
         self._compose_diagnostics = mapper_result.diagnostics
         return mapper_result.document
+
+    def compose_discovery_catalog(self, resolved: tuple[ResolvedPackage, ...]) -> dict[str, Any]:
+        """Compose an in-memory discovery catalog with local metadata only.
+
+        Ref resolution is separate and may require network access. Discovery
+        does not fetch cosmetic manifests for every remote package, but keeps
+        the existing local metadata and curator precedence through the mapper.
+        """
+        metadata = {
+            pkg.name: self._fetch_local_metadata(pkg) or {}
+            for pkg in resolved
+            if not pkg.source_repo
+        }
+        # Authored paths are already relative to the authoring file. pluginRoot
+        # is a native-output layout hint: applying its stripped representation
+        # to APM's local consumer would rebase bare and nested paths differently.
+        # Compose a separate immutable view; native output and the parsed
+        # configuration retain their original pluginRoot contract.
+        config = self._load_yml()
+        discovery_config = replace(
+            config,
+            metadata={key: value for key, value in config.metadata.items() if key != "pluginRoot"},
+        )
+        return self._map_output(
+            DEFAULT_MARKETPLACE_OUTPUT, resolved, remote_metadata=metadata, config=discovery_config
+        ).document
 
     def compose_codex_marketplace_json(
         self,

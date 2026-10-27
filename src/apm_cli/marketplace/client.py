@@ -1199,11 +1199,17 @@ def _auto_detect_path(
 # ---------------------------------------------------------------------------
 
 
+def is_local_authoring_source(source: MarketplaceSource) -> bool:
+    """Only explicitly selected local apm.yml files use authoring semantics."""
+    return source.kind == "local" and Path(source.local_path).name == "apm.yml"
+
+
 def fetch_marketplace(
     source: MarketplaceSource,
     *,
     force_refresh: bool = False,
     auth_resolver: object | None = None,
+    offline: bool = False,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -1215,6 +1221,8 @@ def fetch_marketplace(
         source: Marketplace source to fetch.
         force_refresh: Skip cache and re-fetch from network.
         auth_resolver: Optional ``AuthResolver`` instance (created if None).
+        offline: For an explicitly selected local apm.yml, forbid network ref
+            resolution. Other source kinds reject this option.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -1222,6 +1230,17 @@ def fetch_marketplace(
     Raises:
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
+    if is_local_authoring_source(source):
+        from .authoring_source import load_authoring_catalog
+
+        data = load_authoring_catalog(source, offline=offline, auth_resolver=auth_resolver)
+        return parse_marketplace_json(data, source.name)
+    if offline:
+        raise MarketplaceFetchError(
+            source.name,
+            "--offline is supported here only for explicitly selected local apm.yml catalogs",
+            retry_hint="Omit --offline to use the existing JSON or repository workflow.",
+        )
     cache_name = _cache_key(source)
     use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
 
