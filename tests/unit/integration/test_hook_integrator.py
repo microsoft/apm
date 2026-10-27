@@ -3813,20 +3813,19 @@ class TestIssue1007Fixes:
         assert "copilot-hooks.json" in names, "copilot-hooks.json must reach copilot"
         assert "hooks.json" not in names, "hooks.json must not reach copilot when specific exists"
 
-    def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("target", ["claude", "cursor", "copilot", "codex", "gemini"])
+    def test_filter_generic_hooks_universal(self, tmp_path: Path, target: str) -> None:
         """Generic stems pass through for all targets when no target-specific file exists."""
-        generic_files = [
-            tmp_path / "hooks.json",
-            tmp_path / "telemetry-hooks.json",
-        ]
-        for f in generic_files:
-            f.write_text("{}")
+        hooks_file = tmp_path / "hooks.json"
+        telemetry_file = tmp_path / "telemetry-hooks.json"
+        hooks_file.write_text("{}")
+        telemetry_file.write_text("{}")
+        generic_files = [hooks_file, telemetry_file]
 
-        for target in ("claude", "cursor", "copilot", "codex", "gemini"):
-            result = _filter_hook_files_for_target(generic_files, target)
-            assert set(result) == set(generic_files), (
-                f"Generic hook files must be universal; target={target!r} got {result}"
-            )
+        result = _filter_hook_files_for_target(generic_files, target)
+        assert set(result) == set(generic_files), (
+            f"Generic hook files must be universal; target={target!r} got {result}"
+        )
 
     def test_filter_prefixed_stem_routing(self, tmp_path: Path) -> None:
         """Stems like azure-skills-cursor-hooks route only to cursor."""
