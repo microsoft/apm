@@ -13,6 +13,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.commands.install import _integrate_package_primitives
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
@@ -951,8 +953,13 @@ class TestDispatchTable:
 
         dispatch = get_dispatch_table()
         assert dispatch["skills"].multi_target is True
-        for name in ("prompts", "agents", "commands", "instructions", "hooks"):
-            assert dispatch[name].multi_target is False
+
+    @pytest.mark.parametrize("name", ["prompts", "agents", "commands", "instructions", "hooks"])
+    def test_other_primitives_are_single_target(self, name):
+        from apm_cli.integration.dispatch import get_dispatch_table
+
+        dispatch = get_dispatch_table()
+        assert dispatch[name].multi_target is False
 
     def test_dispatch_entries_have_valid_methods(self):
         from apm_cli.integration.dispatch import get_dispatch_table
