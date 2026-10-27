@@ -29,6 +29,16 @@ def _accessible_instruction_names(optimizer, placement_map, file_path):
     return accessible
 
 
+def _has_instruction_coverage(optimizer, placement_map, file_path, instruction_name):
+    """True if the named instruction is placed in the file's inheritance chain and applies to it."""
+    return any(
+        instruction.name == instruction_name
+        and optimizer._is_instruction_relevant(instruction, file_path.parent)
+        for dir_in_chain in optimizer._get_inheritance_chain(file_path.parent)
+        for instruction in placement_map.get(dir_in_chain, [])
+    )
+
+
 class TestCoverageGuarantees:
     """Test mathematical coverage guarantees and constraint satisfaction."""
 
@@ -176,8 +186,16 @@ class TestCoverageGuarantees:
             f"Placement map: {[(str(k), [i.name for i in v]) for k, v in placement_map.items()]}"
         )
 
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            ("src", "components", "button.tsx"),
+            ("src", "components", "forms", "login.tsx"),
+            ("src", "components", "forms", "validation", "rules.ts"),
+        ],
+    )
     def test_coverage_constraint_priority_over_efficiency(
-        self, complex_project, coverage_challenge_instructions
+        self, complex_project, coverage_challenge_instructions, relative_path
     ):
         """Test that coverage constraints take priority over efficiency optimization.
 
@@ -192,37 +210,14 @@ class TestCoverageGuarantees:
         stats = optimizer.get_optimization_stats(placement_map)
 
         # Even if efficiency is low, all files must have coverage
-        typescript_files = [
-            complex_project / "src" / "components" / "button.tsx",
-            complex_project / "src" / "components" / "forms" / "login.tsx",
-            complex_project / "src" / "components" / "forms" / "validation" / "rules.ts",
-        ]
+        ts_file = complex_project.joinpath(*relative_path)
 
         # CONSTRAINT: Coverage must be maintained regardless of efficiency
-        for ts_file in typescript_files:
-            if ts_file.exists():
-                # Check that typescript-deep instruction is accessible
-                file_dir = ts_file.parent
-                chain = optimizer._get_inheritance_chain(file_dir)
-
-                has_typescript_coverage = False
-                for dir_in_chain in chain:
-                    if dir_in_chain in placement_map:
-                        for instruction in placement_map[dir_in_chain]:
-                            if (
-                                instruction.name == "typescript-deep"
-                                and optimizer._is_instruction_relevant(instruction, ts_file.parent)
-                            ):
-                                has_typescript_coverage = True
-                                break
-                    if has_typescript_coverage:
-                        break
-
-                assert has_typescript_coverage, (
-                    f"CONSTRAINT VIOLATION: TypeScript file {ts_file} lacks coverage\n"
-                    f"Efficiency: {stats.efficiency_percentage:.1f}%\n"
-                    f"This violates coverage-first principle: coverage must be guaranteed even with low efficiency"
-                )
+        assert _has_instruction_coverage(optimizer, placement_map, ts_file, "typescript-deep"), (
+            f"CONSTRAINT VIOLATION: TypeScript file {ts_file} lacks coverage\n"
+            f"Efficiency: {stats.efficiency_percentage:.1f}%\n"
+            f"This violates coverage-first principle: coverage must be guaranteed even with low efficiency"
+        )
 
     def test_data_loss_prevention_edge_cases(self, complex_project):
         """Test that no files are left without applicable instructions in edge cases."""
