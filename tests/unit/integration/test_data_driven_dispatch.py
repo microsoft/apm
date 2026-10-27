@@ -20,6 +20,7 @@ from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.skill_support import SkillIntegrationResult
+from apm_cli.integration.dispatch import get_dispatch_table
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
@@ -961,18 +962,16 @@ class TestDispatchTable:
         dispatch = get_dispatch_table()
         assert dispatch[name].multi_target is False
 
-    def test_dispatch_entries_have_valid_methods(self):
-        from apm_cli.integration.dispatch import get_dispatch_table
-
-        dispatch = get_dispatch_table()
-        for name, entry in dispatch.items():  # noqa: B007
-            integrator = entry.integrator_class()
-            assert hasattr(integrator, entry.integrate_method), (
-                f"{entry.integrator_class.__name__} missing {entry.integrate_method}"
-            )
-            assert hasattr(integrator, entry.sync_method), (
-                f"{entry.integrator_class.__name__} missing {entry.sync_method}"
-            )
+    @pytest.mark.parametrize("name", sorted(get_dispatch_table()))
+    def test_dispatch_entries_have_valid_methods(self, name):
+        entry = get_dispatch_table()[name]
+        integrator = entry.integrator_class()
+        assert hasattr(integrator, entry.integrate_method), (
+            f"{entry.integrator_class.__name__} missing {entry.integrate_method}"
+        )
+        assert hasattr(integrator, entry.sync_method), (
+            f"{entry.integrator_class.__name__} missing {entry.sync_method}"
+        )
 
     def test_dispatch_counter_keys_match_result_dict(self):
         """Counter keys in dispatch match the keys used in install result."""
