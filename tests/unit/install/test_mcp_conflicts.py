@@ -64,7 +64,7 @@ class TestValidCallNoErrors:
 
     def test_headers_with_url(self) -> None:
         """--header with --url is valid."""
-        _call(url="https://example.com/mcp", headers={"X-Key": "value"})
+        assert _call(url="https://example.com/mcp", headers={"X-Key": "value"}) is None
 
     def test_registry_url_alone(self) -> None:
         """--registry without url or command_argv is valid."""
