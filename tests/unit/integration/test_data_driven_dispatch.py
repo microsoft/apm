@@ -291,19 +291,24 @@ class TestTargetGatingRegression:
 class TestExhaustivenessChecks:
     """Structural checks ensuring no target x primitive pair is orphaned."""
 
-    def test_every_target_primitive_has_dispatch_path(self):
+    @pytest.mark.parametrize(
+        ("target_name", "prim_name"),
+        [
+            (target_name, prim_name)
+            for target_name, profile in KNOWN_TARGETS.items()
+            for prim_name in profile.primitives
+        ],
+    )
+    def test_every_target_primitive_has_dispatch_path(self, target_name, prim_name):
         """For each (target, primitive) in KNOWN_TARGETS, verify the dispatch
         table has a corresponding entry."""
         from apm_cli.integration.dispatch import get_dispatch_table
 
         dispatch = get_dispatch_table()
 
-        for target_name, profile in KNOWN_TARGETS.items():
-            for prim_name in profile.primitives:
-                assert prim_name in dispatch, (
-                    f"Primitive '{prim_name}' in target '{target_name}' has no "
-                    f"entry in the dispatch table."
-                )
+        assert prim_name in dispatch, (
+            f"Primitive '{prim_name}' in target '{target_name}' has no entry in the dispatch table."
+        )
 
     def test_partition_parity_with_old_buckets(self):
         """Verify partition_managed_files produces the expected bucket keys
