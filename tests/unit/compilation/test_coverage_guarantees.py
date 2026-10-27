@@ -18,6 +18,17 @@ from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
 
 
+def _accessible_instruction_names(optimizer, placement_map, file_path):
+    """Names of instructions reachable from file_path through its inheritance chain."""
+    accessible = set()
+    for dir_in_chain in optimizer._get_inheritance_chain(file_path.parent):
+        if dir_in_chain in placement_map:
+            for instruction in placement_map[dir_in_chain]:
+                if optimizer._is_instruction_relevant(instruction, file_path.parent):
+                    accessible.add(instruction.name)
+    return accessible
+
+
 class TestCoverageGuarantees:
     """Test mathematical coverage guarantees and constraint satisfaction."""
 
@@ -96,8 +107,43 @@ class TestCoverageGuarantees:
             ),
         ]
 
+    @pytest.mark.parametrize(
+        ("relative_path", "expected_instructions", "description"),
+        [
+            (
+                ("src", "components", "forms", "validation", "rules.ts"),
+                ["typescript-deep", "validation-specific"],
+                "Deep TypeScript validation file should get both TS and validation instructions",
+            ),
+            (
+                ("src", "components", "button.tsx"),
+                ["typescript-deep"],
+                "TypeScript component should get TS instructions",
+            ),
+            (
+                ("tests", "integration", "api", "test_auth.py"),
+                ["python-testing"],
+                "Python test file should get testing instructions",
+            ),
+            (
+                ("docs", "api", "v1", "README.md"),
+                ["docs-standards"],
+                "Documentation file should get docs instructions",
+            ),
+            (
+                ("scripts", "deployment", "deploy.sh"),
+                ["shell-standards"],
+                "Shell script should get shell instructions",
+            ),
+        ],
+    )
     def test_hierarchical_coverage_verification(
-        self, complex_project, coverage_challenge_instructions
+        self,
+        complex_project,
+        coverage_challenge_instructions,
+        relative_path,
+        expected_instructions,
+        description,
     ):
         """Test that every file can access applicable instructions through inheritance chain.
 
@@ -108,69 +154,27 @@ class TestCoverageGuarantees:
         # Get optimized placement
         placement_map = optimizer.optimize_instruction_placement(coverage_challenge_instructions)
 
-        # Define test files and their expected applicable instructions
-        test_cases = [
-            {
-                "file": complex_project
-                / "src"
-                / "components"
-                / "forms"
-                / "validation"
-                / "rules.ts",
-                "expected_instructions": ["typescript-deep", "validation-specific"],
-                "description": "Deep TypeScript validation file should get both TS and validation instructions",
-            },
-            {
-                "file": complex_project / "src" / "components" / "button.tsx",
-                "expected_instructions": ["typescript-deep"],
-                "description": "TypeScript component should get TS instructions",
-            },
-            {
-                "file": complex_project / "tests" / "integration" / "api" / "test_auth.py",
-                "expected_instructions": ["python-testing"],
-                "description": "Python test file should get testing instructions",
-            },
-            {
-                "file": complex_project / "docs" / "api" / "v1" / "README.md",
-                "expected_instructions": ["docs-standards"],
-                "description": "Documentation file should get docs instructions",
-            },
-            {
-                "file": complex_project / "scripts" / "deployment" / "deploy.sh",
-                "expected_instructions": ["shell-standards"],
-                "description": "Shell script should get shell instructions",
-            },
-        ]
+        # Verify the file can access all applicable instructions
+        file_path = complex_project.joinpath(*relative_path)
+        expected_names = set(expected_instructions)
 
-        # For each test file, verify it can access all applicable instructions
-        for test_case in test_cases:
-            file_path = test_case["file"]
-            expected_names = set(test_case["expected_instructions"])
+        # Get inheritance chain for the file's directory
+        inheritance_chain = optimizer._get_inheritance_chain(file_path.parent)
 
-            # Get inheritance chain for the file's directory
-            file_dir = file_path.parent
-            inheritance_chain = optimizer._get_inheritance_chain(file_dir)
+        # Collect all instructions accessible through inheritance
+        accessible_instructions = _accessible_instruction_names(optimizer, placement_map, file_path)
 
-            # Collect all instructions accessible through inheritance
-            accessible_instructions = set()
-            for dir_in_chain in inheritance_chain:
-                if dir_in_chain in placement_map:
-                    for instruction in placement_map[dir_in_chain]:
-                        # Check if instruction applies to this file
-                        if optimizer._is_instruction_relevant(instruction, file_path.parent):
-                            accessible_instructions.add(instruction.name)
-
-            # GUARANTEE: File must be able to access all applicable instructions
-            missing_instructions = expected_names - accessible_instructions
-            assert not missing_instructions, (
-                f"COVERAGE VIOLATION: {test_case['description']}\n"
-                f"File: {file_path}\n"
-                f"Missing instructions: {missing_instructions}\n"
-                f"Accessible: {accessible_instructions}\n"
-                f"Expected: {expected_names}\n"
-                f"Inheritance chain: {[str(p) for p in inheritance_chain]}\n"
-                f"Placement map: {[(str(k), [i.name for i in v]) for k, v in placement_map.items()]}"
-            )
+        # GUARANTEE: File must be able to access all applicable instructions
+        missing_instructions = expected_names - accessible_instructions
+        assert not missing_instructions, (
+            f"COVERAGE VIOLATION: {description}\n"
+            f"File: {file_path}\n"
+            f"Missing instructions: {missing_instructions}\n"
+            f"Accessible: {accessible_instructions}\n"
+            f"Expected: {expected_names}\n"
+            f"Inheritance chain: {[str(p) for p in inheritance_chain]}\n"
+            f"Placement map: {[(str(k), [i.name for i in v]) for k, v in placement_map.items()]}"
+        )
 
     def test_coverage_constraint_priority_over_efficiency(
         self, complex_project, coverage_challenge_instructions
