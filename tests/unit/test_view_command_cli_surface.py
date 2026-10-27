@@ -243,6 +243,15 @@ class TestDisplayPackageInfo:
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
 
+        out = capsys.readouterr().out
+        assert "Package Info: org/repo" in out
+        assert "Name: test-pkg" in out
+        assert "Ref: v1.0" in out
+        assert "Commit: abc123" in out
+        assert "2 skills" in out
+        assert "1 executable workflows" in out
+        assert "2 hook file(s)" in out
+
     def test_no_project_root_skips_lockfile(self, tmp_path):
         from apm_cli.commands.view import display_package_info
 
