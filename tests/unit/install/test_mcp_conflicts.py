@@ -52,7 +52,7 @@ class TestValidCallNoErrors:
 
     def test_mcp_name_with_transport_stdio_no_url(self) -> None:
         """stdio transport without --url is valid."""
-        _call(transport="stdio")
+        assert _call(transport="stdio") is None
 
     def test_mcp_name_with_command_argv(self) -> None:
         """A stdio command alongside mcp_name (no url) is valid."""
