@@ -172,7 +172,7 @@ class TestDisplayPackageInfo:
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
 
-    def test_rich_rendering_no_context_files(self, tmp_path):
+    def test_rich_rendering_no_context_files(self, tmp_path, capsys):
         """Covers 'No context files found' branch."""
         from apm_cli.commands.view import display_package_info
 
@@ -187,6 +187,10 @@ class TestDisplayPackageInfo:
             patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("", "", "")),
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
+
+        out = capsys.readouterr().out
+        assert "No context" in out
+        assert "No agent" in out
 
     def test_rich_rendering_with_hooks(self, tmp_path):
         """Covers hooks > 0 branch."""
