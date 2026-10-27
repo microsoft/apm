@@ -1123,11 +1123,7 @@ class TestBuildGitEnvBearerIsolation:
             env = AuthResolver._build_git_env("glpat_fresh", host_kind="gitlab")
 
         assert "GIT_TOKEN" not in env
-        header_values = [
-            value
-            for key, value in env.items()
-            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
-        ]
+        header_values = _basic_auth_headers(env)
         assert len(header_values) == 1
         encoded = header_values[0].split(" ", 2)[2]
         assert base64.b64decode(encoded).decode() == "oauth2:glpat_fresh"
