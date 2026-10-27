@@ -245,12 +245,17 @@ class TestDisplayPackageInfo:
         logger = _make_logger()
         pkg_info = _make_package_info()
 
-        with patch(
-            "apm_cli.commands.view._get_detailed_package_info",
-            return_value=pkg_info,
+        with (
+            patch(
+                "apm_cli.commands.view._get_detailed_package_info",
+                return_value=pkg_info,
+            ),
+            patch("apm_cli.commands.view._lookup_lockfile_ref") as lookup,
         ):
             # No project_root passed -> _lookup_lockfile_ref not called
             display_package_info("org/repo", tmp_path, logger, project_root=None)
+
+        lookup.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
