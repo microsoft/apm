@@ -37,7 +37,7 @@ def _call(**overrides) -> None:
         registry_url=None,
     )
     defaults.update(overrides)
-    validate_mcp_conflicts(**defaults)
+    return validate_mcp_conflicts(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ def _call(**overrides) -> None:
 class TestValidCallNoErrors:
     def test_all_defaults_no_error(self) -> None:
         """A call with all defaults should succeed without raising."""
-        _call()
+        assert _call() is None
 
     def test_mcp_name_with_transport_stdio_no_url(self) -> None:
         """stdio transport without --url is valid."""
