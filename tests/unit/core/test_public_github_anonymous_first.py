@@ -106,6 +106,15 @@ def _poisoned_environment() -> dict[str, str]:
     }
 
 
+def _is_github_credential(name: str) -> bool:
+    return name in _GITHUB_TOKEN_ENV_NAMES or name.startswith("GITHUB_APM_PAT_")
+
+
+def _poisoned_environment_without_credentials() -> dict[str, str]:
+    """Return the poisoned environment minus GitHub token variables."""
+    return {k: v for k, v in _poisoned_environment().items() if not _is_github_credential(k)}
+
+
 def _assert_anonymous_attempt_env(env: dict[str, str]) -> None:
     """Assert the complete credential-free anonymous Git call shape."""
     assert env["GIT_TERMINAL_PROMPT"] == "0"
@@ -1051,10 +1060,7 @@ def test_private_github_file_fetch_uses_one_scoped_fallback() -> None:
     manager.resolve_credential_from_git.return_value = "private-token"
     resolver = AuthResolver(token_manager=manager)
     dep_ref = DependencyReference.parse("https://github.com/acme/private.git#main")
-    inherited = _poisoned_environment()
-    for name in tuple(inherited):
-        if name in _GITHUB_TOKEN_ENV_NAMES or name.startswith("GITHUB_APM_PAT_"):
-            inherited.pop(name)
+    inherited = _poisoned_environment_without_credentials()
 
     with patch.dict(os.environ, inherited, clear=True):
         downloader = _public_downloader(resolver)
