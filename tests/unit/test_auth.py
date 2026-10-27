@@ -1049,12 +1049,7 @@ class TestStalePATDiagnosticDedup:
             resolver = AuthResolver()
             with patch("apm_cli.utils.console._rich_warning") as mock_warn:
                 with ThreadPoolExecutor(max_workers=16) as pool:
-                    futures = [
-                        pool.submit(resolver.emit_stale_pat_diagnostic, "dev.azure.com")
-                        for _ in range(64)
-                    ]
-                    for fut in futures:
-                        fut.result()
+                    list(pool.map(resolver.emit_stale_pat_diagnostic, ["dev.azure.com"] * 64))
                 # Single emission -> _rich_warning called twice (msg + detail).
                 assert mock_warn.call_count == 2
 
