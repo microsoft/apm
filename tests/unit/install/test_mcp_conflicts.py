@@ -56,7 +56,7 @@ class TestValidCallNoErrors:
 
     def test_mcp_name_with_command_argv(self) -> None:
         """A stdio command alongside mcp_name (no url) is valid."""
-        _call(command_argv=["npx", "my-server"])
+        assert _call(command_argv=["npx", "my-server"]) is None
 
     def test_remote_transport_with_url(self) -> None:
         """Remote transport with url (no command_argv) is valid."""
