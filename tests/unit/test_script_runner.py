@@ -388,34 +388,27 @@ class TestPromptCompilerDependencyDiscovery:
         result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
         assert result == dep_prompt
 
-    def test_resolve_prompt_file_multiple_dependencies(self):
+    def test_resolve_prompt_file_multiple_dependencies(self, tmp_path, monkeypatch):
         """Test resolving prompt file with multiple dependencies (first match wins)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            original_cwd = Path.cwd()
-            try:
-                import os
+        monkeypatch.chdir(tmp_path)
 
-                os.chdir(tmpdir)
+        # Create multiple dependency directories with org/repo structure
+        compliance_dir = Path("apm_modules/acme/compliance-rules")
+        compliance_dir.mkdir(parents=True)
+        design_dir = Path("apm_modules/microsoft/apm-sample-package")
+        design_dir.mkdir(parents=True)
 
-                # Create multiple dependency directories with org/repo structure
-                compliance_dir = Path("apm_modules/acme/compliance-rules")
-                compliance_dir.mkdir(parents=True)
-                design_dir = Path("apm_modules/microsoft/apm-sample-package")
-                design_dir.mkdir(parents=True)
+        # Create prompt files in both (first one found should win)
+        compliance_prompt = compliance_dir / "hello-world.prompt.md"
+        compliance_prompt.write_text("Hello from compliance!")
+        design_prompt = design_dir / "hello-world.prompt.md"
+        design_prompt.write_text("Hello from design!")
 
-                # Create prompt files in both (first one found should win)
-                compliance_prompt = compliance_dir / "hello-world.prompt.md"
-                compliance_prompt.write_text("Hello from compliance!")
-                design_prompt = design_dir / "hello-world.prompt.md"
-                design_prompt.write_text("Hello from design!")
-
-                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-                # Should return one of the matches (doesn't matter which since both exist)
-                assert result in [compliance_prompt, design_prompt]
-                assert result.exists()
-                assert result.read_text().startswith("Hello from")
-            finally:
-                os.chdir(original_cwd)
+        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+        # Should return one of the matches (doesn't matter which since both exist)
+        assert result in [compliance_prompt, design_prompt]
+        assert result.exists()
+        assert result.read_text().startswith("Hello from")
 
     def test_resolve_prompt_file_no_apm_modules(self):
         """Test resolving prompt file when apm_modules directory doesn't exist."""
