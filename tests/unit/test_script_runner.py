@@ -371,29 +371,22 @@ class TestPromptCompilerDependencyDiscovery:
         result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
         assert result == dep_prompt
 
-    def test_resolve_prompt_file_dependency_subdirectory(self):
+    def test_resolve_prompt_file_dependency_subdirectory(self, tmp_path, monkeypatch):
         """Test resolving prompt file from dependency subdirectory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            original_cwd = Path.cwd()
-            try:
-                import os
+        monkeypatch.chdir(tmp_path)
 
-                os.chdir(tmpdir)
+        # Create apm_modules structure
+        dep_dir = Path("apm_modules/design-guidelines")
+        dep_dir.mkdir(parents=True)
 
-                # Create apm_modules structure
-                dep_dir = Path("apm_modules/design-guidelines")
-                dep_dir.mkdir(parents=True)
+        # Create prompt file in prompts subdirectory
+        prompts_dir = dep_dir / "prompts"
+        prompts_dir.mkdir()
+        dep_prompt = prompts_dir / "hello-world.prompt.md"
+        dep_prompt.write_text("Hello from dependency prompts!")
 
-                # Create prompt file in prompts subdirectory
-                prompts_dir = dep_dir / "prompts"
-                prompts_dir.mkdir()
-                dep_prompt = prompts_dir / "hello-world.prompt.md"
-                dep_prompt.write_text("Hello from dependency prompts!")
-
-                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-                assert result == dep_prompt
-            finally:
-                os.chdir(original_cwd)
+        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+        assert result == dep_prompt
 
     def test_resolve_prompt_file_multiple_dependencies(self):
         """Test resolving prompt file with multiple dependencies (first match wins)."""
