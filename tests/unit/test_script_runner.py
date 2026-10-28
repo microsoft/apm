@@ -345,24 +345,16 @@ class TestPromptCompilerDependencyDiscovery:
         """Set up test fixtures."""
         self.compiler = PromptCompiler()
 
-    def test_resolve_prompt_file_local_exists(self):
+    def test_resolve_prompt_file_local_exists(self, tmp_path, monkeypatch):
         """Test resolving prompt file when it exists locally."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Change to temp directory for test
-            original_cwd = Path.cwd()
-            try:
-                import os
+        monkeypatch.chdir(tmp_path)
 
-                os.chdir(tmpdir)
+        # Create local prompt file
+        prompt_file = Path("hello-world.prompt.md")
+        prompt_file.write_text("Hello World!")
 
-                # Create local prompt file
-                prompt_file = Path("hello-world.prompt.md")
-                prompt_file.write_text("Hello World!")
-
-                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-                assert result == prompt_file
-            finally:
-                os.chdir(original_cwd)
+        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+        assert result == prompt_file
 
     def test_resolve_prompt_file_dependency_root(self):
         """Test resolving prompt file from dependency root directory."""
