@@ -119,13 +119,10 @@ class TestSpecFileSyntax:
         assert _SPEC_FILE.is_file(), f"Expected spec file at {_SPEC_FILE}"
 
     def test_spec_file_compiles_without_syntax_errors(self):
-        """``compile()`` the raw source  -- catches SyntaxError without executing
+        """``compile()`` the raw source  -- catches SyntaxError without         executing
         any PyInstaller-specific globals."""
         source = _SPEC_FILE.read_text(encoding="utf-8")
-        try:
-            compile(source, str(_SPEC_FILE), "exec")
-        except SyntaxError as exc:
-            pytest.fail(f"build/apm.spec contains a syntax error: {exc}")
+        compile(source, str(_SPEC_FILE), "exec")
 
     def test_spec_file_helper_functions_are_extractable(self):
         """AST extraction must succeed and return at least two function defs."""
