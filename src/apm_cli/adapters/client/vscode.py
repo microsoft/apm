@@ -300,7 +300,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             package = self._select_best_package(server_info["packages"])
             runtime_hint = package.get("runtime_hint", "") if package else ""
             registry_name = self._infer_registry_name(package) if package else ""
-            is_docker = runtime_hint == "docker" or registry_name == "docker"
+            is_docker = self._is_docker_package(package)
             env_config, declared_inputs = self._declared_vscode_environment(
                 package,
                 server_name=server_info.get("name", ""),
@@ -864,6 +864,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
         )
         if package_args is None:
             return None
+        if not run_options and not package_args:
+            return None
         if not run_options and package_args and package_args[0] == "run":
             image_index = cls._docker_image_arg_index(package_args, package.get("name"))
             if image_index is None:
@@ -874,6 +876,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 package_args = package_args[image_index + 1 :]
         elif not run_options and package_args:
             run_options = ["run", "-i", "--rm"]
+        elif cls._is_options_only(run_options):
+            run_options = cls._ensure_docker_run_args(run_options)
         # The subcommand has to lead: `docker -v … run` is not a run invocation,
         # and there would be nothing for the flag normalizer to anchor on.
         if not run_options or run_options[0] != "run":
