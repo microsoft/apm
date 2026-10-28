@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm pack` writes the `apm.yml` version into the bundled `plugin.json` instead of reusing a stale authored version, so a release no longer names its bundle `build/<pkg>-1.0.3` while the manifest inside declares an older version. Authored manifests are otherwise preserved, and a warning names the version that was reconciled. (#3351)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

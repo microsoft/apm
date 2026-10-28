@@ -22,6 +22,7 @@ from apm_cli.bundle.plugin_exporter import (
     _get_dev_dependency_urls,
     _merge_file_map,
     _plugin_rel_for_deployed_path,
+    _reconcile_plugin_json_version,
     _rename_prompt,
     _update_plugin_json_paths,
     _validate_output_rel,
@@ -680,6 +681,85 @@ class TestUpdatePluginJsonPaths:
         assert captured == []
 
 
+class _NullLogger:
+    """Absorb pack diagnostics so tests do not print to the console."""
+
+    def warning(self, _msg):
+        pass
+
+    def info(self, _msg):
+        pass
+
+    def debug(self, _msg):
+        pass
+
+
+class TestReconcilePluginJsonVersion:
+    """``plugin.json`` inside a bundle must agree with the apm.yml version."""
+
+    def test_forces_apm_yml_version_when_authored_is_stale(self):
+        captured = []
+
+        class _StubLogger:
+            def warning(self, msg):
+                captured.append(msg)
+
+        result = _reconcile_plugin_json_version(
+            {"name": "pkg", "version": "1.0.2"}, "1.0.3", logger=_StubLogger()
+        )
+
+        assert result["version"] == "1.0.3"
+        assert result["name"] == "pkg"
+        assert len(captured) == 1
+        assert "1.0.2" in captured[0]
+        assert "1.0.3" in captured[0]
+
+    def test_matching_version_is_untouched_and_silent(self):
+        captured = []
+
+        class _StubLogger:
+            def warning(self, msg):
+                captured.append(msg)
+
+        result = _reconcile_plugin_json_version(
+            {"name": "pkg", "version": "1.0.3"}, "1.0.3", logger=_StubLogger()
+        )
+
+        assert result["version"] == "1.0.3"
+        assert captured == []
+
+    def test_missing_version_is_filled(self):
+        result = _reconcile_plugin_json_version({"name": "pkg"}, "1.0.3", logger=_NullLogger())
+
+        assert result["version"] == "1.0.3"
+
+    def test_input_is_not_mutated(self):
+        authored = {"name": "pkg", "version": "1.0.2"}
+
+        _reconcile_plugin_json_version(authored, "1.0.3", logger=_NullLogger())
+
+        assert authored["version"] == "1.0.2"
+
+    def test_bundle_manifest_matches_bundle_directory(self, tmp_path):
+        """Regression: a stale authored plugin.json used to ship 1.0.2 inside build/<pkg>-1.0.3."""
+        project = tmp_path / "project"
+        project.mkdir()
+        _write_apm_yml(project, name="demo-pkg", version="1.0.3")
+        _write_lockfile(project)
+        _make_apm_dir(project, skills={"demo": ["SKILL.md"]})
+        authored = project / ".claude-plugin" / "plugin.json"
+        authored.parent.mkdir()
+        authored.write_text(json.dumps({"name": "demo-pkg", "version": "1.0.2"}), encoding="utf-8")
+
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as mock_warn:
+            result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert result.bundle_path.name == "demo-pkg-1.0.3"
+        packed = json.loads((result.bundle_path / "plugin.json").read_text())
+        assert packed["version"] == "1.0.3"
+        assert any("1.0.2" in str(c) for c in mock_warn.call_args_list)
+
+
 # ---------------------------------------------------------------------------
 # Integration tests: export_plugin_bundle
 # ---------------------------------------------------------------------------
@@ -708,6 +788,12 @@ class TestExportPluginBundle:
         assert not (result.bundle_path / "apm_modules").exists()
 
     def test_uses_existing_plugin_json(self, tmp_path):
+        """Authored metadata is kept, but ``version`` follows apm.yml (#3351).
+
+        The bundle directory is named from the apm.yml version, so honouring a
+        stale authored version here shipped a self-contradicting bundle
+        (``build/<pkg>-1.0.0/plugin.json`` declaring 2.0.0).
+        """
         project = _setup_plugin_project(
             tmp_path,
             agents=["a.agent.md"],
@@ -718,7 +804,8 @@ class TestExportPluginBundle:
 
         pj = json.loads((result.bundle_path / "plugin.json").read_text())
         assert pj["name"] == "custom-name"
-        assert pj["version"] == "2.0.0"
+        assert pj["version"] == "1.0.0"
+        assert result.bundle_path.name == "test-pkg-1.0.0"
 
     def test_synthesizes_plugin_json_when_absent(self, tmp_path):
         """G2: bare plugin shape (no marketplace block) gets an [i] info,
