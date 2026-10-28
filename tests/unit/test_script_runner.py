@@ -410,25 +410,18 @@ class TestPromptCompilerDependencyDiscovery:
         assert result.exists()
         assert result.read_text().startswith("Hello from")
 
-    def test_resolve_prompt_file_no_apm_modules(self):
+    def test_resolve_prompt_file_no_apm_modules(self, tmp_path, monkeypatch):
         """Test resolving prompt file when apm_modules directory doesn't exist."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            original_cwd = Path.cwd()
-            try:
-                import os
+        monkeypatch.chdir(tmp_path)
 
-                os.chdir(tmpdir)
+        # No apm_modules directory exists
+        with pytest.raises(FileNotFoundError) as exc_info:
+            self.compiler._resolve_prompt_file("hello-world.prompt.md")
 
-                # No apm_modules directory exists
-                with pytest.raises(FileNotFoundError) as exc_info:
-                    self.compiler._resolve_prompt_file("hello-world.prompt.md")
-
-                error_msg = str(exc_info.value)
-                assert "Prompt file 'hello-world.prompt.md' not found" in error_msg
-                assert "Local: hello-world.prompt.md" in error_msg
-                assert "Run 'apm install'" in error_msg
-            finally:
-                os.chdir(original_cwd)
+        error_msg = str(exc_info.value)
+        assert "Prompt file 'hello-world.prompt.md' not found" in error_msg
+        assert "Local: hello-world.prompt.md" in error_msg
+        assert "Run 'apm install'" in error_msg
 
     def test_resolve_prompt_file_not_found_anywhere(self):
         """Test resolving prompt file when it's not found anywhere."""
