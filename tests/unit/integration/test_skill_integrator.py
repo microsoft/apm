@@ -1431,13 +1431,10 @@ class TestNativeSkillIntegration:
             package_type=package_type,
         )
 
-    def test_native_skill_preserves_complete_structure(self):
-        """Test that native skill integration preserves complete directory structure."""
-        # Create a complete skill package
+    def _create_complete_skill_package(self) -> Path:
+        """Create a skill package with SKILL.md plus scripts/, references/ and assets/."""
         package_dir = self.project_root / "complete-skill"
         package_dir.mkdir()
-
-        # Create SKILL.md
         (package_dir / "SKILL.md").write_text("""---
 name: complete-skill
 description: A complete skill with all subdirectories
@@ -1446,18 +1443,17 @@ description: A complete skill with all subdirectories
 
 Use this skill for comprehensive guidance.
 """)
-
-        # Create scripts/
         (package_dir / "scripts").mkdir()
         (package_dir / "scripts" / "validate.sh").write_text("#!/bin/bash\necho 'validating'")
-
-        # Create references/
         (package_dir / "references").mkdir()
         (package_dir / "references" / "api.md").write_text("# API Reference")
-
-        # Create assets/
         (package_dir / "assets").mkdir()
         (package_dir / "assets" / "template.json").write_text('{"key": "value"}')
+        return package_dir
+
+    def test_native_skill_preserves_complete_structure(self):
+        """Test that native skill integration preserves complete directory structure."""
+        package_dir = self._create_complete_skill_package()
 
         package_info = self._create_package_info(name="complete-skill", install_path=package_dir)
 
