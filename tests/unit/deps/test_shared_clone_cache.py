@@ -1044,11 +1044,10 @@ class TestBareCloneRetryRmtree:
     `git init --bare` would fail or leak state.
     """
 
-    def test_bare_action_rmtrees_target_before_init(self, tmp_path: Path) -> None:
-        """_bare_action wipes existing target via shutil.rmtree pre-init."""
+    def _make_downloader(self):
+        """Build a downloader whose transport plan has a single HTTPS no-token attempt."""
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
-        from apm_cli.models.dependency.reference import DependencyReference
 
         d = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
         d.auth_resolver = MagicMock()
@@ -1069,6 +1068,13 @@ class TestBareCloneRetryRmtree:
             strict=False,
         )
         d._transport_selector.select = MagicMock(return_value=plan)
+        return d
+
+    def test_bare_action_rmtrees_target_before_init(self, tmp_path: Path) -> None:
+        """_bare_action wipes existing target via shutil.rmtree pre-init."""
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        d = self._make_downloader()
         dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
 
         # Pre-create the target with stale content; verify it gets wiped.
