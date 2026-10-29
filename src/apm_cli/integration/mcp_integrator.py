@@ -19,7 +19,7 @@ import os
 import re
 import shutil
 import warnings
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -131,6 +131,8 @@ def _clean_json_mcp_config(
     trailing_newline: bool = False,
     use_rich: bool = False,
     fail_on_write_error: bool = False,
+    nested_servers: Callable[[dict], dict | None] | None = None,
+    nested_settings: frozenset[str] = frozenset(),
 ) -> int:
     """Remove stale entries from a JSON-based MCP config file.
 
@@ -143,6 +145,13 @@ def _clean_json_mcp_config(
         trailing_newline: When True, append a trailing newline after JSON serialisation.
         use_rich: When True, emit removal notices via ``_rich_success``; otherwise use
             ``logger.progress``.
+        nested_servers: Returns a second server map inside the parsed config,
+            or ``None``.  Stale names are removed from it as well, for layouts
+            such as OpenCode v2 that keep servers below the top-level key.
+            A top-level entry is then removed only when the nested map does
+            not declare the same name, since that entry is not APM's.
+        nested_settings: Top-level keys that hold settings rather than
+            servers whenever ``nested_servers`` returns a map.
 
     Returns:
         Number of entries removed.
@@ -164,9 +173,22 @@ def _clean_json_mcp_config(
         servers = config.get(servers_key, {})
         if not isinstance(servers, dict):
             raise ValueError(f"{label} {servers_key} must be a mapping")
-        removed = [n for n in stale_names if n in servers]
+        nested = nested_servers(config) if nested_servers else None
+        if nested is None:
+            removed = [n for n in stale_names if n in servers]
+        else:
+            removed = [
+                n
+                for n in stale_names
+                if n in servers and n not in nested and n not in nested_settings
+            ]
         for name in removed:
             del servers[name]
+        if nested:
+            nested_removed = [n for n in stale_names if n in nested]
+            for name in nested_removed:
+                del nested[name]
+            removed = sorted(builtins.set(removed) | builtins.set(nested_removed))
         if removed:
             text = json.dumps(config, indent=2)
             if trailing_newline:
@@ -862,7 +884,10 @@ class MCPIntegrator:
         # Project scope is opt-in; user scope uses ~/.config/opencode/.
         if "opencode" in target_runtimes:
             if clean_user_scope or (project_root_path / ".opencode").is_dir():
-                from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+                from apm_cli.adapters.client.opencode import (
+                    V2_MCP_SETTINGS,
+                    OpenCodeClientAdapter,
+                )
 
                 _clean_json_mcp_config(
                     OpenCodeClientAdapter.config_path_for(project_root_path, clean_user_scope),
@@ -871,6 +896,8 @@ class MCPIntegrator:
                     "OpenCode MCP config",
                     servers_key="mcp",
                     fail_on_write_error=fail_on_write_error,
+                    nested_servers=OpenCodeClientAdapter.native_v2_servers,
+                    nested_settings=V2_MCP_SETTINGS,
                 )
 
         if "windsurf" in target_runtimes:

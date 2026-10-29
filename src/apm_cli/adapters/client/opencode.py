@@ -23,6 +23,12 @@ Key differences from Copilot/Cursor:
 - Command format: single array ``command`` (not ``command`` + ``args``)
 - Env key: ``environment`` (not ``env``)
 
+OpenCode v2 nests servers under ``mcp.servers`` and replaces ``enabled``
+with its inverse, ``disabled``.  Both versions read the same files, but
+v1 cannot read the v2 layout, so APM writes v2 entries only when the
+target file already declares an ``mcp.servers`` map.  Otherwise it keeps
+the v1 layout above, which v2 also accepts.
+
 At project scope APM only writes to ``opencode.json`` when the
 ``.opencode/`` directory already exists -- OpenCode support is opt-in.
 """
@@ -33,11 +39,20 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
+from ...models.dependency.mcp import (
+    _EXTRA_DENYLIST,
+    opencode_enabled_matches,
+    opencode_enabled_value,
+)
+from ...utils.console import _rich_warning
 from .copilot import CopilotClientAdapter
 
 _ENV_REF_TEMPLATE = "{env:%s}"
 _ENV_REF_RE = re.compile(re.escape(_ENV_REF_TEMPLATE) % r"([A-Za-z_][A-Za-z0-9_]*)")
+
+_V2_SERVERS_KEY = "servers"
+# Settings that share the ``mcp`` object with v1 server entries in v2 files.
+V2_MCP_SETTINGS = frozenset({_V2_SERVERS_KEY, "timeout"})
 
 
 class OpenCodeClientAdapter(CopilotClientAdapter):
@@ -127,11 +142,71 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         if "mcp" not in current_config:
             current_config["mcp"] = {}
 
+        if self.uses_native_v2(current_config):
+            return self._update_v2_config(config_path, current_config, config_updates, enabled)
+
         for name, copilot_entry in config_updates.items():
             current_config["mcp"][name] = self._to_opencode_format(copilot_entry, enabled=enabled)
 
         self._write_json_config(config_path, current_config)
         return True
+
+    def _update_v2_config(
+        self,
+        config_path: Path,
+        current_config: dict,
+        config_updates: dict,
+        enabled: Any,
+    ) -> bool:
+        """Write *config_updates* under ``mcp.servers`` in a v2 config.
+
+        A v1-layout entry with the same name is removed only when it is
+        exactly what APM would have written there, so user edits survive.
+        Nothing is written if any entry cannot be expressed in v2.
+        """
+        mcp = current_config["mcp"]
+        servers = mcp[_V2_SERVERS_KEY]
+        try:
+            rendered = {
+                name: self._to_opencode_v2_format(entry, enabled=enabled)
+                for name, entry in config_updates.items()
+            }
+        except ValueError as exc:
+            _rich_warning(f"{exc} -- skipping {config_path}", symbol="warning")
+            return False
+
+        for name, entry in rendered.items():
+            legacy = mcp.get(name) if name not in V2_MCP_SETTINGS else None
+            if legacy is not None:
+                written = self._to_opencode_format(config_updates[name], enabled=enabled)
+                if legacy == written and opencode_enabled_matches(legacy, written):
+                    del mcp[name]
+                else:
+                    _rich_warning(
+                        f"Kept the edited v1 entry 'mcp.{name}' in {config_path}; "
+                        f"OpenCode v2 uses 'mcp.servers.{name}' instead",
+                        symbol="warning",
+                    )
+            servers[name] = entry
+
+        self._write_json_config(config_path, current_config)
+        return True
+
+    @staticmethod
+    def uses_native_v2(config: Any) -> bool:
+        """Return whether *config* declares the OpenCode v2 server layout.
+
+        A v1 server that happens to be named ``servers`` carries a string
+        ``type`` and is not treated as a v2 server map.
+        """
+        mcp = config.get("mcp") if isinstance(config, dict) else None
+        servers = mcp.get(_V2_SERVERS_KEY) if isinstance(mcp, dict) else None
+        return isinstance(servers, dict) and not isinstance(servers.get("type"), str)
+
+    @classmethod
+    def native_v2_servers(cls, config: dict) -> dict | None:
+        """Return the mutable ``mcp.servers`` map of a v2 config, else ``None``."""
+        return config["mcp"][_V2_SERVERS_KEY] if cls.uses_native_v2(config) else None
 
     def validate_config_for_install(self) -> bool:
         """Refuse unsafe user configs even when no server write would be needed."""
@@ -141,7 +216,19 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         )
 
     def get_current_config(self):
-        """Read the current ``opencode.json`` contents."""
+        """Read the current ``opencode.json`` contents.
+
+        For a v2 config, ``mcp`` lists only the ``mcp.servers`` entries.
+        A server still in the v1 layout then counts as not installed, so a
+        reinstall writes its native entry and retires the v1 one.
+        """
+        config = self._read_config_file()
+        if not self.uses_native_v2(config):
+            return config
+        return {**config, "mcp": dict(config["mcp"][_V2_SERVERS_KEY])}
+
+    def _read_config_file(self) -> dict:
+        """Return the parsed config file, or ``{}`` when it is absent or unreadable."""
         config_path = self.get_config_path()
         if not os.path.exists(config_path):
             return {}
@@ -152,11 +239,12 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             return {}
 
     def render_server_config(self, server_info: dict) -> dict:
-        """Render the ``mcp`` entry APM writes, for exact baseline comparisons."""
-        return self._to_opencode_format(
-            super().render_server_config(server_info),
-            enabled=opencode_enabled_value(server_info),
-        )
+        """Render the entry APM writes, for exact baseline comparisons."""
+        copilot_entry = super().render_server_config(server_info)
+        enabled = opencode_enabled_value(server_info)
+        if self.uses_native_v2(self._read_config_file()):
+            return self._to_opencode_v2_format(copilot_entry, enabled=enabled)
+        return self._to_opencode_format(copilot_entry, enabled=enabled)
 
     def configure_mcp_server(
         self,
@@ -232,4 +320,28 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             if key not in translated_keys and key not in entry:
                 entry[key] = value
 
+        return entry
+
+    @classmethod
+    def _to_opencode_v2_format(cls, copilot_entry: dict, enabled: Any = True) -> dict:
+        """Convert a Copilot-format server config to the OpenCode v2 layout.
+
+        Identical to the v1 entry except that ``enabled`` becomes
+        ``disabled: true`` when false and is omitted when true, the v2
+        default.  ``disabled`` always follows ``enabled``, even when an
+        extra field supplies it; other passthrough fields such as
+        ``codemode`` are kept as is.
+
+        Raises:
+            ValueError: *enabled* is not a boolean, so it has no v2 equivalent.
+        """
+        if not isinstance(enabled, bool):
+            raise ValueError(
+                f"OpenCode v2 needs a boolean 'enabled' value, got {json.dumps(enabled)}"
+            )
+        entry = cls._to_opencode_format(copilot_entry, enabled=enabled)
+        del entry["enabled"]
+        entry.pop("disabled", None)
+        if not enabled:
+            entry["disabled"] = True
         return entry

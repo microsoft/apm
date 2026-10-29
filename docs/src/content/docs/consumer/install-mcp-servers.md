@@ -166,7 +166,7 @@ unresolved required entries fail closed.
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
-| OpenCode | `opencode.json` (project, only if `.opencode/` exists) or `~/.config/opencode/opencode.json` (`-g`) | both | JSON `mcp` |
+| OpenCode | `opencode.json` (project, only if `.opencode/` exists) or `~/.config/opencode/opencode.json` (`-g`) | both | JSON `mcp` (v1) or `mcp.servers` (v2) |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
@@ -182,7 +182,8 @@ value unchanged into that server's `opencode.json` entry. If omitted, APM keeps
 the existing `true` default. APM does not validate or coerce explicit values;
 OpenCode interprets them. Other targets ignore this OpenCode-only field.
 Reinstall applies changes to `enabled`, including its JSON type; removing
-the field restores `true`.
+the field restores `true`. For the OpenCode 2 layout, see
+[OpenCode v2 configuration](#opencode-v2-configuration).
 
 Global Cursor and OpenCode installs preserve your personal servers, including
 ones that share a name with a package-declared server. Reinstalling and
@@ -196,6 +197,45 @@ uses a symlink below the home directory, APM warns and fails without rewriting
 it, even on a no-op reinstall. Fix the reported config and rerun the original
 command with `--global` and the same `--target` selection. A home-directory
 alias itself remains supported.
+
+### OpenCode v2 configuration
+
+OpenCode 1 and OpenCode 2 read the same `opencode.json` files, but only
+OpenCode 2 understands its native layout, which nests servers under
+`mcp.servers`. APM therefore chooses the layout from the target file
+itself:
+
+- If the file declares an `mcp.servers` object, APM writes each server
+  there in the OpenCode 2 format.
+- Otherwise APM keeps writing the OpenCode 1 layout, which OpenCode 2 also
+  reads.
+
+To opt in, add an empty map to the target file and reinstall:
+
+```json
+{
+  "mcp": {
+    "servers": {}
+  }
+}
+```
+
+In the OpenCode 2 layout, `enabled: false` is written as `disabled: true`,
+and `enabled: true` or an omitted value writes no field, the OpenCode 2
+default. Other values have no OpenCode 2 equivalent, so APM warns and
+leaves the file unchanged. A `disabled` value in the `extra` block is
+ignored, so `enabled` alone decides. To expose a server's tools directly instead of
+through Code Mode, set `codemode: false` in the dependency's `extra` block;
+APM writes extra fields verbatim, so use the OpenCode 2 spelling for any
+other native setting, such as snake_case `oauth` fields.
+
+APM does not convert configuration it did not write. When it switches to
+`mcp.servers`, it removes an OpenCode 1 entry of the same name only if the
+entry is unchanged from what APM wrote; an edited entry stays in place with
+a warning, and OpenCode 2 uses the `mcp.servers` entry. Your own servers,
+`mcp.timeout` and other settings are preserved, and pruning removes only
+entries APM wrote. Remove `mcp.servers` before running OpenCode 1 against
+the same file, since OpenCode 1 cannot read it.
 
 ## Resolve a connection name conflict
 
