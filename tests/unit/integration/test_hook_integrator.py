@@ -1051,32 +1051,14 @@ class TestClaudeIntegration:
         and no other hooks remain, the sidecar file should be deleted.
         This prevents leftover sidecar files that are no longer referenced.
         """
-        # Create settings.json with a single APM-owned hook (without _apm_source)
-        apm_matcher = {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "echo 'apm hook'",
-                    "timeout": 5,
-                }
-            ]
-        }
+        # Same APM-owned hook in settings.json and in the sidecar (with _apm_source)
+        hook = {"type": "command", "command": "echo 'apm hook'", "timeout": 5}
         settings_path = temp_project / ".claude" / "settings.json"
-        settings_path.write_text(json.dumps({"hooks": {"Stop": [apm_matcher]}}))
-
-        # Create sidecar file with matching ownership info (_apm_source included)
+        settings_path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [hook]}]}}))
         sidecar_path = temp_project / ".claude" / "apm-hooks.json"
-        sidecar_matcher = {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "echo 'apm hook'",
-                    "timeout": 5,
-                }
-            ],
-            "_apm_source": "test-pkg",
-        }
-        sidecar_path.write_text(json.dumps({"Stop": [sidecar_matcher]}))
+        sidecar_path.write_text(
+            json.dumps({"Stop": [{"hooks": [hook], "_apm_source": "test-pkg"}]})
+        )
 
         # Verify sidecar exists
         assert sidecar_path.exists()
