@@ -4311,6 +4311,26 @@ class TestPluginBinDeploy:
         mock_info.dependency_ref = None
         return mock_info
 
+    def _make_preinstalled_plugin(self, tmp_path: Path):
+        """Create a plugin with bin/myplugin and an identical copy already deployed."""
+        import shutil
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        dest_bin = project_root / ".claude" / "skills" / "myplugin" / "bin"
+        dest_bin.mkdir(parents=True)
+        shutil.copy2(bin_dir / "myplugin", dest_bin / "myplugin")
+        return project_root, pkg_info, dest_bin
+
     def test_deploys_bin_and_manifest_for_marketplace_plugin(self, tmp_path: Path) -> None:
         """bin/ executables and plugin.json are deployed to ~/.claude/skills/<name>/."""
         from apm_cli.core.scope import InstallScope
@@ -4579,24 +4599,7 @@ class TestPluginBinDeploy:
         """force=True copies bin/ executables even when src and dest hashes match."""
         from apm_cli.core.scope import InstallScope
 
-        project_root = tmp_path / "home"
-        project_root.mkdir()
-        (project_root / ".claude").mkdir()
-
-        pkg_dir = tmp_path / "apm_modules" / "myplugin"
-        pkg_dir.mkdir(parents=True)
-        bin_dir = pkg_dir / "bin"
-        bin_dir.mkdir()
-        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
-
-        pkg_info = self._make_plugin_package(pkg_dir)
-
-        # Pre-seed an identical copy so hash-check would normally skip it.
-        dest_bin = project_root / ".claude" / "skills" / "myplugin" / "bin"
-        dest_bin.mkdir(parents=True)
-        import shutil
-
-        shutil.copy2(bin_dir / "myplugin", dest_bin / "myplugin")
+        project_root, pkg_info, dest_bin = self._make_preinstalled_plugin(tmp_path)
 
         integrator = SkillIntegrator()
         # Without force: the file is skipped (hash matches).
