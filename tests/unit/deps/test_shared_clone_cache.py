@@ -1315,6 +1315,41 @@ class TestAdoBareBearerRetry:
 class TestFetchShaIntoBare:
     """Tests for the fetch_sha_into_bare() free function."""
 
+    def _capture_fetch_action(self, tmp_path: Path):
+        """Run fetch_sha_into_bare for a missing SHA and return the fetch action
+        it hands to the transport plan, together with the bare path.
+        """
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "e" * 40
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+        captured_actions: list = []
+
+        def mock_execute(
+            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
+        ) -> None:
+            captured_actions.append(clone_action)
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1),  # SHA not present
+                MagicMock(returncode=0),  # SHA present after fetch
+                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
+            ]
+
+            fetch_sha_into_bare(
+                mock_execute,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+        return captured_actions[0], bare_path
+
     def test_sha_already_present_returns_true_without_fetch(self, tmp_path: Path) -> None:
         """SHA already present in bare: rev-parse succeeds, no network fetch."""
         from apm_cli.deps.bare_cache import fetch_sha_into_bare
@@ -1495,38 +1530,7 @@ class TestFetchShaIntoBare:
 
     def test_fetch_action_uses_explicit_url_not_origin(self, tmp_path: Path) -> None:
         """Fetch action uses the explicit URL from transport plan, not 'origin'."""
-        from apm_cli.deps.bare_cache import fetch_sha_into_bare
-        from apm_cli.models.apm_package import DependencyReference
-
-        bare_path = tmp_path / "bare"
-        bare_path.mkdir()
-        sha = "e" * 40
-
-        dep_ref = DependencyReference.parse("owner/repo/sub#main")
-        captured_actions: list = []
-
-        def mock_execute(
-            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
-        ) -> None:
-            captured_actions.append(clone_action)
-
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=1),  # SHA not present
-                MagicMock(returncode=0),  # SHA present after fetch
-                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
-            ]
-
-            fetch_sha_into_bare(
-                mock_execute,
-                "https://github.com/owner/repo.git",
-                bare_path,
-                sha,
-                dep_ref=dep_ref,
-            )
-
-        # Verify the action uses the explicit URL
-        captured_action = captured_actions[0]
+        captured_action, bare_path = self._capture_fetch_action(tmp_path)
         explicit_url = "https://explicit.example.com/repo.git"
         with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
             mock_run_fetch.return_value = MagicMock(returncode=0)
