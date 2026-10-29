@@ -591,6 +591,35 @@ class TestBareCloneFallback:
         d._transport_selector.select = MagicMock(return_value=plan)
         return d
 
+    def _run_bare_clone_resolving(
+        self, tmp_path: Path, ref: str, resolved_sha: str
+    ) -> list[list[str]]:
+        """Run _bare_clone_with_fallback for *ref* with a fake git whose
+        rev-parse resolves to *resolved_sha*; return the captured git commands.
+        """
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        d = self._make_downloader(tmp_path)
+        dep = DependencyReference.parse(f"o/r/skills/X#{ref}")
+        captured: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            captured.append(list(args))
+            cmd_str = " ".join(args)
+            if "rev-parse --verify" in cmd_str:
+                return MagicMock(returncode=0, stdout=resolved_sha + "\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+            d._bare_clone_with_fallback(
+                "https://example/o/r",
+                tmp_path / "bare",
+                dep_ref=dep,
+                ref=ref,
+                is_commit_sha=True,
+            )
+        return captured
+
     def test_sha_ref_tier1_init_fetch_path(self, tmp_path: Path) -> None:
         """6.4 + 6.18: full SHA triggers init+fetch tier 1 with update-ref HEAD."""
         from apm_cli.models.dependency.reference import DependencyReference
@@ -695,30 +724,10 @@ class TestBareCloneFallback:
         tier-2 `rev-parse --verify <short>^{commit}`. The resolved 40-char
         SHA is what gets passed to `update-ref HEAD`, not the abbreviation.
         """
-        from apm_cli.models.dependency.reference import DependencyReference
-
         short_sha = "abc1234"  # 7-char abbreviation
         full_sha = "abc12345670000000000000000000000000fffff"
-        d = self._make_downloader(tmp_path)
-        dep = DependencyReference.parse(f"o/r/skills/X#{short_sha}")
-        bare = tmp_path / "bare"
-        captured: list[list[str]] = []
 
-        def fake_run(args, **kwargs):
-            captured.append(list(args))
-            cmd_str = " ".join(args)
-            if "rev-parse --verify" in cmd_str:
-                return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
-            d._bare_clone_with_fallback(
-                "https://example/o/r",
-                bare,
-                dep_ref=dep,
-                ref=short_sha,
-                is_commit_sha=True,
-            )
+        captured = self._run_bare_clone_resolving(tmp_path, short_sha, full_sha)
 
         cmd_strings = [" ".join(c) for c in captured]
         # Tier 1 (init+fetch) MUST NOT be attempted for short SHAs.
