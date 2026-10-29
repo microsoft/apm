@@ -741,6 +741,23 @@ def test_root_healing_preserves_canonical_dependency_marker_without_lock(
     assert source_scans == 1
 
 
+def _install_org_a_hooks_package(project: Path) -> PackageInfo:
+    """Create org-a/hooks under apm_modules with an 'echo alpha' hook and lock it."""
+    install_path = project / "apm_modules" / "org-a" / "hooks"
+    hooks_dir = install_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    hook = _session_start_hook("echo alpha", matcher="")
+    (hooks_dir / "hooks.json").write_text(json.dumps(hook), encoding="utf-8")
+    lock = LockFile()
+    lock.add_dependency(LockedDependency(repo_url="org-a/hooks"))
+    lock.write(project / "apm.lock.yaml")
+    return PackageInfo(
+        package=APMPackage(name="hooks", version="1.0.0", source="org-a/hooks"),
+        install_path=install_path,
+        dependency_ref=DependencyReference.parse("org-a/hooks"),
+    )
+
+
 def test_unambiguous_legacy_leaf_marker_migrates_to_canonical_owner(
     tmp_path: Path,
 ) -> None:
@@ -748,11 +765,7 @@ def test_unambiguous_legacy_leaf_marker_migrates_to_canonical_owner(
     project = tmp_path / "project"
     cursor = project / ".cursor"
     cursor.mkdir(parents=True)
-    install_path = project / "apm_modules" / "org-a" / "hooks"
-    hooks_dir = install_path / ".apm" / "hooks"
-    hooks_dir.mkdir(parents=True)
-    hook = _session_start_hook("echo alpha", matcher="")
-    (hooks_dir / "hooks.json").write_text(json.dumps(hook), encoding="utf-8")
+    package = _install_org_a_hooks_package(project)
     legacy_entry = _session_start_hook("echo legacy")["hooks"]["SessionStart"][0]
     (cursor / "hooks.json").write_text(
         json.dumps({"version": 1, "hooks": {"SessionStart": [legacy_entry]}}),
@@ -763,19 +776,6 @@ def test_unambiguous_legacy_leaf_marker_migrates_to_canonical_owner(
     (cursor / "apm-hooks.json").write_text(
         json.dumps({"SessionStart": [sidecar_entry]}),
         encoding="utf-8",
-    )
-    lock = LockFile()
-    lock.add_dependency(LockedDependency(repo_url="org-a/hooks"))
-    lock.write(project / "apm.lock.yaml")
-    dependency = DependencyReference.parse("org-a/hooks")
-    package = PackageInfo(
-        package=APMPackage(
-            name="hooks",
-            version="1.0.0",
-            source="org-a/hooks",
-        ),
-        install_path=install_path,
-        dependency_ref=dependency,
     )
 
     result = HookIntegrator().integrate_hooks_for_target(
