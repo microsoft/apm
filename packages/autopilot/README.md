@@ -51,10 +51,9 @@ reviewers.
 - Triage and review read the full conversation (paginate to
   exhaustion). Partial context = stop, no fresh advice.
 - Human decision labels are never written by these skills:
-  `status/needs-triage`, `status/needs-design`, `status/accepted`.
-  Exception: PR triage writes `status/deferred` when the PR has no
-  same-repo linked issue labelled `status/accepted`. Do not overwrite
-  `status/accepted` on the PR.
+  `status/needs-triage`, `status/needs-design`, `status/accepted`,
+  `status/deferred`. Deferral may be recommended in an advisory comment,
+  but only a human decides whether to apply `status/deferred`.
 - Labels, comments, and silence are not authorization.
 - Each canonical skill emits an Enter card before work and an Exit
   receipt after. Missing field = stop. Schedulers are `write: off`.
@@ -103,7 +102,9 @@ skip, two per author, oldest first, cap 10).
 Advises one already-selected issue. One public comment (suggested
 reply unless `debug: on`) plus `triage/recommended` and optional
 classification. May clear `triage/requested`. Never assigns. An
-`accept` recommendation is not acceptance.
+`accept` recommendation is not acceptance. Requires the active
+specialist agents in the consumer's `.github/agents/` directory; it
+stops and reports missing roles before advising.
 
 ### `autopilot-issue-delivery-scheduler`
 
@@ -151,7 +152,9 @@ composes `autopilot-pr-merge-worker`.
 Advisory multi-persona review of one PR. Requires `status/accepted`
 (else silent stop; may clear `panel-review`). Re-checks the
 CODEOWNERS last-comment gate before panelists. One recommendation
-comment. Does not gate merge. Actor-session may request `@me` as a
+comment. Does not gate merge. The active specialist agents must be
+present in the consumer's `.github/agents/` directory; missing roles
+stop the review before fan-out. Actor-session may request `@me` as a
 supplemental reviewer.
 
 ### `autopilot-pr-merge-worker`

@@ -128,11 +128,11 @@
             },
             "proves": {
               "type": "string",
-              "description": "One sentence in USER words naming the promise the test proves (or fails to prove if missing). MUST mirror a Scenario Evidence row from the PR body when one exists -- the rubric (.github/skills/pr-description-skill/assets/scenario-evidence-rubric.md) is the shared vocabulary."
+              "description": "One sentence in USER words naming the promise the test proves (or fails to prove if missing). MUST mirror a Scenario Evidence row from the PR body when one exists."
             },
             "principles": {
               "type": "array",
-              "description": "APM principle taxonomy from the scenario-evidence rubric (Portability by manifest, Secure by default, Governed by policy, Multi-harness support, Vendor-neutral, DevX, OSS). Ranks the criticality of the proven (or missing) promise.",
+              "description": "APM principle taxonomy defined by the enum below. Ranks the criticality of the proven (or missing) promise.",
               "items": {
                 "type": "string",
                 "enum": [

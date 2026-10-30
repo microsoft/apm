@@ -1,6 +1,6 @@
 name: pr-description-skill
 version: 0.1.0
-description: Authors one anchored, mermaid-validated GitHub-Flavored Markdown PR body for any microsoft/apm pull request -- TL;DR, WHY/WHAT/HOW, trade-offs, validation evidence, how-to-test. Single-thread skill; consumed by the issue/PR orchestrators at every PR-open site and usable standalone.
+description: Authors one anchored GitHub-Flavored Markdown PR body with mermaid diagrams validated when included -- TL;DR, WHY/WHAT/HOW, trade-offs, validation evidence, how-to-test. Single-thread skill; consumed by the issue/PR orchestrators at every PR-open site and usable standalone.
 author: Microsoft
 license: MIT
 type: skill
