@@ -1289,10 +1289,15 @@ def is_other_profile_path(profile: TargetProfile, value: str) -> bool:
     profiles other than the selected one.  Such a path is not stale for an
     install into the selected profile.  The check is a lexical prefix match
     against the selected root; it neither resolves nor follows symlinks.
+    Separators are compared in POSIX form: an absolute root keeps native
+    separators (``D:\\profiles\\b``) while lockfile values use ``/``.
     """
     if profile.name not in USER_ROOT_ENV_VARS or "://" in value:
         return False
-    return not value.startswith(get_integration_prefixes(targets=[profile]))
+    prefixes = tuple(
+        prefix.replace("\\", "/") for prefix in get_integration_prefixes(targets=[profile])
+    )
+    return not value.replace("\\", "/").startswith(prefixes)
 
 
 def active_targets_user_scope(

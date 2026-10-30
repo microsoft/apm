@@ -420,13 +420,21 @@ def test_same_target_stale_and_undeclared_target_are_removed(tmp_path: Path) -> 
     assert set(reconciled.removed) == {active, ghost}
 
 
-@pytest.mark.parametrize("selected_root", ["profiles/b", "/outside/profiles/b"])
+@pytest.mark.parametrize(
+    ("selected_root", "selected_value"),
+    [
+        ("profiles/b", "profiles/b"),
+        ("/outside/profiles/b", "/outside/profiles/b"),
+        ("D:\\profiles\\b", "D:/profiles/b"),
+    ],
+    ids=["home-relative", "absolute", "windows-absolute"],
+)
 @pytest.mark.parametrize(("target", "default_root"), [("claude", ".claude"), ("hermes", ".hermes")])
 def test_other_profile_rows_are_not_stale(
-    tmp_path: Path, selected_root: str, target: str, default_root: str
+    tmp_path: Path, selected_root: str, selected_value: str, target: str, default_root: str
 ) -> None:
     """Rows under another CLAUDE_CONFIG_DIR/HERMES_HOME root survive an install into the selected one."""
-    selected = _locator(f"{selected_root}/skills/demo/SKILL.md", target=target)
+    selected = _locator(f"{selected_value}/skills/demo/SKILL.md", target=target)
     default = _locator(f"{default_root}/skills/demo/SKILL.md", target=target)
     sibling = _locator("profiles/c/skills/demo/SKILL.md", target=target)
     prior = DeploymentLedger(
