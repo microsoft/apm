@@ -420,6 +420,30 @@ def test_same_target_stale_and_undeclared_target_are_removed(tmp_path: Path) -> 
     assert set(reconciled.removed) == {active, ghost}
 
 
+@pytest.mark.parametrize("selected_root", ["profiles/b", "/outside/profiles/b"])
+@pytest.mark.parametrize(("target", "default_root"), [("claude", ".claude"), ("hermes", ".hermes")])
+def test_other_profile_rows_are_not_stale(
+    tmp_path: Path, selected_root: str, target: str, default_root: str
+) -> None:
+    """Rows under another CLAUDE_CONFIG_DIR/HERMES_HOME root survive an install into the selected one."""
+    selected = _locator(f"{selected_root}/skills/demo/SKILL.md", target=target)
+    default = _locator(f"{default_root}/skills/demo/SKILL.md", target=target)
+    sibling = _locator("profiles/c/skills/demo/SKILL.md", target=target)
+    prior = DeploymentLedger(
+        records={locator.key: _record(locator) for locator in (selected, default, sibling)}
+    )
+    reconciler = DeploymentReconciler(
+        tmp_path,
+        {target: _target(target, selected_root)},
+        diagnostics=DiagnosticCollector(),
+    )
+
+    reconciled = reconciler.reconcile(prior, [], _intent(active=frozenset({target})))
+
+    assert reconciled.removed == (selected,)
+    assert set(reconciled.ledger.records) == {default.key, sibling.key}
+
+
 @pytest.mark.parametrize(
     ("dropped_target", "surviving_target"),
     (

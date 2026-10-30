@@ -525,11 +525,20 @@ class DeploymentReconciler:
         )
 
     def _is_stale(self, record: DeploymentRecord, intent: DeploymentIntent) -> bool:
+        """Decide whether an unrefreshed row lost its target this run.
+
+        A row of an active target is stale unless it lies under another
+        profile root of that target (``CLAUDE_CONFIG_DIR``, ``HERMES_HOME``).
+        A row of a known target dropped from the declared set is stale too.
+        """
         if not intent.authoritative_targets:
             return False
         target = record.locator.target
         if target in intent.active_targets:
-            return True
+            from apm_cli.integration.targets import is_other_profile_path
+
+            profile = self.target_profiles.get(target)
+            return profile is None or not is_other_profile_path(profile, record.locator.value)
         return (
             intent.declared_targets is not None
             and target in self.target_profiles
