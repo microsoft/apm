@@ -205,6 +205,9 @@ def test_external_persona_preflight_fails_closed_for_clean_consumers(tmp_path: P
         assert "check_required_agents.py" in skill
         assert "stop and report" in skill.lower()
         assert "](../../agents/" not in skill
+        if package == "autopilot-pr-review-worker":
+            assert "`.github/agents/apm-ceo.agent.md`" in skill
+            assert "`.apm/agents/apm-ceo.agent.md`" not in skill
 
         help_result = subprocess.run(
             [sys.executable, str(script), "--help"],
@@ -246,6 +249,10 @@ def test_external_persona_preflight_fails_closed_for_clean_consumers(tmp_path: P
 def test_pr_triage_never_writes_human_deferred_label() -> None:
     """PR triage's write contract agrees with the shared human-label contract."""
     worker = _ascii(WORKER_PR_TRIAGE)
+    template = _ascii(
+        ROOT / "packages/autopilot/autopilot-pr-triage-worker/.apm/skills/"
+        "autopilot-pr-triage-worker/assets/pr-triage-template.md"
+    )
     contract_path = (
         ROOT / "packages/autopilot/autopilot-pr-triage-worker/.apm/skills/"
         "autopilot-pr-triage-worker/assets/label-contract.json"
@@ -255,6 +262,8 @@ def test_pr_triage_never_writes_human_deferred_label() -> None:
     assert "Never write `status/deferred`" in worker
     assert "defer recommendation belongs only in the advisory comment" in worker
     assert "add `status/deferred` when `write: on`" not in worker
+    assert "status/deferred" not in template
+    assert "awaiting maintainer review and acceptance of its scope" in template
 
 
 def test_pr_description_diagrams_are_conditional_and_cli_is_pinned() -> None:

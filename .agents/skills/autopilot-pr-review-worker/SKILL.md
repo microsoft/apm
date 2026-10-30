@@ -550,7 +550,7 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 5. **Spawn the CEO synthesizer task.** Pass the spawned panelist JSON
    returns (omitted personas are inactive; do not invent stub JSON)
    to a `task` invocation that loads
-   `.apm/agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
+   `.github/agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
    for its JSON return -- do NOT spawn it detached (background mode that
    returns an `agent_id`) and do NOT end your turn while it runs. Its
    return is required to render the comment; ending the turn here is the

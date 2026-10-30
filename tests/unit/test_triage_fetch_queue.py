@@ -266,7 +266,7 @@ def test_list_pages_drops_pulls_for_issue_kind() -> None:
 
 
 def test_queue_helpers_match_across_schedulers_and_worker_contract() -> None:
-    """Issue and PR schedulers ship one helper implementation; worker has no queue scripts."""
+    """Issue and PR schedulers share queue helpers; the worker has no queue scripts."""
     pr = (
         ROOT
         / "packages/autopilot/autopilot-pr-triage-scheduler/.apm/skills/autopilot-pr-triage-scheduler"
@@ -281,7 +281,9 @@ def test_queue_helpers_match_across_schedulers_and_worker_contract() -> None:
     assert (PACKAGE / "assets/label-contract.json").read_bytes() == (
         worker / "assets/label-contract.json"
     ).read_bytes()
-    assert not (worker / "scripts").exists()
+    assert not (worker / "scripts/fetch_queue.py").exists()
+    assert not (worker / "scripts/triage_state.py").exists()
+    assert (worker / "scripts/check_required_agents.py").is_file()
 
 
 def test_trusted_gh_uses_cli_owner(monkeypatch: pytest.MonkeyPatch) -> None:
