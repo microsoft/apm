@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install -g` into one Claude profile (`CLAUDE_CONFIG_DIR`) or Hermes home (`HERMES_HOME`) no longer deletes files deployed to another profile through the shared user lockfile; stale-file cleanup is limited to the selected root. (#3423)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

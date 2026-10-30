@@ -53,6 +53,16 @@ set.  Adding a new rule format means: add it here, set ``output_compare=True``
 on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 """
 
+USER_ROOT_ENV_VARS: dict[str, str] = {
+    "claude": "CLAUDE_CONFIG_DIR",
+    "hermes": "HERMES_HOME",
+}
+"""Targets whose user-scope root an environment variable selects.
+
+Each value of the variable is a separate profile of the same runtime, and
+all of them share one user lockfile.
+"""
+
 
 @dataclass(frozen=True)
 class PrimitiveMapping:
@@ -475,12 +485,11 @@ class TargetProfile:
         # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
         # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
         # `apm install -g` lands where the tool reads.
-        if self.name in ("claude", "hermes"):
+        if self.name in USER_ROOT_ENV_VARS:
             import os
             from pathlib import Path
 
-            env_var = "CLAUDE_CONFIG_DIR" if self.name == "claude" else "HERMES_HOME"
-            env = os.environ.get(env_var, "").strip()
+            env = os.environ.get(USER_ROOT_ENV_VARS[self.name], "").strip()
             if env:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
@@ -1270,6 +1279,25 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
                     seen.add(dp)
                     prefixes.append(dp)
     return tuple(prefixes)
+
+
+def is_other_profile_path(profile: TargetProfile, value: str) -> bool:
+    """Return True when *value* was deployed to another profile of *profile*.
+
+    Profiles of a target listed in :data:`USER_ROOT_ENV_VARS` share one user
+    lockfile, so its ``deployed_files`` can list paths under the roots of
+    profiles other than the selected one.  Such a path is not stale for an
+    install into the selected profile.  The check is a lexical prefix match
+    against the selected root; it neither resolves nor follows symlinks.
+    Separators are compared in POSIX form: an absolute root keeps native
+    separators (``D:\\profiles\\b``) while lockfile values use ``/``.
+    """
+    if profile.name not in USER_ROOT_ENV_VARS or "://" in value:
+        return False
+    prefixes = tuple(
+        prefix.replace("\\", "/") for prefix in get_integration_prefixes(targets=[profile])
+    )
+    return not value.replace("\\", "/").startswith(prefixes)
 
 
 def active_targets_user_scope(
