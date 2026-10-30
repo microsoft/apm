@@ -210,16 +210,20 @@ are active for this `panel-mode` and surface. Do not spawn
 
 | Agent | Role | When spawned |
 |-------|------|----------------|
-| [Python Architect](.apm/agents/python-architect.agent.md) | Architectural Reviewer + mermaid in `full` | Core, unless docs/changelog-only. Optional in `lean` on tiny diffs. |
-| [CLI Logging Expert](.apm/agents/cli-logging-expert.agent.md) | Output UX Reviewer | Surface-gated |
-| [DevX UX Expert](.apm/agents/devx-ux-expert.agent.md) | Package-Manager UX | Surface-gated |
-| [Supply Chain Security Expert](.apm/agents/supply-chain-security-expert.agent.md) | Threat-Model Reviewer | Surface-gated |
-| [OSS Growth Hacker](.apm/agents/oss-growth-hacker.agent.md) | Adoption Strategist | Surface-gated |
-| [Auth Expert](.apm/agents/auth-expert.agent.md) | Auth / Token Reviewer | Surface-gated |
-| [Doc Writer](.apm/agents/doc-writer.agent.md) | Documentation Reviewer | Surface-gated |
-| [Test Coverage Expert](.apm/agents/test-coverage-expert.agent.md) | Test-Presence Reviewer | Core unless docs-only (`src/` untouched) |
-| [Performance Expert](.apm/agents/performance-expert.agent.md) | Package-Manager Performance Reviewer | Surface-gated |
-| [APM CEO](.apm/agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Always |
+| `python-architect` | Architectural Reviewer + mermaid in `full` | Core, unless docs/changelog-only. Optional in `lean` on tiny diffs. |
+| `cli-logging-expert` | Output UX Reviewer | Surface-gated |
+| `devx-ux-expert` | Package-Manager UX | Surface-gated |
+| `supply-chain-security-expert` | Threat-Model Reviewer | Surface-gated |
+| `oss-growth-hacker` | Adoption Strategist | Surface-gated |
+| `auth-expert` | Auth / Token Reviewer | Surface-gated |
+| `doc-writer` | Documentation Reviewer | Surface-gated |
+| `test-coverage-expert` | Test-Presence Reviewer | Core unless docs-only (`src/` untouched) |
+| `performance-expert` | Package-Manager Performance Reviewer | Surface-gated |
+| `apm-ceo` | Strategic Arbiter / Synthesizer | Always |
+
+These agent files are consumer-provided companion assets, not part of this
+package. For a Copilot consumer, APM deploys them under
+`.github/agents/<agent-slug>.agent.md`.
 
 ## Topology
 
@@ -243,6 +247,22 @@ are active for this `panel-mode` and surface. Do not spawn
 
 Caller (merge-worker, scheduler, or human) SHOULD set
 `panel-mode: full | lean | delta`. Omitted or unknown -> `lean`.
+
+After resolving the active roster from the mode and surface, but before
+spawning any panelist, run the bundled
+`scripts/check_required_agents.py` with the active role slugs and the
+consumer's `.github/agents` directory as `--agents-dir`. The script emits
+JSON and returns nonzero when any active role is missing. Stop and report
+all missing roles; do not skip a required role or produce a partial review.
+Run it from the consumer repository root, for example:
+
+```bash
+python3 .agents/skills/autopilot-pr-review-worker/scripts/check_required_agents.py \
+  --agents-dir .github/agents python-architect test-coverage-expert apm-ceo
+```
+
+Replace the example roles with the exact active roster for the selected mode
+and surface.
 
 | Mode | Roster | Context | Comment |
 |------|--------|---------|---------|
@@ -530,7 +550,7 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 5. **Spawn the CEO synthesizer task.** Pass the spawned panelist JSON
    returns (omitted personas are inactive; do not invent stub JSON)
    to a `task` invocation that loads
-   `.apm/agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
+   `.github/agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
    for its JSON return -- do NOT spawn it detached (background mode that
    returns an `agent_id`) and do NOT end your turn while it runs. Its
    return is required to render the comment; ending the turn here is the

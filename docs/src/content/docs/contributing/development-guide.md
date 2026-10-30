@@ -58,6 +58,10 @@ uses `triage/recommended` after the canonical label is provisioned and
 this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
+PR triage may recommend deferral in its advisory comment, but applying
+`status/deferred` remains a human decision. Issue-triage and PR-review workers
+also stop and report missing active companion personas under
+`.github/agents/` rather than silently omitting a required lens.
 
 The scheduled Triage Panel (also used by a blank manual dispatch) fetches
 labels and complete comments before selecting at most five issues. It

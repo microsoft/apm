@@ -4,9 +4,9 @@ description: >-
   Use this skill to write the PR description (PR body) for any pull
   request opened against microsoft/apm. Produces one self-sufficient
   GitHub-Flavored Markdown artifact: TL;DR, Problem (WHY), Approach
-  (WHAT), Implementation (HOW), 1-3 validated mermaid diagrams,
-  explicit trade-offs, validation evidence, and a How-to-test
-  section -- with every WHY-claim backed by a verbatim quote from
+  (WHAT), Implementation (HOW), validated mermaid diagrams when
+  structure is non-trivial, explicit trade-offs, validation evidence,
+  and a How-to-test section -- with every WHY-claim backed by a
   PROSE or Agent Skills. Activate when the user asks to "write a PR
   description", "draft a PR body", "open a PR", "fill in the PR
   template", or any equivalent.
@@ -72,7 +72,7 @@ Per-section ceilings (enforced by `assets/section-rubric.md`):
 | Problem (WHY) | max 6 bullets, max 3 quoted anchors total |
 | Approach (WHAT) | a table OR 3-7 bullets; may be skipped if PR is purely additive (say "additive: see Implementation") |
 | Implementation (HOW) | one short paragraph per file, OR a table; no prose walls |
-| Diagrams | 1-3 mermaid blocks; every diagram preceded by a one-sentence legend |
+| Diagrams | Include 1-3 validated mermaid blocks only when structure or control flow is non-trivial; simple, docs-only, and mechanical PRs may omit the section |
 | Trade-offs | 3-5 bullets; mechanical PRs may be 1-2 |
 | Benefits | 3-5 numbered items, each measurable |
 | Validation | copy-paste real command output; do not narrate |
@@ -113,11 +113,12 @@ quote, it is downgraded to a "should" with the reason given.
    Anchor: Agent Skills,
    ["Add what the agent lacks, omit what it knows"](https://agentskills.io/skill-creation/best-practices).
 
-4. **Visual aid where structure is non-trivial.** Any change that
-   touches more than one file or alters control flow SHOULD include
-   at least one mermaid diagram. Add a second only when the
-   relationships are non-trivial. Never add a third unless it earns
-   its place. Each diagram MUST be preceded by a one-sentence legend.
+4. **Visual aid where structure is non-trivial.** Changes with
+   non-trivial structure or control flow SHOULD include 1-3 mermaid
+   diagrams. Simple, docs-only, and mechanical PRs may omit the
+   section. Add a second only when the relationships are non-trivial.
+   Never add a third unless it earns its place. Each diagram MUST be
+   preceded by a one-sentence legend.
 
    Anchor: Agent Skills,
    ["agents pattern-match well against concrete structures"](https://agentskills.io/skill-creation/best-practices).
@@ -176,7 +177,7 @@ scannable.
 | 3 | Problem (WHY) | Observed failure modes; max 6 bullets, max 3 quoted anchors |
 | 4 | Approach (WHAT) | Table or 3-7 bullets; may say "additive: see Implementation" |
 | 5 | Implementation (HOW) | One short paragraph per file or a table |
-| 6 | Diagrams | 1-3 validated mermaid blocks, each with a legend; diagram type chosen per intent (`assets/mermaid-conventions.md`) |
+| 6 | Diagrams | Optional for simple, docs-only, and mechanical PRs; non-trivial structure or control flow requires 1-3 validated blocks, each with a legend and a type chosen per intent (`assets/mermaid-conventions.md`) |
 | 7 | Trade-offs | 3-5 bullets (1-2 if mechanical) |
 | 8 | Benefits | 3-5 numbered, measurable items |
 | 9 | Validation | Real command output, ideally inside `<details>` if long; **MUST include the Scenario Evidence subsection** (`assets/scenario-evidence-rubric.md`) for any behavior-change PR -- maps each user-promise scenario this PR touches to the test that proves it works, tagged with the APM principle the scenario serves |
@@ -230,14 +231,14 @@ Run these steps in order. Tick each before moving on.
 4. [ ] Fill in the template top-to-bottom using only facts from
        the activation contract. Every WHY-claim gets a verbatim
        quoted anchor. If you cannot anchor a claim, drop it.
-5. [ ] Generate 1-3 mermaid diagrams. **Before drafting any block,
-       load `assets/mermaid-conventions.md`** to pick the right
-       diagram type per intent (sequenceDiagram for execution flow,
-       flowchart LR for pipeline / architecture, stateDiagram-v2 for
-       state machines) and apply the boxing convention for NEW
-       behavior. Add a one-sentence legend above each diagram.
-6. [ ] **Validate every mermaid block deterministically (see
-       below). Do NOT save the draft until every block validates.**
+5. [ ] Decide whether the PR has non-trivial structure or control
+       flow. Simple, docs-only, and mechanical PRs may omit the
+       Diagrams section. Otherwise, load `assets/mermaid-conventions.md`
+       and generate 1-3 diagrams of the right type (sequenceDiagram
+       for execution flow, flowchart LR for pipeline / architecture,
+       stateDiagram-v2 for state machines), with one-sentence legends.
+6. [ ] If the draft contains mermaid blocks, **validate every block
+       deterministically (see below)** and do not save until all pass.
 7. [ ] Load `assets/section-rubric.md` and run the self-check pass.
        Validation loop pattern from Agent Skills:
        ["do the work, run a validator (a script, a reference checklist, or a self-check), fix any issues, and repeat until validation passes."](https://agentskills.io/skill-creation/best-practices).
@@ -250,15 +251,15 @@ Run these steps in order. Tick each before moving on.
 
 ## Mandatory mermaid validation step
 
-Run every mermaid block in the draft through `mmdc` and refuse to
-save until all pass.
+When the draft contains mermaid blocks, run each through `mmdc` and
+refuse to save until all pass.
 
 ```bash
 # Extract mermaid blocks and validate each one.
-# Requires: npx --yes -p @mermaid-js/mermaid-cli mmdc (one-shot, no global install needed)
+# Requires: npx --yes -p @mermaid-js/mermaid-cli@12.0.0 mmdc
 awk '/^```mermaid/{n++; f=outdir"/diag"n".mmd"; getline; while($0 != "```") {print > f; getline}}' outdir=/tmp/mermaid-check pr-body-draft.md
 for f in /tmp/mermaid-check/diag*.mmd; do
-  npx --yes -p @mermaid-js/mermaid-cli mmdc -i "$f" -o "${f%.mmd}.svg" --quiet || { echo "INVALID: $f"; exit 1; }
+  npx --yes -p @mermaid-js/mermaid-cli@12.0.0 mmdc -i "$f" -o "${f%.mmd}.svg" --quiet || { echo "INVALID: $f"; exit 1; }
 done
 ```
 
@@ -292,8 +293,8 @@ of` closing rules, round brackets in node labels, inline
 - The file is **UTF-8 GitHub-Flavored Markdown**. Em dashes, smart
   quotes, Unicode in mermaid labels, alerts, and collapsibles are
   all permitted and encouraged where they improve readability.
-- Every mermaid block has been validated by `mmdc` and renders
-  without error.
+- Every included mermaid block has been validated by the pinned
+  `mmdc` package and renders without error.
 - The cite-or-omit rule applies absolutely.
 - The TL;DR is at most four sentences.
 - The body ends with the trailer:
@@ -312,8 +313,9 @@ of` closing rules, round brackets in node labels, inline
 - Diagrams without a legend, OR diagrams that fail `mmdc`.
 - A TL;DR longer than four sentences.
 - Skipping any required section because "the PR is small". A small
-  PR can have a one-line Implementation per file, but the section
-  header must still be present.
+  PR can have a one-line Implementation per file, but all required
+  section headers must still be present. The Diagrams section is
+  optional for simple, docs-only, and mechanical changes.
 - Restating the diff line-by-line in Implementation. That is what
   the Files Changed tab is for.
 - Quoting a doc out of context. The self-check pass must verify

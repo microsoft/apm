@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Autopilot workers no longer write human-owned deferral labels, fail closed when active personas are missing, and PR-description guidance pins Mermaid validation while keeping diagrams conditional. (#3419)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

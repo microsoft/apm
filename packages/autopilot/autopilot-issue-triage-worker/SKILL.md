@@ -109,14 +109,35 @@ output template differ.
 
 ## Agent roster
 
-| Agent | Persona | Always active? |
-|-------|---------|----------------|
-| [DevX UX Expert](../../agents/devx-ux-expert.agent.md) | User-Need Reviewer | Yes |
-| [Supply Chain Security Expert](../../agents/supply-chain-security-expert.agent.md) | Risk-Surface Reviewer | Yes |
-| [APM CEO](../../agents/apm-ceo.agent.md) | Triage Arbiter | Yes (always arbitrates) |
-| [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Contributor-Tone Reviewer | Conditional (see below) |
-| [Python Architect](../../agents/python-architect.agent.md) | Architecture Reviewer | Conditional (see below) |
-| [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
+| Agent slug | Persona | Always active? |
+|------------|---------|----------------|
+| `devx-ux-expert` | User-Need Reviewer | Yes |
+| `supply-chain-security-expert` | Risk-Surface Reviewer | Yes |
+| `apm-ceo` | Triage Arbiter | Yes (always arbitrates) |
+| `oss-growth-hacker` | Contributor-Tone Reviewer | Conditional (see below) |
+| `python-architect` | Architecture Reviewer | Conditional (see below) |
+| `doc-writer` | Documentation Reviewer | Conditional (see below) |
+
+These agent files are consumer-provided companion assets, not part of this
+package. For a Copilot consumer, APM deploys them under
+`.github/agents/<agent-slug>.agent.md`. Do not resolve them through a
+path relative to the installed skill directory.
+
+Before reading persona files or producing advice, run the bundled
+`scripts/check_required_agents.py` with the three always-active slugs and
+every conditional slug activated for this issue, using the consumer's
+`.github/agents` directory as `--agents-dir`. The script emits JSON and
+returns nonzero when any required role is absent; stop and report every
+missing role. Never silently omit a mandatory or activated conditional lens.
+For example, the always-active roles are checked with:
+
+```bash
+python3 .agents/skills/autopilot-issue-triage-worker/scripts/check_required_agents.py \
+  --agents-dir .github/agents \
+  devx-ux-expert supply-chain-security-expert apm-ceo
+```
+
+Add any conditional role selected for this issue to the role arguments.
 
 Skipped by default: CLI Logging Expert, Auth Expert. Triage operates
 on issue intent, not on diffs -- those personas are invoked downstream
@@ -376,7 +397,7 @@ write/receipt step.
    If any check fails, redo that persona's pass and repeat the gate.
    Do not proceed to step 5 until the gate passes.
 5. Take the **APM CEO** lens (load
-   `../../agents/apm-ceo.agent.md`) and arbitrate the collected
+   `.github/agents/apm-ceo.agent.md`) and arbitrate the collected
    findings into a single recommendation, useful classification,
    proposed brief, and reply tone. Still in your own context. CEO
    arbitration may run only after the completeness gate has passed.
@@ -423,8 +444,9 @@ write/receipt step.
 
 For each persona, run this exact procedure in your own context:
 
-1. Open the persona's `.agent.md` file (linked in the roster) and
-   read its scope, lens, anti-patterns, and required return shape.
+1. Open the persona's `.agent.md` file from the consumer's
+   `.github/agents/` directory and read its scope, lens,
+   anti-patterns, and required return shape.
 2. From that persona's lens, review the issue title, body, labels,
    author signals, and the complete prior comment history against the
    scope declared in the file. Reconcile with earlier advice and any
