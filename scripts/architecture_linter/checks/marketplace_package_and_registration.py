@@ -472,6 +472,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
         ("compute_native_bundle_hash", "src/apm_cli/utils/content_hash.py"),
         ("owns_codex_dependency", _CODEX_PREFIX + "registrar.py"),
         ("verify_codex_source_identity", _CODEX_PREFIX + "registrar.py"),
+        ("is_codex_source_pin", _CODEX_PREFIX + "registrar.py"),
     ):
         count = _count_across(
             provider,
@@ -532,6 +533,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
             "ctx.package_deployed_files.get(key)",
         ),
         "src/apm_cli/install/sources.py": (
+            "is_codex_source_pin(cached_commit)",
             "is_codex_compatibility_manifest(install_path, detect_package_type(install_path)[1])",
             "native_validation = validate_apm_package(install_path, source_path=install_path)",
         ),

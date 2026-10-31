@@ -504,13 +504,25 @@ class CachedDependencySource(DependencySource):
         if not cached_package.source:
             cached_package.source = dep_ref.repo_url
 
+        # Determine commit SHA for the cached path. See _resolve_cached_commit
+        # for the invariant ("recorded SHA must match disk identity") and the
+        # priority rules (PR #1158 -- branch-ref drift fix).
+        cached_commit = self._resolve_cached_commit()
+
+        from apm_cli.codex_plugins.registrar import is_codex_source_pin
+
+        # A cache hit without a live resolved reference still knows the commit
+        # the bytes came from, and downstream consumers read it from here: the
+        # Codex native path treats a resolved commit as a source pin, so the
+        # ``cached`` sentinel made a locked SHA look like an invalid pin (#3388).
         resolved_or_cached_ref = (
             resolved_ref
             if resolved_ref
             else ResolvedReference(
                 original_ref=dep_ref.reference or "default",
                 ref_type=GitReferenceType.BRANCH,
-                resolved_commit="cached",
+                # Short SHAs and branch names stay on the ``cached`` sentinel.
+                resolved_commit=cached_commit if is_codex_source_pin(cached_commit) else "cached",
                 ref_name=dep_ref.reference or "default",
             )
         )
@@ -529,11 +541,6 @@ class CachedDependencySource(DependencySource):
         depth = node.depth if node else 1
         resolved_by = locked_parent_identity(ctx, node)
         _is_dev = node.is_dev if node else False
-
-        # Determine commit SHA for the cached path. See _resolve_cached_commit
-        # for the invariant ("recorded SHA must match disk identity") and the
-        # priority rules (PR #1158 -- branch-ref drift fix).
-        cached_commit = self._resolve_cached_commit()
 
         # Determine if cached package came from registry
         _cached_registry = None

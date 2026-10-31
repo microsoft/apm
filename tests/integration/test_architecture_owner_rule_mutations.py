@@ -171,6 +171,11 @@ def test_native_typed_error_guard_retains_legacy_and_rejects_broad_handlers(
             "False",
         ),
         (
+            "src/apm_cli/install/sources.py",
+            "is_codex_source_pin(cached_commit)",
+            "bool(cached_commit)",
+        ),
+        (
             "src/apm_cli/install/drift.py",
             "codex_records = verify_codex_source_identity(",
             "codex_records = noncanonical_source_check(",

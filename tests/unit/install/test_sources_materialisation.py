@@ -621,7 +621,8 @@ class TestCachedDependencySourceAcquire:
         assert result is not None
 
     def test_resolved_ref_none_creates_fallback_resolved_reference(self, tmp_path: Path) -> None:
-        """resolved_ref=None → a synthetic ResolvedReference is built."""
+        """resolved_ref=None → the fallback carries the locked commit, not 'cached'."""
+        locked_sha = "f1b2ba49d18a3de11f87d8e6dc672dfdaadbff85"
         ctx = _make_ctx(targets=["copilot"])
         dep_ref = _make_dep_ref(is_virtual=False, reference="feature-branch")
         install_path = tmp_path / "pkg"
@@ -637,14 +638,46 @@ class TestCachedDependencySourceAcquire:
             patch("apm_cli.utils.content_hash.compute_package_hash", return_value="h"),
             patch(
                 "apm_cli.install.sources.CachedDependencySource._resolve_cached_commit",
-                return_value="c",
+                return_value=locked_sha,
             ),
         ):
             source = self._make_source(ctx, dep_ref, install_path, resolved_ref=None)
             result = source.acquire()
 
         assert result is not None
-        # resolved_ref was None; the code builds a fallback - we just confirm no crash
+        assert result.package_info is not None
+        # A locked SHA must survive as the source pin; the Codex native path
+        # rejects the 'cached' sentinel as an invalid pin (#3388).
+        assert result.package_info.resolved_reference.resolved_commit == locked_sha
+
+    def test_resolved_ref_none_keeps_cached_sentinel_without_a_full_sha(
+        self, tmp_path: Path
+    ) -> None:
+        """A branch name is not a commit identity, so the sentinel stays."""
+        ctx = _make_ctx(targets=["copilot"])
+        dep_ref = _make_dep_ref(is_virtual=False, reference="main")
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+        (install_path / "apm.yml").write_text("name: test\nversion: 0.0.1\n")
+
+        mock_pkg = MagicMock()
+        mock_pkg.source = "owner/repo"
+
+        with (
+            patch("apm_cli.models.apm_package.APMPackage.from_apm_yml", return_value=mock_pkg),
+            patch("apm_cli.models.validation.detect_package_type", return_value=(None, None)),
+            patch("apm_cli.utils.content_hash.compute_package_hash", return_value="h"),
+            patch(
+                "apm_cli.install.sources.CachedDependencySource._resolve_cached_commit",
+                return_value="main",
+            ),
+        ):
+            source = self._make_source(ctx, dep_ref, install_path, resolved_ref=None)
+            result = source.acquire()
+
+        assert result is not None
+        assert result.package_info is not None
+        assert result.package_info.resolved_reference.resolved_commit == "cached"
 
     def test_unpinned_dep_sets_delta(self, tmp_path: Path) -> None:
         """dep_ref.reference=None → deltas['unpinned']=1."""

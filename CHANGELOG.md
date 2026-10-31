@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A warm-cache `apm install --frozen` keeps the commit a dependency was resolved from as the Codex source pin, instead of the `cached` sentinel that native admission rejected as an invalid pin. (#3388)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
