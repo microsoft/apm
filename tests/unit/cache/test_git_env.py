@@ -19,9 +19,11 @@ from apm_cli.utils.git_env import (
     GitUrlRewriteProbeError,
     _GitConfigSnapshot,
     _resolve_trusted_executable,
+    checkout_git_worktree,
     clone_git_worktree,
     get_gh_executable,
     get_git_executable,
+    git_autocrlf_pin_args,
     git_network_env,
     git_remote_refs,
     git_subprocess_env,
@@ -1606,3 +1608,113 @@ class TestGitSubprocessEnv:
             )
 
         assert token not in str(raised.value)
+
+
+class TestUncachedFallbackLineEndings:
+    """The uncached fallback clone and its checkout must agree on line endings.
+
+    A host ``core.autocrlf=true`` is frozen into the clone's environment
+    (apm#2971), which rewrote LF-committed blobs as CRLF; the follow-up
+    ``git checkout <locked sha>`` then saw every file as modified and refused
+    (apm#3368).
+    """
+
+    def test_clone_and_checkout_pin_autocrlf_false(self, tmp_path) -> None:
+        assert git_autocrlf_pin_args() == ("-c", "core.autocrlf=false")
+
+        with patch(
+            "apm_cli.utils.git_env.subprocess.run",
+            side_effect=_run_real_git_config_and_fake_clone,
+        ) as run:
+            clone_git_worktree(
+                "https://git.example.com/acme/repo",
+                tmp_path / "clone",
+                env={"PATH": os.environ.get("PATH", "")},
+            )
+
+        clone_argv = run.call_args_list[-1].args[0]
+        clone_pin = clone_argv.index("core.autocrlf=false")
+        assert clone_argv[clone_pin - 1] == "-c"
+        assert clone_pin < clone_argv.index("clone")
+
+        with patch("apm_cli.utils.git_env.subprocess.run") as checkout_run:
+            checkout_git_worktree(
+                tmp_path / "clone",
+                "0123456789abcdef0123456789abcdef01234567",
+                env={"PATH": os.environ.get("PATH", "")},
+            )
+
+        checkout_argv = checkout_run.call_args.args[0]
+        assert "-c" in checkout_argv
+        assert "core.autocrlf=false" in checkout_argv
+        assert checkout_argv.index("core.autocrlf=false") < checkout_argv.index("checkout")
+
+    def test_locked_sha_checks_out_from_a_crlf_host(self, tmp_path, monkeypatch) -> None:
+        """End-to-end reproduction: clone under a CRLF host, then check out an older SHA."""
+        git = get_git_executable()
+        host_config = tmp_path / "host.gitconfig"
+        host_config.write_text("[core]\n\tautocrlf = true\n", encoding="utf-8")
+        empty_config = tmp_path / "empty.gitconfig"
+        empty_config.write_text("", encoding="utf-8")
+
+        src = tmp_path / "src"
+        src.mkdir()
+        subprocess.run([git, "init", "-q", "-b", "main", str(src)], check=True)
+        tracked = src / "f.txt"
+        tracked.write_bytes(b"a\nb\n")
+
+        def _commit(message: str) -> None:
+            subprocess.run(
+                [git, "-C", str(src), "-c", "user.name=t", "-c", "user.email=t@t", "add", "f.txt"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    git,
+                    "-C",
+                    str(src),
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "commit",
+                    "-qm",
+                    message,
+                ],
+                check=True,
+            )
+
+        _commit("one")
+        old_sha = subprocess.run(
+            [git, "-C", str(src), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        tracked.write_bytes(b"a\nb\nc\n")
+        _commit("two")
+
+        # Host-level config that the clone snapshot freezes into the child env.
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(host_config))
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        reset_git_cache()
+        isolated = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(empty_config)}
+
+        target = tmp_path / "wt"
+        clone_git_worktree(f"file://{src.resolve()}", target, env=isolated)
+
+        assert tracked.read_bytes().replace(b"\r\n", b"\n") == b"a\nb\nc\n"
+        assert (target / "f.txt").read_bytes() == b"a\nb\nc\n", (
+            "clone must write the committed LF bytes"
+        )
+
+        checkout_git_worktree(target, old_sha, env=isolated)
+
+        head = subprocess.run(
+            [git, "-C", str(target), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert head == old_sha
+        assert (target / "f.txt").read_bytes() == b"a\nb\n"
