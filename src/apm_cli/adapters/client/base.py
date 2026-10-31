@@ -391,6 +391,10 @@ class MCPClientAdapter(ABC):
         """Compare the native connection with the adapter's rendered baseline."""
         return native == expected
 
+    def matches_legacy_managed_server_config(self, native: object, expected: dict) -> bool:
+        """Recognize a verified write from an older formatter; never a current match."""
+        return False
+
     def managed_server_config(self, native: dict) -> dict:
         """Return connection data for an actual-write fingerprint."""
         return dict(native)

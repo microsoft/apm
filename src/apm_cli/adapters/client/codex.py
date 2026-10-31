@@ -219,6 +219,26 @@ class CodexClientAdapter(MCPClientAdapter):
             comparable.pop("id")
         return comparable == expected
 
+    def matches_legacy_managed_server_config(self, native: object, expected: dict) -> bool:
+        """Recognize a stdio entry written before ``${VAR}`` values moved to ``env_vars``.
+
+        The older formatter stored either the resolved value or the literal
+        reference, so anything else is a manual edit and stays a conflict.
+        """
+        names = expected.get("env_vars")
+        native_env = native.get("env") if isinstance(native, dict) else None
+        if not names or not isinstance(native_env, dict) or "env_vars" in native:
+            return False
+        legacy_env = dict(expected.get("env") or {})
+        for name in names:
+            value = native_env.get(name)
+            if value is None or value not in (f"${{{name}}}", os.getenv(name)):
+                return False
+            legacy_env[name] = value
+        legacy = {key: value for key, value in expected.items() if key != "env_vars"}
+        legacy["env"] = legacy_env
+        return self.matches_managed_server_config(native, legacy)
+
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
 
@@ -363,17 +383,29 @@ class CodexClientAdapter(MCPClientAdapter):
         # syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``) are resolved at
         # install time before being written to ~/.codex/config.toml.
         # See issue #1266.
+        #
+        # A value authored as exactly ``${VAR}`` under the key ``VAR`` is the
+        # one case that must NOT be resolved and stored: Codex reads those from
+        # the launching environment through ``env_vars`` at server start, so the
+        # secret never lands in config.toml. See issue #3393.
         raw = server_info.get("_raw_stdio")
         if raw:
-            config["command"] = raw["command"]
-            if raw.get("cwd") is not None:
-                config["cwd"] = raw["cwd"]
+            forwarded_env: list[str] = []
             resolved_env_for_args: dict = {}
+            written_env: dict = {}
             if raw.get("env"):
-                resolved_env_for_args = self._resolve_environment_variables(
-                    raw["env"], env_overrides=env_overrides
+                literal_env, forwarded_env = self._split_forwarded_stdio_env(raw["env"])
+                written_env = self._resolve_environment_variables(
+                    literal_env, env_overrides=env_overrides
                 )
-                config["env"] = resolved_env_for_args
+                # Args keep resolving against every declared name; a forwarded
+                # value is read from the environment when it is available, and
+                # never prompts for a value that only the runtime needs.
+                resolved_env_for_args = dict(written_env)
+                for name in forwarded_env:
+                    value = (env_overrides or {}).get(name) or os.getenv(name)
+                    if value:
+                        resolved_env_for_args[name] = value
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
 
             def _process_stdio_arg(arg):
@@ -383,9 +415,17 @@ class CodexClientAdapter(MCPClientAdapter):
                     )
                 return self.normalize_project_arg(arg)
 
-            config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
-            self._merge_extra(config, server_info)
-            return config
+            # Smoke scalars and arrays before the [env] sub-table: tomlkit nests
+            # any later key inside the table it has already opened.
+            stdio_config: dict = {"command": raw["command"]}
+            if raw.get("cwd") is not None:
+                stdio_config["cwd"] = raw["cwd"]
+            stdio_config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
+            if forwarded_env:
+                stdio_config["env_vars"] = forwarded_env
+            stdio_config["env"] = written_env
+            self._merge_extra(stdio_config, server_info)
+            return stdio_config
 
         # Remote MCP handling.
         # Precedence on Codex when a server publishes BOTH a remote and a stdio
@@ -655,6 +695,31 @@ class CodexClientAdapter(MCPClientAdapter):
                 processed.append(processed_value)
 
         return processed
+
+    @staticmethod
+    def _split_forwarded_stdio_env(raw_env: dict) -> tuple[dict, list[str]]:
+        """Split a self-defined stdio env block into literals and forwarded names.
+
+        Codex reads a stdio server's variables from the environment that launches
+        it when they are named in ``env_vars``, so a value written as exactly
+        ``${VAR}`` under the key ``VAR`` does not have to be resolved and stored
+        in config.toml. Everything else keeps the existing install-time
+        resolution and is written to ``[mcp_servers.<name>.env]``.
+
+        Returns:
+            tuple: ``(literal_env, forwarded_env)`` -- the entries to resolve and
+                the variable names to forward.
+        """
+        literal_env: dict = {}
+        forwarded_env: list[str] = []
+        for name, raw_value in raw_env.items():
+            if isinstance(raw_value, str):
+                reference = _ENV_VAR_RE.fullmatch(raw_value)
+                if reference and reference.group(1) == name:
+                    forwarded_env.append(name)
+                    continue
+            literal_env[name] = raw_value
+        return literal_env, forwarded_env
 
     def _process_environment_variables(self, env_vars, env_overrides=None):
         """Process environment variable definitions and resolve actual values.

@@ -62,6 +62,7 @@ _HARNESS_EXTRA_ALIASES = frozenset(
         "bearer_token_env_var",
         "enabled",
         "env_http_headers",
+        "env_vars",
         "environment",
         "http_headers",
         "id",

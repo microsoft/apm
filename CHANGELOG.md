@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex stdio MCP connections written from `apm.yml` forward a `${VAR}` value declared under the same variable name through `env_vars` instead of resolving it into `config.toml`, so the secret never reaches a committed file. Other values keep resolving at install time. (#3393)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

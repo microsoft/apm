@@ -598,6 +598,7 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
                 '        "bearer_token_env_var",\n'
                 '        "enabled",\n'
                 '        "env_http_headers",\n'
+                '        "env_vars",\n'
                 '        "environment",\n'
                 '        "http_headers",\n'
                 '        "id",\n'
