@@ -15,6 +15,7 @@ from apm_cli.marketplace.models import (
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.resolver import (
+    _dependency_reference_from_packed_source,
     _resolve_git_subdir_source,
     _resolve_github_source,
     _resolve_relative_source,
@@ -254,6 +255,36 @@ class TestResolveGitSubdirSource:
             {"repo": "owner/primary", "url": "owner/fallback", "subdir": "pkg"}
         )
         assert result == "owner/primary/pkg"
+
+
+class TestSourceShaPin:
+    """A ``sha`` pins the source, and wins over ``ref`` as it does in Claude Code."""
+
+    SHA = "c27b5b42c0fa3300d71d17d44e838f0f974ea145"
+
+    def test_github_source_uses_sha(self):
+        source = {"type": "github", "repo": "owner/repo", "sha": self.SHA}
+        assert _resolve_github_source(source) == f"owner/repo#{self.SHA}"
+
+    def test_github_source_sha_wins_over_ref(self):
+        source = {"type": "github", "repo": "owner/repo", "ref": "main", "sha": self.SHA}
+        assert _resolve_github_source(source) == f"owner/repo#{self.SHA}"
+
+    def test_url_source_uses_sha(self):
+        source = {"type": "url", "url": "https://github.com/owner/repo", "sha": self.SHA}
+        assert _resolve_url_source(source) == f"owner/repo#{self.SHA}"
+
+    def test_git_subdir_source_uses_sha(self):
+        source = {"type": "git-subdir", "repo": "owner/repo", "subdir": "x", "sha": self.SHA}
+        assert _resolve_git_subdir_source(source) == f"owner/repo/x#{self.SHA}"
+
+    def test_packed_source_uses_sha(self):
+        plugin = MarketplacePlugin(
+            name="demo",
+            source={"type": "url", "url": "https://gitlab.example.com/owner/repo", "sha": self.SHA},
+        )
+        dependency = _dependency_reference_from_packed_source(plugin)
+        assert dependency.reference == self.SHA
 
 
 class TestResolveRelativeSource:
