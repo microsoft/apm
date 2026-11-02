@@ -179,6 +179,13 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
     return data
 
 
+def _has_pack_manifest(bundle_dir: Path) -> bool:
+    """Whether ``apm.lock.yaml`` carries the pack manifest written by ``apm pack``."""
+    lockfile = _read_bundle_lockfile(bundle_dir)
+    pack = (lockfile or {}).get("pack")
+    return isinstance(pack, dict) and bool(pack)
+
+
 def _extract_pack_targets(lockfile: dict[str, Any] | None) -> list[str]:
     """Return list of pack targets from a parsed bundle lockfile."""
     if not lockfile:
@@ -344,6 +351,11 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
 
     if path.is_dir():
         if not (path / "plugin.json").is_file():
+            return None
+        if (path / "apm.yml").is_file() and not _has_pack_manifest(path):
+            # An APM source package that happens to ship a plugin.json is a normal
+            # local dependency, not a bundle: only packed bundles carry the pack
+            # manifest in apm.lock.yaml.
             return None
         return _build_info(
             path,
