@@ -1051,32 +1051,14 @@ class TestClaudeIntegration:
         and no other hooks remain, the sidecar file should be deleted.
         This prevents leftover sidecar files that are no longer referenced.
         """
-        # Create settings.json with a single APM-owned hook (without _apm_source)
-        apm_matcher = {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "echo 'apm hook'",
-                    "timeout": 5,
-                }
-            ]
-        }
+        # Same APM-owned hook in settings.json and in the sidecar (with _apm_source)
+        hook = {"type": "command", "command": "echo 'apm hook'", "timeout": 5}
         settings_path = temp_project / ".claude" / "settings.json"
-        settings_path.write_text(json.dumps({"hooks": {"Stop": [apm_matcher]}}))
-
-        # Create sidecar file with matching ownership info (_apm_source included)
+        settings_path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [hook]}]}}))
         sidecar_path = temp_project / ".claude" / "apm-hooks.json"
-        sidecar_matcher = {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "echo 'apm hook'",
-                    "timeout": 5,
-                }
-            ],
-            "_apm_source": "test-pkg",
-        }
-        sidecar_path.write_text(json.dumps({"Stop": [sidecar_matcher]}))
+        sidecar_path.write_text(
+            json.dumps({"Stop": [{"hooks": [hook], "_apm_source": "test-pkg"}]})
+        )
 
         # Verify sidecar exists
         assert sidecar_path.exists()
@@ -3813,20 +3795,19 @@ class TestIssue1007Fixes:
         assert "copilot-hooks.json" in names, "copilot-hooks.json must reach copilot"
         assert "hooks.json" not in names, "hooks.json must not reach copilot when specific exists"
 
-    def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("target", ["claude", "cursor", "copilot", "codex", "gemini"])
+    def test_filter_generic_hooks_universal(self, tmp_path: Path, target: str) -> None:
         """Generic stems pass through for all targets when no target-specific file exists."""
-        generic_files = [
-            tmp_path / "hooks.json",
-            tmp_path / "telemetry-hooks.json",
-        ]
-        for f in generic_files:
-            f.write_text("{}")
+        hooks_file = tmp_path / "hooks.json"
+        telemetry_file = tmp_path / "telemetry-hooks.json"
+        hooks_file.write_text("{}")
+        telemetry_file.write_text("{}")
+        generic_files = [hooks_file, telemetry_file]
 
-        for target in ("claude", "cursor", "copilot", "codex", "gemini"):
-            result = _filter_hook_files_for_target(generic_files, target)
-            assert set(result) == set(generic_files), (
-                f"Generic hook files must be universal; target={target!r} got {result}"
-            )
+        result = _filter_hook_files_for_target(generic_files, target)
+        assert set(result) == set(generic_files), (
+            f"Generic hook files must be universal; target={target!r} got {result}"
+        )
 
     def test_filter_prefixed_stem_routing(self, tmp_path: Path) -> None:
         """Stems like azure-skills-cursor-hooks route only to cursor."""
@@ -4433,21 +4414,11 @@ class TestIssue1007Fixes:
         temp_project: Path,
     ) -> None:
         """Same-content dependency hooks are not mistaken for stale root hooks."""
-        hook_data = {
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "bash .codex/hooks/pre-push-review.sh",
-                            }
-                        ],
-                    }
-                ]
-            }
+        pre_push_matcher = {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": "bash .codex/hooks/pre-push-review.sh"}],
         }
+        hook_data = {"hooks": {"PreToolUse": [pre_push_matcher]}}
         root_info = self._make_root_local_pkg(
             temp_project,
             manifest_name="sample-project",
@@ -4460,16 +4431,7 @@ class TestIssue1007Fixes:
         settings_path = temp_project / ".claude" / "settings.json"
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         settings["hooks"]["PreToolUse"].append(
-            {
-                "matcher": "Bash",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "bash .codex/hooks/pre-push-review.sh",
-                    }
-                ],
-                "_apm_source": "suspicious-bardeen-e50cf8",
-            }
+            {**pre_push_matcher, "_apm_source": "suspicious-bardeen-e50cf8"}
         )
         settings_path.write_text(json.dumps(settings), encoding="utf-8")
 

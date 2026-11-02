@@ -32,6 +32,15 @@ def _disable_gh_cli_fallback():
         yield
 
 
+def _basic_auth_headers(env):
+    """Return the ``Authorization: Basic ...`` values injected via GIT_CONFIG_VALUE_*."""
+    return [
+        value
+        for key, value in env.items()
+        if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
+    ]
+
+
 # ---------------------------------------------------------------------------
 # TestClassifyHost
 # ---------------------------------------------------------------------------
@@ -1040,12 +1049,7 @@ class TestStalePATDiagnosticDedup:
             resolver = AuthResolver()
             with patch("apm_cli.utils.console._rich_warning") as mock_warn:
                 with ThreadPoolExecutor(max_workers=16) as pool:
-                    futures = [
-                        pool.submit(resolver.emit_stale_pat_diagnostic, "dev.azure.com")
-                        for _ in range(64)
-                    ]
-                    for fut in futures:
-                        fut.result()
+                    list(pool.map(resolver.emit_stale_pat_diagnostic, ["dev.azure.com"] * 64))
                 # Single emission -> _rich_warning called twice (msg + detail).
                 assert mock_warn.call_count == 2
 
@@ -1103,11 +1107,7 @@ class TestBuildGitEnvBearerIsolation:
             )
         assert "GIT_TOKEN" not in env
         assert {name: env[name] for name in inherited} == {name: "" for name in inherited}
-        header_values = [
-            value
-            for key, value in env.items()
-            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
-        ]
+        header_values = _basic_auth_headers(env)
         assert len(header_values) == 1
         encoded = header_values[0].split(" ", 2)[2]
         assert base64.b64decode(encoded).decode() == ":ado-pat"
@@ -1118,11 +1118,7 @@ class TestBuildGitEnvBearerIsolation:
             env = AuthResolver._build_git_env("glpat_fresh", host_kind="gitlab")
 
         assert "GIT_TOKEN" not in env
-        header_values = [
-            value
-            for key, value in env.items()
-            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
-        ]
+        header_values = _basic_auth_headers(env)
         assert len(header_values) == 1
         encoded = header_values[0].split(" ", 2)[2]
         assert base64.b64decode(encoded).decode() == "oauth2:glpat_fresh"

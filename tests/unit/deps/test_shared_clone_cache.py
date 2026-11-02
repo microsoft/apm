@@ -591,6 +591,35 @@ class TestBareCloneFallback:
         d._transport_selector.select = MagicMock(return_value=plan)
         return d
 
+    def _run_bare_clone_resolving(
+        self, tmp_path: Path, ref: str, resolved_sha: str
+    ) -> list[list[str]]:
+        """Run _bare_clone_with_fallback for *ref* with a fake git whose
+        rev-parse resolves to *resolved_sha*; return the captured git commands.
+        """
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        d = self._make_downloader(tmp_path)
+        dep = DependencyReference.parse(f"o/r/skills/X#{ref}")
+        captured: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            captured.append(list(args))
+            cmd_str = " ".join(args)
+            if "rev-parse --verify" in cmd_str:
+                return MagicMock(returncode=0, stdout=resolved_sha + "\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+            d._bare_clone_with_fallback(
+                "https://example/o/r",
+                tmp_path / "bare",
+                dep_ref=dep,
+                ref=ref,
+                is_commit_sha=True,
+            )
+        return captured
+
     def test_sha_ref_tier1_init_fetch_path(self, tmp_path: Path) -> None:
         """6.4 + 6.18: full SHA triggers init+fetch tier 1 with update-ref HEAD."""
         from apm_cli.models.dependency.reference import DependencyReference
@@ -695,30 +724,10 @@ class TestBareCloneFallback:
         tier-2 `rev-parse --verify <short>^{commit}`. The resolved 40-char
         SHA is what gets passed to `update-ref HEAD`, not the abbreviation.
         """
-        from apm_cli.models.dependency.reference import DependencyReference
-
         short_sha = "abc1234"  # 7-char abbreviation
         full_sha = "abc12345670000000000000000000000000fffff"
-        d = self._make_downloader(tmp_path)
-        dep = DependencyReference.parse(f"o/r/skills/X#{short_sha}")
-        bare = tmp_path / "bare"
-        captured: list[list[str]] = []
 
-        def fake_run(args, **kwargs):
-            captured.append(list(args))
-            cmd_str = " ".join(args)
-            if "rev-parse --verify" in cmd_str:
-                return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
-            d._bare_clone_with_fallback(
-                "https://example/o/r",
-                bare,
-                dep_ref=dep,
-                ref=short_sha,
-                is_commit_sha=True,
-            )
+        captured = self._run_bare_clone_resolving(tmp_path, short_sha, full_sha)
 
         cmd_strings = [" ".join(c) for c in captured]
         # Tier 1 (init+fetch) MUST NOT be attempted for short SHAs.
@@ -1035,11 +1044,10 @@ class TestBareCloneRetryRmtree:
     `git init --bare` would fail or leak state.
     """
 
-    def test_bare_action_rmtrees_target_before_init(self, tmp_path: Path) -> None:
-        """_bare_action wipes existing target via shutil.rmtree pre-init."""
+    def _make_downloader(self):
+        """Build a downloader whose transport plan has a single HTTPS no-token attempt."""
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
-        from apm_cli.models.dependency.reference import DependencyReference
 
         d = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
         d.auth_resolver = MagicMock()
@@ -1060,6 +1068,13 @@ class TestBareCloneRetryRmtree:
             strict=False,
         )
         d._transport_selector.select = MagicMock(return_value=plan)
+        return d
+
+    def test_bare_action_rmtrees_target_before_init(self, tmp_path: Path) -> None:
+        """_bare_action wipes existing target via shutil.rmtree pre-init."""
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        d = self._make_downloader()
         dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
 
         # Pre-create the target with stale content; verify it gets wiped.
@@ -1300,6 +1315,41 @@ class TestAdoBareBearerRetry:
 class TestFetchShaIntoBare:
     """Tests for the fetch_sha_into_bare() free function."""
 
+    def _capture_fetch_action(self, tmp_path: Path):
+        """Run fetch_sha_into_bare for a missing SHA and return the fetch action
+        it hands to the transport plan, together with the bare path.
+        """
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "e" * 40
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+        captured_actions: list = []
+
+        def mock_execute(
+            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
+        ) -> None:
+            captured_actions.append(clone_action)
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1),  # SHA not present
+                MagicMock(returncode=0),  # SHA present after fetch
+                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
+            ]
+
+            fetch_sha_into_bare(
+                mock_execute,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+        return captured_actions[0], bare_path
+
     def test_sha_already_present_returns_true_without_fetch(self, tmp_path: Path) -> None:
         """SHA already present in bare: rev-parse succeeds, no network fetch."""
         from apm_cli.deps.bare_cache import fetch_sha_into_bare
@@ -1480,38 +1530,7 @@ class TestFetchShaIntoBare:
 
     def test_fetch_action_uses_explicit_url_not_origin(self, tmp_path: Path) -> None:
         """Fetch action uses the explicit URL from transport plan, not 'origin'."""
-        from apm_cli.deps.bare_cache import fetch_sha_into_bare
-        from apm_cli.models.apm_package import DependencyReference
-
-        bare_path = tmp_path / "bare"
-        bare_path.mkdir()
-        sha = "e" * 40
-
-        dep_ref = DependencyReference.parse("owner/repo/sub#main")
-        captured_actions: list = []
-
-        def mock_execute(
-            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
-        ) -> None:
-            captured_actions.append(clone_action)
-
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=1),  # SHA not present
-                MagicMock(returncode=0),  # SHA present after fetch
-                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
-            ]
-
-            fetch_sha_into_bare(
-                mock_execute,
-                "https://github.com/owner/repo.git",
-                bare_path,
-                sha,
-                dep_ref=dep_ref,
-            )
-
-        # Verify the action uses the explicit URL
-        captured_action = captured_actions[0]
+        captured_action, bare_path = self._capture_fetch_action(tmp_path)
         explicit_url = "https://explicit.example.com/repo.git"
         with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
             mock_run_fetch.return_value = MagicMock(returncode=0)

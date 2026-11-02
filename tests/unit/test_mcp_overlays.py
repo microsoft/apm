@@ -143,7 +143,7 @@ class TestMCPDependencyModel:
 
     def test_validate_stdio_shell_string_error_includes_fix_it(self):
         """Error message must include the corrected command/args shape."""
-        try:
+        with pytest.raises(ValueError) as exc_info:
             MCPDependency.from_dict(
                 {
                     "name": "fix-it",
@@ -152,13 +152,10 @@ class TestMCPDependencyModel:
                     "command": "npx -y some-pkg",
                 }
             )
-        except ValueError as e:
-            msg = str(e)
-            assert "command: npx" in msg
-            assert '"-y"' in msg
-            assert '"some-pkg"' in msg
-        else:
-            pytest.fail("expected ValueError")
+        msg = str(exc_info.value)
+        assert "command: npx" in msg
+        assert '"-y"' in msg
+        assert '"some-pkg"' in msg
 
     def test_validate_stdio_command_with_whitespace_but_args_present_ok(self):
         """If args is explicitly provided, do not second-guess the command shape.

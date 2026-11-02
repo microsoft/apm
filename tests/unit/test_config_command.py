@@ -25,15 +25,11 @@ class TestConfigShow:
         except (FileNotFoundError, OSError):
             pass
 
-    def test_config_show_outside_project(self):
+    def test_config_show_outside_project(self, tmp_path, monkeypatch):
         """Show config when not in an APM project directory."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with patch("apm_cli.commands.config.get_version", return_value="1.2.3"):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        monkeypatch.chdir(tmp_path)
+        with patch("apm_cli.commands.config.get_version", return_value="1.2.3"):
+            result = self.runner.invoke(config, [])
         assert result.exit_code == 0
 
     def test_config_show_inside_project(self):
