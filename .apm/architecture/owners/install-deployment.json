@@ -46,6 +46,7 @@
       "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
+        "src/apm_cli/utils/filesystem_identity.py",
         "src/apm_cli/integration/skill_support.py",
         "src/apm_cli/install/pipeline.py"
       ],

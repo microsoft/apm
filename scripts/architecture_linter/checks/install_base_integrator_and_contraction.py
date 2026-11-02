@@ -1277,8 +1277,15 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
     requirements = {
         _DEPLOYMENT_LEDGER: (
             "class DeploymentMaterializationSession:",
-            'data["installation"] != installation',
-            'data["root_identity"] != self._root_identity()',
+            'data["installation"] != self._installation',
+            "not self._matches_root_identity(data)",
+            'return data["root_identity"] == [metadata.st_dev, metadata.st_ino]',
+            'return data["root_identity"] == self._root_identity()',
+            '"deployment-receipts-v2"',
+            '"volume": darwin_volume_uuid(self.root)',
+            "self.baseline(path, [target]) != record.content_hash",
+            "compute_file_hash(path) != record.content_hash",
+            "if snapshot[key] == self._legacy_snapshot.get(key):",
             "record.active_owner not in self._valid_owners",
             "self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]",
             "value = deployed_path_entry(path, self.root, targets)",

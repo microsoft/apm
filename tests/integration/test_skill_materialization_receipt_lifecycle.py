@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm
 
 def _receipt(scenario) -> Path:
     receipts = list(
-        (Path(scenario.environment["HOME"]) / ".apm/deployment-receipts").glob("*.json")
+        (Path(scenario.environment["HOME"]) / ".apm/deployment-receipts-v2").glob("*.json")
     )
     assert len(receipts) == 1
     return receipts[0]
@@ -140,7 +140,7 @@ def test_receipts_capture_rendered_links_and_preserve_repeat_bytes(
     scenario.install("a")
     lock = scenario.lock_root / "apm.lock.yaml"
     before = lock.read_bytes()
-    receipts = list((scenario.environment.home / ".apm/deployment-receipts").glob("*.json"))
+    receipts = list((scenario.environment.home / ".apm/deployment-receipts-v2").glob("*.json"))
     assert len(receipts) == 1
     data = json.loads(receipts[0].read_text(encoding="utf-8"))
     rows = [row for row in data["records"] if row["value"].endswith("SKILL.md")]
