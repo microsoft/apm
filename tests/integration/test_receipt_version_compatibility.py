@@ -243,3 +243,78 @@ def test_legacy_uninstall_revokes_newer_v2_authority_after_claim_restore(
             assert asset.read_text() == "v2\n"
             assert lock_path.read_bytes() == lock_bytes
             assert legacy_receipt.read_bytes() == legacy_proof
+
+
+@pytest.mark.parametrize("user_scope", [False, True])
+@pytest.mark.parametrize("legacy_paths", [False, True])
+def test_new_uninstall_retires_v1_before_downgrade_recreation(
+    tmp_path: Path, apm_engine_command, user_scope: bool, legacy_paths: bool
+):
+    """An actual downgraded reader cannot reuse a retired compatibility baseline."""
+    from apm_cli.integration.targets import KNOWN_TARGETS, apply_legacy_skill_paths
+
+    legacy_binary = os.environ.get("APM_LEGACY_BINARY")
+    if not legacy_binary:
+        pytest.skip("Set APM_LEGACY_BINARY to the unpatched APM 0.35.0 executable")
+    isolated = IsolatedApmEnvironment.create(tmp_path / "environment", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    if legacy_paths:
+        env["APM_LEGACY_SKILL_PATHS"] = "1"
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    root = isolated.config_root if user_scope else project
+    package = isolated.work_root / "package"
+    source = package / ".apm/skills/demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: demo\ndescription: Uninstall fixture\n---\nv1\n")
+    (source / "asset.md").write_text("v1\n")
+    (package / "apm.yml").write_text("name: demo-pkg\nversion: 1.0.0\n")
+    target_name = "copilot" if legacy_paths else "agent-skills"
+    manifest = root / "apm.yml"
+    manifest.write_text(
+        f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n- {target_name}\n"
+    )
+    scope_args = ("-g",) if user_scope else ()
+    fixed = ApmLifecycleRunner(apm_engine_command)
+    legacy = ApmLifecycleRunner((legacy_binary,))
+    args = ("install", *scope_args, "--target", target_name, "--no-policy")
+    for version in (1, 2):
+        (source / "asset.md").write_text(f"v{version}\n")
+        (package / "apm.yml").write_text(f"name: demo-pkg\nversion: 1.{version}.0\n")
+        result = fixed.run(args, cwd=project, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+    lock_path = root / "apm.lock.yaml"
+    lock_bytes, manifest_bytes = lock_path.read_bytes(), manifest.read_bytes()
+    target = KNOWN_TARGETS[target_name].for_scope(user_scope=user_scope)
+    assert target is not None
+    if legacy_paths:
+        target = apply_legacy_skill_paths([target])[0]
+    deploy_root = isolated.home if user_scope else project
+    asset = target.skills_deploy_path(deploy_root) / "demo/asset.md"
+    assert asset.read_text() == "v2\n"
+    result = fixed.run(("uninstall", *scope_args, str(package)), cwd=project, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not asset.exists()
+    receipts = list(isolated.config_root.glob("deployment-receipts*/*.json"))
+    assert len(receipts) == 2
+    assert all(json.loads(receipt.read_text())["records"] == [] for receipt in receipts)
+    manifest.write_bytes(manifest_bytes)
+    lock_path.write_bytes(lock_bytes)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    # Recreate the bytes formerly authorized by v1, distinct from the later
+    # lock's v2 hash. This isolates stale overwrite authority from the old
+    # executable's separate refusal/cleanup bug repaired by #3440.
+    asset.write_text("v1\n")
+    (source / "asset.md").write_text("v3\n")
+    (package / "apm.yml").write_text("name: demo-pkg\nversion: 1.3.0\n")
+    result = legacy.run(args, cwd=project, env=env)
+    assert asset.is_file(), result.stdout + result.stderr
+    assert asset.read_text() == "v1\n", result.stdout + result.stderr
+    assert "no trustworthy local deployment baseline" in " ".join(
+        (result.stdout + result.stderr).split()
+    )
+    legacy_receipt = next((isolated.config_root / "deployment-receipts").glob("*.json"))
+    assert all(
+        not row["value"].endswith("asset.md")
+        for row in json.loads(legacy_receipt.read_text())["records"]
+    )

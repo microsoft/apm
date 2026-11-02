@@ -1001,7 +1001,14 @@ def test_claim_free_retirement_preserves_unconsumed_legacy_update(tmp_path, monk
     legacy_proof = session.legacy_state_path.read_bytes()
     asset.unlink()
     DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
-    assert json.loads(session.state_path.read_text())["legacy_snapshot"] == checkpoint
+    assert json.loads(session.state_path.read_text())["legacy_snapshot"] == {
+        key: value for key, value in checkpoint.items() if not key.endswith("asset.md")
+    }
+    retired_legacy = json.loads(session.legacy_state_path.read_text())
+    assert retired_legacy["records"] == [
+        row for row in json.loads(legacy_proof)["records"] if row["value"].endswith("SKILL.md")
+    ]
+    legacy_proof = session.legacy_state_path.read_bytes()
     for _ in range(2):
         reloaded = _session(root, lock)
         assert reloaded.baseline(path, [TARGET]) == updated_hash
@@ -1134,3 +1141,95 @@ def test_legacy_deletion_revokes_same_physical_member_after_target_handoff(
         )
         assert reloaded.baseline(path, [new_target]) is None
         reloaded.bind_committed_claims(lock)
+
+
+def test_confirmed_retirement_removes_only_matching_legacy_evidence(tmp_path, monkeypatch):
+    root, path, asset, _lock, session = _two_member_receipt(tmp_path, monkeypatch)
+    before = json.loads(session.legacy_state_path.read_text())
+    survivor = next(row for row in before["records"] if row["value"].endswith("SKILL.md"))
+    asset.unlink()
+    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
+    after = json.loads(session.legacy_state_path.read_text())
+    assert after["records"] == [survivor]
+    assert len(after["destinations"]) == len(after["bindings"]) == 1
+    for field in ("root", "root_identity", "stable_root_identity", "scope", "installation"):
+        assert after[field] == before[field]
+    proof = session.legacy_state_path.read_bytes(), session.legacy_state_path.stat().st_mtime_ns
+    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
+    assert (
+        session.legacy_state_path.read_bytes(),
+        session.legacy_state_path.stat().st_mtime_ns,
+    ) == proof
+    assert path.is_file()
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "identity", "device"])
+def test_retirement_preserves_invalid_legacy_receipt(tmp_path, monkeypatch, damage):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    data = json.loads(session.legacy_state_path.read_text())
+    if damage == "identity":
+        data["installation"] = "foreign"
+    elif damage == "device":
+        data["root_identity"][0] += 1
+    session.legacy_state_path.write_text("{" if damage == "corrupt" else json.dumps(data))
+    proof = session.legacy_state_path.read_bytes()
+    path.unlink()
+    DeploymentMaterializationSession.retire_removed(root, [path], user_scope=False)
+    assert session.legacy_state_path.read_bytes() == proof
+    assert json.loads(session.state_path.read_text())["records"] == []
+
+
+@pytest.mark.parametrize("failed_version", [1, 2])
+def test_retirement_write_failure_keeps_old_reader_safe_or_reports_failure(
+    tmp_path, monkeypatch, failed_version
+):
+    from apm_cli.utils import atomic_io
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    old_v1, old_v2 = session.legacy_state_path.read_bytes(), session.state_path.read_bytes()
+    original = atomic_io.atomic_write_text
+    failed_path = session.legacy_state_path if failed_version == 1 else session.state_path
+
+    def fail(destination, text, **kwargs):
+        if destination == failed_path:
+            raise OSError("retirement persistence failed")
+        return original(destination, text, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", fail)
+    path.unlink()
+    with pytest.raises(OSError, match="retirement persistence failed"):
+        DeploymentMaterializationSession.retire_removed(root, [path], user_scope=False)
+    assert session.state_path.read_bytes() == old_v2
+    if failed_version == 1:
+        assert session.legacy_state_path.read_bytes() == old_v1
+    else:
+        assert json.loads(session.legacy_state_path.read_text())["records"] == []
+        # A failed v2 flush cannot restore authority already removed from v1.
+        path.write_text("rendered old\n")
+        assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
+def test_retirement_removes_legacy_only_members_without_creating_claims(tmp_path, monkeypatch):
+    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
+    stable = json.loads(session.state_path.read_text())
+    for field in ("destinations", "bindings", "legacy_snapshot"):
+        stable[field] = {
+            key: value for key, value in stable[field].items() if not key.endswith("asset.md")
+        }
+    stable["records"] = [row for row in stable["records"] if not row["value"].endswith("asset.md")]
+    session.state_path.write_text(json.dumps(stable))
+    asset.unlink()
+    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
+    legacy = json.loads(session.legacy_state_path.read_text())
+    assert len(legacy["records"]) == 1
+    assert legacy["records"][0]["value"].endswith("SKILL.md")
+    assert json.loads(session.state_path.read_text())["records"] == stable["records"]
+    assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)

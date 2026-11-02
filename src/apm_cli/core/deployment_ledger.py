@@ -612,6 +612,48 @@ class DeploymentMaterializationSession:
         self._state_present = True
         self._legacy_snapshot = data["legacy_snapshot"]
 
+    def _retire_legacy_members(self, removed: set[str]) -> bool:
+        """Subtract confirmed deletions from valid old-reader evidence only."""
+        from apm_cli.utils.atomic_io import atomic_write_text
+
+        self._validate_paths(legacy=True)
+        if not self.legacy_state_path.exists():
+            return False
+        proof = self.legacy_state_path.read_bytes()
+        try:
+            data = self._read_state(self.legacy_state_path, version=1)
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            # Leave invalid evidence for explicit recovery instead of silently
+            # repairing or rebinding it. Stable evidence may still be retired.
+            return False
+        retired = {
+            key
+            for key, value in data["destinations"].items()
+            if value in removed
+            or any(parent.as_posix() in removed for parent in Path(value).parents)
+        }
+        if not retired:
+            return False
+        records = DeploymentLedgerCodec.from_rows(data["records"]).records
+        data["records"] = DeploymentLedgerCodec.rows(
+            DeploymentLedger({key: row for key, row in records.items() if key not in retired})
+        )
+        for field in ("destinations", "bindings"):
+            data[field] = {key: value for key, value in data[field].items() if key not in retired}
+        self._validate_paths(legacy=True)
+        if self.legacy_state_path.read_bytes() != proof:
+            raise ValueError("Legacy materialization evidence changed before retirement")
+        atomic_write_text(
+            self.legacy_state_path,
+            json.dumps(data, sort_keys=True, indent=2) + "\n",
+            new_file_mode=0o600,
+        )
+        # Do not consume unrelated pending older-writer updates while recording
+        # our own removals. They still need ownership-aware reconciliation.
+        for key in retired:
+            self._legacy_snapshot.pop(key, None)
+        return True
+
     def retire(self, deleted: Sequence[Path]) -> None:
         """Forget successfully removed physical outputs without granting cleanup authority."""
         removed = {path.resolve().as_posix() for path in deleted}
@@ -621,7 +663,8 @@ class DeploymentMaterializationSession:
             if value in removed
             or any(parent.as_posix() in removed for parent in Path(value).parents)
         }
-        if keys:
+        legacy_changed = self._retire_legacy_members(removed)
+        if keys or legacy_changed:
             records = {key: record for key, record in self._records.items() if key not in keys}
             destinations = {
                 key: value for key, value in self._destinations.items() if key not in keys

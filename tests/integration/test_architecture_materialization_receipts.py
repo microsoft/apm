@@ -25,6 +25,11 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
     [
         (
             "core/deployment_ledger.py",
+            "legacy_changed = self._retire_legacy_members(removed)",
+            "legacy_changed = False",
+        ),
+        (
+            "core/deployment_ledger.py",
             "for key in self._legacy_snapshot.keys() - snapshot.keys():",
             "for key in ():",
         ),
