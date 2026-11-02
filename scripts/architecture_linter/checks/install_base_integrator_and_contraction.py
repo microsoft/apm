@@ -1286,6 +1286,8 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "self.baseline(path, [target]) != record.content_hash",
             "compute_file_hash(path) != record.content_hash",
             "if snapshot[key] == self._legacy_snapshot.get(key):",
+            "for key in self._legacy_snapshot.keys() - snapshot.keys():",
+            "self._retire_legacy_deletions(snapshot)",
             'data["stable_root_identity"] != self._root_identity()',
             "committed._publish_legacy_compatibility()",
             'data["legacy_snapshot"] = self._snapshot(self._legacy_projection(data))',

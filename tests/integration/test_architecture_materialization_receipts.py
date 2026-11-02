@@ -24,6 +24,11 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
     ("path", "before", "after"),
     [
         (
+            "core/deployment_ledger.py",
+            "for key in self._legacy_snapshot.keys() - snapshot.keys():",
+            "for key in ():",
+        ),
+        (
             "commands/uninstall/cli.py",
             "else:\n        if integration_cleanup.materialization_session is not None:",
             "finally:\n        if integration_cleanup.materialization_session is not None:",

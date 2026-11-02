@@ -1045,7 +1045,7 @@ def test_no_write_compatibility_publication_reloads_retired_state(
 
 
 @pytest.mark.parametrize("newer_v2", [False, True])
-def test_legacy_deletion_retires_only_unchanged_v2_baseline(tmp_path, monkeypatch, newer_v2):
+def test_legacy_deletion_revokes_even_differing_v2_baseline(tmp_path, monkeypatch, newer_v2):
     root, path, lock = _fixture(tmp_path, monkeypatch)
     old_bytes = path.read_bytes()
     session = _session(root, lock)
@@ -1055,9 +1055,9 @@ def test_legacy_deletion_retires_only_unchanged_v2_baseline(tmp_path, monkeypatc
     expected = None
     if newer_v2:
         path.write_text("independently newer v2 write\n")
-        expected = compute_file_hash(path)
+        newer_hash = compute_file_hash(path)
         session = _session(root, lock)
-        session.record({path: expected}, [TARGET], "pkg")
+        session.record({path: newer_hash}, [TARGET], "pkg")
         session.flush()
     # An older executable deletes the member and retires its legacy row.
     path.unlink()
@@ -1071,3 +1071,66 @@ def test_legacy_deletion_retires_only_unchanged_v2_baseline(tmp_path, monkeypatc
         assert reloaded.baseline(path, [TARGET]) == expected
         reloaded.bind_committed_claims(lock)
     assert path.read_bytes() == old_bytes
+
+
+def test_witnessed_write_after_legacy_retirement_can_establish_new_authority(tmp_path, monkeypatch):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    legacy = json.loads(session.legacy_state_path.read_text())
+    legacy.update(records=[], destinations={}, bindings={})
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    path.unlink()
+    retired = _session(root, lock)
+    assert retired.baseline(path, [TARGET]) is None
+    retired.bind_committed_claims(lock)
+    # A real write after observing retirement has unambiguous ordering. It
+    # establishes new evidence without reviving any pre-retirement baseline.
+    path.write_text("fresh witnessed write\n")
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
+
+
+@pytest.mark.parametrize("first,second", [("codex", "agent-skills"), ("agent-skills", "codex")])
+def test_legacy_deletion_revokes_same_physical_member_after_target_handoff(
+    tmp_path, monkeypatch, first, second
+):
+    old_target, new_target = KNOWN_TARGETS[first], KNOWN_TARGETS[second]
+    root, path, lock = _fixture(tmp_path, monkeypatch, target=old_target)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [old_target], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    locator = DeploymentLedgerCodec.locator_for_path(
+        path, project_root=root, target=new_target, scope=InstallScope.PROJECT
+    )
+    path.write_text("new target's witnessed write\n")
+    content_hash = compute_file_hash(path)
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger({locator.key: DeploymentRecord(locator, ("pkg",), "pkg", content_hash)}),
+        lock,
+        write_legacy_views=False,
+    )
+    session = DeploymentMaterializationSession(
+        root, InstallScope.PROJECT, lock, targets=[new_target]
+    )
+    session.record({path: content_hash}, [new_target], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    assert _session(root, lock).baseline(path, [new_target]) == content_hash
+    legacy = json.loads(session.legacy_state_path.read_text())
+    legacy.update(records=[], destinations={}, bindings={})
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    path.unlink()
+    path.write_text("new target's witnessed write\n")
+    for _ in range(2):
+        reloaded = DeploymentMaterializationSession(
+            root, InstallScope.PROJECT, lock, targets=[new_target]
+        )
+        assert reloaded.baseline(path, [new_target]) is None
+        reloaded.bind_committed_claims(lock)

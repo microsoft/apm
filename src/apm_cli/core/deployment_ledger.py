@@ -274,6 +274,37 @@ class DeploymentMaterializationSession:
             for key, row in zip(sorted(records), rows, strict=True)
         }
 
+    def _retire_legacy_deletions(self, snapshot: dict[str, str]) -> None:
+        """Revoke a deleted member even if its writer or rendered hash changed."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        # A different v2 hash cannot prove that its write happened after this
+        # deletion: an older uninstall may have deleted those newer bytes using
+        # the current lock. Revoke prior authority regardless of hash equality.
+        # Only a witnessed write after reconciliation can establish it again.
+        for key in self._legacy_snapshot.keys() - snapshot.keys():
+            retired = {key}
+            target_name = key.split("|", 1)[0]
+            target = self._recorded_targets.get(target_name)
+            if target is None:
+                profile = KNOWN_TARGETS.get(target_name)
+                target = (
+                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                )
+            if target is not None:
+                # Canonical target aliases can share one physical directory.
+                # Changing the target name must not evade physical retirement.
+                for current_key, destination in self._destinations.items():
+                    locator = self._locator(Path(destination), [target])
+                    if locator is not None and locator.key == key:
+                        retired.add(current_key)
+            for retired_key in retired:
+                self._records.pop(retired_key, None)
+                destination = self._destinations.pop(retired_key, None)
+                self._bindings.pop(retired_key, None)
+                if destination is not None:
+                    self._physical_keys.pop(destination, None)
+
     def _merge_legacy_writes(self, data: dict[str, Any]) -> None:
         """Admit changed older-writer evidence, never an unchanged stale baseline."""
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -282,22 +313,7 @@ class DeploymentMaterializationSession:
         snapshot = self._snapshot(data)
         if snapshot == self._legacy_snapshot:
             return
-        current = self._snapshot(
-            {
-                "records": DeploymentLedgerCodec.rows(DeploymentLedger(self._records)),
-                "destinations": self._destinations,
-                "bindings": self._bindings,
-            }
-        )
-        # An older writer can retire only the evidence we last observed from
-        # it. Independently changed v2 writes must survive a legacy deletion.
-        for key in self._legacy_snapshot.keys() - snapshot.keys():
-            if current.get(key) == self._legacy_snapshot[key]:
-                self._records.pop(key, None)
-                destination = self._destinations.pop(key, None)
-                self._bindings.pop(key, None)
-                if destination is not None:
-                    self._physical_keys.pop(destination, None)
+        self._retire_legacy_deletions(snapshot)
         for key, record in DeploymentLedgerCodec.from_rows(data["records"]).records.items():
             if snapshot[key] == self._legacy_snapshot.get(key):
                 continue
