@@ -416,10 +416,10 @@ class TestCLIIntegration(unittest.TestCase):
             _display_validation_errors,
             _get_validation_suggestion,  # noqa: F401
         )
-    
+
         # Test with mock errors
         errors = ["test.md: Missing 'description' in frontmatter", "other.md: Empty content"]
-    
+
         # This should not raise an exception
         _display_validation_errors(errors)
 
