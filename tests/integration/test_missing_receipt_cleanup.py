@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -17,8 +18,14 @@ pytestmark = [pytest.mark.integration]
 @pytest.mark.parametrize("user_scope", [False, True])
 @pytest.mark.parametrize("edited", [False, True])
 @pytest.mark.parametrize("package_kind", ["apm_package", "claude_skill", "skill_bundle"])
+@pytest.mark.parametrize("secondary_only", [False, True])
 def test_missing_receipt_cannot_turn_refused_writes_into_stale_deletions(
-    tmp_path: Path, apm_engine_command, user_scope: bool, edited: bool, package_kind: str
+    tmp_path: Path,
+    apm_engine_command,
+    user_scope: bool,
+    edited: bool,
+    package_kind: str,
+    secondary_only: bool,
 ):
     isolated = IsolatedApmEnvironment.create(tmp_path / "environment", base_env=dict(os.environ))
     env = isolated.subprocess_env()
@@ -39,19 +46,27 @@ def test_missing_receipt_cannot_turn_refused_writes_into_stale_deletions(
     (source / "SKILL.md").write_text("---\nname: demo\ndescription: Receipt fixture\n---\nv1\n")
     (source / "a.md").write_text("v1\n")
     (source / "b.md").write_text("v1\n")
+    targets = "claude,agent-skills" if secondary_only else "agent-skills"
+    target_manifest = "\n".join(f"- {target}" for target in targets.split(","))
     (root / "apm.yml").write_text(
-        f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n- agent-skills\n"
+        f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n{target_manifest}\n"
     )
     fixed_binary = os.environ.get("APM_FIXED_BINARY")
     runner = ApmLifecycleRunner((fixed_binary,) if fixed_binary else apm_engine_command)
-    args = ("install", *(("-g",) if user_scope else ()), "--target", "agent-skills", "--no-policy")
+    args = ("install", *(("-g",) if user_scope else ()), "--target", targets, "--no-policy")
     first = runner.run(args, cwd=project, env=env)
     assert first.returncode == 0, first.stdout + first.stderr
-    deployed_skills = list(
-        ((isolated.home if user_scope else project) / ".agents/skills").glob("*/SKILL.md")
-    )
+    deploy_root = isolated.home if user_scope else project
+    secondary_root = ".claude/skills" if secondary_only else ".agents/skills"
+    deployed_skills = list((deploy_root / secondary_root).glob("*/SKILL.md"))
     assert len(deployed_skills) == 1
     deployed = deployed_skills[0].parent
+    if secondary_only:
+        # Only the secondary target retains old-lock files. The primary can
+        # install successfully, so its diagnostics cannot mask a lost error.
+        primary = deploy_root / ".agents/skills"
+        assert len(list(primary.glob("*/SKILL.md"))) == 1
+        shutil.rmtree(primary)
     if edited:
         (deployed / "SKILL.md").write_text("my local edits\n")
     before = {p.name: p.read_bytes() for p in deployed.iterdir()}
