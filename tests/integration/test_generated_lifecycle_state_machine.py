@@ -252,15 +252,17 @@ class _ModelFixture:
         if not self.global_scope:
             home = self.scenario.isolated.home
             with patch("apm_cli.core.deployment_ledger.Path.home", return_value=home):
-                receipt = DeploymentMaterializationSession(
+                session = DeploymentMaterializationSession(
                     self.project.root, InstallScope.PROJECT, None
-                ).state_path
+                )
+                receipts = (session.state_path, session.legacy_state_path)
             return {
                 **_INSTALL_EXACT_PATHS,
                 "user": _USER_WRITE_PATHS
                 | {
-                    receipt.parent.relative_to(home).as_posix(),
-                    receipt.relative_to(home).as_posix(),
+                    path.relative_to(home).as_posix()
+                    for receipt in receipts
+                    for path in (receipt.parent, receipt)
                 },
             }
         return {
@@ -919,6 +921,7 @@ def test_generated_lifecycle_mandatory_replay(
     [
         *itertools.product(("identity-sibling", "wrong-root"), _VARIANTS),
         ("receipt-sibling", "project"),
+        ("legacy-receipt-sibling", "project"),
     ],
 )
 def test_generated_identity_write_scope_is_exact(
@@ -945,8 +948,11 @@ def test_generated_identity_write_scope_is_exact(
     before = model._capture()
     if extra_write == "identity-sibling":
         unexpected = identity.parent / "unrelated.txt"
-    elif extra_write == "receipt-sibling":
-        unexpected = home / ".apm/deployment-receipts/unrelated.json"
+    elif extra_write in ("receipt-sibling", "legacy-receipt-sibling"):
+        namespace = (
+            "deployment-receipts-v2" if extra_write == "receipt-sibling" else "deployment-receipts"
+        )
+        unexpected = home / ".apm" / namespace / "unrelated.json"
     else:
         wrong_root = project if model.fixture.global_scope else home
         unexpected = wrong_root / ".apm-local/installation"

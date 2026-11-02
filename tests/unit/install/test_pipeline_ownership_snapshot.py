@@ -321,7 +321,7 @@ def test_receipt_persistence_failure_is_a_pipeline_failure(
 
     def fail_receipt(path: Path, text: str, **kwargs: Any) -> None:
         nonlocal writes, failed_path, prior_receipt
-        if path.parent.name == "deployment-receipts":
+        if path.parent.name == "deployment-receipts-v2":
             writes += 1
             if writes == failed_write:
                 failed_path = path

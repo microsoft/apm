@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.requires_apm
 
 def _receipt(scenario) -> Path:
     receipts = list(
-        (Path(scenario.environment["HOME"]) / ".apm/deployment-receipts").glob("*.json")
+        (Path(scenario.environment["HOME"]) / ".apm/deployment-receipts-v2").glob("*.json")
     )
     assert len(receipts) == 1
     return receipts[0]
@@ -53,6 +53,7 @@ def test_untrusted_receipt_does_not_replace_legacy_deployment(
     receipt = _receipt(scenario)
     if damage == "missing":
         receipt.unlink()
+        (receipt.parent.parent / "deployment-receipts" / receipt.name).unlink(missing_ok=True)
     elif damage == "corrupt":
         receipt.write_text("{", encoding="utf-8")
     else:
@@ -88,8 +89,13 @@ def test_read_only_commands_never_promote_live_receipts(
     tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
 ) -> None:
     scenario = _branch_switch(tmp_path, apm_binary_path, "local")
-    state = _receipt(scenario).parent
-    before = {path.name: path.read_bytes() for path in state.iterdir()}
+    state = _receipt(scenario).parent.parent
+    for legacy in (state / "deployment-receipts").glob("*.json"):
+        legacy.unlink()
+    before = {
+        path.relative_to(state): path.read_bytes()
+        for path in state.glob("deployment-receipts*/*.json")
+    }
     old = scenario.deployed_skill.read_bytes()
     result = scenario.runner.run(
         command,
@@ -102,7 +108,10 @@ def test_read_only_commands_never_promote_live_receipts(
         assert isinstance(json.loads(result.stdout), dict)
     else:
         assert "dry-run" in result.stdout.lower()
-    assert {path.name: path.read_bytes() for path in state.iterdir()} == before
+    assert {
+        path.relative_to(state): path.read_bytes()
+        for path in state.glob("deployment-receipts*/*.json")
+    } == before
     assert scenario.deployed_skill.read_bytes() == old
     assert _git(scenario.root, scenario.environment, "ls-files", ".apm-local") == ""
 
@@ -140,7 +149,7 @@ def test_receipts_capture_rendered_links_and_preserve_repeat_bytes(
     scenario.install("a")
     lock = scenario.lock_root / "apm.lock.yaml"
     before = lock.read_bytes()
-    receipts = list((scenario.environment.home / ".apm/deployment-receipts").glob("*.json"))
+    receipts = list((scenario.environment.home / ".apm/deployment-receipts-v2").glob("*.json"))
     assert len(receipts) == 1
     data = json.loads(receipts[0].read_text(encoding="utf-8"))
     rows = [row for row in data["records"] if row["value"].endswith("SKILL.md")]

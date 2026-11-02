@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -131,7 +132,7 @@ def _assert_skill_receipt(
     bound: bool,
 ) -> Path:
     """Check successful-write evidence and its expected committed-claim binding."""
-    receipts = list((scenario.isolated.config_root / "deployment-receipts").glob("*.json"))
+    receipts = list((scenario.isolated.config_root / "deployment-receipts-v2").glob("*.json"))
     assert len(receipts) == 1
     receipt = receipts[0]
     assert receipt.is_file() and not receipt.is_symlink()
@@ -141,9 +142,20 @@ def _assert_skill_receipt(
     assert UUID(hex=data["installation"]).hex == data["installation"]
     assert identity.read_bytes() == (data["installation"] + "\n").encode("ascii")
     assert (identity.parent / ".gitignore").read_bytes() == b"*\n"
-    assert data["version"] == 1
+    assert data["version"] == 2
     assert data["root"] == root.resolve().as_posix()
-    assert data["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
+    metadata = root.stat()
+    if sys.platform == "darwin":
+        assert data["root_identity"]["kind"] == "darwin-volume"
+        assert UUID(data["root_identity"]["volume"]).int != 0
+        assert data["root_identity"]["inode"] == metadata.st_ino
+        assert data["root_identity"]["created"] == metadata.st_birthtime
+    else:
+        assert data["root_identity"] == {
+            "kind": "stat",
+            "device": metadata.st_dev,
+            "inode": metadata.st_ino,
+        }
     assert data["scope"] == scope
     ledger = DeploymentLedgerCodec.from_rows(data["records"])
     assert len(ledger.records) == len(expected)
