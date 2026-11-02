@@ -967,3 +967,78 @@ def test_identical_unowned_members_do_not_create_local_authority(
         )
     assert result.deployed_files
     assert not session.state_path.exists()
+
+
+def _two_member_receipt(tmp_path, monkeypatch):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    asset = path.with_name("asset.md")
+    asset.write_text("retired asset\n")
+    locator = DeploymentLedgerCodec.locator_for_path(
+        asset, project_root=root, target=TARGET, scope=InstallScope.PROJECT
+    )
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+    ledger.records[locator.key] = DeploymentRecord(
+        locator, ("pkg",), "pkg", compute_file_hash(asset)
+    )
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
+    session = _session(root, lock)
+    session.record({p: compute_file_hash(p) for p in (path, asset)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    return root, path, asset, lock, session
+
+
+def test_claim_free_retirement_preserves_unconsumed_legacy_update(tmp_path, monkeypatch):
+    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
+    checkpoint = json.loads(session.state_path.read_text())["legacy_snapshot"]
+    path.write_text("legitimate older-writer update\n")
+    updated_hash = compute_file_hash(path)
+    legacy = json.loads(session.legacy_state_path.read_text())
+    for row in legacy["records"]:
+        if row["value"].endswith("SKILL.md"):
+            row["content_hash"] = updated_hash
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    legacy_proof = session.legacy_state_path.read_bytes()
+    asset.unlink()
+    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
+    assert json.loads(session.state_path.read_text())["legacy_snapshot"] == checkpoint
+    for _ in range(2):
+        reloaded = _session(root, lock)
+        assert reloaded.baseline(path, [TARGET]) == updated_hash
+        reloaded.bind_committed_claims(lock)
+    assert session.legacy_state_path.read_bytes() == legacy_proof
+
+
+@pytest.mark.parametrize("retire_all", [False, True])
+def test_no_write_compatibility_publication_reloads_retired_state(
+    tmp_path, monkeypatch, retire_all
+):
+    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
+    session.legacy_state_path.unlink()
+    captured = _session(root, lock)
+    removed = [path, asset] if retire_all else [asset]
+    for member in removed:
+        member.unlink()
+    DeploymentMaterializationSession.retire_removed(root, removed, user_scope=False)
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+    ledger = DeploymentLedger(
+        {
+            key: row
+            for key, row in ledger.records.items()
+            if not any(row.locator.value.endswith(member.name) for member in removed)
+        }
+    )
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
+    captured.bind_committed_claims(lock)
+    if retire_all:
+        assert not session.legacy_state_path.exists()
+    else:
+        legacy = json.loads(session.legacy_state_path.read_text())
+        assert len(legacy["records"]) == 1
+        assert legacy["records"][0]["content_hash"] == compute_file_hash(path)
+    proof = session.state_path.read_bytes()
+    legacy_proof = session.legacy_state_path.read_bytes() if not retire_all else None
+    _session(root, lock).bind_committed_claims(lock)
+    assert session.state_path.read_bytes() == proof
+    if legacy_proof is not None:
+        assert session.legacy_state_path.read_bytes() == legacy_proof

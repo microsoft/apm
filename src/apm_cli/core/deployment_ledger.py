@@ -98,6 +98,7 @@ class DeploymentMaterializationSession:
         self._migration_pending = False
         self._legacy_snapshot: dict[str, str] = {}
         self._claims: dict[str, list[DeploymentRecord]] = {}
+        self._has_ownership_context = lockfile is not None
         if lockfile is not None:
             for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
                 self._claims.setdefault(
@@ -198,7 +199,10 @@ class DeploymentMaterializationSession:
                     self._set_state(legacy)
                     self._legacy_snapshot = self._snapshot(legacy)
                     self._migration_pending = True
-                else:
+                elif self._has_ownership_context:
+                    # Cleanup-only retirement cannot validate older-writer
+                    # imports. Leave their checkpoint for an ownership-aware
+                    # session instead of consuming evidence it cannot admit.
                     self._merge_legacy_writes(legacy)
         except (ValueError, KeyError, TypeError, UnicodeError) as exc:
             path = self.state_path if self._state_present else self.legacy_state_path
@@ -430,9 +434,8 @@ class DeploymentMaterializationSession:
         Keep that projection separate from the actual writer; never infer a
         writer or a baseline from the committed lock.
         """
-        if not self._written and not self._migration_pending:
-            self._publish_legacy_compatibility()
-            return
+        # Cleanup may have retired evidence since integration captured this
+        # session, even when integration performed no new skill writes.
         committed = type(self)(self.root, self.scope, lockfile)
         for key, value in self._written.items():
             record = committed._records.get(key)
