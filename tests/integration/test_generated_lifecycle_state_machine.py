@@ -946,7 +946,7 @@ def test_generated_identity_write_scope_is_exact(
     if extra_write == "identity-sibling":
         unexpected = identity.parent / "unrelated.txt"
     elif extra_write == "receipt-sibling":
-        unexpected = home / ".apm/deployment-receipts/unrelated.json"
+        unexpected = home / ".apm/deployment-receipts-v2/unrelated.json"
     else:
         wrong_root = project if model.fixture.global_scope else home
         unexpected = wrong_root / ".apm-local/installation"

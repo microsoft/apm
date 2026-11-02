@@ -115,8 +115,48 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "core/deployment_ledger.py",
-            'data["root_identity"] != self._root_identity()',
+            "not self._matches_root_identity(data)",
             "False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'data["installation"] != self._installation',
+            "False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'return data["root_identity"] == [metadata.st_dev, metadata.st_ino]',
+            "return True",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'return data["root_identity"] == self._root_identity()',
+            "return True",
+        ),
+        (
+            "core/deployment_ledger.py",
+            '"deployment-receipts-v2"',
+            '"deployment-receipts"',
+        ),
+        (
+            "core/deployment_ledger.py",
+            '"volume": darwin_volume_uuid(self.root)',
+            '"volume": str(metadata.st_dev)',
+        ),
+        (
+            "core/deployment_ledger.py",
+            "self.baseline(path, [target]) != record.content_hash",
+            "False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            "compute_file_hash(path) != record.content_hash",
+            "False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            "if snapshot[key] == self._legacy_snapshot.get(key):",
+            "if False:",
         ),
         (
             "core/deployment_ledger.py",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -251,6 +252,186 @@ def test_recreated_checkout_cannot_reuse_old_receipt(
             _session(root, lock)
     else:
         assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin volume identity")
+@pytest.mark.parametrize("symlinked", [False, True])
+def test_darwin_receipt_survives_changed_device_number(tmp_path, monkeypatch, symlinked):
+    from types import SimpleNamespace
+
+    if symlinked:
+        real = tmp_path / "real"
+        real.mkdir()
+        alias = tmp_path / "alias"
+        alias.symlink_to(real, target_is_directory=True)
+        tmp_path = alias
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    content_hash = compute_file_hash(path)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    original_stat = Path.stat
+    resolved_root = root.resolve()
+    changed = []
+
+    def changed_device(self, *args, **kwargs):
+        metadata = original_stat(self, *args, **kwargs)
+        if self == resolved_root:
+            changed.append(self)
+            return SimpleNamespace(
+                st_dev=metadata.st_dev + 100,
+                st_ino=metadata.st_ino,
+                st_birthtime=metadata.st_birthtime,
+                st_mode=metadata.st_mode,
+            )
+        return metadata
+
+    monkeypatch.setattr(Path, "stat", changed_device)
+    assert _session(root, lock).baseline(path, [TARGET]) == content_hash
+    assert changed, "The session must observe the simulated changed device"
+
+
+@pytest.mark.parametrize("field", ["volume", "inode", "created"])
+def test_persistent_receipt_rejects_different_directory_identity(tmp_path, monkeypatch, field):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    identity = {"kind": "darwin-volume", "volume": "volume-a", "inode": 42, "created": 123.5}
+    monkeypatch.setattr(
+        DeploymentMaterializationSession, "_root_identity", lambda self: identity.copy()
+    )
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    identity[field] = "different"
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
+
+
+@pytest.mark.parametrize("changed_device", [False, True])
+def test_legacy_receipt_migration_requires_exact_old_identity(
+    tmp_path, monkeypatch, changed_device
+):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    content_hash = compute_file_hash(path)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    data = json.loads(session.state_path.read_text())
+    metadata = root.stat()
+    data.update(version=1, root_identity=[metadata.st_dev + int(changed_device), metadata.st_ino])
+    session.legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
+    session.legacy_state_path.write_text(json.dumps(data))
+    session.state_path.unlink()
+    before = session.legacy_state_path.read_bytes()
+    if changed_device:
+        with pytest.raises(ValueError, match="installation binding does not match"):
+            _session(root, lock)
+    else:
+        migrated = _session(root, lock)
+        assert migrated.baseline(path, [TARGET]) == content_hash
+        assert not migrated.state_path.exists()
+        migrated.flush()
+        assert not migrated.state_path.exists()
+        migrated.bind_committed_claims(lock)
+        assert json.loads(migrated.state_path.read_text())["version"] == 2
+        assert migrated.legacy_state_path.read_bytes() == before
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin volume identity")
+def test_volume_identity_failure_does_not_fall_back_to_device_number(tmp_path, monkeypatch):
+    from apm_cli.utils import filesystem_identity
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+
+    def unavailable(path):
+        raise OSError("volume identity unavailable")
+
+    monkeypatch.setattr(filesystem_identity, "darwin_volume_uuid", unavailable)
+    with pytest.raises(OSError, match="volume identity unavailable"):
+        _session(root, lock)
+
+
+def _move_to_legacy(session):
+    data = json.loads(session.state_path.read_text())
+    metadata = session.root.stat()
+    data.update(version=1, root_identity=[metadata.st_dev, metadata.st_ino])
+    data.pop("legacy_snapshot", None)
+    session.legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
+    session.legacy_state_path.write_text(json.dumps(data))
+    session.state_path.unlink()
+    return data
+
+
+def test_legacy_changes_cannot_adopt_an_edit_equal_to_an_older_version(tmp_path, monkeypatch):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    asset = path.with_name("asset.md")
+    asset.write_text("old asset\n")
+    locator = DeploymentLedgerCodec.locator_for_path(
+        asset, project_root=root, target=TARGET, scope=InstallScope.PROJECT
+    )
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+    ledger.records[locator.key] = DeploymentRecord(
+        locator, ("pkg",), "pkg", compute_file_hash(asset)
+    )
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
+    session = _session(root, lock)
+    old_bytes = path.read_bytes()
+    session.record(
+        {path: compute_file_hash(path), asset: compute_file_hash(asset)}, [TARGET], "pkg"
+    )
+    session.flush()
+    legacy = _move_to_legacy(session)
+    _session(root, lock).bind_committed_claims(lock)
+    path.write_text("new rendered\n")
+    new_hash = compute_file_hash(path)
+    session = _session(root, lock)
+    session.record({path: new_hash}, [TARGET], "pkg")
+    session.flush()
+    # A real older-writer change to another member must not revive this
+    # unchanged older baseline when the user restores the old skill bytes.
+    path.write_bytes(old_bytes)
+    asset.write_text("new asset\n")
+    for row in legacy["records"]:
+        if row["value"].endswith("asset.md"):
+            row["content_hash"] = compute_file_hash(asset)
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    reloaded = _session(root, lock)
+    assert reloaded.baseline(path, [TARGET]) == new_hash
+    assert reloaded.baseline(asset, [TARGET]) == compute_file_hash(asset)
+    reloaded.bind_committed_claims(lock)
+    assert _session(root, lock).baseline(path, [TARGET]) == new_hash
+
+
+@pytest.mark.parametrize("damage", ["owner", "destination", "content", "device"])
+def test_returning_from_legacy_does_not_admit_unverified_changes(tmp_path, monkeypatch, damage):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    content_hash = compute_file_hash(path)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    legacy = _move_to_legacy(session)
+    _session(root, lock).bind_committed_claims(lock)
+    if damage == "owner":
+        legacy["records"][0]["active_owner"] = "foreign"
+        legacy["records"][0]["owners"] = ["foreign"]
+    elif damage == "destination":
+        foreign = root / "foreign.md"
+        foreign.write_bytes(path.read_bytes())
+        key = next(iter(legacy["destinations"]))
+        legacy["destinations"][key] = str(foreign)
+    elif damage == "device":
+        legacy["root_identity"][0] += 1
+    else:
+        legacy["records"][0]["content_hash"] = "sha256:" + "e" * 64
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    proof = session.legacy_state_path.read_bytes()
+    reloaded = _session(root, lock)
+    assert reloaded.baseline(path, [TARGET]) == content_hash
+    reloaded.bind_committed_claims(lock)
+    assert _session(root, lock).baseline(path, [TARGET]) == content_hash
+    assert session.legacy_state_path.read_bytes() == proof
 
 
 def test_atomic_failure_cannot_publish_new_receipt(
