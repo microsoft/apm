@@ -93,6 +93,7 @@ class DeploymentMaterializationSession:
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
+        self._recorded_targets: dict[str, TargetProfile] = {}
         self._dirty = False
         self._migration_pending = False
         self._legacy_snapshot: dict[str, str] = {}
@@ -152,6 +153,11 @@ class DeploymentMaterializationSession:
     def _matches_root_identity(self, data: dict[str, Any]) -> bool:
         if data["version"] == 1:
             metadata = self.root.stat()
+            if (
+                "stable_root_identity" in data
+                and data["stable_root_identity"] != self._root_identity()
+            ):
+                return False
             # A legacy receipt cannot prove which volume a changed device
             # number referred to. Migrate only an exact legacy binding, and
             # publish the new format at a live install's commit boundary.
@@ -381,6 +387,7 @@ class DeploymentMaterializationSession:
 
         if not written:
             return
+        self._recorded_targets.update((target.name, target) for target in targets)
         prepared: list[tuple[DeploymentRecord, str, str]] = []
         for path, content_hash in written.items():
             locator = self._locator(path, targets)
@@ -424,6 +431,7 @@ class DeploymentMaterializationSession:
         writer or a baseline from the committed lock.
         """
         if not self._written and not self._migration_pending:
+            self._publish_legacy_compatibility()
             return
         committed = type(self)(self.root, self.scope, lockfile)
         for key, value in self._written.items():
@@ -435,6 +443,77 @@ class DeploymentMaterializationSession:
         if committed._migration_pending:
             committed._dirty = True
         committed.flush()
+        committed._recorded_targets.update(self._recorded_targets)
+        committed._publish_legacy_compatibility()
+
+    def _legacy_projection(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Project recorded rendered-write evidence, never hashes adopted from disk."""
+        metadata = self.root.stat()
+        return {
+            **{
+                key: data[key]
+                for key in ("root", "scope", "installation", "records", "destinations", "bindings")
+            },
+            "version": 1,
+            "root_identity": [metadata.st_dev, metadata.st_ino],
+            "stable_root_identity": data["root_identity"],
+        }
+
+    def _publish_legacy_compatibility(self) -> None:
+        """Create missing old-reader evidence only at the committed-claims boundary."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.atomic_io import atomic_write_text
+
+        if (
+            not self._state_present
+            or not self._records
+            or self.legacy_state_path.exists()
+            or self.legacy_state_path.is_symlink()
+        ):
+            return
+        # A no-write install cannot use changed claims to promote old evidence.
+        # Preserve recorded hashes even for edited files: the old writer must
+        # compare those prior hashes, not adopt the user's current bytes.
+        for key, record in self._records.items():
+            profile = KNOWN_TARGETS.get(record.locator.target)
+            target = self._recorded_targets.get(record.locator.target)
+            if target is None:
+                target = (
+                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                )
+            if (
+                target is None
+                or self.baseline(Path(self._destinations[key]), [target]) != record.content_hash
+            ):
+                return
+        data = self._read_state(self.state_path, version=2)
+        if (
+            DeploymentLedgerCodec.from_rows(data["records"]).records != self._records
+            or data["destinations"] != self._destinations
+            or data["bindings"] != self._bindings
+        ):
+            raise ValueError("Materialization evidence changed before compatibility publication")
+        projection = self._legacy_projection(data)
+        snapshot = self._snapshot(projection)
+        if snapshot != self._legacy_snapshot:
+            # Repair pre-projection v2 receipts once; newly written receipts
+            # already contain this checkpoint, so repeat installs do not churn.
+            self._legacy_snapshot = snapshot
+            self._persist(self._records, self._destinations)
+        self._validate_paths(legacy=True)
+        self.legacy_state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._validate_paths(legacy=True)
+        try:
+            atomic_write_text(
+                self.legacy_state_path,
+                json.dumps(projection, sort_keys=True, indent=2) + "\n",
+                new_file_mode=0o600,
+                create_only=True,
+            )
+        except FileExistsError:
+            # Another writer won the create race. Its evidence is not ours to
+            # replace; the normal loader validates it on the next install.
+            return
 
     def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
         from apm_cli.utils.atomic_io import atomic_write_text
@@ -470,6 +549,10 @@ class DeploymentMaterializationSession:
             "bindings": {key: self._bindings[key] for key in records},
             "legacy_snapshot": self._legacy_snapshot,
         }
+        if not self.legacy_state_path.exists() and not self.legacy_state_path.is_symlink():
+            # Checkpoint the expected compatibility projection before it can
+            # appear, so its first observation is not mistaken for older writes.
+            data["legacy_snapshot"] = self._snapshot(self._legacy_projection(data))
         atomic_write_text(
             self.state_path,
             json.dumps(data, sort_keys=True, indent=2) + "\n",
@@ -477,6 +560,7 @@ class DeploymentMaterializationSession:
             create_only=not self._state_present,
         )
         self._state_present = True
+        self._legacy_snapshot = data["legacy_snapshot"]
 
     def retire(self, deleted: Sequence[Path]) -> None:
         """Forget successfully removed physical outputs without granting cleanup authority."""

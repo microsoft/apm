@@ -125,6 +125,7 @@ def test_external_user_receipt_uses_the_deployed_compatibility_claim(
             == content_hash
         )
     session.bind_committed_claims(lock)
+    assert session.legacy_state_path.exists()
     assert (
         DeploymentMaterializationSession(home, InstallScope.USER, lock).baseline(path, [target])
         == content_hash
@@ -362,6 +363,133 @@ def _move_to_legacy(session):
     session.legacy_state_path.write_text(json.dumps(data))
     session.state_path.unlink()
     return data
+
+
+def test_compatibility_receipt_is_committed_once_and_keeps_recorded_hashes(tmp_path, monkeypatch):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    original_hash = compute_file_hash(path)
+    session.record({path: original_hash}, [TARGET], "pkg")
+    session.flush()
+    assert not session.legacy_state_path.exists()
+    path.write_text("local edits\n")
+    session.bind_committed_claims(lock)
+    legacy = json.loads(session.legacy_state_path.read_text())
+    assert legacy["version"] == 1
+    assert legacy["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
+    assert legacy["stable_root_identity"] == session._root_identity()
+    assert legacy["records"][0]["content_hash"] == original_hash
+    assert compute_file_hash(path) != original_hash
+    proof = {
+        p: (p.read_bytes(), p.stat().st_mtime_ns)
+        for p in (session.state_path, session.legacy_state_path)
+    }
+    _session(root, lock).bind_committed_claims(lock)
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in proof} == proof
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_compatibility_publication_never_replaces_existing_receipt(tmp_path, monkeypatch, stale):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    if stale:
+        legacy = json.loads(session.legacy_state_path.read_text())
+        legacy["root_identity"][0] += 1
+        session.legacy_state_path.write_text(json.dumps(legacy))
+    proof = session.legacy_state_path.read_bytes()
+    path.write_text("new actual rendered write\n")
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    assert session.legacy_state_path.read_bytes() == proof
+
+
+def test_compatibility_receipt_exclusive_create_preserves_a_racing_writer(tmp_path, monkeypatch):
+    from apm_cli.utils import atomic_io
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    proof = session.state_path.read_bytes()
+    write = atomic_io.atomic_write_text
+
+    def race(destination, text, **kwargs):
+        if destination == session.legacy_state_path:
+            assert kwargs["create_only"] is True
+            destination.write_bytes(b"another writer's evidence\n")
+            raise FileExistsError(str(destination))
+        return write(destination, text, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", race)
+    session.bind_committed_claims(lock)
+    assert session.legacy_state_path.read_bytes() == b"another writer's evidence\n"
+    assert session.state_path.read_bytes() == proof
+
+
+def test_failed_checkpoint_repair_cannot_publish_compatibility_receipt(tmp_path, monkeypatch):
+    from apm_cli.utils import atomic_io
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    old = json.loads(session.state_path.read_text())
+    old.pop("legacy_snapshot")
+    session.state_path.write_text(json.dumps(old))
+    proof = session.state_path.read_bytes()
+    write = atomic_io.atomic_write_text
+
+    def refuse(destination, text, **kwargs):
+        if destination == session.state_path:
+            raise OSError("checkpoint failure")
+        return write(destination, text, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", refuse)
+    with pytest.raises(OSError, match="checkpoint failure"):
+        _session(root, lock).bind_committed_claims(lock)
+    assert not session.legacy_state_path.exists()
+    assert session.state_path.read_bytes() == proof
+
+
+def test_pre_projection_v2_receipt_is_repaired_once_without_skill_writes(tmp_path, monkeypatch):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    data = json.loads(session.state_path.read_text())
+    data.pop("legacy_snapshot")
+    session.state_path.write_text(json.dumps(data))
+    skill_proof = (path.read_bytes(), path.stat().st_mtime_ns)
+    _session(root, lock).bind_committed_claims(lock)
+    assert session.legacy_state_path.exists()
+    proof = {
+        p: (p.read_bytes(), p.stat().st_mtime_ns)
+        for p in (session.state_path, session.legacy_state_path)
+    }
+    _session(root, lock).bind_committed_claims(lock)
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in proof} == proof
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == skill_proof
+
+
+def test_compatibility_fallback_checks_stable_identity_without_v2(tmp_path, monkeypatch):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    content_hash = compute_file_hash(path)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    session.state_path.unlink()
+    assert _session(root, lock).baseline(path, [TARGET]) == content_hash
+    legacy = json.loads(session.legacy_state_path.read_text())
+    legacy["stable_root_identity"] = {"kind": "foreign-root"}
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
 
 
 def test_legacy_changes_cannot_adopt_an_edit_equal_to_an_older_version(tmp_path, monkeypatch):
@@ -698,6 +826,7 @@ def test_changed_canonical_claims_cannot_rebind_without_actual_writes(
     new_session.bind_committed_claims(lock)
     assert session.state_path.read_bytes() == before
     assert _session(root, lock).baseline(path, [TARGET]) is None
+    assert not session.legacy_state_path.exists()
 
 
 @pytest.mark.parametrize("binding", ["identity", "state", "ignore"])

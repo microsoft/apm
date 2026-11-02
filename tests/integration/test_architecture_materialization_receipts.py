@@ -160,6 +160,31 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "core/deployment_ledger.py",
+            'data["stable_root_identity"] != self._root_identity()',
+            "False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            "committed._publish_legacy_compatibility()",
+            "pass",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'data["legacy_snapshot"] = self._snapshot(self._legacy_projection(data))',
+            'data["legacy_snapshot"] = {}',
+        ),
+        (
+            "core/deployment_ledger.py",
+            "self.baseline(Path(self._destinations[key]), [target]) != record.content_hash",
+            "False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            "new_file_mode=0o600,\n                create_only=True,",
+            "new_file_mode=0o600,\n                create_only=False,",
+        ),
+        (
+            "core/deployment_ledger.py",
             "record.active_owner not in self._valid_owners",
             "False",
         ),

@@ -53,6 +53,7 @@ def test_untrusted_receipt_does_not_replace_legacy_deployment(
     receipt = _receipt(scenario)
     if damage == "missing":
         receipt.unlink()
+        (receipt.parent.parent / "deployment-receipts" / receipt.name).unlink(missing_ok=True)
     elif damage == "corrupt":
         receipt.write_text("{", encoding="utf-8")
     else:
@@ -88,8 +89,13 @@ def test_read_only_commands_never_promote_live_receipts(
     tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
 ) -> None:
     scenario = _branch_switch(tmp_path, apm_binary_path, "local")
-    state = _receipt(scenario).parent
-    before = {path.name: path.read_bytes() for path in state.iterdir()}
+    state = _receipt(scenario).parent.parent
+    for legacy in (state / "deployment-receipts").glob("*.json"):
+        legacy.unlink()
+    before = {
+        path.relative_to(state): path.read_bytes()
+        for path in state.glob("deployment-receipts*/*.json")
+    }
     old = scenario.deployed_skill.read_bytes()
     result = scenario.runner.run(
         command,
@@ -102,7 +108,10 @@ def test_read_only_commands_never_promote_live_receipts(
         assert isinstance(json.loads(result.stdout), dict)
     else:
         assert "dry-run" in result.stdout.lower()
-    assert {path.name: path.read_bytes() for path in state.iterdir()} == before
+    assert {
+        path.relative_to(state): path.read_bytes()
+        for path in state.glob("deployment-receipts*/*.json")
+    } == before
     assert scenario.deployed_skill.read_bytes() == old
     assert _git(scenario.root, scenario.environment, "ls-files", ".apm-local") == ""
 

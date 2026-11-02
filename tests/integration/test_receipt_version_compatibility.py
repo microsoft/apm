@@ -79,3 +79,64 @@ def test_real_legacy_cli_upgrade_downgrade_upgrade(
     assert (deployed / "SKILL.md").read_text() == ("local edits\n" if edited else skill.read_text())
     assert old_receipt.read_bytes() == legacy_after_downgrade
     assert json.loads(new_receipt.read_text())["version"] == 2
+
+
+@pytest.mark.parametrize("user_scope", [False, True])
+@pytest.mark.parametrize("edited", [False, True])
+def test_fresh_fixed_install_can_downgrade_without_losing_skills(
+    tmp_path: Path, apm_engine_command, user_scope: bool, edited: bool
+):
+    legacy_binary = os.environ.get("APM_LEGACY_BINARY")
+    if not legacy_binary:
+        pytest.skip("Set APM_LEGACY_BINARY to the unpatched APM 0.35.0 executable")
+    isolated = IsolatedApmEnvironment.create(tmp_path / "environment", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    project.mkdir(parents=True)
+    root = isolated.config_root if user_scope else project
+    root.mkdir(parents=True, exist_ok=True)
+    package = isolated.work_root / "package"
+    source = package / ".apm/skills/demo"
+    source.mkdir(parents=True)
+    (package / "apm.yml").write_text("name: demo-pkg\nversion: 1.0.0\n")
+    skill_text = "---\nname: demo\ndescription: Fresh downgrade fixture\n---\nv1\n"
+    (source / "SKILL.md").write_text(skill_text)
+    (source / "asset.md").write_text("v1\n")
+    (root / "apm.yml").write_text(
+        f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n- agent-skills\n"
+    )
+    fixed_binary = os.environ.get("APM_FIXED_BINARY")
+    fixed = ApmLifecycleRunner((fixed_binary,) if fixed_binary else apm_engine_command)
+    legacy = ApmLifecycleRunner((legacy_binary,))
+    args = ("install", *(("-g",) if user_scope else ()), "--target", "agent-skills", "--no-policy")
+    result = fixed.run((*args, "--dry-run"), cwd=project, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not list((isolated.home / ".apm").glob("deployment-receipts*/*.json"))
+    result = fixed.run(args, cwd=project, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    receipts = list((isolated.home / ".apm").glob("deployment-receipts*/*.json"))
+    proof = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in receipts}
+    result = fixed.run(args, cwd=project, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in receipts} == proof
+    deployed = (isolated.home if user_scope else project) / ".agents/skills/demo"
+    if edited:
+        (deployed / "SKILL.md").write_text("local edits\n")
+    before = {p.name: p.read_bytes() for p in deployed.iterdir()}
+    lock_before = (root / "apm.lock.yaml").read_bytes()
+    (package / "apm.yml").write_text("name: demo-pkg\nversion: 1.1.0\n")
+    (source / "SKILL.md").write_text(skill_text.replace("v1", "v2"))
+    (source / "asset.md").write_text("v2\n")
+    result = legacy.run(args, cwd=project, env=env)
+    assert deployed.is_dir(), result.stdout + result.stderr
+    assert all((deployed / name).is_file() for name in before), result.stdout + result.stderr
+    if result.returncode:
+        assert {p.name: p.read_bytes() for p in deployed.iterdir()} == before
+        assert (root / "apm.lock.yaml").read_bytes() == lock_before
+    else:
+        assert (deployed / "SKILL.md").read_text() == (
+            "local edits\n" if edited else (source / "SKILL.md").read_text()
+        )
+        assert (deployed / "asset.md").read_bytes() == (source / "asset.md").read_bytes()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert any(p.parent.name == "deployment-receipts" for p in receipts)
