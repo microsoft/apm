@@ -82,7 +82,14 @@ class DeploymentMaterializationSession:
     create a prior-local baseline.
     """
 
-    def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        scope: InstallScope,
+        lockfile: LockFile | None,
+        *,
+        targets: Sequence[TargetProfile] = (),
+    ) -> None:
         self.root = project_root.resolve()
         self.scope = scope
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
@@ -93,7 +100,9 @@ class DeploymentMaterializationSession:
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
-        self._recorded_targets: dict[str, TargetProfile] = {}
+        self._recorded_targets: dict[str, TargetProfile] = {
+            target.name: target for target in targets
+        }
         self._dirty = False
         self._migration_pending = False
         self._legacy_snapshot: dict[str, str] = {}
@@ -273,13 +282,33 @@ class DeploymentMaterializationSession:
         snapshot = self._snapshot(data)
         if snapshot == self._legacy_snapshot:
             return
+        current = self._snapshot(
+            {
+                "records": DeploymentLedgerCodec.rows(DeploymentLedger(self._records)),
+                "destinations": self._destinations,
+                "bindings": self._bindings,
+            }
+        )
+        # An older writer can retire only the evidence we last observed from
+        # it. Independently changed v2 writes must survive a legacy deletion.
+        for key in self._legacy_snapshot.keys() - snapshot.keys():
+            if current.get(key) == self._legacy_snapshot[key]:
+                self._records.pop(key, None)
+                destination = self._destinations.pop(key, None)
+                self._bindings.pop(key, None)
+                if destination is not None:
+                    self._physical_keys.pop(destination, None)
         for key, record in DeploymentLedgerCodec.from_rows(data["records"]).records.items():
             if snapshot[key] == self._legacy_snapshot.get(key):
                 continue
             destination = data["destinations"][key]
             path = Path(destination)
             profile = KNOWN_TARGETS.get(record.locator.target)
-            target = profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+            target = self._recorded_targets.get(record.locator.target)
+            if target is None:
+                target = (
+                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                )
             if target is None or not path.is_file() or path.is_symlink():
                 continue
             previous = (
@@ -436,7 +465,9 @@ class DeploymentMaterializationSession:
         """
         # Cleanup may have retired evidence since integration captured this
         # session, even when integration performed no new skill writes.
-        committed = type(self)(self.root, self.scope, lockfile)
+        committed = type(self)(
+            self.root, self.scope, lockfile, targets=tuple(self._recorded_targets.values())
+        )
         for key, value in self._written.items():
             record = committed._records.get(key)
             if record is None or record != self._records.get(key):

@@ -14,10 +14,11 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 pytestmark = [pytest.mark.integration]
 
 
+@pytest.mark.parametrize("legacy_paths", [False, True])
 @pytest.mark.parametrize("user_scope", [False, True])
 @pytest.mark.parametrize("edited", [False, True])
 def test_real_legacy_cli_upgrade_downgrade_upgrade(
-    tmp_path: Path, apm_engine_command, user_scope: bool, edited: bool
+    tmp_path: Path, apm_engine_command, user_scope: bool, edited: bool, legacy_paths: bool
 ):
     legacy_binary = os.environ.get("APM_LEGACY_BINARY")
     if not legacy_binary:
@@ -37,7 +38,15 @@ def test_real_legacy_cli_upgrade_downgrade_upgrade(
     (root / "apm.yml").write_text(
         f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n- agent-skills\n"
     )
-    args = ("install", *(("-g",) if user_scope else ()), "--target", "agent-skills", "--no-policy")
+    target = "copilot" if legacy_paths else "agent-skills"
+    args = (
+        "install",
+        *(("-g",) if user_scope else ()),
+        "--target",
+        target,
+        "--no-policy",
+        *(("--legacy-skill-paths",) if legacy_paths else ()),
+    )
     legacy = ApmLifecycleRunner((legacy_binary,))
     fixed_binary = os.environ.get("APM_FIXED_BINARY")
     fixed = ApmLifecycleRunner((fixed_binary,) if fixed_binary else apm_engine_command)
@@ -51,7 +60,11 @@ def test_real_legacy_cli_upgrade_downgrade_upgrade(
     old_receipt = next((isolated.home / ".apm/deployment-receipts").glob("*.json"))
     old_bytes = old_receipt.read_bytes()
     new_receipt = isolated.home / ".apm/deployment-receipts-v2" / old_receipt.name
-    deployed = (isolated.home if user_scope else project) / ".agents/skills/demo"
+    deployed = (isolated.home if user_scope else project) / (
+        (".copilot/skills/demo" if user_scope else ".github/skills/demo")
+        if legacy_paths
+        else ".agents/skills/demo"
+    )
     before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in deployed.iterdir()}
     install(fixed, "--dry-run")
     assert not new_receipt.exists()
@@ -81,10 +94,11 @@ def test_real_legacy_cli_upgrade_downgrade_upgrade(
     assert json.loads(new_receipt.read_text())["version"] == 2
 
 
+@pytest.mark.parametrize("legacy_paths", [False, True])
 @pytest.mark.parametrize("user_scope", [False, True])
 @pytest.mark.parametrize("edited", [False, True])
 def test_fresh_fixed_install_can_downgrade_without_losing_skills(
-    tmp_path: Path, apm_engine_command, user_scope: bool, edited: bool
+    tmp_path: Path, apm_engine_command, user_scope: bool, edited: bool, legacy_paths: bool
 ):
     legacy_binary = os.environ.get("APM_LEGACY_BINARY")
     if not legacy_binary:
@@ -108,7 +122,15 @@ def test_fresh_fixed_install_can_downgrade_without_losing_skills(
     fixed_binary = os.environ.get("APM_FIXED_BINARY")
     fixed = ApmLifecycleRunner((fixed_binary,) if fixed_binary else apm_engine_command)
     legacy = ApmLifecycleRunner((legacy_binary,))
-    args = ("install", *(("-g",) if user_scope else ()), "--target", "agent-skills", "--no-policy")
+    target = "copilot" if legacy_paths else "agent-skills"
+    args = (
+        "install",
+        *(("-g",) if user_scope else ()),
+        "--target",
+        target,
+        "--no-policy",
+        *(("--legacy-skill-paths",) if legacy_paths else ()),
+    )
     result = fixed.run((*args, "--dry-run"), cwd=project, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not list((isolated.home / ".apm").glob("deployment-receipts*/*.json"))
@@ -119,7 +141,11 @@ def test_fresh_fixed_install_can_downgrade_without_losing_skills(
     result = fixed.run(args, cwd=project, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in receipts} == proof
-    deployed = (isolated.home if user_scope else project) / ".agents/skills/demo"
+    deployed = (isolated.home if user_scope else project) / (
+        (".copilot/skills/demo" if user_scope else ".github/skills/demo")
+        if legacy_paths
+        else ".agents/skills/demo"
+    )
     if edited:
         (deployed / "SKILL.md").write_text("local edits\n")
     before = {p.name: p.read_bytes() for p in deployed.iterdir()}

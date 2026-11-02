@@ -1342,7 +1342,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
         ),
         "src/apm_cli/integration/skill_support.py": ("removed_paths.append(skill_subdir)",),
         "src/apm_cli/commands/uninstall/engine.py": (
-            "DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)",
+            "DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile, targets=_targets)",
             'with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):',
             "materialization_session=materialization_session,",
             "removed_paths=removed_skill_paths",

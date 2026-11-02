@@ -1042,3 +1042,32 @@ def test_no_write_compatibility_publication_reloads_retired_state(
     assert session.state_path.read_bytes() == proof
     if legacy_proof is not None:
         assert session.legacy_state_path.read_bytes() == legacy_proof
+
+
+@pytest.mark.parametrize("newer_v2", [False, True])
+def test_legacy_deletion_retires_only_unchanged_v2_baseline(tmp_path, monkeypatch, newer_v2):
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    expected = None
+    if newer_v2:
+        path.write_text("independently newer v2 write\n")
+        expected = compute_file_hash(path)
+        session = _session(root, lock)
+        session.record({path: expected}, [TARGET], "pkg")
+        session.flush()
+    # An older executable deletes the member and retires its legacy row.
+    path.unlink()
+    legacy = json.loads(session.legacy_state_path.read_text())
+    legacy.update(records=[], destinations={}, bindings={})
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    # A branch restores the same claims and the user recreates the former bytes.
+    path.write_bytes(old_bytes)
+    for _ in range(2):
+        reloaded = _session(root, lock)
+        assert reloaded.baseline(path, [TARGET]) == expected
+        reloaded.bind_committed_claims(lock)
+    assert path.read_bytes() == old_bytes
