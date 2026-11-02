@@ -46,13 +46,12 @@ def test_missing_receipt_cannot_turn_refused_writes_into_stale_deletions(
     (source / "SKILL.md").write_text("---\nname: demo\ndescription: Receipt fixture\n---\nv1\n")
     (source / "a.md").write_text("v1\n")
     (source / "b.md").write_text("v1\n")
-    targets = "claude,agent-skills" if secondary_only else "agent-skills"
+    targets = "agent-skills,claude" if secondary_only else "agent-skills"
     target_manifest = "\n".join(f"- {target}" for target in targets.split(","))
     (root / "apm.yml").write_text(
         f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n{target_manifest}\n"
     )
-    fixed_binary = os.environ.get("APM_FIXED_BINARY")
-    runner = ApmLifecycleRunner((fixed_binary,) if fixed_binary else apm_engine_command)
+    runner = ApmLifecycleRunner(apm_engine_command)
     args = ("install", *(("-g",) if user_scope else ()), "--target", targets, "--no-policy")
     first = runner.run(args, cwd=project, env=env)
     assert first.returncode == 0, first.stdout + first.stderr
