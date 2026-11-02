@@ -1257,7 +1257,9 @@ class SkillIntegrator(BaseIntegrator):
                 self._skill_can_complete = False
                 continue
 
-            target_existed = target_skill_dir.exists()
+            target_existed = target_skill_dir.exists() and any(
+                p.is_file() for p in target_skill_dir.rglob("*")
+            )
             from apm_cli.models.apm_package import PackageType as _PackageType
 
             copied = self._copy_skill_bundle(
