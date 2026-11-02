@@ -389,7 +389,9 @@ def test_compatibility_receipt_is_committed_once_and_keeps_recorded_hashes(tmp_p
 
 
 @pytest.mark.parametrize("stale", [False, True])
-def test_compatibility_publication_never_replaces_existing_receipt(tmp_path, monkeypatch, stale):
+def test_compatibility_refresh_requires_witnessed_writes_and_valid_evidence(
+    tmp_path, monkeypatch, stale
+):
     root, path, lock = _fixture(tmp_path, monkeypatch)
     session = _session(root, lock)
     session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
@@ -405,7 +407,12 @@ def test_compatibility_publication_never_replaces_existing_receipt(tmp_path, mon
     session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
     session.flush()
     session.bind_committed_claims(lock)
-    assert session.legacy_state_path.read_bytes() == proof
+    if stale:
+        assert session.legacy_state_path.read_bytes() == proof
+    else:
+        refreshed = json.loads(session.legacy_state_path.read_text())
+        assert refreshed["records"][0]["content_hash"] == compute_file_hash(path)
+        assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
 
 
 def test_compatibility_receipt_exclusive_create_preserves_a_racing_writer(tmp_path, monkeypatch):
@@ -1233,3 +1240,75 @@ def test_retirement_removes_legacy_only_members_without_creating_claims(tmp_path
     assert legacy["records"][0]["value"].endswith("SKILL.md")
     assert json.loads(session.state_path.read_text())["records"] == stable["records"]
     assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
+
+
+def test_legacy_deletion_revokes_uncovered_members_but_keeps_covered_survivors(
+    tmp_path, monkeypatch
+):
+    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
+    added = path.with_name("added.md")
+    added.write_text("v2-only prior write\n")
+    locator = DeploymentLedgerCodec.locator_for_path(
+        added, project_root=root, target=TARGET, scope=InstallScope.PROJECT
+    )
+    ledger = DeploymentLedgerCodec.from_lockfile(lock)
+    ledger.records[locator.key] = DeploymentRecord(
+        locator, ("pkg",), "pkg", compute_file_hash(added)
+    )
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
+    session = _session(root, lock)
+    session.record({added: compute_file_hash(added)}, [TARGET], "pkg")
+    session.flush()  # Model older v2 evidence predating compatibility refresh.
+    legacy = json.loads(session.legacy_state_path.read_text())
+    retired = {key for key in legacy["destinations"] if key.endswith("asset.md")}
+    legacy["records"] = [row for row in legacy["records"] if not row["value"].endswith("asset.md")]
+    for field in ("destinations", "bindings"):
+        legacy[field] = {key: value for key, value in legacy[field].items() if key not in retired}
+    session.legacy_state_path.write_text(json.dumps(legacy))
+    asset.unlink()
+    for _ in range(2):
+        reloaded = _session(root, lock)
+        assert reloaded.baseline(added, [TARGET]) is None
+        assert reloaded.baseline(path, [TARGET]) == compute_file_hash(path)
+        reloaded.bind_committed_claims(lock)
+
+
+@pytest.mark.parametrize("failed_version", [1, 2])
+def test_failed_legacy_refresh_cannot_revive_unchanged_older_evidence(
+    tmp_path, monkeypatch, failed_version
+):
+    from apm_cli.utils import atomic_io
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    session.bind_committed_claims(lock)
+    proof = session.legacy_state_path.read_bytes()
+    old_checkpoint = json.loads(session.state_path.read_text())["legacy_snapshot"]
+    path.write_text("new witnessed bytes\n")
+    expected = compute_file_hash(path)
+    session = _session(root, lock)
+    session.record({path: expected}, [TARGET], "pkg")
+    session.flush()
+    write = atomic_io.atomic_write_text
+
+    def fail(destination, text, **kwargs):
+        if destination == session.legacy_state_path and failed_version == 1:
+            raise OSError("refresh failed")
+        if (
+            destination == session.state_path
+            and failed_version == 2
+            and json.loads(text)["legacy_snapshot"] != old_checkpoint
+        ):
+            raise OSError("refresh failed")
+        return write(destination, text, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", fail)
+    with pytest.raises(OSError, match="refresh failed"):
+        session.bind_committed_claims(lock)
+    if failed_version == 1:
+        assert session.legacy_state_path.read_bytes() == proof
+    path.write_bytes(old_bytes)
+    assert _session(root, lock).baseline(path, [TARGET]) == expected

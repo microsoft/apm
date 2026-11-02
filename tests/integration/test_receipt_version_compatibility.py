@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -90,7 +91,13 @@ def test_real_legacy_cli_upgrade_downgrade_upgrade(
     install(fixed)
     assert (deployed / "asset.md").read_text() == "v3\n"
     assert (deployed / "SKILL.md").read_text() == ("local edits\n" if edited else skill.read_text())
-    assert old_receipt.read_bytes() == legacy_after_downgrade
+    refreshed = json.loads(old_receipt.read_text())
+    assert any(
+        row["value"].endswith("asset.md")
+        and row["content_hash"] == "sha256:" + hashlib.sha256(b"v3\n").hexdigest()
+        for row in refreshed["records"]
+    )
+    assert old_receipt.read_bytes() != legacy_after_downgrade
     assert json.loads(new_receipt.read_text())["version"] == 2
 
 
@@ -170,8 +177,14 @@ def test_fresh_fixed_install_can_downgrade_without_losing_skills(
 
 @pytest.mark.parametrize("user_scope", [False, True])
 @pytest.mark.parametrize("legacy_paths", [False, True])
+@pytest.mark.parametrize("member_added", [False, True])
 def test_legacy_uninstall_revokes_newer_v2_authority_after_claim_restore(
-    tmp_path: Path, apm_engine_command, monkeypatch, user_scope: bool, legacy_paths: bool
+    tmp_path: Path,
+    apm_engine_command,
+    monkeypatch,
+    user_scope: bool,
+    legacy_paths: bool,
+    member_added: bool,
 ):
     """Actual old uninstall must not leave authority for a recreated newer file."""
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
@@ -193,7 +206,8 @@ def test_legacy_uninstall_revokes_newer_v2_authority_after_claim_restore(
     source = package / ".apm/skills/demo"
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: demo\ndescription: Uninstall fixture\n---\nv1\n")
-    (source / "asset.md").write_text("v1\n")
+    if not member_added:
+        (source / "asset.md").write_text("v1\n")
     (package / "apm.yml").write_text("name: demo-pkg\nversion: 1.0.0\n")
     target_name = "copilot" if legacy_paths else "agent-skills"
     manifest = root / "apm.yml"
@@ -205,10 +219,18 @@ def test_legacy_uninstall_revokes_newer_v2_authority_after_claim_restore(
     legacy = ApmLifecycleRunner((legacy_binary,))
     args = ("install", *scope_args, "--target", target_name, "--no-policy")
     for version in (1, 2):
-        (source / "asset.md").write_text(f"v{version}\n")
+        if not member_added or version == 2:
+            (source / "asset.md").write_text(f"v{version}\n")
         (package / "apm.yml").write_text(f"name: demo-pkg\nversion: 1.{version}.0\n")
         result = fixed.run(args, cwd=project, env=env)
         assert result.returncode == 0, result.stdout + result.stderr
+        receipt = next((isolated.config_root / "deployment-receipts").glob("*.json"))
+        asset_rows = [
+            row
+            for row in json.loads(receipt.read_text())["records"]
+            if row["value"].endswith("asset.md")
+        ]
+        assert bool(asset_rows) == (not member_added or version == 2)
     lock_path = root / "apm.lock.yaml"
     lock_bytes, manifest_bytes = lock_path.read_bytes(), manifest.read_bytes()
     target = KNOWN_TARGETS[target_name].for_scope(user_scope=user_scope)
@@ -318,3 +340,76 @@ def test_new_uninstall_retires_v1_before_downgrade_recreation(
         not row["value"].endswith("asset.md")
         for row in json.loads(legacy_receipt.read_text())["records"]
     )
+
+
+def test_legacy_uninstall_revokes_relocated_user_target(
+    tmp_path: Path, apm_engine_command, monkeypatch
+):
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    legacy_binary = os.environ.get("APM_LEGACY_BINARY")
+    if not legacy_binary:
+        pytest.skip("Set APM_LEGACY_BINARY to the unpatched APM 0.35.0 executable")
+    isolated = IsolatedApmEnvironment.create(tmp_path / "environment", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    package = isolated.work_root / "package"
+    source = package / ".apm/skills/demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: demo\ndescription: Relocation fixture\n---\nv1\n")
+    (source / "asset.md").write_text("v2\n")
+    (package / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+    manifest = isolated.config_root / "apm.yml"
+    manifest.write_text(
+        f"name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n  - path: {package}\ntargets:\n- claude\n"
+    )
+    fixed, old = ApmLifecycleRunner(apm_engine_command), ApmLifecycleRunner((legacy_binary,))
+    args = ("install", "-g", "--target", "claude", "--no-policy")
+    for name in ("original-target", "moved-target"):
+        env["CLAUDE_CONFIG_DIR"] = str(isolated.home / name)
+        result = fixed.run(args, cwd=project, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+    lock_path = isolated.config_root / "apm.lock.yaml"
+    lock_bytes, manifest_bytes = lock_path.read_bytes(), manifest.read_bytes()
+    asset = isolated.home / "moved-target/skills/demo/asset.md"
+    assert asset.read_text() == "v2\n"
+    receipt = next((isolated.config_root / "deployment-receipts").glob("*.json"))
+    assert str(asset) in json.loads(receipt.read_text())["destinations"].values()
+    before_outputs = {
+        str(path): path.read_bytes()
+        for name in ("original-target", "moved-target")
+        for path in (isolated.home / name / "skills/demo").glob("*.md")
+    }
+    result = old.run(("uninstall", "-g", str(package)), cwd=project, env=env)
+    if result.returncode:
+        # Some legacy configurations reject these relocated target paths
+        # before deletion. That is a safe stop, not retirement evidence.
+        assert result.returncode == 1
+        assert "could not remove tracked target files" in result.stdout
+        assert lock_path.read_bytes() == lock_bytes
+        assert manifest.read_bytes() == manifest_bytes
+        assert {path: Path(path).read_bytes() for path in before_outputs} == before_outputs
+        return
+    assert not asset.exists()
+    manifest.write_bytes(manifest_bytes)
+    lock_path.write_bytes(lock_bytes)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("v2\n")
+    (source / "asset.md").write_text("v3\n")
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "home", classmethod(lambda cls: isolated.home))
+        patch.setenv("CLAUDE_CONFIG_DIR", env["CLAUDE_CONFIG_DIR"])
+        target = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert target is not None
+        for _ in range(2):
+            lock = LockFile.read(lock_path)
+            session = DeploymentMaterializationSession(
+                isolated.home, InstallScope.USER, lock, targets=[target]
+            )
+            assert session.baseline(asset, [target]) is None
+            session.bind_committed_claims(lock)
+            assert asset.read_text() == "v2\n"

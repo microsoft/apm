@@ -282,6 +282,17 @@ class DeploymentMaterializationSession:
         # deletion: an older uninstall may have deleted those newer bytes using
         # the current lock. Revoke prior authority regardless of hash equality.
         # Only a witnessed write after reconciliation can establish it again.
+        deleted_keys = self._legacy_snapshot.keys() - snapshot.keys()
+        if deleted_keys:
+            # Earlier v2 writers could add members absent from v1. A legacy
+            # uninstall can delete those through the lock without naming them
+            # in its receipt. Missing legacy coverage cannot preserve authority.
+            for current_key in self._records.keys() - snapshot.keys():
+                self._records.pop(current_key, None)
+                destination = self._destinations.pop(current_key, None)
+                self._bindings.pop(current_key, None)
+                if destination is not None:
+                    self._physical_keys.pop(destination, None)
         for key in self._legacy_snapshot.keys() - snapshot.keys():
             retired = {key}
             target_name = key.split("|", 1)[0]
@@ -484,17 +495,77 @@ class DeploymentMaterializationSession:
         committed = type(self)(
             self.root, self.scope, lockfile, targets=tuple(self._recorded_targets.values())
         )
+        witnessed = set()
         for key, value in self._written.items():
             record = committed._records.get(key)
             if record is None or record != self._records.get(key):
                 continue
             committed._bindings[key] = [record.active_owner, committed._claim_signature(value)]
             committed._dirty = True
+            witnessed.add(key)
         if committed._migration_pending:
             committed._dirty = True
         committed.flush()
         committed._recorded_targets.update(self._recorded_targets)
+        committed._refresh_legacy_writes(witnessed)
         committed._publish_legacy_compatibility()
+
+    def _refresh_legacy_writes(self, witnessed: set[str]) -> None:
+        """Keep old-reader coverage current using committed actual writes only."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.atomic_io import atomic_write_text
+
+        if not witnessed or not self.legacy_state_path.exists():
+            return
+        self._validate_paths(legacy=True)
+        proof = self.legacy_state_path.read_bytes()
+        try:
+            data = self._read_state(self.legacy_state_path, version=1)
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            return
+        records = dict(DeploymentLedgerCodec.from_rows(data["records"]).records)
+        updated, retired = set(), set()
+        for key in witnessed:
+            record = self._records.get(key)
+            if record is None:
+                continue
+            profile = KNOWN_TARGETS.get(record.locator.target)
+            target = self._recorded_targets.get(record.locator.target)
+            if target is None:
+                target = (
+                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                )
+            destination = self._destinations[key]
+            if target is None or self.baseline(Path(destination), [target]) != record.content_hash:
+                continue
+            for old_key, old_destination in list(data["destinations"].items()):
+                if old_destination == destination and old_key != key:
+                    records.pop(old_key, None)
+                    data["destinations"].pop(old_key)
+                    data["bindings"].pop(old_key)
+                    retired.add(old_key)
+            records[key] = record
+            data["destinations"][key] = destination
+            data["bindings"][key] = self._bindings[key]
+            updated.add(key)
+        if not updated:
+            return
+        data["records"] = DeploymentLedgerCodec.rows(DeploymentLedger(records))
+        self._validate_paths(legacy=True)
+        if self.legacy_state_path.read_bytes() != proof:
+            raise ValueError("Legacy materialization evidence changed before write publication")
+        text = json.dumps(data, sort_keys=True, indent=2) + "\n"
+        if json.loads(proof) != data:
+            atomic_write_text(self.legacy_state_path, text, new_file_mode=0o600)
+        # Publish the receipt before advancing its checkpoint. A failed write
+        # must not make unchanged old evidence look like a new older-writer edit.
+        snapshot = self._snapshot(data)
+        checkpoint = self._legacy_snapshot.copy()
+        for key in retired:
+            self._legacy_snapshot.pop(key, None)
+        self._legacy_snapshot.update({key: snapshot[key] for key in updated})
+        if checkpoint != self._legacy_snapshot:
+            self._persist(self._records, self._destinations)
 
     def _legacy_projection(self, data: dict[str, Any]) -> dict[str, Any]:
         """Project recorded rendered-write evidence, never hashes adopted from disk."""

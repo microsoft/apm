@@ -1289,6 +1289,8 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "for key in self._legacy_snapshot.keys() - snapshot.keys():",
             "self._retire_legacy_deletions(snapshot)",
             "legacy_changed = self._retire_legacy_members(removed)",
+            "committed._refresh_legacy_writes(witnessed)",
+            "for current_key in self._records.keys() - snapshot.keys():",
             'data["stable_root_identity"] != self._root_identity()',
             "committed._publish_legacy_compatibility()",
             'data["legacy_snapshot"] = self._snapshot(self._legacy_projection(data))',
