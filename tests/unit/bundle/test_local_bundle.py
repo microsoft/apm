@@ -117,6 +117,27 @@ def _make_plugin_bundle(
     return bundle
 
 
+def test_detect_local_bundle_skips_source_package_with_apm_yml(tmp_path: Path) -> None:
+    """A source package with apm.yml and plugin.json is a dependency, not a bundle."""
+    package = tmp_path / "demo-pkg"
+    package.mkdir()
+    (package / "apm.yml").write_text("name: demo-pkg\n", encoding="utf-8")
+    (package / "plugin.json").write_text(json.dumps({"id": "demo-pkg"}), encoding="utf-8")
+
+    assert detect_local_bundle(package) is None
+
+
+def test_detect_local_bundle_keeps_packed_bundle_with_apm_yml(tmp_path: Path) -> None:
+    """A packed bundle stays a bundle even when it also ships an apm.yml."""
+    bundle = _make_plugin_bundle(tmp_path)
+    (bundle / "apm.yml").write_text("name: demo-pkg\n", encoding="utf-8")
+
+    info = detect_local_bundle(bundle)
+
+    assert info is not None
+    assert info.source_dir == bundle
+
+
 def _make_plugin_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
     """Archive a bundle directory into .tar.gz."""
     tmp_path.mkdir(parents=True, exist_ok=True)
