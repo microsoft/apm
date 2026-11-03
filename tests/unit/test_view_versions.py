@@ -116,3 +116,51 @@ class TestDisplayMarketplacePlugin:
         logger = MagicMock()
         _display_marketplace_plugin("bare", "acme-tools", logger)
         logger.error.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Registry-only mode (PROXY_REGISTRY_ONLY)
+# ---------------------------------------------------------------------------
+
+
+class TestDisplayVersionsRegistryOnly:
+    """Version listing must not reach the source host in registry-only mode."""
+
+    def test_routes_to_proxy_registry(self):
+        """PROXY_REGISTRY_ONLY routes ``view versions`` to the proxy registry."""
+        from types import SimpleNamespace
+
+        from apm_cli.commands import view
+
+        proxy = SimpleNamespace(url="https://proxy.example.com/artifactory/apm")
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=True),
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=proxy),
+            patch.object(view, "_display_registry_versions") as display,
+            patch(view.GitHubPackageDownloader.list_remote_refs) as ls_remote,
+        ):
+            view.display_versions("acme-org/acme-pkg", logger)
+
+        display.assert_called_once()
+        assert display.call_args.kwargs["registry_url_override"] == proxy.url
+        ls_remote.assert_not_called()
+
+    def test_missing_proxy_url_exits(self):
+        """PROXY_REGISTRY_ONLY without a proxy URL fails with a clear error."""
+        from apm_cli.commands import view
+
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=True),
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch(view.GitHubPackageDownloader.list_remote_refs) as ls_remote,
+        ):
+            with pytest.raises(SystemExit) as exc:
+                view.display_versions("acme-org/acme-pkg", logger)
+
+        assert exc.value.code == 1
+        assert "PROXY_REGISTRY_URL" in logger.error.call_args.args[0]
+        ls_remote.assert_not_called()
