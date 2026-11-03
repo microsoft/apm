@@ -102,14 +102,28 @@ def test_ordinary_install_retires_obsolete_absent_dependency_claims(
     extra.unlink()
     if not already_absent and historical != "concrete":
         # Source removal alone cannot authorize deletion of an unattributed file.
-        run(*install)
+        prior_lock = lock_path.read_bytes()
+        prior_outputs = {path: (deploy_root / path).read_bytes() for path in obsolete | surviving}
+        for _ in range(2):
+            refused = run(*install, expected=1)
+            assert "no trustworthy local deployment baseline" in " ".join(refused.stdout.split())
+            assert lock_path.read_bytes() == prior_lock
+            assert {
+                path: (deploy_root / path).read_bytes() for path in prior_outputs
+            } == prior_outputs
         retained = load_yaml(lock_path)
         shared = ".agents/skills/demo/extra.md"
         assert (deploy_root / shared).read_bytes() == b"Old dependency asset.\n"
         assert shared in retained["dependencies"][0]["deployed_files"]
         assert shared in retained["dependencies"][0]["deployed_file_hashes"]
-        assert any(row["value"] == shared for row in retained["deployments"])
-        (deploy_root / shared).unlink()
+        if historical == "legacy":
+            assert any(row["value"] == shared for row in retained["deployments"])
+        else:
+            assert "deployments" not in retained
+        # Model explicit removal of the retained assets, then exercise normal
+        # claim retirement below without granting an overwrite through --force.
+        for path in obsolete:
+            (deploy_root / path).unlink()
     if already_absent:
         for path in obsolete:
             (deploy_root / path).unlink()
@@ -199,8 +213,19 @@ def test_historical_absence_respects_live_preservation_boundaries(
     elif protection in {"untracked-content", "trusted-untracked-content"}:
         untracked.write_bytes(b"Untracked personal content.\n")
     arguments = ("--target", "claude") if protection == "unprocessed-target" else ()
-    expected_exit = 1 if protection == "required-selection" else 0
+    refuses_install = protection in {"edited-marker", "untracked-content", "required-selection"}
+    expected_exit = 1 if refuses_install else 0
     prior_bytes = lock_path.read_bytes()
+
+    def deployed_bytes():
+        return {
+            str(path.relative_to(scenario.deploy_root)): path.read_bytes()
+            for root in (".agents", ".claude")
+            for path in (scenario.deploy_root / root / "skills/s").rglob("*")
+            if path.is_file()
+        }
+
+    prior_files = deployed_bytes()
     for _ in range(2):
         result = scenario.run("install", *arguments, expected=expected_exit)
         repaired = load_yaml(lock_path)
@@ -224,13 +249,14 @@ def test_historical_absence_respects_live_preservation_boundaries(
             assert personal not in dependency["deployed_files"]
             assert personal not in dependency["deployed_file_hashes"]
             assert all(row["value"] != personal for row in repaired["deployments"])
-        if protection == "untracked-content":
+        if protection in {"edited-marker", "untracked-content"}:
             assert "no trustworthy local deployment baseline" in " ".join(result.stdout.split())
         assert not (scenario.deploy_root / shared).exists()
         if protection == "edited-marker":
             assert marker.read_bytes() == b"User-edited skill marker.\n"
-        elif protection == "required-selection":
+        if refuses_install:
             assert lock_path.read_bytes() == prior_bytes
+            assert deployed_bytes() == prior_files
 
 
 @pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
