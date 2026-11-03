@@ -1335,8 +1335,6 @@ class SkillIntegrator(BaseIntegrator):
                 current_key or skill_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                # Every physical target must report safety errors; warn/logger
-                # still restrict duplicate promotion summaries to the primary.
                 diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
@@ -1447,8 +1445,6 @@ class SkillIntegrator(BaseIntegrator):
                 parent_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                # Every physical target must report safety errors; warn/logger
-                # still restrict duplicate promotion summaries to the primary.
                 diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
