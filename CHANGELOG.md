@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Registry-only mode (`PROXY_REGISTRY_ONLY`) no longer enumerates refs from the upstream host. `apm outdated` and downloader ref listings return no remote refs instead of running `git ls-remote` against the source host, matching how Artifactory-backed dependencies are already treated, and `apm install` / `apm lock` reject a semver range with an actionable error rather than resolving it from upstream tags. Behaviour is unchanged when the mode is off. (#3448)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

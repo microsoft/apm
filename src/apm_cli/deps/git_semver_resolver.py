@@ -39,6 +39,7 @@ __all__ = [
     "GitSemverResolution",
     "GitSemverResolver",
     "NoMatchingTagError",
+    "RegistryOnlySemverError",
     "iter_semver_tags",
     "utc_now_iso",
 ]
@@ -96,6 +97,16 @@ class NoMatchingTagError(Exception):
         super().__init__(f"{summary}\n{hint}" if hint else summary)
         self.summary = summary
         self.hint = hint
+
+
+class RegistryOnlySemverError(NoMatchingTagError):
+    """Raised when a semver range is requested in registry-only mode.
+
+    Subclasses :class:`NoMatchingTagError` so existing callers that
+    already handle range-resolution failure keep working; the distinct
+    type lets callers that care tell "no tag matched" apart from "ranges
+    are unavailable in this mode".
+    """
 
 
 @dataclass(frozen=True)
@@ -258,7 +269,28 @@ class GitSemverResolver:
         NoMatchingTagError
             When no tag on the remote satisfies the constraint after
             trying the default patterns and the bare-version fallback.
+        RegistryOnlySemverError
+            When registry-only mode (``PROXY_REGISTRY_ONLY``) is active.
+            Ranges need a version listing, and the proxy exposes no
+            enumeration surface, so resolving one would require querying
+            the upstream host the mode exists to avoid.
         """
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            raise RegistryOnlySemverError(
+                summary=(
+                    f"Cannot resolve the range '{constraint}' for"
+                    f" '{owner_repo}' in registry-only mode."
+                ),
+                hint=(
+                    "PROXY_REGISTRY_ONLY is set, so the upstream host cannot be"
+                    " queried for a tag listing, and the proxy exposes no"
+                    " version enumeration surface. Pin an exact version"
+                    " instead, or unset PROXY_REGISTRY_ONLY to resolve ranges"
+                    " from the upstream host."
+                ),
+            )
         if remote_url is None:
             refs = self._ref_resolver.list_remote_refs(owner_repo)
         else:
