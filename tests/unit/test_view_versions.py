@@ -139,7 +139,7 @@ class TestDisplayVersionsRegistryOnly:
             patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=True),
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=proxy),
             patch.object(view, "_display_registry_versions") as display,
-            patch(view.GitHubPackageDownloader.list_remote_refs) as ls_remote,
+            patch("apm_cli.commands.view.GitHubPackageDownloader.list_remote_refs") as ls_remote,
         ):
             view.display_versions("acme-org/acme-pkg", logger)
 
@@ -156,7 +156,7 @@ class TestDisplayVersionsRegistryOnly:
         with (
             patch("apm_cli.deps.registry_proxy.is_enforce_only", return_value=True),
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch(view.GitHubPackageDownloader.list_remote_refs) as ls_remote,
+            patch("apm_cli.commands.view.GitHubPackageDownloader.list_remote_refs") as ls_remote,
         ):
             with pytest.raises(SystemExit) as exc:
                 view.display_versions("acme-org/acme-pkg", logger)
