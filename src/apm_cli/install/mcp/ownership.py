@@ -71,10 +71,12 @@ def compare_native_mcp_connection(
     if managed and isinstance(stored_config, dict):
         try:
             dependency = MCPDependency.from_dict(stored_config)
+            legacy_baseline = requested
             if dependency.is_self_defined:
                 expected = client.render_server_config(
                     MCPIntegrator._build_self_defined_info(dependency)
                 )
+                legacy_baseline = expected
                 if requested is not None:
                     comparison = client.project_managed_server_config(
                         native, baseline=expected, requested=requested
@@ -87,6 +89,18 @@ def compare_native_mcp_connection(
                 matches_baseline = mcp_native_hash(comparable) == native_hash
                 if matches_baseline and managed_fields is not None:
                     managed_fields.update(comparable)
+            # An entry an earlier APM release rendered differently (e.g. with
+            # expanded references) is still managed when the adapter can prove it.
+            if (
+                not matches_baseline
+                and legacy_baseline is not None
+                and client.matches_legacy_managed_config(
+                    native, legacy_baseline, native_hash=native_hash
+                )
+            ):
+                matches_baseline = True
+                if managed_fields is not None:
+                    managed_fields.update(client.managed_server_config(native))
         except (TypeError, ValueError):
             logger.debug("Unusable MCP baseline for %s on %s", name, client.target_name)
     if requested is not None:

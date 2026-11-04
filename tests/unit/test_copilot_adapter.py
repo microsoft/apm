@@ -534,19 +534,19 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
     behaviour. Runtime-capable targets are tested separately after an
     individual audit."""
 
-    def _adapter(self, cls):
+    def _adapter(self, cls, **kwargs):
         with (
             patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
-            return cls()
+            return cls(**kwargs)
 
-    def test_claude_still_resolves_to_literal(self):
-        """Claude Desktop config does NOT support runtime substitution --
-        this adapter MUST keep resolving."""
+    def test_claude_user_scope_still_resolves_to_literal(self):
+        """Only Claude's project ``.mcp.json`` keeps placeholders (#3252);
+        user-scope ``~/.claude.json`` keeps install-time resolution."""
         from apm_cli.adapters.client.claude import ClaudeClientAdapter
 
-        adapter = self._adapter(ClaudeClientAdapter)
+        adapter = self._adapter(ClaudeClientAdapter, user_scope=True)
         self.assertFalse(adapter._supports_runtime_env_substitution)
         with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
             result = adapter._resolve_env_variable(
@@ -704,9 +704,9 @@ class TestLegacyModeStdioEnvBlock(unittest.TestCase):
     pre-fix latent bug returns ``{}`` and every self-defined stdio MCP
     server silently loses its env block.
 
-    Claude is exercised as the representative legacy-mode subclass; the
-    method now lives on ``MCPClientAdapter`` so the contract is shared
-    with every adapter that inherits the base.
+    Claude at user scope is exercised as the representative legacy-mode
+    subclass; the method now lives on ``MCPClientAdapter`` so the contract
+    is shared with every adapter that inherits the base.
     """
 
     def _adapter(self):
@@ -716,7 +716,7 @@ class TestLegacyModeStdioEnvBlock(unittest.TestCase):
             patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
-            return ClaudeClientAdapter()
+            return ClaudeClientAdapter(user_scope=True)
 
     def test_dict_shape_resolves_all_three_placeholder_syntaxes(self):
         adapter = self._adapter()

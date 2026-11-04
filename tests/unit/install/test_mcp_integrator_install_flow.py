@@ -453,19 +453,21 @@ class TestRunMcpInstallSelfDefined:
         assert install.call_args.kwargs["self_defined_deps"] == [sd_dep]
 
     @pytest.mark.parametrize(
-        ("runtime", "signal_dir", "config_relpath"),
+        ("runtime", "signal_dir", "config_relpath", "expected_token"),
         [
-            ("claude", ".claude", ".mcp.json"),
-            ("codex", ".codex", ".codex/config.toml"),
+            # Claude Code expands ${VAR} in .mcp.json at server start (#3252).
+            ("claude", ".claude", ".mcp.json", "${MY_TOKEN}"),
+            ("codex", ".codex", ".codex/config.toml", "repro-secret-not-a-real-token"),
         ],
     )
-    def test_self_defined_stdio_env_placeholders_resolve_from_process_env(
+    def test_self_defined_stdio_env_placeholders_follow_target_support(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         runtime: str,
         signal_dir: str,
         config_relpath: str,
+        expected_token: str,
     ) -> None:
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
         from apm_cli.models.dependency.mcp import MCPDependency
@@ -499,7 +501,7 @@ class TestRunMcpInstallSelfDefined:
             ]["env"]
         else:
             env_block = toml.load(config_path)["mcp_servers"]["env-demo"]["env"]
-        assert env_block["MY_TOKEN"] == "repro-secret-not-a-real-token"
+        assert env_block["MY_TOKEN"] == expected_token
         assert env_block["LITERAL_VALUE"] == "literal-value"
 
     def test_self_defined_non_stdio_env_remains_env_overrides(self) -> None:

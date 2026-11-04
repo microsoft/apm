@@ -7,6 +7,7 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
+import logging
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,8 @@ from apm_cli.utils.yaml_io import load_yaml
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import EffectiveTargetDecision
+
+_log = logging.getLogger(__name__)
 
 # IntelliJ owns a fail-closed atomic user-config contract. Other adapters retain
 # their existing best-effort behavior when a composed target set includes an
@@ -359,7 +362,18 @@ def _install_registry_group(  # noqa: PLR0913
                             if native_hashes is not None:
                                 native_hashes.get(rt, {}).pop(dep, None)
                         if state is NativeMcpConnectionState.CONFLICT:
-                            _report_native_conflict(dep, rt, client, logger, native_conflicts)
+                            _report_native_conflict(
+                                dep,
+                                rt,
+                                client,
+                                logger,
+                                native_conflicts,
+                                render=lambda client=client, dep=dep: client.render_server_config(
+                                    server_info_cache[dep],
+                                    env_overrides=shared_env_vars,
+                                    runtime_vars=shared_runtime_vars,
+                                ),
+                            )
                             continue
                         if state in {
                             NativeMcpConnectionState.MATCHING_MANAGED,
@@ -433,10 +447,32 @@ def _install_registry_group(  # noqa: PLR0913
 
 
 def _report_native_conflict(
-    name: str, runtime: str, client: Any, logger: Any, conflicts: list[str]
+    name: str,
+    runtime: str,
+    client: Any,
+    logger: Any,
+    conflicts: list[str],
+    render: Any = None,
 ) -> None:
-    """Report a preserved native collision identically for both dependency sources."""
+    """Report a preserved native collision identically for both dependency sources.
+
+    *render* returns the requested native entry, letting the adapter add
+    target-specific guidance (names only) about the preserved connection.
+    """
     conflicts.append(f"{name} ({runtime})")
+    guidance = None
+    if render is not None:
+        try:
+            guidance = client.native_conflict_guidance(name, render())
+        except (TypeError, ValueError):
+            _log.debug("No conflict guidance for %s on %s", name, runtime, exc_info=True)
+    if guidance:
+        logger.error(
+            f"MCP server '{name}' conflicts with the existing {runtime} "
+            f"connection in {client.get_config_path()}. Preserved that connection. "
+            f"{guidance} --force does not take ownership of user connections."
+        )
+        return
     logger.error(
         f"MCP server '{name}' conflicts with the existing {runtime} "
         f"connection in {client.get_config_path()}. Preserved that connection. "
@@ -1184,7 +1220,16 @@ def _install_self_defined_deps(
                     if native_hashes is not None:
                         native_hashes.get(rt, {}).pop(dep.name, None)
                 if state is NativeMcpConnectionState.CONFLICT:
-                    _report_native_conflict(dep.name, rt, client, logger, native_conflicts)
+                    _report_native_conflict(
+                        dep.name,
+                        rt,
+                        client,
+                        logger,
+                        native_conflicts,
+                        render=lambda client=client, info=synthetic_info: (
+                            client.render_server_config(info)
+                        ),
+                    )
                     continue
                 if state in {
                     NativeMcpConnectionState.MATCHING_MANAGED,
@@ -1410,6 +1455,13 @@ def run_mcp_install(  # noqa: PLR0913
         console=console,
         logger=logger,
     )
+    claude_targeted = "claude" in target_runtimes
+    if claude_targeted:
+        # Claude's diagnostics cover every server of this run, so they are
+        # emitted once at the end rather than after the first server.
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+        ClaudeClientAdapter.reset_install_run_state()
     if managed_target_servers is not None:
         from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
@@ -1575,11 +1627,15 @@ def run_mcp_install(  # noqa: PLR0913
             native_conflicts.append(str(exc))
 
     if native_conflicts:
+        if claude_targeted:
+            ClaudeClientAdapter.emit_install_run_summary()
         raise MCPNativeConflictError(
             "\n".join(native_conflicts), wrote_connections=bool(written_connections)
         )
 
     # Close the panel
     _print_mcp_summary(console, configured_count, successful_updates)
+    if claude_targeted:
+        ClaudeClientAdapter.emit_install_run_summary()
 
     return configured_count

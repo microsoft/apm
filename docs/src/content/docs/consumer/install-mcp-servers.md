@@ -428,8 +428,9 @@ credential value is not written into the generated config. Literal-only
 targets keep their existing automatic-token behavior. If none of the
 listed variables is set, no automatic header is added.
 
-Reinstalling the same declaration does not automatically repair credentials
-already written to runtime config. Follow
+Except for Claude Code's project `.mcp.json` (see below), reinstalling the
+same declaration does not automatically repair credentials already written to
+runtime config. Follow
 [Repairing existing credentials](#repairing-existing-credentials) to preserve
 custom settings and rotate exposed credentials.
 For other authenticated remote servers, set headers explicitly with
@@ -466,6 +467,16 @@ Preserve the authorization scheme, for example `Bearer ${env:GITHUB_TOKEN}`,
 and make the variable available to Cursor. Keep all other fields and servers,
 and inspect the diff. An ordinary reinstall of the same declaration does not
 perform this repair.
+
+For Claude Code at project scope, the next `apm install` replaces values in
+`.mcp.json` that APM wrote earlier, either because APM recorded writing that
+exact entry or because the entry matches the declaration expanded from the
+current environment. It prints the affected variable names. An entry APM
+cannot confirm it wrote is kept, and install reports which fields hold values.
+Replace those yourself with `${NAME}` references, for example
+`Bearer ${GITHUB_TOKEN}`. Export the variables before starting `claude`.
+Claude Code still asks you to approve project servers; APM does not change
+that approval.
 
 If you instead regenerate an entry, save its custom fields first, remove only
 that server entry, reinstall, and restore those fields without restoring the

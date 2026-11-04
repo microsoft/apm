@@ -115,11 +115,12 @@ shipped. Do not embed tokens. Two patterns work:
 ```
 
 Headers and env values are never shell-expanded by APM. For harnesses
-that support runtime env placeholders (for example VS Code and Kiro),
-APM preserves the placeholder so the harness resolves it when the
-server starts or the request is made. For harnesses that require
-literal values (for example Claude Code and Codex self-defined stdio
-env), APM resolves `${VAR}` from the install process environment,
+that support runtime env placeholders (for example VS Code, Kiro, and
+Claude Code's project `.mcp.json`), APM preserves the placeholder so the
+harness resolves it when the server starts or the request is made. For
+harnesses that require literal values (for example Codex self-defined
+stdio env) and for Claude Code's user-scope `~/.claude.json`, APM
+resolves `${VAR}` from the install process environment,
 prompts interactively when the terminal is attached, and leaves
 unresolved placeholders unchanged in non-interactive installs. Keep the
 real secret in the consumer's environment (or their secret manager).

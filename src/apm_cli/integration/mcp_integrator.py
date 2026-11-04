@@ -1307,7 +1307,8 @@ class MCPIntegrator:
                     all_ok = False
 
             # Emit aggregated post-install diagnostics for runtimes that
-            # support runtime env-var substitution (currently Copilot CLI).
+            # support runtime env-var substitution (currently Copilot CLI;
+            # Claude Code's are emitted once per run by run_mcp_install).
             # Safe no-op for runtimes whose adapter doesn't aggregate state.
             try:
                 if runtime == "copilot":

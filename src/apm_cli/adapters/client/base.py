@@ -391,6 +391,20 @@ class MCPClientAdapter(ABC):
         """Compare the native connection with the adapter's rendered baseline."""
         return native == expected
 
+    def matches_legacy_managed_config(
+        self, native: object, expected: dict, *, native_hash: str | None = None
+    ) -> bool:
+        """Whether *native* is an older APM rendering of *expected*.
+
+        Adapters whose native representation changed override this with the
+        evidence that proves an existing entry was APM-generated.
+        """
+        return False
+
+    def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
+        """Extra target-specific guidance for a preserved conflicting entry."""
+        return None
+
     def managed_server_config(self, native: dict) -> dict:
         """Return connection data for an actual-write fingerprint."""
         return dict(native)

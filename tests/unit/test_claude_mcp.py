@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
+from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.core.scope import InstallScope
 from apm_cli.factory import ClientFactory
 from apm_cli.utils.path_security import PathTraversalError
@@ -251,6 +252,304 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
                 "RATE": "0.5",
             },
         )
+
+
+class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
+    """#3252: the committed ``.mcp.json`` keeps ``${VAR}`` references.
+
+    Claude Code expands them when it starts the server, so APM must not
+    resolve secrets at install time and bake them into the project.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / ".claude").mkdir()
+        self.mcp_path = self.root / ".mcp.json"
+        ClaudeClientAdapter.reset_install_run_state()
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        ClaudeClientAdapter.reset_install_run_state()
+        CopilotClientAdapter.reset_install_run_state()
+        self.tmp.cleanup()
+
+    def _configure(self, adapter, server_info):
+        with patch.object(adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = server_info
+            self.assertTrue(adapter.configure_mcp_server(server_info["name"]))
+
+    def _configure_project(self, server_info):
+        self._configure(ClaudeClientAdapter(project_root=self.root), server_info)
+        return self.mcp_path.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _stdio_info(name, env):
+        return {"name": name, "_raw_stdio": {"command": "uvx", "args": [name], "env": env}}
+
+    def test_self_defined_env_references_stay_placeholders(self):
+        env = {
+            "JIRA_TOKEN": "${JIRA_TOKEN}",
+            "JIRA_URL": "${env:JIRA_URL}",
+            "LEGACY": "<LEGACY_TOKEN>",
+            "LOG_LEVEL": "debug",
+        }
+        secrets = {
+            "JIRA_TOKEN": "token-sentinel",
+            "JIRA_URL": "https://jira.invalid",
+            "LEGACY_TOKEN": "legacy-sentinel",
+        }
+        with patch.dict(os.environ, secrets):
+            text = self._configure_project(self._stdio_info("atlassian", env))
+
+        self.assertEqual(
+            json.loads(text)["mcpServers"]["atlassian"]["env"],
+            {
+                "JIRA_TOKEN": "${JIRA_TOKEN}",
+                "JIRA_URL": "${JIRA_URL}",
+                "LEGACY": "${LEGACY_TOKEN}",
+                "LOG_LEVEL": "debug",
+            },
+        )
+        for value in secrets.values():
+            self.assertNotIn(value, text)
+
+    def test_registry_required_env_becomes_placeholder(self):
+        info = {
+            "name": "npm-srv",
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "@scope/tool",
+                    "environment_variables": [{"name": "API_KEY", "required": True}],
+                }
+            ],
+        }
+        with patch.dict(os.environ, {"API_KEY": "token-sentinel"}):
+            text = self._configure_project(info)
+
+        self.assertEqual(json.loads(text)["mcpServers"]["npm-srv"]["env"]["API_KEY"], "${API_KEY}")
+        self.assertNotIn("token-sentinel", text)
+
+    def test_reinstall_over_baked_secret_reports_claude_diagnostics(self):
+        self.mcp_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "atlassian": {
+                            "type": "stdio",
+                            "command": "uvx",
+                            "env": {"JIRA_TOKEN": "baked-sentinel"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.dict(os.environ):
+            os.environ.pop("JIRA_TOKEN", None)
+            text = self._configure_project(
+                self._stdio_info("atlassian", {"JIRA_TOKEN": "${JIRA_TOKEN}"})
+            )
+            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+                ClaudeClientAdapter.emit_install_run_summary()
+
+        self.assertNotIn("baked-sentinel", text)
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("previously stored as plaintext in .mcp.json", joined)
+        self.assertIn("Claude Code will resolve 1 environment variable", joined)
+        self.assertIn("before running 'claude'", joined)
+        self.assertIn("JIRA_TOKEN", joined)
+        # Claude's diagnostics must not leak into Copilot CLI's summary.
+        self.assertEqual(CopilotClientAdapter._security_upgraded_keys, set())
+        self.assertEqual(CopilotClientAdapter._unset_env_keys_by_server, {})
+
+    def test_user_scope_keeps_install_time_resolution(self):
+        home = self.root / "home"
+        home.mkdir()
+        with (
+            patch.object(Path, "home", return_value=home),
+            patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "", "TOK": "user-secret"}),
+        ):
+            self._configure(
+                ClaudeClientAdapter(user_scope=True), self._stdio_info("srv", {"TOK": "${TOK}"})
+            )
+
+        data = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["mcpServers"]["srv"]["env"], {"TOK": "user-secret"})
+
+    def test_command_and_url_references_use_claude_syntax(self):
+        stdio = {
+            "name": "cmd-demo",
+            "_raw_stdio": {"command": "${env:DEMO_CMD}", "args": [], "env": {}},
+        }
+        remote = {
+            "name": "url-demo",
+            "remotes": [{"url": "https://<DEMO_HOST>/${env:DEMO_PATH}", "transport_type": "http"}],
+        }
+        self._configure_project(stdio)
+        data = json.loads(self._configure_project(remote))["mcpServers"]
+
+        self.assertEqual(data["cmd-demo"]["command"], "${DEMO_CMD}")
+        self.assertEqual(data["url-demo"]["url"], "https://${DEMO_HOST}/${DEMO_PATH}")
+
+    def test_defaults_are_kept_in_every_field(self):
+        stdio = {
+            "name": "defaults",
+            "_raw_stdio": {
+                "command": "${DEMO_CMD:-uvx}",
+                "args": ["--mode=${DEMO_MODE:-safe}"],
+                "env": {"LEVEL": "${DEMO_LEVEL:-info}"},
+            },
+        }
+        remote = {
+            "name": "remote-defaults",
+            "remotes": [
+                {
+                    "url": "https://${DEMO_HOST:-mcp.example.invalid}/mcp",
+                    "transport_type": "http",
+                    "headers": [{"name": "X-Region", "value": "${DEMO_REGION:-eu}"}],
+                }
+            ],
+        }
+        self._configure_project(stdio)
+        data = json.loads(self._configure_project(remote))["mcpServers"]
+
+        self.assertEqual(data["defaults"]["command"], "${DEMO_CMD:-uvx}")
+        self.assertEqual(data["defaults"]["args"], ["--mode=${DEMO_MODE:-safe}"])
+        self.assertEqual(data["defaults"]["env"], {"LEVEL": "${DEMO_LEVEL:-info}"})
+        self.assertEqual(
+            data["remote-defaults"]["url"], "https://${DEMO_HOST:-mcp.example.invalid}/mcp"
+        )
+        self.assertEqual(data["remote-defaults"]["headers"], {"X-Region": "${DEMO_REGION:-eu}"})
+
+    def test_missing_variable_summary_covers_every_field_but_skips_defaults(self):
+        info = {
+            "name": "missing",
+            "_raw_stdio": {
+                "command": "${MISSING_CMD}",
+                "args": ["--token=${MISSING_ARG}", "--mode=${DEFAULTED_ARG:-safe}"],
+                "env": {"TOKEN": "${MISSING_ENV}"},
+            },
+        }
+        with patch.dict(os.environ):
+            for name in ("MISSING_CMD", "MISSING_ARG", "DEFAULTED_ARG", "MISSING_ENV"):
+                os.environ.pop(name, None)
+            self._configure_project(info)
+            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+                ClaudeClientAdapter.emit_install_run_summary()
+
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("MISSING_ARG, MISSING_CMD, MISSING_ENV", joined)
+        self.assertNotIn("DEFAULTED_ARG", joined)
+
+    def test_upgrade_notice_names_values_replaced_in_args_and_headers(self):
+        self.mcp_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "remote": {
+                            "type": "http",
+                            "url": "https://mcp.example.invalid/mcp",
+                            "headers": {"Authorization": "Bearer baked-sentinel"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        remote = {
+            "name": "remote",
+            "remotes": [
+                {
+                    "url": "https://mcp.example.invalid/mcp",
+                    "transport_type": "http",
+                    "headers": [{"name": "Authorization", "value": "Bearer ${REMOTE_TOKEN}"}],
+                }
+            ],
+        }
+        with patch.dict(os.environ, {"REMOTE_TOKEN": "baked-sentinel"}):
+            text = self._configure_project(remote)
+            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+                ClaudeClientAdapter.emit_install_run_summary()
+
+        self.assertNotIn("baked-sentinel", text)
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("Affected: REMOTE_TOKEN", joined)
+        self.assertIn("rotate these credentials", joined)
+        self.assertNotIn("baked-sentinel", joined)
+
+
+_LEGACY_EXPECTED = {
+    "type": "stdio",
+    "command": "uvx",
+    "args": ["--token=${OLD_TOKEN}"],
+    "env": {"TOKEN": "${OLD_TOKEN}", "MODE": "${OLD_MODE:-safe}", "STATIC": "debug"},
+}
+
+
+class TestClaudeLegacyEntries(unittest.TestCase):
+    """Entries written before #3252 kept expanded values in ``.mcp.json``."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / ".claude").mkdir()
+        self.adapter = ClaudeClientAdapter(project_root=self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _native(self, value):
+        return json.loads(json.dumps(_LEGACY_EXPECTED).replace("${OLD_TOKEN}", value))
+
+    def test_expansion_from_current_environment_is_recognized(self):
+        with patch.dict(os.environ, {"OLD_TOKEN": "old-sentinel"}):
+            self.assertTrue(
+                self.adapter.matches_legacy_managed_config(
+                    self._native("old-sentinel"), _LEGACY_EXPECTED
+                )
+            )
+
+    def test_other_values_are_not_recognized(self):
+        with patch.dict(os.environ, {"OLD_TOKEN": "rotated"}):
+            self.assertFalse(
+                self.adapter.matches_legacy_managed_config(
+                    self._native("old-sentinel"), _LEGACY_EXPECTED
+                )
+            )
+
+    def test_unresolved_reference_in_old_spelling_is_recognized(self):
+        with patch.dict(os.environ):
+            os.environ.pop("OLD_TOKEN", None)
+            native = self._native("${env:OLD_TOKEN}")
+            self.assertTrue(self.adapter.matches_legacy_managed_config(native, _LEGACY_EXPECTED))
+
+    def test_unresolved_registry_variable_written_empty_is_recognized(self):
+        expected = {"type": "stdio", "command": "npx", "args": [], "env": {"API_KEY": "${API_KEY}"}}
+        native = {"type": "stdio", "command": "npx", "args": [], "env": {"API_KEY": ""}}
+        with patch.dict(os.environ):
+            os.environ.pop("API_KEY", None)
+            self.assertTrue(self.adapter.matches_legacy_managed_config(native, expected))
+
+    def test_extra_or_missing_keys_are_not_recognized(self):
+        native = self._native("old-sentinel")
+        native["env"]["EXTRA"] = "user-added"
+        with patch.dict(os.environ, {"OLD_TOKEN": "old-sentinel"}):
+            self.assertFalse(self.adapter.matches_legacy_managed_config(native, _LEGACY_EXPECTED))
+
+    def test_conflict_guidance_names_fields_without_values(self):
+        native = self._native("someone-elses-value")
+        self.adapter.update_config({"legacy": native})
+        guidance = self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED)
+
+        self.assertIn("Fields args[0], env.TOKEN hold values", guidance)
+        self.assertIn("rotate those credentials", guidance)
+        self.assertNotIn("someone-elses-value", guidance)
+
+    def test_conflict_guidance_is_silent_without_expanded_fields(self):
+        self.adapter.update_config({"legacy": dict(_LEGACY_EXPECTED, command="other")})
+        self.assertIsNone(self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED))
 
 
 class TestClaudeClientAdapterUser(unittest.TestCase):

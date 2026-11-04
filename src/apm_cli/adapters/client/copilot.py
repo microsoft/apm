@@ -46,6 +46,12 @@ class CopilotClientAdapter(MCPClientAdapter):
     target_name: str = "copilot"
     mcp_servers_key: str = "mcpServers"
 
+    # Wording for the post-install env-var diagnostics, so subclasses that
+    # reuse them (Claude Code) name their own config file and launch command.
+    _runtime_config_label: ClassVar[str] = "the Copilot config"
+    _runtime_launch_command: ClassVar[str] = "gh copilot"
+    _runtime_upgrade_guidance: ClassVar[str] = ""
+
     # When True, env-var placeholders (``${VAR}``, ``${env:VAR}``, legacy
     # ``<VAR>``) are translated to Copilot CLI's native runtime-substitution
     # syntax (``${VAR}``) and emitted into mcp-config.json verbatim. The
@@ -55,12 +61,11 @@ class CopilotClientAdapter(MCPClientAdapter):
     # environment and the literal value is baked into the config file
     # (legacy pre-#1152 behaviour).
     #
-    # Subclasses (Windsurf / OpenCode / Claude / Gemini) override this to
-    # ``False`` until their respective config formats are individually audited
-    # for runtime-substitution support. Cursor has audited native
-    # ``${env:VAR}`` support. Critically, Claude Desktop's config format does
-    # NOT support runtime substitution -- it MUST keep resolving at install
-    # time.
+    # Subclasses (Windsurf / OpenCode / Gemini) override this to ``False``
+    # until their respective config formats are individually audited for
+    # runtime-substitution support. Cursor has audited native ``${env:VAR}``
+    # support. Claude enables it for the project-scoped ``.mcp.json`` (see
+    # ``ClaudeClientAdapter``).
     _supports_runtime_env_substitution: bool = True
 
     # Process-wide aggregation of legacy ``<VAR>`` offenders, keyed by
@@ -199,22 +204,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            # Reset per-server tracking before formatting (so the per-server
-            # summary line and aggregated diagnostics reflect this server only).
-            self._last_env_placeholder_keys = set()
-            self._last_legacy_angle_vars = set()
-
-            # Detect security upgrade: was the previous on-disk config for
-            # this server holding literal (resolved) values for env keys
-            # we are about to replace with ${KEY} placeholders? If so,
-            # remember the affected keys for the post-install notice. We
-            # snapshot BEFORE writing the new config.
-            previously_baked_keys = set()
-            previously_baked_headers = False
-            if self._supports_runtime_env_substitution:
-                previously_baked_keys, previously_baked_headers = (
-                    self._collect_previously_baked_keys(server_url, server_name)
-                )
+            previously_baked = self._begin_env_tracking(server_url, server_name)
 
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -224,30 +214,53 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Update configuration using the chosen key
             self.update_config({config_key: server_config})
 
-            # Aggregate diagnostics for the post-install summary.
-            if self._supports_runtime_env_substitution:
-                if self._last_legacy_angle_vars:
-                    self._legacy_angle_offenders_by_server[config_key] = set(
-                        self._last_legacy_angle_vars
-                    )
-                # Only flag a security upgrade when the previously baked keys
-                # actually overlap with what we are now placeholderizing -- OR
-                # when the previous on-disk state had baked HTTP header
-                # literals (which don't expose env-var names directly, so we
-                # surface every newly-placeholderised key for this server).
-                upgraded = previously_baked_keys & self._last_env_placeholder_keys
-                if previously_baked_headers and self._last_env_placeholder_keys:
-                    upgraded = upgraded | self._last_env_placeholder_keys
-                if upgraded:
-                    self._security_upgraded_keys.update(upgraded)
-
-            # Per-server install line with env-var summary parenthetical.
-            self._emit_install_summary(config_key, server_config)
+            self._record_env_diagnostics(config_key, server_config, previously_baked)
             return True
 
         except Exception as e:
             print(f"Error configuring MCP server: {e}")
             return False
+
+    def _begin_env_tracking(self, server_url, server_name):
+        """Reset per-server env tracking and snapshot baked on-disk values.
+
+        Must run BEFORE the new config is formatted and written. Returns the
+        snapshot that :meth:`_record_env_diagnostics` consumes.
+        """
+        # Reset per-server tracking before formatting (so the per-server
+        # summary line and aggregated diagnostics reflect this server only).
+        self._last_env_placeholder_keys = set()
+        self._last_legacy_angle_vars = set()
+
+        # Detect security upgrade: was the previous on-disk config for
+        # this server holding literal (resolved) values for env keys
+        # we are about to replace with ${KEY} placeholders? If so,
+        # remember the affected keys for the post-install notice.
+        if not self._supports_runtime_env_substitution:
+            return set(), False
+        return self._collect_previously_baked_keys(server_url, server_name)
+
+    def _record_env_diagnostics(self, config_key, server_config, previously_baked):
+        """Aggregate this server's env diagnostics for the post-install summary."""
+        previously_baked_keys, previously_baked_headers = previously_baked
+        if self._supports_runtime_env_substitution:
+            if self._last_legacy_angle_vars:
+                self._legacy_angle_offenders_by_server[config_key] = set(
+                    self._last_legacy_angle_vars
+                )
+            # Only flag a security upgrade when the previously baked keys
+            # actually overlap with what we are now placeholderizing -- OR
+            # when the previous on-disk state had baked HTTP header
+            # literals (which don't expose env-var names directly, so we
+            # surface every newly-placeholderised key for this server).
+            upgraded = previously_baked_keys & self._last_env_placeholder_keys
+            if previously_baked_headers and self._last_env_placeholder_keys:
+                upgraded = upgraded | self._last_env_placeholder_keys
+            if upgraded:
+                self._security_upgraded_keys.update(upgraded)
+
+        # Per-server install line with env-var summary parenthetical.
+        self._emit_install_summary(config_key, server_config)
 
     def _collect_previously_baked_keys(self, server_url, server_name):
         """Return ``(env_keys, headers_were_baked)`` for the existing on-disk
@@ -357,9 +370,15 @@ class CopilotClientAdapter(MCPClientAdapter):
             _emit_separator_once()
             _rich_warning(
                 f"Security improvement: {count} environment {noun} previously stored as "
-                f"plaintext in the Copilot config are now resolved at runtime.\n"
+                f"plaintext in {cls._runtime_config_label} are now resolved at runtime.\n"
                 f"    Affected: {affected}\n"
-                f"    Ensure these are exported in your shell before running 'gh copilot'",
+                f"    Ensure these are exported in your shell before running "
+                f"'{cls._runtime_launch_command}'"
+                + (
+                    f"\n    {cls._runtime_upgrade_guidance}"
+                    if cls._runtime_upgrade_guidance
+                    else ""
+                ),
                 symbol="warning",
             )
         if cls._unset_env_keys_by_server:
@@ -372,11 +391,11 @@ class CopilotClientAdapter(MCPClientAdapter):
             noun = "variable" if count == 1 else "variables"
             _emit_separator_once()
             _rich_warning(
-                f"Copilot CLI will resolve {count} environment {noun} at runtime "
+                f"{cls._client_label} will resolve {count} environment {noun} at runtime "
                 f"that {'is' if count == 1 else 'are'} not currently set: "
                 f"{', '.join(sorted_unset)}.\n"
                 f"    Export {'it' if count == 1 else 'them'} in your shell before "
-                f"running 'gh copilot', e.g.:\n"
+                f"running '{cls._runtime_launch_command}', e.g.:\n"
                 f"      export {export_hint}",
                 symbol="warning",
             )

@@ -280,6 +280,7 @@ export default defineConfig({
 						{ label: 'Lockfile spec', slug: 'reference/lockfile-spec' },
 						{ label: 'Policy schema', slug: 'reference/policy-schema' },
 						{ label: 'Targets matrix', slug: 'reference/targets-matrix' },
+						{ label: 'MCP variable compatibility', slug: 'reference/mcp-variable-compatibility' },
 						{ label: 'Primitive types', slug: 'reference/primitive-types' },
 						{ label: 'Package types', slug: 'reference/package-types' },
 						{ label: 'Baseline checks', slug: 'reference/baseline-checks' },

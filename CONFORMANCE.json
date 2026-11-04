@@ -761,6 +761,19 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-026",
+      "keyword": "MUST",
+      "section": "4.5",
+      "status": "active",
+      "test_count": 3,
+      "tests": [
+        "tests/spec_conformance/test_claude_mcp_reference_reqs.py::test_project_config_keeps_references_instead_of_values",
+        "tests/spec_conformance/test_claude_mcp_reference_reqs.py::test_reinstall_keeps_values_it_cannot_show_it_wrote",
+        "tests/spec_conformance/test_claude_mcp_reference_reqs.py::test_reinstall_replaces_values_the_consumer_wrote"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1850,7 +1863,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 101,
+      "active": 102,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1874,5 +1887,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 136
+  "total_requirements": 137
 }

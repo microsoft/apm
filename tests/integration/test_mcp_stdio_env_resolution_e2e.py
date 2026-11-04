@@ -1,4 +1,8 @@
-"""E2E guard for self-defined stdio MCP env placeholder resolution."""
+"""E2E guard for self-defined stdio MCP env placeholder resolution.
+
+Codex resolves references at install time; Claude Code expands them in the
+project ``.mcp.json`` at server start, so APM keeps them there (#3252).
+"""
 
 from __future__ import annotations
 
@@ -75,7 +79,7 @@ def _env_block(project_dir: Path, runtime: str) -> dict[str, str]:
     ],
 )
 @pytest.mark.parametrize("verbose", [False, True], ids=["default-output", "verbose-output"])
-def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
+def test_self_defined_stdio_env_placeholders_e2e(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     apm_binary_path: str,
@@ -83,7 +87,7 @@ def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
     signal_dir: str,
     verbose: bool,
 ) -> None:
-    """Real install writes process-env values for self-defined stdio env."""
+    """Real install keeps or resolves self-defined stdio env per target."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     (project_dir / signal_dir).mkdir()
@@ -101,10 +105,16 @@ def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
     )
 
     env_block = _env_block(project_dir, runtime)
-    assert env_block["APM_STDIO_E2E_TOKEN"] == secret_value
-    assert env_block["APM_STDIO_E2E_TOKEN"] != "${APM_STDIO_E2E_TOKEN}"
     assert env_block["APM_STDIO_E2E_UNSET_TOKEN"] == "${APM_STDIO_E2E_UNSET_TOKEN}"
     assert env_block["LITERAL_VALUE"] == "literal-value"
 
     observed_output = f"{result.stdout}\n{result.stderr}"
     assert secret_value not in observed_output
+
+    if runtime == "claude":
+        assert env_block["APM_STDIO_E2E_TOKEN"] == "${APM_STDIO_E2E_TOKEN}"
+        assert secret_value not in (project_dir / ".mcp.json").read_text(encoding="utf-8")
+        assert "Claude Code will resolve 1 environment variable" in observed_output
+        assert "APM_STDIO_E2E_UNSET_TOKEN" in observed_output
+    else:
+        assert env_block["APM_STDIO_E2E_TOKEN"] == secret_value

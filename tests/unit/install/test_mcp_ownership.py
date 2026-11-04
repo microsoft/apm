@@ -427,3 +427,99 @@ def test_legacy_adoption_inspects_intellij_obsolete_config(tmp_path) -> None:
         )
 
     assert adopted == {"intellij": {"managed"}}
+
+
+# --- Claude entries expanded by releases before #3252 -----------------------
+
+_EXPANDED_STORED = {
+    "name": "managed",
+    "registry": False,
+    "transport": "stdio",
+    "command": "uvx",
+    "args": ["fixture-server", "--token=${OWN_TOKEN}"],
+    "env": {"TOKEN": "${OWN_TOKEN}", "MODE": "${OWN_MODE:-safe}", "STATIC": "debug"},
+}
+
+
+def _expanded_native(client: ClaudeClientAdapter, value: str) -> dict:
+    """Render the declaration, then expand ${OWN_TOKEN} like earlier releases did."""
+    rendered = client.render_server_config(
+        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_EXPANDED_STORED))
+    )
+    return json.loads(json.dumps(rendered).replace("${OWN_TOKEN}", value))
+
+
+def test_expanded_entry_from_earlier_release_is_managed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OWN_TOKEN", "own-sentinel")
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "own-sentinel")
+
+    result = _compare_managed_claude(client, _EXPANDED_STORED, native, _EXPANDED_STORED)
+
+    assert result is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+@pytest.mark.parametrize("environment_value", [None, "rotated-sentinel"])
+def test_expanded_entry_without_proof_is_a_conflict(
+    tmp_path, monkeypatch, environment_value: str | None
+) -> None:
+    monkeypatch.delenv("OWN_TOKEN", raising=False)
+    if environment_value is not None:
+        monkeypatch.setenv("OWN_TOKEN", environment_value)
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "own-sentinel")
+
+    result = _compare_managed_claude(client, _EXPANDED_STORED, native, _EXPANDED_STORED)
+
+    assert result is NativeMcpConnectionState.CONFLICT
+
+
+def test_recorded_write_hash_proves_expanded_entry(tmp_path, monkeypatch) -> None:
+    from apm_cli.install.mcp.ownership import mcp_native_hash
+
+    monkeypatch.delenv("OWN_TOKEN", raising=False)
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "typed-at-a-prompt")
+    Path(client.get_config_path()).write_text(
+        json.dumps({"mcpServers": {"managed": native}}), encoding="utf-8"
+    )
+
+    result = compare_native_mcp_connection(
+        client,
+        "managed",
+        requested_info=MCPIntegrator._build_self_defined_info(
+            MCPDependency.from_dict(_EXPANDED_STORED)
+        ),
+        stored_config=_EXPANDED_STORED,
+        managed=True,
+        native_hash=mcp_native_hash(native),
+    )
+
+    assert result is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+def test_unmanaged_expanded_entry_is_never_adopted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OWN_TOKEN", "own-sentinel")
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "own-sentinel")
+
+    result = _compare_managed_claude(
+        client, _EXPANDED_STORED, native, _EXPANDED_STORED, managed=False
+    )
+
+    assert result is NativeMcpConnectionState.CONFLICT
+
+
+def test_user_scope_expanded_entry_is_not_migrated(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OWN_TOKEN", "own-sentinel")
+    project = ClaudeClientAdapter(project_root=tmp_path)
+    expected = project.render_server_config(
+        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_EXPANDED_STORED))
+    )
+    native = _expanded_native(project, "own-sentinel")
+
+    assert project.matches_legacy_managed_config(native, expected) is True
+    assert (
+        ClaudeClientAdapter(user_scope=True).matches_legacy_managed_config(native, expected)
+        is False
+    )

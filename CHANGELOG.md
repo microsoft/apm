@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install --target claude` keeps `${VAR}` and `${VAR:-default}` references in the project's `.mcp.json` (`command`, `args`, `env`, `url`, `headers`) instead of prompting for and writing the real values, and reports missing variables by name for every server. Reinstall replaces values an earlier release wrote when APM can confirm it wrote them; otherwise it keeps the entry and names the fields to fix. User scope (`~/.claude.json`) is unchanged. The new MCP variable compatibility reference records every harness. -- by @Aaryan-Dadu (closes #3252)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
