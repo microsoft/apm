@@ -341,13 +341,15 @@ def _display_registry_versions(
     dep_ref: DependencyReference,
     logger: CommandLogger,
     registry_name: str | None = None,
+    registry_url_override: str | None = None,
 ) -> None:
     """List available versions from the configured registry for a registry dep.
 
     *registry_name* forces a specific registry by name (from the merged
     registries map), bypassing the lockfile/default resolution below. An empty
     string or ``None`` falls back to the lockfile's recorded registry, then the
-    configured default.
+    configured default. *registry_url_override* pins the URL directly, used by
+    registry-only mode to reach the proxy registry from the environment.
     """
     from ..deps.registry.auth import resolve_for_url
     from ..deps.registry.client import RegistryClient, RegistryError
@@ -389,6 +391,9 @@ def _display_registry_versions(
             known = ", ".join(sorted(registries)) or "none configured"
             logger.error(f"Registry '{explicit}' is not configured (known: {known})")
             sys.exit(1)
+
+    if registry_url is None:
+        registry_url = registry_url_override
 
     # Prefer resolved_url from lockfile: it names the exact registry used for
     # this dep and works for non-default registries without any extra lookup.
@@ -567,6 +572,21 @@ def display_versions(
     except ValueError as exc:
         logger.error(f"Invalid package reference '{package}': {exc}")
         sys.exit(1)
+
+    # (0) Registry-only deployments have no direct source-host egress: list the
+    # versions through the configured proxy registry instead of `git ls-remote`.
+    from ..deps.registry_proxy import RegistryConfig, is_enforce_only
+
+    if is_enforce_only():
+        proxy = RegistryConfig.from_env()
+        if proxy is None:
+            logger.error(
+                "Registry-only mode is active (PROXY_REGISTRY_ONLY) but "
+                "PROXY_REGISTRY_URL is not set; cannot enumerate versions."
+            )
+            sys.exit(1)
+        _display_registry_versions(package, dep_ref, logger, registry_url_override=proxy.url)
+        return
 
     # (1) Explicit --registry forces the registry path.
     if registry is not None:
