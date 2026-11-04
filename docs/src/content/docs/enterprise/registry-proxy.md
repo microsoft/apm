@@ -127,6 +127,11 @@ that listing. The consequences are:
   dependency. `apm outdated` cannot report newer versions.
 - A semver range in `apm.yml` (`^1.2.0`, `1.4.x`) fails with an
   actionable error rather than silently resolving from upstream tags.
+- An exact version (`1.2.3`) needs no listing, so it is kept as a
+  literal ref and resolved straight through the proxy. Note that
+  `ref_kind` classifies a bare `1.2.3` as a semver constraint rather
+  than a literal tag, so this is a deliberate exemption rather than a
+  side effect of that classification.
 
 Pin exact versions when running registry-only:
 

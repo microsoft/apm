@@ -270,10 +270,14 @@ class GitSemverResolver:
             When no tag on the remote satisfies the constraint after
             trying the default patterns and the bare-version fallback.
         RegistryOnlySemverError
-            When registry-only mode (``PROXY_REGISTRY_ONLY``) is active.
-            Ranges need a version listing, and the proxy exposes no
-            enumeration surface, so resolving one would require querying
-            the upstream host the mode exists to avoid.
+            When registry-only mode (``PROXY_REGISTRY_ONLY``) is active
+            and ``constraint`` is a range. A range needs a version
+            listing, and the proxy exposes no enumeration surface, so
+            resolving one would require querying the upstream host the
+            mode exists to avoid. Exact versions never reach this method
+            in registry-only mode: ``maybe_resolve_git_semver`` declines
+            the semver route for them so they resolve as a literal ref
+            through the proxy.
         """
         from .registry_proxy import is_enforce_only
 
@@ -285,10 +289,11 @@ class GitSemverResolver:
                 ),
                 hint=(
                     "PROXY_REGISTRY_ONLY is set, so the upstream host cannot be"
-                    " queried for a tag listing, and the proxy exposes no"
-                    " version enumeration surface. Pin an exact version"
-                    " instead, or unset PROXY_REGISTRY_ONLY to resolve ranges"
-                    " from the upstream host."
+                    " queried for the tag listing a range needs, and the proxy"
+                    " exposes no version enumeration surface. Pin one exact"
+                    " version (e.g. '1.2.3'), which resolves through the proxy"
+                    " without a listing, or unset PROXY_REGISTRY_ONLY to"
+                    " resolve ranges from the upstream host."
                 ),
             )
         if remote_url is None:
