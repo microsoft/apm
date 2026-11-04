@@ -6,7 +6,7 @@ Sub-commands:
 * ``apm lifecycle test``     -- preview (dry-run) a synthetic event; --execute to run
 * ``apm lifecycle init``     -- inject a starter lifecycle: block into apm.yml
 * ``apm lifecycle validate`` -- check all script files for errors
-* ``apm lifecycle trust``    -- trust apm.yml lifecycle: so its scripts run on install
+* ``apm lifecycle trust``    -- trust apm.yml lifecycle: so its scripts run
 * ``apm lifecycle untrust``  -- revoke trust for apm.yml lifecycle:
 """
 
@@ -114,6 +114,7 @@ def lifecycle(ctx: click.Context) -> None:
             "post-update",
             "pre-uninstall",
             "post-uninstall",
+            "pre-compile",
         ],
         case_sensitive=False,
     ),
@@ -530,7 +531,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
 
 @lifecycle.command(
     name="trust",
-    help="Trust the project apm.yml lifecycle: block so its scripts run on install.",
+    help="Trust the project apm.yml lifecycle: block so its scripts run.",
 )
 def lifecycle_trust() -> None:
     """Record trust for the current lifecycle: subtree of apm.yml.
@@ -556,7 +557,8 @@ def lifecycle_trust() -> None:
         return
 
     _rich_warning(
-        "Project lifecycle scripts can run arbitrary commands during apm install/update/uninstall.",
+        "Project lifecycle scripts can run arbitrary commands during apm install, update, "
+        "uninstall, and compile.",
         symbol="warning",
     )
     fingerprint = trust_project_scripts(project_file)

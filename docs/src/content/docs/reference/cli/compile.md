@@ -68,6 +68,12 @@ Resolution order for which targets to compile:
 Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.
 
+Before it reads sources, `apm compile` fires the `pre-compile`
+[lifecycle event](../../../enterprise/lifecycle-scripts/#generating-sources-before-compile),
+so a trusted project script can generate instructions under `.apm/` first.
+It does not fire with `--dry-run`, `--validate`, `--watch`, `--root`, or
+`--global`.
+
 The compiled output is scanned for hidden Unicode before any file is
 written. Critical findings cause the command to exit non-zero. See
 [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
@@ -336,6 +342,8 @@ re-runs compilation automatically.
   startup). Run `apm compile --clean` separately between watch sessions
   to remove orphaned outputs.
 - 1-second debounce to coalesce rapid edits.
+- `pre-compile` lifecycle scripts do not run; run `apm compile` once to
+  regenerate their output.
 - Press Ctrl+C to stop.
 - Combine with `--dry-run` to validate placement on every save without
   writing.

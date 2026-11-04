@@ -1,8 +1,8 @@
 """Lifecycle script models, runner, and discovery.
 
 APM supports lifecycle scripts that fire at key moments during install,
-update, and uninstall operations.  Scripts are configured in well-known
-locations discovered from three tiers:
+update, uninstall, and compile operations.  Scripts are configured in
+well-known locations discovered from three tiers:
 
 1. Policy  -- platform-specific admin directory (JSON drop-ins, unchanged)
 2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
@@ -54,6 +54,7 @@ LIFECYCLE_EVENTS = (
     "post-update",
     "pre-uninstall",
     "post-uninstall",
+    "pre-compile",
 )
 
 # Supported script action types.
@@ -577,8 +578,12 @@ def build_runner_from_context(
     logger: CommandLogger | None = None,
     verbose: bool = False,
     project_root: str | None = None,
+    events: tuple[str, ...] | None = None,
 ) -> LifecycleScriptRunner:
     """Create a LifecycleScriptRunner via file-based discovery.
+
+    ``events`` limits the runner to those events, so a command whose events
+    have no scripts returns before org-policy discovery.
 
     Scans policy (JSON), user (apm.yml lifecycle:), and project (apm.yml
     lifecycle:) script sources.
@@ -626,6 +631,8 @@ def build_runner_from_context(
         # abort the install/update/uninstall flow.
         project_entries, project_fp = [], None
     scripts.extend(project_entries)
+    if events is not None:
+        scripts = [script for script in scripts if script.event in events]
 
     if not scripts:
         return LifecycleScriptRunner(

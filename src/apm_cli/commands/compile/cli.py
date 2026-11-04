@@ -574,6 +574,54 @@ def _display_user_path(path: Path) -> str:
     return f"~/{rel.as_posix()}"
 
 
+def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -> None:
+    """Fire the ``pre-compile`` lifecycle event before sources are read.
+
+    Trusted scripts on this event can generate primitives under ``.apm/``
+    from the project's own toolchain, so compile reads what they wrote.
+    Best-effort, like every lifecycle event: a failing script never stops
+    the compile.
+    """
+    from ...core.lifecycle_scripts import (
+        LifecycleEvent,
+        PackageInfo,
+        build_runner_from_context,
+    )
+    from ...models.apm_package import APMPackage
+
+    manifest = source_root / APM_YML_FILENAME
+    if not manifest.exists():
+        return
+    project_root = str(source_root)
+    try:
+        runner = build_runner_from_context(
+            logger=logger, verbose=verbose, project_root=project_root, events=("pre-compile",)
+        )
+        packages = [
+            PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference)
+            for dep in APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        ]
+        event = LifecycleEvent.create(
+            event="pre-compile",
+            packages=packages,
+            scope="project",
+            working_directory=project_root,
+        )
+        runner.fire("pre-compile", event)
+    except Exception:
+        logger.verbose_detail("[i] pre-compile lifecycle scripts could not run")
+
+
+def _generate_sources(
+    logger: CommandLogger, verbose: bool, source_root: Path | None, *, clean: bool, run: bool
+) -> None:
+    """Run pre-compile scripts, then check the project they may have populated."""
+    if not run or source_root is None:
+        return
+    _fire_pre_compile(logger, verbose, source_root)
+    _validate_project(logger, False, source_root, allow_empty=clean)
+
+
 def _validate_project(
     logger: CommandLogger,
     dry_run: bool,
@@ -818,13 +866,20 @@ def _run_compilation(
     clean: bool,
     no_dedup: bool,
     source_root: Path | None = None,
+    *,
+    run_scripts: bool = False,
 ) -> None:
     """Main compilation flow: target resolution, config, compile, and output.
+
+    With ``run_scripts``, the ``pre-compile`` lifecycle event fires first and
+    the project check follows it, both under this function's lifecycle lock,
+    so what the scripts generate is what compile reads.
 
     Handles both distributed (default) and single-file (``--single-agents``)
     strategies, emits the canonical target-provenance line, runs the
     compiler, reports results, and hard-fails on critical security findings.
     """
+    _generate_sources(logger, verbose, source_root, clean=clean, run=run_scripts and not dry_run)
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,
         ResolvedTargets,
@@ -1425,12 +1480,18 @@ def compile(  # noqa: PLR0913 -- Click handler
         # from. Equals $PWD unless --root redirects writes elsewhere.
         source_root = get_source_root(InstallScope.PROJECT)
 
-        _validate_project(
-            logger,
-            dry_run,
-            source_root,
-            allow_empty=clean and not validate and not watch,
-        )
+        # pre-compile scripts run inside _run_compilation, which checks the
+        # project after them so a first compile finds what they generate.
+        # --validate, --watch and --dry-run run no scripts, and neither does
+        # --root, which promises to write only under its directory.
+        run_scripts = not validate and not watch and not dry_run and not root
+        if not run_scripts:
+            _validate_project(
+                logger,
+                dry_run,
+                source_root,
+                allow_empty=clean and not validate and not watch,
+            )
 
         if validate:
             _run_validation_mode(logger, verbose, source_root)
@@ -1464,6 +1525,7 @@ def compile(  # noqa: PLR0913 -- Click handler
             clean,
             no_dedup,
             source_root=source_root,
+            run_scripts=run_scripts,
         )
 
     except ImportError as e:

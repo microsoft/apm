@@ -599,10 +599,10 @@ With `--ci --policy <path|url|owner/repo>`, a policy that cannot be loaded (miss
 | `apm lifecycle init` | Inject a starter `lifecycle:` block into `apm.yml` | `--force` (overwrite existing block) |
 | `apm lifecycle test EVENT` | Fire a synthetic event through all discovered scripts (dry-run) | `--verbose`, `--execute` (actually run scripts) |
 | `apm lifecycle validate` | Check all discovered script files for schema errors, unknown events, missing fields, and non-HTTPS URLs | -- |
-| `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run on install | -- |
+| `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run | -- |
 | `apm lifecycle untrust` | Revoke trust for `apm.yml` `lifecycle:`; project scripts will stop running | -- |
 
-Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. Script files are discovered from three sources (additive): policy (POSIX: `/etc/apm/policy.d/*.json`; Windows: `%ProgramData%\APM\policy.d\*.json`; JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
+Lifecycle scripts fire on seven events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`, `pre-compile`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. `pre-compile` fires before `apm compile` reads sources (not with `--dry-run`, `--validate`, `--watch`, `--root`, or `--global`). Script files are discovered from three sources (additive): policy (POSIX: `/etc/apm/policy.d/*.json`; Windows: `%ProgramData%\APM\policy.d\*.json`; JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
 
 ## Distribution
 
