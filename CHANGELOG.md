@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install -g` / `apm update -g` now deploy instructions to
+  `~/.cursor/rules/*.mdc` for the Cursor target. Previously they were skipped
+  based on an incorrect assumption that Cursor global rules were
+  Settings-UI-only. (closes #3054) (#2506)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
