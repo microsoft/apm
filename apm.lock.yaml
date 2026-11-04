@@ -1844,7 +1844,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:4d136a7ccdff7b686585864b770f6ec6efd95746b21d4a7ef92fb5ceb6fec58d
+  content_hash: sha256:8d9ac6f8da59b9eeb0fcc9d1551551aef85b41ba4735dd28db50b0937e7a130a
 - kind: project-relative
   target: legacy
   value: .agents/skills/docs-grounding-verifier/assets/judge-prompt.md
@@ -3135,7 +3135,7 @@ local_deployed_file_hashes:
   .agents/skills/docs-corpus-audit/evals/content-evals.json: sha256:f498fd7fe5c53021be2738d0961bcf50a2a054589f95c43818e74b242e3c0a5b
   .agents/skills/docs-corpus-audit/evals/trigger-evals.json: sha256:ebecf51a2a2b84adf7b3a5799f73f30a6b87f21a3e7970a9086aadb2c17da085
   .agents/skills/docs-corpus-audit/scripts/scan-cross-corpus-drift.sh: sha256:5793571642a4ab008987da66c793d878e91071dc6f0df1d3e39e4d6b30b77705
-  .agents/skills/docs-grounding-verifier/SKILL.md: sha256:4d136a7ccdff7b686585864b770f6ec6efd95746b21d4a7ef92fb5ceb6fec58d
+  .agents/skills/docs-grounding-verifier/SKILL.md: sha256:8d9ac6f8da59b9eeb0fcc9d1551551aef85b41ba4735dd28db50b0937e7a130a
   .agents/skills/docs-grounding-verifier/assets/judge-prompt.md: sha256:0a767c6166c4b1bb3ea2525d652f6b7ee23ffcfc6e83bd800666e1a35fa029ea
   .agents/skills/docs-grounding-verifier/evals/content-evals.json: sha256:ff8070b95ee54eeb664ae7bd3e7fa43ed65ac0bbead3ae5752f23763f04ad979
   .agents/skills/docs-grounding-verifier/evals/run-evals.sh: sha256:bbcda2bf81c651235d154fbb716747c125923f4bd7302e911126ba833390da0e
