@@ -43,6 +43,7 @@ from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
 )
 from apm_cli.install.source_helpers import (
+    locked_parent_identity,
     materialized_manifest_snapshot,
 )
 from apm_cli.install.source_helpers import (
@@ -173,7 +174,11 @@ class LocalDependencySource(DependencySource):
         # source directory was captured during resolve via
         # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
         # has nothing to do.
-        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
+        base_dir = (
+            ctx.source_root
+            if dep_ref.replacement is not None
+            else getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
+        )
         original_src = Path(dep_ref.local_path).expanduser()
         if not original_src.is_absolute():
             original_src = (base_dir / original_src).resolve()
@@ -259,7 +264,7 @@ class LocalDependencySource(DependencySource):
         # Record for lockfile
         node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
         depth = node.depth if node else 1
-        resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+        resolved_by = locked_parent_identity(ctx, node)
         _is_dev = node.is_dev if node else False
         ctx.installed_packages.append(
             InstalledPackage(
@@ -522,7 +527,7 @@ class CachedDependencySource(DependencySource):
         # Collect for lockfile
         node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
         depth = node.depth if node else 1
-        resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+        resolved_by = locked_parent_identity(ctx, node)
         _is_dev = node.is_dev if node else False
 
         # Determine commit SHA for the cached path. See _resolve_cached_commit
@@ -802,7 +807,7 @@ class FreshDependencySource(DependencySource):
                 resolved_commit = package_info.resolved_reference.resolved_commit
             node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
             depth = node.depth if node else 1
-            resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+            resolved_by = locked_parent_identity(ctx, node)
             _is_dev = node.is_dev if node else False
             # Registry-sourced deps: pull the captured resolution out of
             # the resolver's per-graph map so the lockfile records

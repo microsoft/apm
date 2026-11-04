@@ -19,8 +19,57 @@ from apm_cli.integration.mcp_config_view import CurrentMcpConfigView, McpSourceP
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.results import InstallResult
+from apm_cli.utils.yaml_io import dump_yaml
 
 pytestmark = pytest.mark.component
+
+
+@pytest.mark.parametrize("admitted", [False, True], ids=["omitted", "admitted"])
+def test_skills_only_preparation_retains_omissions_without_selected_comparison(
+    tmp_path: Path, admitted: bool
+) -> None:
+    """Omission intent is captured before writes without comparing unselected MCP."""
+    source = tmp_path / "dependency"
+    source.mkdir()
+    declaration = MCPDependency(
+        name="service", registry=False, transport="http", url="https://example.invalid/service"
+    )
+    dump_yaml(
+        {
+            "name": "dependency",
+            "version": "1.0.0",
+            "dependencies": {"mcp": [declaration.to_dict()]},
+        },
+        source / "apm.yml",
+    )
+    dependency = LockedDependency(
+        repo_url="_local/dependency", source="local", local_path=str(source), depth=1
+    )
+    lock = LockFile(
+        dependencies={dependency.get_unique_key(): dependency},
+        mcp_servers=["service"] if admitted else [],
+        mcp_configs={"service": declaration.to_dict()} if admitted else {},
+    )
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock.write(lock_path)
+    before = lock_path.read_bytes()
+    prepared = prepare_mcp_integration(
+        apm_package=APMPackage(name="root", version="1.0.0", package_path=tmp_path),
+        mcp_deps=[],
+        apm_modules_path=tmp_path / "apm_modules",
+        lock_path=lock_path,
+        should_install=False,
+        trust_transitive_mcp=False,
+        logger=Mock(),
+        allow_pending=False,
+    )
+    assert prepared.current_view is None
+    assert prepared.dependencies == []
+    assert prepared.omissions is not None
+    assert set(prepared.omissions) == (set() if admitted else {"service"})
+    if not admitted:
+        assert prepared.omissions["service"]["reason"] == "only-apm"
+    assert lock_path.read_bytes() == before
 
 
 def test_result_retains_complete_graph_instead_of_selected_packages(tmp_path: Path) -> None:

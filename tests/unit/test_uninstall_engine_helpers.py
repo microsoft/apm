@@ -527,6 +527,7 @@ class TestCleanupStaleMcp:
             scope=None,
             fail_on_write_error=True,
             stored_configs=lockfile.mcp_configs,
+            native_hashes={},
         )
         mock_mcp.update_lockfile.assert_called_once()
 
@@ -588,6 +589,7 @@ class TestCleanupStaleMcp:
             scope="user",
             fail_on_write_error=True,
             stored_configs=lockfile.mcp_configs,
+            native_hashes={},
         )
 
     def test_target_ownership_limits_cleanup_to_owning_runtime(self, tmp_path):
@@ -616,6 +618,7 @@ class TestCleanupStaleMcp:
             scope=None,
             fail_on_write_error=True,
             stored_configs={},
+            native_hashes={},
         )
 
     def test_partial_target_ownership_retains_unmapped_aggregate_server(self, tmp_path):
@@ -644,6 +647,7 @@ class TestCleanupStaleMcp:
             scope=None,
             fail_on_write_error=True,
             stored_configs={},
+            native_hashes={},
         )
         assert lockfile.mcp_servers == ["legacy-unmapped"]
         assert lockfile.mcp_target_servers == {}

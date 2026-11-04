@@ -41,6 +41,129 @@ REQUEST_DEFAULTS_RULE = "install-deployment-request-defaults"
 
 MUTATIONS: tuple[CompoundMutation, ...] = (
     CompoundMutation(
+        "absent-claim-receipt-must-not-narrow-install-scope",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/phases/lockfile.py",
+        _replace(
+            "active_targets=self.ctx.targets,",
+            "active_targets=[t for t in self.ctx.targets if t.name in completed.targets],",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-discovery-receipt",
+        BASE_RULE,
+        "src/apm_cli/install/services.py",
+        _replace("source_plan.skill_discovery_complete is True", "True"),
+    ),
+    CompoundMutation(
+        "absent-claim-materialization-receipt",
+        BASE_RULE,
+        "src/apm_cli/install/services.py",
+        _replace("skill_result.complete is True", "True"),
+    ),
+    CompoundMutation(
+        "absent-claim-receipt-owner",
+        BASE_RULE,
+        "src/apm_cli/install/services.py",
+        _replace(
+            'result["completed_reintegration"] = CompletedReintegration(\n            owner=package_name,',
+            "result[\"completed_reintegration\"] = CompletedReintegration(\n            owner='other',",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-receipt-processed-targets",
+        BASE_RULE,
+        "src/apm_cli/install/services.py",
+        _replace(
+            'target.name for target in projection_targets if target.supports("skills")',
+            "target.name for target in projection_targets if True",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-canonical-decision",
+        CONTRACTION_RULE,
+        "src/apm_cli/core/deployment_state.py",
+        _replace(
+            "or prior.locator.value in obsolete_absent",
+            "or False",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-owner-protection",
+        CONTRACTION_RULE,
+        "src/apm_cli/core/deployment_state.py",
+        _replace("record.owners != (completed.owner,)", "False"),
+    ),
+    CompoundMutation(
+        "absent-claim-processed-target-proof",
+        CONTRACTION_RULE,
+        "src/apm_cli/core/deployment_state.py",
+        _replace("or not completed.targets <= intent.active_targets", "or False"),
+    ),
+    CompoundMutation(
+        "absent-claim-no-disk-authority",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/manifest_reconcile.py",
+        _replace("dropped -= verified_absent", "dropped -= frozenset()"),
+    ),
+    CompoundMutation(
+        "absent-claim-observation-routing",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/manifest_reconcile.py",
+        _replace(
+            "verified_absent = verified_absent_dependency_values(",
+            "verified_absent = unverified_values(",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-observation-import",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/manifest_reconcile.py",
+        _replace(
+            "from apm_cli.install.helpers.absence_observation import",
+            "from apm_cli.install.helpers.rogue_observation import",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-observation-validation",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/helpers/absence_observation.py",
+        _replace("BaseIntegrator.validate_deploy_path(", "unvalidated_path("),
+    ),
+    CompoundMutation(
+        "absent-claim-observation-read-only",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/helpers/absence_observation.py",
+        _replace("(project_root / path).lstat()", "(project_root / path).unlink()"),
+    ),
+    CompoundMutation(
+        "absent-claim-skill-domain",
+        CONTRACTION_RULE,
+        "src/apm_cli/core/deployment_state.py",
+        _replace("candidates & proven_skill_values", "candidates"),
+    ),
+    CompoundMutation(
+        "absent-claim-source-backed-members",
+        CONTRACTION_RULE,
+        "src/apm_cli/core/deployment_state.py",
+        _replace(
+            "completed.skill_values & completed.current_values & successful_by_value.keys()",
+            "completed.current_values & successful_by_value.keys()",
+        ),
+    ),
+    CompoundMutation(
+        "absent-claim-other-primitive-overlap",
+        CONTRACTION_RULE,
+        "src/apm_cli/core/deployment_state.py",
+        _replace('if surface.kind != "skills"', "if False"),
+    ),
+    CompoundMutation(
+        "absent-claim-intent-routing-scope",
+        CONTRACTION_RULE,
+        "src/apm_cli/install/manifest_reconcile.py",
+        _replace("intent.active_targets != active_names", "False"),
+    ),
+    CompoundMutation(
         "target-owner-ignores-nested-mask",
         TARGET_RULE,
         "src/apm_cli/install/target_filter.py",
@@ -108,21 +231,22 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
     CompoundMutation(
         "target-consumer-rejects-rogue-resolver-import",
         TARGET_RULE,
-        "src/apm_cli/install/services.py",
+        "src/apm_cli/install/deployment_plan.py",
         _replace(
-            "from .target_filter import resolve_effective_package_targets\n",
+            "from .target_filter import log_package_target_restriction, resolve_effective_package_targets\n",
+            "from .target_filter import log_package_target_restriction\n"
             "from .rogue import resolve_effective_package_targets\n",
         ),
     ),
     CompoundMutation(
         "target-consumer-rejects-dead-canonical-evidence-for-rogue-binding",
         TARGET_RULE,
-        "src/apm_cli/install/services.py",
+        "src/apm_cli/install/deployment_plan.py",
         _replace(
-            "    target_selection = resolve_effective_package_targets(\n",
-            "    target_selection = rogue_resolve_effective_package_targets()\n"
+            "    selection = resolve_effective_package_targets(\n",
+            "    selection = rogue_resolve_effective_package_targets()\n"
             "    if False:\n"
-            "        target_selection = resolve_effective_package_targets(\n",
+            "        selection = resolve_effective_package_targets(\n",
         ),
     ),
     CompoundMutation(
@@ -266,15 +390,15 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "src/apm_cli/commands/uninstall/engine.py",
         (
             (
-                "        try:\n            integration_result = integrate_package_primitives(\n",
-                "        try:\n"
-                "            if 0:\n"
-                "                integrate_package_primitives(targets=authorized_targets)\n"
-                "            integration_result = integrate_package_primitives(\n",
+                "            try:\n                integration_result = integrate_package_primitives(\n",
+                "            try:\n"
+                "                if 0:\n"
+                "                    integrate_package_primitives(targets=authorized_targets)\n"
+                "                integration_result = integrate_package_primitives(\n",
             ),
             (
-                "                targets=authorized_targets,\n",
-                "                targets=rogue_targets,\n",
+                "                    targets=authorized_targets,\n",
+                "                    targets=rogue_targets,\n",
             ),
         ),
     ),
@@ -283,10 +407,10 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         TARGET_RULE,
         "src/apm_cli/commands/uninstall/engine.py",
         _replace(
-            "        try:\n            integration_result = integrate_package_primitives(\n",
-            "        try:\n"
-            "            integrate_package_primitives(targets=rogue_targets)\n"
-            "            integration_result = integrate_package_primitives(\n",
+            "            try:\n                integration_result = integrate_package_primitives(\n",
+            "            try:\n"
+            "                integrate_package_primitives(targets=rogue_targets)\n"
+            "                integration_result = integrate_package_primitives(\n",
         ),
     ),
     CompoundMutation(
@@ -396,7 +520,10 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "contraction-implicit-historical-sweep",
         CONTRACTION_RULE,
         "src/apm_cli/install/manifest_reconcile.py",
-        _replace("    sweep = generic_governed_values\n", "    sweep = frozenset(prior_values)\n"),
+        _replace(
+            "    sweep = intent.generic_governed_values\n",
+            "    sweep = frozenset(prior_values)\n",
+        ),
     ),
     CompoundMutation(
         "contraction-missing-unprocessed-claims",

@@ -23,6 +23,8 @@ AI coding agents need context to be useful — standards, prompts, skills, plugi
 # apm.yml — ships with your project
 name: your-project
 version: 1.0.0
+targets:
+  - copilot # choose the harness(es) this project supports
 dependencies:
   apm:
     # Skills from any repository
@@ -34,7 +36,7 @@ dependencies:
     # A full APM package with instructions, skills, prompts, hooks...
     - microsoft/apm-sample-package#v1.0.0
   mcp:
-    # MCP servers -- installed into every detected client
+    # MCP servers -- installed into every selected target
     - name: io.github.github/github-mcp-server
       transport: http   # MCP transport name, not URL scheme -- connects over HTTPS
 ```

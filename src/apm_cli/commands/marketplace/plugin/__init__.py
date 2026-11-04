@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import click
-import yaml
 
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
@@ -60,6 +59,8 @@ def _has_marketplace_block(apm_path: Path) -> bool:
     """Return True when *apm_path* has a populated ``marketplace:`` block."""
     if not apm_path.exists():
         return False
+    import yaml
+
     try:
         # Bounded loader so a hostile apm.yml cannot wedge this probe with a
         # merge/alias expansion bomb (fails closed as yaml.YAMLError).

@@ -10,14 +10,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
+from uuid import UUID
 
 import pytest
 import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
 from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
@@ -117,6 +119,58 @@ def _skill(name: str) -> str:
     return (
         f"---\nname: {name}\ndescription: Required lifecycle fixture skill {name}\n---\n# {name}\n"
     )
+
+
+def _assert_skill_receipt(
+    scenario: _Scenario,
+    root: Path,
+    *,
+    scope: str,
+    owner: str,
+    expected: Mapping[str, Path],
+    bound: bool,
+) -> Path:
+    """Check successful-write evidence and its expected committed-claim binding."""
+    receipts = list((scenario.isolated.config_root / "deployment-receipts").glob("*.json"))
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.is_file() and not receipt.is_symlink()
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    identity = root / ".apm-local/installation"
+    assert identity.is_file() and not identity.is_symlink()
+    assert UUID(hex=data["installation"]).hex == data["installation"]
+    assert identity.read_bytes() == (data["installation"] + "\n").encode("ascii")
+    assert (identity.parent / ".gitignore").read_bytes() == b"*\n"
+    assert data["version"] == 1
+    assert data["root"] == root.resolve().as_posix()
+    assert data["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
+    assert data["scope"] == scope
+    ledger = DeploymentLedgerCodec.from_rows(data["records"])
+    assert len(ledger.records) == len(expected)
+    assert set(data["destinations"]) == set(data["bindings"]) == set(ledger.records)
+    assert {
+        row.locator.target: Path(data["destinations"][key]) for key, row in ledger.records.items()
+    } == {target: path.resolve() for target, path in expected.items()}
+    lock_root = scenario.isolated.config_root if scope == "user" else root
+    lock = LockFile.read(lock_root / "apm.lock.yaml")
+    assert lock is not None
+    claims = DeploymentLedgerCodec.from_lockfile(lock).records
+    for key, row in ledger.records.items():
+        path = expected[row.locator.target]
+        assert row.locator.scope == scope
+        assert row.content_hash == compute_file_hash(path)
+        assert (row.owners, row.active_owner) == ((owner,), owner)
+        value = path.as_posix() if scope == "user" else path.relative_to(root).as_posix()
+        expected_claims = sorted(
+            [claim.locator.key, list(claim.owners), claim.active_owner]
+            for claim in claims.values()
+            if claim.locator.value == value
+        )
+        if bound:
+            assert expected_claims
+        assert data["bindings"][key][0] == owner
+        assert json.loads(data["bindings"][key][1]) == (expected_claims if bound else [])
+    return receipt
 
 
 def _revision_instruction(revision: str) -> str:
@@ -3107,9 +3161,11 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         "caller": cwd,
         **external_roots,
     }
-    home_sentinel = scenario.isolated.home / "user-owned.txt"
+    home_sentinel, caller_sentinel = (
+        scenario.isolated.home / "user-owned.txt",
+        cwd / "user-owned.txt",
+    )
     home_sentinel.write_bytes(b"home-user-owned\n")
-    caller_sentinel = cwd / "user-owned.txt"
     caller_sentinel.write_bytes(b"caller-user-owned\n")
 
     def capture() -> LifecycleStateSnapshot:
@@ -3121,6 +3177,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         *,
         expected_returncode: int = 0,
         command_cwd: Path | None = None,
+        create_identity: bool = False,
     ) -> CommandResult:
         before = ArtifactSnapshotSet.capture(artifact_roots)
         result = scenario.runner.run(
@@ -3131,7 +3188,17 @@ def test_required_global_audit_rule_matrix_for_external_roots(
             before,
             ArtifactSnapshotSet.capture(artifact_roots),
             exact_paths={
-                "home": {".local", ".local/state", ".local/state/gh", ".local/state/gh/device-id"},
+                "home": {
+                    ".local",
+                    ".local/state",
+                    ".local/state/gh",
+                    ".local/state/gh/device-id",
+                    *(
+                        {".apm-local", ".apm-local/.gitignore", ".apm-local/installation"}
+                        if create_identity
+                        else set()
+                    ),
+                },
                 **{
                     target: {
                         "skills",
@@ -3172,7 +3239,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     )
 
     install_args = ("install", "--global", "--no-policy", "--parallel-downloads", "0")
-    run(install_args, "global-audit-install")
+    run(install_args, "global-audit-install", create_identity=True)
     installed = capture()
     installed_home = LifecycleStateSnapshot.capture(
         cwd,
@@ -3214,6 +3281,14 @@ def test_required_global_audit_rule_matrix_for_external_roots(
                 _skill("global-audit") + f"\nrevision-{revision}\n"
             ).encode()
         assert capture().deployment_records
+        _assert_skill_receipt(
+            scenario,
+            scenario.isolated.home,
+            scope="user",
+            owner=f"{_OWNER}/{source.package.name}",
+            expected={target: external_roots[target] / skill_paths[target] for target in targets},
+            bound=True,
+        )
 
     manifest_path = physical_apm_home / "apm.yml"
 
@@ -3484,6 +3559,14 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         environment=source.environment,
         scenario_id="lock-release-install-baseline",
     )
+    receipt = _assert_skill_receipt(
+        scenario,
+        consumer.root,
+        scope="project",
+        owner=f"{_OWNER}/{source.package.name}",
+        expected={"copilot": consumer.root / ".agents/skills/lock-release/SKILL.md"},
+        bound=True,
+    )
     scenario.consumers.set_targets(consumer, ("claude",))
     capture_args = {
         "targets": ("claude", "copilot"),
@@ -3525,6 +3608,17 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         after_failure.file(".claude/skills/lock-release/SKILL.md").content
         == _skill("lock-release").encode()
     )
+    assert (
+        _assert_skill_receipt(
+            scenario,
+            consumer.root,
+            scope="project",
+            owner=f"{_OWNER}/{source.package.name}",
+            expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
+            bound=False,
+        )
+        == receipt
+    )
     assert_only_snapshot_paths_changed(
         before_artifacts,
         after_artifacts,
@@ -3538,10 +3632,12 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
                 ".claude/skills",
                 ".claude/skills/lock-release",
                 ".claude/skills/lock-release/SKILL.md",
-            }
+            },
+            "user": {receipt.relative_to(scenario.isolated.home).as_posix()},
         },
     )
     assert list(consumer.root.glob("apm-atomic-*")) == []
+    failed_receipt_bytes = receipt.read_bytes()
 
     _run_success(
         scenario,
@@ -3550,11 +3646,27 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         environment=source.environment,
         scenario_id="lock-release-followup-install",
     )
+    _assert_skill_receipt(
+        scenario,
+        consumer.root,
+        scope="project",
+        owner=f"{_OWNER}/{source.package.name}",
+        expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
+        bound=False,
+    )
+    assert receipt.read_bytes() == failed_receipt_bytes
+    before_audit = ArtifactSnapshotSet.capture(
+        {"project": consumer.root, "user": scenario.isolated.home}
+    )
     _, audit = _audit(
         scenario,
         consumer,
         environment=source.environment,
         scenario_id="lock-release-followup-audit",
+    )
+    assert_snapshot_set_unchanged(
+        before_audit,
+        ArtifactSnapshotSet.capture({"project": consumer.root, "user": scenario.isolated.home}),
     )
     released = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
     assert (
@@ -3563,6 +3675,27 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
     )
     assert released.file(".agents/skills/lock-release/SKILL.md").kind == "missing"
     assert audit["passed"] is True
+    preserved = consumer.root / "preserved-skill.md"
+    (consumer.root / ".claude/skills/lock-release/SKILL.md").rename(preserved)
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="lock-release-restore-written-baseline",
+    )
+    _assert_skill_receipt(
+        scenario,
+        consumer.root,
+        scope="project",
+        owner=f"{_OWNER}/{source.package.name}",
+        expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
+        bound=True,
+    )
+    assert preserved.read_bytes() == _skill("lock-release").encode()
+    assert (
+        consumer.root / ".claude/skills/lock-release/SKILL.md"
+    ).read_bytes() == preserved.read_bytes()
 
 
 @pytest.mark.parametrize(

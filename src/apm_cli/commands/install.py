@@ -41,6 +41,7 @@ from apm_cli.install.manifest_helpers import (
     _prepare_user_scope_for_install,
     _report_bootstrap_manifest,
 )
+from apm_cli.models.dependency.replacement import project_manifest_dependencies
 
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -295,6 +296,7 @@ def _resolve_package_references(
         logger.validation_start(len(packages))
 
     for package in packages:
+        requested_entries = {}
         # --- Marketplace pre-parse intercept ---
         # If input has no slash and is not a local path, check if it is a
         # marketplace ref (NAME@MARKETPLACE).  If so, resolve it to a
@@ -404,12 +406,12 @@ def _resolve_package_references(
                 skill_subset,
                 skill_subset_from_cli,
                 current_deps,
-                _apm_yml_entries,
+                requested_entries,
                 dependency_reference_cls=DependencyReference,
                 logger=logger,
             )
             if marketplace_dep_ref is not None or direct_virtual_resolved:
-                _apm_yml_entries.setdefault(canonical, dependency_reference_to_yaml_entry(dep_ref))
+                requested_entries.setdefault(canonical, dependency_reference_to_yaml_entry(dep_ref))
         except ValueError as e:
             reason = str(e)
             invalid_outcomes.append((package, reason))
@@ -430,7 +432,7 @@ def _resolve_package_references(
                     logger.error(reason)
                 continue
             dep_ref.allow_insecure = True
-            _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
+            requested_entries[canonical] = dep_ref.to_apm_yml_entry()
 
         scope_reject = user_scope_rejection_reason(dep_ref, scope)
         if scope_reject:
@@ -439,9 +441,8 @@ def _resolve_package_references(
                 logger.validation_fail(package, scope_reject)
             continue
 
-        if skill_subset and canonical not in _apm_yml_entries:
-            _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
-        _apm_yml_entries.setdefault(canonical, dep_ref.to_apm_yml_entry())
+        if skill_subset and canonical not in requested_entries:
+            requested_entries[canonical] = dep_ref.to_apm_yml_entry()
 
         # Check if package is already in dependencies (by identity)
         already_in_deps = identity in existing_identities
@@ -484,11 +485,12 @@ def _resolve_package_references(
             updates_existing_entry, update_error = try_update_existing_dependency_entry(
                 current_deps,
                 already_in_deps=identity in manifest_identities,
-                apm_yml_entries=_apm_yml_entries,
+                apm_yml_entries=requested_entries,
                 canonical=canonical,
                 dep_ref=dep_ref,
                 identity=identity,
                 dependency_reference_cls=DependencyReference,
+                default_registry=default_registry,
                 logger=logger,
             )
             if update_error:
@@ -496,6 +498,8 @@ def _resolve_package_references(
                 if logger:
                     logger.validation_fail(package, update_error)
                 continue
+            _apm_yml_entries.update(requested_entries)
+            _apm_yml_entries.setdefault(canonical, dep_ref.to_apm_yml_entry())
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
                 logger.validation_pass(canonical, already_in_deps, updates_existing_entry, dry_run)
@@ -1717,8 +1721,7 @@ def _install_apm_packages(ctx, outcome):
     Install packages and transitive MCP servers, updating non-frozen lock state.
     Args:
         ctx: :class:`InstallContext` with configuration and environment.
-        outcome: ``_ValidationOutcome`` from package validation (may be
-            ``None`` when no explicit packages were passed).
+        outcome: Package validation result, or ``None`` without explicit packages.
     Returns:
         Tuple of ``(apm_count, mcp_count, lsp_count, apm_diagnostics)``.
     """
@@ -1760,8 +1763,6 @@ def _install_apm_packages(ctx, outcome):
     )
 
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
-
-    all_apm_deps = list(apm_deps) + list(dev_apm_deps)
 
     if ctx.frozen is True:
         from apm_cli.install.request import InstallRequest
@@ -1836,11 +1837,12 @@ def _install_apm_packages(ctx, outcome):
         )
         return (*prospective_plan.dependency_counts, None)
 
-    _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
+    _check_insecure_dependencies(
+        project_manifest_dependencies(apm_package), ctx.allow_insecure, logger
+    )
 
     apm_count = 0
 
-    # Migrate legacy apm.lock -> apm.lock.yaml if needed (one-time, transparent)
     migrate_lockfile_if_needed(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
@@ -1859,9 +1861,10 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_target_servers_present = _existing_lock._mcp_target_servers_present
 
     # Enter the APM install path when there are deps, local .apm/ primitives
-    # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
+    # (#714), orphan deps to clean up, or replacement intent to persist.
     from apm_cli.core.scope import get_deploy_root as _get_deploy_root
     from apm_cli.deps.lockfile import _SELF_KEY as _LOCK_SELF_KEY
+    from apm_cli.install.plan import lockfile_satisfies_replacements
 
     _cli_project_root = _get_deploy_root(ctx.scope)
     _has_orphan_deps_in_lock = bool(
@@ -1876,6 +1879,7 @@ def _install_apm_packages(ctx, outcome):
         or _project_has_root_primitives(_cli_project_root)
         or _has_orphan_deps_in_lock
         or _local_cleanup_pending(_existing_lock)
+        or not lockfile_satisfies_replacements(_existing_lock, apm_package.replace_rules)[0]
     ):
         if not APM_DEPS_AVAILABLE:
             logger.error("APM dependency system not available")

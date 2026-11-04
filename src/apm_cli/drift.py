@@ -171,13 +171,18 @@ def detect_ref_change(
         return False  # new package — not drift, just a first install
     if getattr(dep_ref, "is_marketplace", False) is True:
         return marketplace_ref_mismatch(dep_ref, locked_dep) is not None
+    if not locked_dep.matches_replacement(dep_ref):
+        return True
+    selected_locked = (
+        locked_dep.to_dependency_ref() if locked_dep.replacement is not None else locked_dep
+    )
 
     # Source flip drift: manifest changed resolver between installs (e.g.
     # was ``- git: ...``, now ``acme/foo@corp#^1.0.0``). The install path,
     # auth chain, and trust anchor all change — force a re-resolve.
     # Note: source=None and source="git" are equivalent (legacy default).
     manifest_source = _normalize_dep_source(dep_ref)
-    locked_source = _normalize_dep_source(locked_dep)
+    locked_source = _normalize_dep_source(selected_locked)
     if manifest_source != locked_source:
         return True
 
@@ -190,8 +195,8 @@ def detect_ref_change(
                 host_type=_optional_string_attr(dep_ref, "host_type"),
             )
             locked_provider = effective_host_provider_identity(
-                _optional_string_attr(locked_dep, "host") or default_host(),
-                host_type=_optional_string_attr(locked_dep, "host_type"),
+                _optional_string_attr(selected_locked, "host") or default_host(),
+                host_type=_optional_string_attr(selected_locked, "host_type"),
             )
         except (ValueError, RuntimeError):
             # An unclassifiable lock cannot safely authorize replay.
@@ -218,7 +223,7 @@ def detect_ref_change(
         return not _registry_range_covers_locked_version(ref, locked_dep.version)
 
     if (getattr(dep_ref, "is_insecure", False) is True) != (
-        getattr(locked_dep, "is_insecure", False) is True
+        getattr(selected_locked, "is_insecure", False) is True
     ):
         return True
 
@@ -253,6 +258,10 @@ def should_force_ref_recheck(
     update rechecks semver ranges and hook-only packages. Hook replacements
     must pass staged admission before any live content is replaced.
     """
+    if locked_dep is not None and not locked_dep.matches_replacement(dep_ref):
+        return True
+    if dep_ref.replacement is not None and dep_ref.is_local:
+        return True
     if dep_ref.is_local or getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:
@@ -260,6 +269,10 @@ def should_force_ref_recheck(
     if update_refs:
         if update_keys is not None and dep_ref.get_unique_key() not in update_keys:
             return False
+        if dep_ref.replacement is not None:
+            from apm_cli.deps.revision_pins import is_full_revision_pin
+
+            return not is_full_revision_pin(dep_ref.reference)
         if getattr(dep_ref, "ref_kind", None) == "semver":
             return True
         if package_path is not None:
@@ -443,7 +456,7 @@ def build_download_ref(
 
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-        if locked_dep:
+        if locked_dep and locked_dep.matches_replacement(dep_ref):
             overrides: dict[str, Any] = {}
 
             # Registry-proxy rows preserve their configured proxy host for
@@ -469,6 +482,6 @@ def build_download_ref(
                 overrides["reference"] = locked_dep.resolved_ref
 
             if overrides:
-                return _dataclass_replace(dep_ref, **overrides)
+                return _dataclass_replace(dep_ref.source_reference, **overrides)
 
-    return dep_ref
+    return dep_ref.source_reference

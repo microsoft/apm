@@ -154,6 +154,15 @@ def run_phase(root: Path, scratch: Path, name: str) -> dict[str, object]:
     nodes = [NATIVE_NODE]
     if name == "baseline":
         nodes.insert(0, "tests/unit/cache/test_git_symlink_config.py")
+        nodes.insert(0, "tests/integration/test_resolution_failure_lifecycle.py")
+        nodes[0:0] = [
+            "tests/unit/install/test_resolution_failure_recovery.py"
+            "::test_nested_replacement_denied_restore_retry_preserves_original_child_bytes",
+            "tests/unit/install/test_resolution_failure_recovery.py"
+            "::test_denied_nested_restore_defers_ancestor_relocation_until_retry",
+            "tests/unit/install/test_resolution_failure_recovery.py"
+            "::test_three_level_recovery_preserves_bytes_across_successive_denials",
+        ]
     command = [
         sys.executable,
         "-B",

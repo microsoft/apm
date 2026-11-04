@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.codex_plugins.admission import CodexNativeDeployment
+    from apm_cli.core.deployment_state import CompletedReintegration
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
@@ -143,8 +144,11 @@ class InstallContext:
     # Integrate phase outputs (written by integrate, read by cleanup/lockfile/summary)
     # ------------------------------------------------------------------
     intended_dep_keys: set[str] = field(default_factory=set)
-    # Absent means integration skipped; empty means it completed with no files.
+    # An empty result can also mean refusal; completeness is recorded separately.
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
+    package_completed_reintegrations: dict[str, CompletedReintegration] = field(
+        default_factory=dict
+    )
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)

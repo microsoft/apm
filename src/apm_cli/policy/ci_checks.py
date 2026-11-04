@@ -103,11 +103,13 @@ def _check_ref_consistency(
     """Verify manifest refs match the lockfile's resolved ref and commit."""
     from ..deps.revision_pins import is_full_revision_pin
     from ..drift import detect_ref_change, marketplace_ref_mismatch
+    from ..install.plan import lockfile_satisfies_replacements
+    from ..models.dependency.replacement import project_manifest_dependencies
 
-    mismatches: list[str] = []
+    _, mismatches = lockfile_satisfies_replacements(lock, manifest.replace_rules)
     requires_update = False
     marketplace_index = lock.marketplace_index()
-    for dep_ref in manifest.get_all_apm_dependencies():
+    for dep_ref in project_manifest_dependencies(manifest):
         key = dep_ref.get_unique_key()
         display = dep_ref.get_display_name() if dep_ref.is_marketplace else key
         locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
@@ -494,7 +496,7 @@ def _check_config_consistency(
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR,
         trust_transitive_self_defined=True,
-    )
+    ).with_recorded_omissions(lock)
     stored_configs = lock.mcp_configs or {}
     diff = view.diff(stored_configs)
 
@@ -531,7 +533,11 @@ def _check_config_consistency(
     return CheckResult(
         name="config-consistency",
         passed=False,
-        message=(f"{len(details)} MCP config inconsistenc(ies) -- run 'apm install' to reconcile"),
+        message=(
+            f"{len(details)} MCP config inconsistenc(ies) -- "
+            "repeat 'apm install' with the intended selection "
+            "('--only apm' for skills-only) to reconcile"
+        ),
         details=details,
     )
 

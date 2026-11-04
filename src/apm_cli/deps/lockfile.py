@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -28,14 +28,30 @@ from ..models.dependency.reference import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
 )
+from ..models.dependency.replacement import (
+    LocalReplacementSource,
+    ReplacementBinding,
+    ReplacementConfigError,
+    build_replacement_index,
+    parse_replace_block,
+    project_effective_reference,
+)
 
 logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
-SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3"})
 _REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
+
+
+def lockfile_parent_identity(
+    dependency: DependencyReference | LockedDependency,
+    replacements: Sequence[object] | None,
+) -> str:
+    """Encode exact original parent keys for v3, retaining legacy repo-url parents."""
+    return dependency.get_unique_key() if replacements is not None else dependency.repo_url
 
 
 def _copy_extension_map(value: object) -> dict[str, Any]:
@@ -183,6 +199,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "mcp_configs",
         "mcp_target_servers",
         "mcp_config_provenance",
+        "mcp_omissions",
         "lsp_configs",
         "lsp_target_servers",
         "lsp_config_provenance",
@@ -201,6 +218,11 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
     for index, dependency in enumerate(data.get("dependencies", [])):
         if not isinstance(dependency, dict):
             raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
+    if any(not isinstance(name, str) or not name for name in (data.get("mcp_omissions") or {})):
+        raise LockfileFormatError(
+            "MCP omission evidence has invalid server names; selection is unknown. "
+            "Restore a known-good lockfile and repeat the intended install selection"
+        )
     for field_name in ("mcp_target_servers", "lsp_target_servers"):
         for target, servers in (data.get(field_name) or {}).items():
             if not isinstance(target, str) or not target or not isinstance(servers, list):
@@ -360,6 +382,7 @@ class LockedDependency:
     # in declaration order. Omitted from YAML when empty so lockfiles that
     # declare no extensions stay byte-identical. Values are not interpreted.
     extensions: dict[str, Any] = field(default_factory=dict)
+    replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -512,6 +535,8 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
+        if self.replacement is not None:
+            result["replacement"] = self.replacement.to_dict()
         # Replay forward-compat unknown fields LAST so they never shadow a
         # known field that this build understands.
         for k, v in self._unknown_fields.items():
@@ -594,6 +619,7 @@ class LockedDependency:
             "extensions",
             "exec_status",
             "name",
+            "replacement",
             # legacy migration key handled above
             "deployed_skills",
         }
@@ -603,7 +629,7 @@ class LockedDependency:
             if k not in _known_keys and not DependencyReference.is_transient_provider_field(k)
         }
 
-        return cls(
+        locked = cls(
             repo_url=data["repo_url"],
             materialization_repo_url=data.get("materialization_repo_url"),
             alias=data.get("alias"),
@@ -646,6 +672,18 @@ class LockedDependency:
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
+        if "replacement" in data:
+            try:
+                locked.replacement = ReplacementBinding.from_dict(
+                    data["replacement"], locked.to_dependency_ref()
+                )
+            except ReplacementConfigError as exc:
+                raise LockfileFormatError(f"Invalid replacement evidence: {exc}") from exc
+            if locked.to_dependency_ref().is_local and (
+                locked.resolved_ref or locked.resolved_commit
+            ):
+                raise LockfileFormatError("Local replacement must not carry a Git ref or commit")
+        return locked
 
     @classmethod
     def from_dependency_ref(
@@ -704,6 +742,28 @@ class LockedDependency:
                 "exclusive: a dependency is either registry-sourced or a "
                 "git-source semver resolution, not both."
             )
+        binding = dep_ref.replacement
+        if binding is not None:
+            if registry_resolution is not None or registry_config is not None:
+                raise ValueError("Replacement sources cannot use a registry resolution")
+            locked = cls.from_dependency_ref(
+                dep_ref=binding.original,
+                resolved_commit=resolved_commit,
+                depth=depth,
+                resolved_by=resolved_by,
+                is_dev=is_dev,
+                git_semver_resolution=git_semver_resolution,
+                package_name=package_name,
+                package_version=package_version,
+                extensions=extensions,
+            )
+            locked.replacement = ReplacementBinding.from_dict(binding.to_dict(), binding.original)
+            locked.resolved_ref = (
+                git_semver_resolution.resolved_tag
+                if git_semver_resolution is not None
+                else dep_ref.reference
+            )
+            return locked
         if registry_config is not None:
             host = registry_config.host
             registry_prefix = registry_config.prefix
@@ -801,8 +861,12 @@ class LockedDependency:
             extensions=_copy_extension_map(extensions),
         )
 
-    def to_dependency_ref(self) -> DependencyReference:
+    def to_dependency_ref(self, *, effective: bool = True) -> DependencyReference:
         """Reconstruct a DependencyReference from this locked dependency.
+
+        Replacement rows return the selected source by default, including
+        its host for transport and provider checks. ``effective=False``
+        returns the original ownership coordinates instead.
 
         Registry-sourced deps come back with ``source="registry"`` so the
         install pipeline routes them to the registry resolver. The exact
@@ -815,7 +879,7 @@ class LockedDependency:
         # range (e.g. ``^1.2.0`` -> ``1.5.3``).
         is_registry = self.source == "registry"
         ref = self.version if (is_registry and self.version) else self.resolved_ref
-        return DependencyReference(
+        dep = DependencyReference(
             repo_url=self.materialization_repo_url or self.repo_url,
             alias=self.alias,
             host=self.host,
@@ -835,6 +899,36 @@ class LockedDependency:
             skill_subset=sorted(self.skill_subset) if self.skill_subset else None,
             target_subset=sorted(self.target_subset) if self.target_subset else None,
         ).with_derived_provider_coordinates()
+        if not effective or self.replacement is None:
+            return dep
+        selected = project_effective_reference(self.replacement.original, self.replacement.rule)
+        selected.replacement = self.replacement
+        if not selected.is_local:
+            selected.reference = self.resolved_ref or selected.reference
+        return selected
+
+    def matches_replacement(self, dep: DependencyReference) -> bool:
+        """Whether this pin belongs to the same root-selected source contract."""
+        binding = dep.replacement
+        if binding is None or self.replacement is None:
+            return binding is self.replacement
+        return binding.rule == self.replacement.rule
+
+    @property
+    def parent_keys(self) -> tuple[str | None, ...]:
+        """Return recorded incoming parents, including the root marker."""
+        if self.replacement is None:
+            return (self.resolved_by,)
+        return tuple(dict.fromkeys(request.parent for request in self.replacement.requests))
+
+    @property
+    def is_local_source(self) -> bool:
+        """Whether verification/replay uses local bytes, independent of ownership."""
+        return (
+            isinstance(self.replacement.rule.source, LocalReplacementSource)
+            if self.replacement is not None
+            else self.source == "local"
+        )
 
 
 @dataclass
@@ -855,6 +949,7 @@ class LockFile:
     # it never pollutes config comparisons. Consistency diagnostics use this as
     # ownership context only; provenance never exempts a lock-only server.
     mcp_config_provenance: dict[str, str | list[str]] = field(default_factory=dict)
+    mcp_omissions: dict[str, Any] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
     lsp_target_servers: dict[str, list[str]] = field(default_factory=dict)
@@ -867,6 +962,12 @@ class LockFile:
     _deployments_present: bool = field(default=False, repr=False, compare=False)
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
     _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
+
+    # Root replacement rules (issue #3180).  Stores the full normalized rule
+    # table including dormant rules so frozen validation can compare declared
+    # intent without reading unused sources.  ``None`` means no replacement
+    # state; ``[]`` means explicitly empty (cleared rules).
+    replacements: list[dict] | None = field(default=None, repr=False)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -963,13 +1064,53 @@ class LockFile:
                 return True
         return False
 
+    def _needs_v3(self) -> bool:
+        """Whether replacement state requires lockfile schema v3 (issue #3180).
+
+        The version bump is content-driven: only when replacement rules exist
+        (including an explicitly empty list) does the lockfile require v3.
+        Verified v0.25.0, v0.32.0 and v0.33.0 readers reject this version;
+        v0.24.1 does not provide that fail-closed guarantee.
+        """
+        return self.replacements is not None or any(
+            dep.replacement is not None for dep in self.dependencies.values()
+        )
+
+    def _validate_replacement_evidence(self) -> None:
+        """Keep per-entry source evidence bound to the complete root rule table."""
+        try:
+            index = build_replacement_index(parse_replace_block(self.replacements or []))
+            for dep in self.dependencies.values():
+                rule = index.lookup(dep.to_dependency_ref(effective=False))
+                evidence = dep.replacement
+                if (rule is None) != (evidence is None) or (
+                    evidence is not None and evidence.rule != rule
+                ):
+                    raise ReplacementConfigError(
+                        f"Replacement evidence for {dep.get_unique_key()} disagrees with root replacements"
+                    )
+                if self.replacements is not None:
+                    if any(
+                        parent is not None and parent not in self.dependencies
+                        for parent in dep.parent_keys
+                    ):
+                        raise ReplacementConfigError(
+                            f"Replacement graph parent for {dep.get_unique_key()} is absent from the lockfile"
+                        )
+        except ReplacementConfigError as exc:
+            raise LockfileFormatError(str(exc)) from exc
+
     def _required_lockfile_version(self) -> str:
         """Return the minimum schema version required by current lock state."""
+        if self._needs_v3():
+            return "3"
         return "2" if self._needs_v2() else "1"
 
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        self._validate_replacement_evidence()
 
         if not self.deployment_ledger.records:
             self.deployment_ledger = DeploymentLedgerCodec.from_lockfile(self)
@@ -999,6 +1140,8 @@ class LockFile:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
+            if self.mcp_omissions:
+                data["mcp_omissions"] = dict(sorted(self.mcp_omissions.items()))
             if self.mcp_target_servers or self._mcp_target_servers_present:
                 data["mcp_target_servers"] = {
                     target: sorted(servers)
@@ -1025,6 +1168,8 @@ class LockFile:
                 data["local_deployed_file_hashes"] = dict(
                     sorted(self.local_deployed_file_hashes.items())
                 )
+            if self.replacements is not None:
+                data["replacements"] = self.replacements
             from ..utils.yaml_io import yaml_to_str
 
             return yaml_to_str(data)
@@ -1060,6 +1205,7 @@ class LockFile:
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
+        lock.mcp_omissions = dict(data.get("mcp_omissions") or {})
         lock.mcp_target_servers = {
             target: list(servers)
             for target, servers in (data.get("mcp_target_servers") or {}).items()
@@ -1076,6 +1222,17 @@ class LockFile:
         lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        # Root replacement rules (issue #3180).  ``None`` = no replacement
+        # section in lockfile; ``[]`` = explicitly cleared replacement state.
+        raw_replacements = data.get("replacements")
+        if "replacements" in data:
+            if isinstance(raw_replacements, list):
+                lock.replacements = raw_replacements
+            else:
+                raise LockfileFormatError("'replacements' must be a list")
+        if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
+            raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
+        lock._validate_replacement_evidence()
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
@@ -1289,7 +1446,10 @@ class LockFile:
         Ignores ``generated_at`` and ``apm_version`` so that a no-change
         install does not dirty the lockfile.
         """
-        if self.lockfile_version != other.lockfile_version:
+        if (
+            self.lockfile_version != other.lockfile_version
+            or self.replacements != other.replacements
+        ):
             return False
         self_dependency_keys = set(self.dependencies).difference({_SELF_KEY})
         other_dependency_keys = set(other.dependencies).difference({_SELF_KEY})
@@ -1305,7 +1465,9 @@ class LockFile:
         # Python equality treats ``1`` and ``True`` as equal, which would keep a
         # stale drift baseline after a type-only change such as OpenCode's
         # ``enabled``.
-        if _json_identity(self.mcp_configs) != _json_identity(other.mcp_configs):
+        if _json_identity(self.mcp_configs) != _json_identity(other.mcp_configs) or _json_identity(
+            self.mcp_omissions
+        ) != _json_identity(other.mcp_omissions):
             return False
         if (
             self.mcp_target_servers != other.mcp_target_servers

@@ -8,8 +8,10 @@ This test verifies that the adapter:
 4. Maintains consistent behavior for environment variable handling
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 
 import pytest
@@ -19,6 +21,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+
+@pytest.fixture(autouse=True)
+def isolated_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep adapter project configuration inside this test's directory."""
+    monkeypatch.chdir(tmp_path)
 
 
 class TestEmptyStringAndDefaults:
@@ -56,26 +64,41 @@ class TestEmptyStringAndDefaults:
                         {
                             "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
                             "description": "GitHub Personal Access Token for authentication",
+                            "required": True,
                         },
                         {
                             "name": "GITHUB_TOOLSETS",
                             "description": "Comma-separated list of enabled toolsets",
+                            "required": False,
                         },
                         {
                             "name": "GITHUB_HOST",
                             "description": "GitHub Enterprise Server hostname (optional)",
+                            "required": False,
                         },
                         {
                             "name": "GITHUB_READ_ONLY",
                             "description": "Enable read-only mode (1 for true)",
+                            "required": False,
                         },
                         {
                             "name": "GITHUB_DYNAMIC_TOOLSETS",
                             "description": "Enable dynamic toolset discovery (1 for true)",
+                            "required": False,
                         },
                     ],
                 }
             ],
+        }
+
+    def test_copilot_runtime_defers_required_variables(self, github_mcp_server_data: dict) -> None:
+        """Required registry variables need no install-time secret value."""
+        adapter = CopilotClientAdapter()
+        env_vars = github_mcp_server_data["packages"][0]["environment_variables"]
+        assert adapter._resolve_environment_variables(env_vars, {}) == {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
+            "GITHUB_TOOLSETS": "context",
+            "GITHUB_DYNAMIC_TOOLSETS": "1",
         }
 
     def test_codex_empty_strings_trigger_defaults(self, github_mcp_server_data):
@@ -129,9 +152,15 @@ class TestEmptyStringAndDefaults:
             actual_env_flags = set(env_flags)
             assert expected_env_flags == actual_env_flags
 
-    def test_copilot_empty_strings_trigger_defaults(self, github_mcp_server_data):
-        """Test that Copilot adapter treats empty strings as no value and applies defaults."""
+    @pytest.mark.parametrize("runtime_env", [False, True], ids=["legacy", "runtime"])
+    def test_copilot_empty_strings_trigger_defaults(
+        self, github_mcp_server_data: dict, runtime_env: bool, tmp_path: Path
+    ) -> None:
+        """Preserve legacy defaults and runtime references without persisting secrets."""
         adapter = CopilotClientAdapter()
+        if not runtime_env:
+            adapter._supports_runtime_env_substitution = False
+        assert adapter._supports_runtime_env_substitution is runtime_env
 
         # User provides some values but leaves essential ones empty
         env_overrides = {
@@ -153,6 +182,7 @@ class TestEmptyStringAndDefaults:
 
             config = adapter.get_current_config()
             server_config = config["mcpServers"]["github-mcp-server"]
+            assert (tmp_path / ".github" / "mcp.json").is_file()
 
             # Extract env values from Docker args (Copilot format: -e VAR=value)
             args = server_config["args"]
@@ -165,13 +195,17 @@ class TestEmptyStringAndDefaults:
                         env_values[env_name] = env_value
 
             # Check that user values + defaults for empty ones are present
-            assert env_values["GITHUB_PERSONAL_ACCESS_TOKEN"] == "ghp_token_123"  # User value
-            assert env_values["GITHUB_READ_ONLY"] == "1"  # User value
+            assert env_values["GITHUB_PERSONAL_ACCESS_TOKEN"] == (
+                "${GITHUB_PERSONAL_ACCESS_TOKEN}" if runtime_env else "ghp_token_123"
+            )
+            assert env_values["GITHUB_READ_ONLY"] == ("${GITHUB_READ_ONLY}" if runtime_env else "1")
             assert env_values["GITHUB_TOOLSETS"] == "context"  # Default for empty
             assert env_values["GITHUB_DYNAMIC_TOOLSETS"] == "1"  # Default for empty
 
             # GITHUB_HOST should not be present (was empty and no default)
             assert "GITHUB_HOST" not in env_values
+            if runtime_env:
+                assert "ghp_token_123" not in json.dumps(server_config)
 
     def test_codex_no_overrides_gets_defaults(self, github_mcp_server_data):
         """Test that Codex adapter applies defaults when required vars provided but optional ones get defaults."""
@@ -208,9 +242,15 @@ class TestEmptyStringAndDefaults:
             assert "GITHUB_HOST" not in env_section
             assert "GITHUB_READ_ONLY" not in env_section
 
-    def test_copilot_no_overrides_gets_defaults(self, github_mcp_server_data):
-        """Test that Copilot adapter applies defaults when required vars provided but optional ones get defaults."""
+    @pytest.mark.parametrize("runtime_env", [False, True], ids=["legacy", "runtime"])
+    def test_copilot_no_overrides_gets_defaults(
+        self, github_mcp_server_data: dict, runtime_env: bool, tmp_path: Path
+    ) -> None:
+        """Keep defaults and optional omission in both supported environment modes."""
         adapter = CopilotClientAdapter()
+        if not runtime_env:
+            adapter._supports_runtime_env_substitution = False
+        assert adapter._supports_runtime_env_substitution is runtime_env
 
         # Provide the required variable, explicitly set others empty to trigger defaults
         env_overrides_with_empties = {
@@ -232,6 +272,7 @@ class TestEmptyStringAndDefaults:
 
             config = adapter.get_current_config()
             server_config = config["mcpServers"]["github-mcp-server"]
+            assert (tmp_path / ".github" / "mcp.json").is_file()
 
             # Extract env values from Docker args
             args = server_config["args"]
@@ -244,13 +285,17 @@ class TestEmptyStringAndDefaults:
                         env_values[env_name] = env_value
 
             # Should have user value + defaults for empty essential vars
-            assert env_values["GITHUB_PERSONAL_ACCESS_TOKEN"] == "token123"  # User provided
+            assert env_values["GITHUB_PERSONAL_ACCESS_TOKEN"] == (
+                "${GITHUB_PERSONAL_ACCESS_TOKEN}" if runtime_env else "token123"
+            )
             assert env_values["GITHUB_TOOLSETS"] == "context"  # Default for empty
             assert env_values["GITHUB_DYNAMIC_TOOLSETS"] == "1"  # Default for empty
 
             # Empty optional vars should not be present
             assert "GITHUB_HOST" not in env_values
             assert "GITHUB_READ_ONLY" not in env_values
+            if runtime_env:
+                assert "token123" not in json.dumps(server_config)
 
     def test_codex_user_values_override_defaults(self, github_mcp_server_data):
         """Test that Codex adapter respects user-provided values over defaults."""
@@ -280,9 +325,15 @@ class TestEmptyStringAndDefaults:
             assert env_section["GITHUB_TOOLSETS"] == "context"  # User value
             assert env_section["GITHUB_DYNAMIC_TOOLSETS"] == "0"  # User value
 
-    def test_copilot_user_values_override_defaults(self, github_mcp_server_data):
-        """Test that Copilot adapter respects user-provided values over defaults."""
+    @pytest.mark.parametrize("runtime_env", [False, True], ids=["legacy", "runtime"])
+    def test_copilot_user_values_override_defaults(
+        self, github_mcp_server_data: dict, runtime_env: bool, tmp_path: Path
+    ) -> None:
+        """Legacy overrides differ from intentional non-secret runtime defaults."""
         adapter = CopilotClientAdapter()
+        if not runtime_env:
+            adapter._supports_runtime_env_substitution = False
+        assert adapter._supports_runtime_env_substitution is runtime_env
 
         # User provides explicit values for default variables
         env_overrides = {
@@ -302,6 +353,7 @@ class TestEmptyStringAndDefaults:
 
             config = adapter.get_current_config()
             server_config = config["mcpServers"]["github-mcp-server"]
+            assert (tmp_path / ".github" / "mcp.json").is_file()
 
             # Extract env values from Docker args
             args = server_config["args"]
@@ -313,9 +365,13 @@ class TestEmptyStringAndDefaults:
                         env_name, env_value = env_spec.split("=", 1)
                         env_values[env_name] = env_value
 
-            # Should use user values, not defaults
-            assert env_values["GITHUB_TOOLSETS"] == "custom_toolset"  # User value
-            assert env_values["GITHUB_DYNAMIC_TOOLSETS"] == "0"  # User value
+            assert env_values["GITHUB_TOOLSETS"] == ("context" if runtime_env else "custom_toolset")
+            assert env_values["GITHUB_DYNAMIC_TOOLSETS"] == ("1" if runtime_env else "0")
+            assert env_values["GITHUB_PERSONAL_ACCESS_TOKEN"] == (
+                "${GITHUB_PERSONAL_ACCESS_TOKEN}" if runtime_env else "ghp_token_123"
+            )
+            if runtime_env:
+                assert "ghp_token_123" not in json.dumps(server_config)
 
     def test_whitespace_only_treated_as_empty(self, github_mcp_server_data):
         """Test that whitespace-only strings are treated as empty."""

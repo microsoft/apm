@@ -39,6 +39,7 @@ def _write_apm_yml(project_dir: Path) -> None:
 
 def _make_request(*, project_dir: Path, manifest_deps: list[DependencyReference]) -> InstallRequest:
     pkg = MagicMock()
+    pkg.replace_rules = None
     pkg.package_path = project_dir / "apm.yml"
     pkg.get_apm_dependencies.return_value = manifest_deps
     pkg.get_dev_apm_dependencies.return_value = []
@@ -47,6 +48,29 @@ def _make_request(*, project_dir: Path, manifest_deps: list[DependencyReference]
 
 
 class TestEnforceFrozen:
+    def test_changed_replacement_table_refuses_before_content_verification(self, tmp_path: Path):
+        from apm_cli.models.dependency.replacement import parse_replace_block
+
+        _write_apm_yml(tmp_path)
+        _write_lockfile(tmp_path, [])
+        before = (tmp_path / "apm.lock.yaml").read_bytes()
+        request = _make_request(project_dir=tmp_path, manifest_deps=[])
+        request.apm_package.replace_rules = parse_replace_block(
+            [
+                {
+                    "for": {"git": "https://github.com/example/unused"},
+                    "with": {"path": "../never-present"},
+                }
+            ]
+        )
+        with (
+            patch.object(InstallService, "_verify_frozen_local_content") as verify,
+            pytest.raises(FrozenInstallError, match="replacement rules"),
+        ):
+            InstallService.enforce_frozen(request)
+        verify.assert_not_called()
+        assert (tmp_path / "apm.lock.yaml").read_bytes() == before
+
     def test_raises_when_lockfile_missing(self, tmp_path: Path):
         _write_apm_yml(tmp_path)
         req = _make_request(project_dir=tmp_path, manifest_deps=[])
@@ -449,6 +473,7 @@ class TestEnforceFrozenColdCache:
         manifest_dep = DependencyReference(repo_url="owner/some-pkg", reference="v1.0.0")
         recording_logger = _RecordingInstallLogger()
         pkg = MagicMock()
+        pkg.replace_rules = None
         pkg.package_path = tmp_path / "apm.yml"
         pkg.get_apm_dependencies.return_value = [manifest_dep]
         pkg.get_dev_apm_dependencies.return_value = []

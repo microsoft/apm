@@ -1124,3 +1124,334 @@ def test_from_rows_preserves_hashless_legacy_ownership_row() -> None:
         ".github/agents/verified.agent.md",
         ".github/agents/unverified.agent.md",
     )
+
+
+# ---------------------------------------------------------------------------
+#  MCP native hash baseline — ledger-side support
+# ---------------------------------------------------------------------------
+
+_HASH_A = "sha256:" + "a1" * 32
+_HASH_B = "sha256:" + "b2" * 32
+_HASH_C = "sha256:" + "c3" * 32
+
+
+def _mcp_uri_locator(
+    server: str,
+    runtime: str = "copilot",
+) -> DeploymentLocator:
+    return DeploymentLocator(
+        kind=LocatorKind.URI,
+        target="mcp",
+        value=server,
+        runtime=runtime,
+        scope="project",
+    )
+
+
+def _seed_lockfile_with_mcp_hashes(
+    servers: dict[str, list[str]],
+    hashes: dict[str, dict[str, str]],
+) -> LockFile:
+    """Create a lockfile whose deployment ledger carries MCP URI hashes."""
+    lockfile = LockFile()
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lockfile,
+        servers,
+        native_hashes=hashes,
+    )
+    return lockfile
+
+
+class TestMcpNativeHashes:
+    """DeploymentLedgerCodec.mcp_native_hashes getter."""
+
+    def test_returns_empty_when_no_mcp_records(self) -> None:
+        lockfile = LockFile()
+        assert DeploymentLedgerCodec.mcp_native_hashes(lockfile) == {}
+
+    def test_returns_empty_when_hashes_are_none(self) -> None:
+        lockfile = LockFile()
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a"]},
+        )
+        assert DeploymentLedgerCodec.mcp_native_hashes(lockfile) == {}
+
+    def test_projects_valid_hashes(self) -> None:
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a", "server-b"]},
+            {"copilot": {"server-a": _HASH_A, "server-b": _HASH_B}},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"server-a": _HASH_A, "server-b": _HASH_B}}
+
+    def test_excludes_malformed_hashes(self) -> None:
+        """Hashes that are not sha256:<64 lower hex> are silently excluded."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["good", "bad"]},
+            {"copilot": {"good": _HASH_A, "bad": "md5:short"}},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"good": _HASH_A}}
+
+    def test_excludes_lsp_records(self) -> None:
+        """LSP URI rows must not appear in MCP hash projection."""
+        lockfile = LockFile()
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["shared"]},
+            native_hashes={"copilot": {"shared": _HASH_A}},
+        )
+        DeploymentLedgerCodec.replace_lsp_target_servers(
+            lockfile,
+            {"copilot": ["shared"]},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"shared": _HASH_A}}
+
+    def test_multiple_runtimes(self) -> None:
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["s1"], "claude": ["s2"]},
+            {"copilot": {"s1": _HASH_A}, "claude": {"s2": _HASH_B}},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"s1": _HASH_A}, "claude": {"s2": _HASH_B}}
+
+
+class TestReplaceMcpTargetServersNativeHashes:
+    """replace_mcp_target_servers with the native_hashes kwarg."""
+
+    def test_none_preserves_existing_hashes_for_retained_coords(self) -> None:
+        """native_hashes=None (default) carries forward prior hashes."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a", "server-b"]},
+            {"copilot": {"server-a": _HASH_A, "server-b": _HASH_B}},
+        )
+        # Update with same servers, no explicit hashes -> preserve
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a", "server-b"]},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"server-a": _HASH_A, "server-b": _HASH_B}}
+
+    def test_none_drops_hash_for_removed_server(self) -> None:
+        """Removing a server from target_servers drops its hash."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["kept", "removed"]},
+            {"copilot": {"kept": _HASH_A, "removed": _HASH_B}},
+        )
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["kept"]},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"kept": _HASH_A}}
+
+    def test_none_drops_hash_for_removed_runtime(self) -> None:
+        """Removing an entire runtime from target_servers drops its hashes."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["s1"], "claude": ["s2"]},
+            {"copilot": {"s1": _HASH_A}, "claude": {"s2": _HASH_B}},
+        )
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["s1"]},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"s1": _HASH_A}}
+
+    def test_explicit_map_replaces_all_hashes(self) -> None:
+        """An explicit map is authoritative — no fallback to prior hashes."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a", "server-b"]},
+            {"copilot": {"server-a": _HASH_A, "server-b": _HASH_B}},
+        )
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a", "server-b"]},
+            native_hashes={"copilot": {"server-a": _HASH_C}},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        # server-a gets new hash, server-b gets None (not in explicit map)
+        assert hashes == {"copilot": {"server-a": _HASH_C}}
+
+    def test_explicit_empty_map_clears_all_hashes(self) -> None:
+        """An explicit empty map clears all MCP hashes."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a"]},
+            native_hashes={},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {}
+
+    def test_explicit_map_rejects_malformed_hash(self) -> None:
+        """Malformed envelope in explicit map is stored as None, not the bad value."""
+        lockfile = LockFile()
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a"]},
+            native_hashes={"copilot": {"server-a": "not-a-hash"}},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {}
+
+    def test_backward_compat_no_kwarg(self) -> None:
+        """Existing callers without native_hashes kwarg still work."""
+        lockfile = LockFile()
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a"]},
+        )
+        assert lockfile.mcp_target_servers == {"copilot": ["server-a"]}
+        assert DeploymentLedgerCodec.mcp_native_hashes(lockfile) == {}
+
+
+class TestMcpHashCarryForward:
+    """MCP URI hashes survive serialization, rebuild, and carry-forward cycles."""
+
+    @pytest.mark.parametrize("bundle", [False, True])
+    def test_local_rename_preserves_mcp_receipt(self, bundle: bool) -> None:
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"claude": ["server-a"]}, {"claude": {"server-a": _HASH_A}}
+        )
+        if bundle:
+            DeploymentLedgerCodec.record_local_bundle_files(
+                lockfile, ["old.md"], {"old.md": _HASH_B}
+            )
+        else:
+            lockfile.local_deployed_files = ["old.md"]
+            DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+
+        lockfile.rename_local_deployed_path("old.md", "new.md")
+
+        assert lockfile.local_deployed_files == ["new.md"]
+        rebuilt = LockFile.from_yaml(lockfile.to_yaml())
+        assert DeploymentLedgerCodec.mcp_native_hashes(rebuilt) == {"claude": {"server-a": _HASH_A}}
+        assert DeploymentLedgerCodec.local_bundle_paths(rebuilt) == (
+            frozenset({"new.md"}) if bundle else frozenset()
+        )
+
+    def test_yaml_round_trip_preserves_hashes(self) -> None:
+        """Hashes survive to_yaml -> from_yaml round-trip."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        yaml_str = lockfile.to_yaml()
+        rebuilt = LockFile.from_yaml(yaml_str)
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(rebuilt)
+        assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+    def test_rebuild_from_legacy_preserves_uri_hashes(self) -> None:
+        """refresh_from_legacy (called by replace_mcp_target_servers) preserves URI hashes."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        # Add a file dependency to trigger a more complex rebuild
+        lockfile.local_deployed_files = [".claude/rules/local.md"]
+        lockfile.local_deployed_file_hashes = {".claude/rules/local.md": "sha256:" + "dd" * 32}
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+    def test_invalidate_legacy_projection_preserves_mcp_uri_via_rebuild(self) -> None:
+        """invalidate_legacy_projection preserves MCP URI content_hash
+        by capturing the prior ledger and passing it to _rebuild_from_legacy."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        # After replace_mcp_target_servers, _deployments_present is True.
+        # A full YAML round-trip makes the persisted ledger survive from_lockfile.
+        yaml_str = lockfile.to_yaml()
+        lockfile = LockFile.from_yaml(yaml_str)
+        assert lockfile._deployments_present is True
+
+        # invalidate clears the ledger then rebuilds from legacy views,
+        # carrying forward URI hashes from the captured prior ledger.
+        DeploymentLedgerCodec.invalidate_legacy_projection(lockfile)
+
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+    def test_is_semantically_equivalent_detects_hash_change(self) -> None:
+        """Adding a hash to an MCP URI record changes semantic equivalence."""
+        without_hash = LockFile()
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            without_hash,
+            {"copilot": ["server-a"]},
+        )
+        with_hash = LockFile()
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            with_hash,
+            {"copilot": ["server-a"]},
+            native_hashes={"copilot": {"server-a": _HASH_A}},
+        )
+        assert not without_hash.is_semantically_equivalent(with_hash)
+
+    def test_semantically_equivalent_when_hashes_match(self) -> None:
+        """Two lockfiles with identical MCP hashes are semantically equivalent."""
+        lf1 = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        lf2 = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        assert lf1.is_semantically_equivalent(lf2)
+
+    def test_hash_survives_adding_second_server(self) -> None:
+        """Adding a new server to a runtime preserves existing server's hash."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        # Add server-b, preserve server-a's hash (native_hashes=None)
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            lockfile,
+            {"copilot": ["server-a", "server-b"]},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+    def test_hash_survives_yaml_round_trip_then_replace(self) -> None:
+        """Hash persisted in YAML survives re-read and subsequent replace."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        rebuilt = LockFile.from_yaml(lockfile.to_yaml())
+        # Re-replace with same servers, no explicit hashes
+        DeploymentLedgerCodec.replace_mcp_target_servers(
+            rebuilt,
+            {"copilot": ["server-a"]},
+        )
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(rebuilt)
+        assert hashes == {"copilot": {"server-a": _HASH_A}}
+
+    def test_file_dependency_mutation_does_not_drop_mcp_hashes(self) -> None:
+        """Mutating file-based dependency state does not affect MCP URI hashes."""
+        lockfile = _seed_lockfile_with_mcp_hashes(
+            {"copilot": ["server-a"]},
+            {"copilot": {"server-a": _HASH_A}},
+        )
+        dep = LockedDependency(
+            repo_url="owner/package",
+            deployed_files=[".github/agents/demo.agent.md"],
+            deployed_file_hashes={".github/agents/demo.agent.md": "sha256:" + "ee" * 32},
+        )
+        lockfile.add_dependency(dep)
+        # add_dependency calls invalidate_legacy_projection, but the hash
+        # is carried in the prior ledger through the rebuild path.
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+        hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+        assert hashes == {"copilot": {"server-a": _HASH_A}}

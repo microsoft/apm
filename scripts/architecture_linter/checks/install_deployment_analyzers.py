@@ -73,6 +73,10 @@ from scripts.architecture_linter.checks.install_single_file import (
 from scripts.architecture_linter.checks.install_single_file import (
     check_single_file_materialization,
 )
+from scripts.architecture_linter.checks.install_skill_preflight import (
+    GUARD_SKILL_PREFLIGHT,
+    check_skill_preflight,
+)
 from scripts.architecture_linter.checks.install_skills_root_derivation import (
     _GUARD_SKILLS_ROOT,
     check_skills_root_derivation,
@@ -154,6 +158,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_SOURCE_PLAN,
         "Authorized deployable source paths come from install/deployable_source_plan.py.",
         check_source_plan,
+    ),
+    _rule(
+        GUARD_SKILL_PREFLIGHT,
+        "The complete selected skill plan is checked before native deployment.",
+        check_skill_preflight,
     ),
     _rule(
         _GUARD_PRIMITIVE_CLASSIFICATION,

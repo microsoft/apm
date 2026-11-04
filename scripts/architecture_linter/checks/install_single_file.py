@@ -32,16 +32,22 @@ def check_single_file_materialization(provider: FactsProvider) -> tuple[Violatio
         MATERIALIZER,
         ("materialize_virtual_file_package", "virtual_file_subdirectory"),
     )
-    findings.extend(_unique_definitions(provider, GUARD, LOCAL, ("read_local_package_source",)))
+    findings.extend(
+        _unique_definitions(
+            provider,
+            GUARD,
+            LOCAL,
+            ("read_local_package_source", "materialize_local_file_for_replay"),
+        )
+    )
     routes = {
         DOWNLOADER: {"download_virtual_file_package": {"materialize_virtual_file_package"}},
-        DRIFT: {
-            "_materialize_install_path": {
+        DRIFT: {"_materialize_install_path": {"materialize_local_file_for_replay"}},
+        LOCAL: {
+            "materialize_local_file_for_replay": {
                 "read_local_package_source",
                 "materialize_virtual_file_package",
             },
-        },
-        LOCAL: {
             "_copy_local_package": {
                 "read_local_package_source",
                 "materialize_virtual_file_package",

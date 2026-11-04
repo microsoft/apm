@@ -201,6 +201,15 @@ uv run pytest tests/unit -x -v
 to force serial execution. The default selection in `pyproject.toml` excludes
 `benchmark` and `live` tests.
 
+For performance changes, prefer deterministic operation-count regressions over
+wall-clock thresholds. Run the consolidated scan regressions with
+`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py`.
+They check deferred error-only imports, at most two indexed ZIP member lookups,
+and uninstall deduplication without comparing previously selected entries.
+Archive parsing and canonical dependency matching retain their existing costs.
+Deferring a direct import does not prove a cold-start speedup: other modules may
+still load the same dependency transitively.
+
 Without `uv`, use a standard Python venv and pip:
 
 ```bash
@@ -288,6 +297,10 @@ The reviewed survivor allowlist lives in
 [`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
 Do not update it to make a run green. Review every surviving diff with
 `mutmut show` and add behavioral tests for real contract gaps.
+Mutant numbers can shift when a function changes. Compare the old and new
+diffs before replacing an accepted ID; a renamed survivor is not a newly
+killed behavior. Add missing coverage to the owner's configured test seam,
+not only to tests outside the pilot.
 Use `--update-baseline` only when the baseline change itself has been reviewed:
 
 ```bash

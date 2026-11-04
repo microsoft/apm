@@ -26,6 +26,7 @@ from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -1481,10 +1482,11 @@ class TestExcludeRuntime:
         self,
         tmp_path,
     ) -> None:
-        """A failed adapter write emits an error and records no durable owner."""
+        """A failed write retains target selection but no owned names or hashes."""
         dep = _make_self_defined_dep("write-failure")
         logger = MagicMock()
         managed_target_servers: dict[str, set[str]] = {}
+        native_hashes: dict[str, dict[str, str]] = {}
 
         with (
             patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
@@ -1499,12 +1501,29 @@ class TestExcludeRuntime:
                 logger=logger,
                 project_root=tmp_path,
                 managed_target_servers=managed_target_servers,
+                native_hashes=native_hashes,
             )
 
         assert result == 0
         install_for_runtime.assert_called_once()
-        assert managed_target_servers == {}
+        assert managed_target_servers == {"copilot": set()}
+        assert native_hashes == {}
         logger.error.assert_called_once_with("write-failure -- failed for copilot")
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        MCPIntegrator.update_lockfile(
+            {dep.name},
+            lock_path=lock_path,
+            mcp_target_servers=managed_target_servers,
+            native_hashes=native_hashes,
+            fail_on_write_error=True,
+        )
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        assert lock.mcp_servers == [dep.name]
+        assert lock.mcp_target_servers == {}
+        assert DeploymentLedgerCodec.mcp_native_hashes(lock) == {}
+        assert DeploymentLedgerCodec.from_lockfile(lock).records == {}
 
 
 # ---------------------------------------------------------------------------

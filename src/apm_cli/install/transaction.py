@@ -29,11 +29,17 @@ def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> Non
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(snapshot)
-        os.replace(temporary_name, manifest_path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(temporary_name)
         raise
+    try:
+        os.replace(temporary_name, manifest_path)
+    except OSError as exc:
+        raise OSError(
+            f"Could not restore {manifest_path}: {exc}. "
+            f"Prior manifest snapshot retained at {temporary_name} for recovery."
+        ) from exc
 
 
 def _maybe_rollback_manifest(
@@ -55,10 +61,9 @@ def _maybe_rollback_manifest(
         except Exception as exc:
             if logger is not None:
                 logger.warning(
-                    "Failed to remove apm.yml created by this install. "
-                    "Delete apm.yml manually before retrying."
+                    f"Failed to remove {manifest_path} created by this install: {exc}. "
+                    "Inspect and remove that new manifest before retrying."
                 )
-                logger.verbose_detail(f"Manifest rollback error: {exc}")
         return
     try:
         if snapshot is None:
@@ -70,8 +75,9 @@ def _maybe_rollback_manifest(
             logger.progress("apm.yml restored to its previous state.")
     except Exception as exc:
         if logger is not None:
-            logger.warning("Failed to restore apm.yml. Inspect apm.yml before retrying.")
-            logger.verbose_detail(f"Manifest rollback error: {exc}")
+            logger.warning(
+                f"Failed to restore apm.yml: {exc}. Inspect the recovery data before retrying."
+            )
 
 
 class InstallTransaction:
@@ -164,22 +170,13 @@ class InstallTransaction:
         """Report cleanup paths that require safe manual recovery."""
         if not issues or self._logger is None:
             return
-        item_label = "item" if len(issues) == 1 else "items"
-        if self._logger.verbose is True:
-            recovery_action = (
-                "Stop other APM installs, then delete the paths listed below manually."
-            )
-        else:
-            recovery_action = (
-                "Stop other APM installs, then run again with --verbose "
-                "to see paths you can delete manually."
-            )
         self._logger.warning(
-            f"Could not safely remove {len(issues)} interrupted-install backup "
-            f"{item_label}. {recovery_action}"
+            "Install recovery or staging cleanup is incomplete. Close programs using the "
+            "affected paths, then inspect the retained data before retrying. "
+            "Do not delete backups needed to recover the prior installation."
         )
         for path, reason in issues:
-            self._logger.verbose_detail(f"Resolution backup kept at {path}: {reason}")
+            self._logger.warning(f"Resolution recovery path {path}: {reason}")
 
     def complete(self, result: InstallResult) -> InstallResult:
         """Finalize one result according to its canonical disposition."""
@@ -209,9 +206,11 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
-                cleanup_issues = self._resolution.rollback() or []
-                self._report_resolution_cleanup_issues(cleanup_issues)
-                self._restore_manifest()
+                try:
+                    cleanup_issues = self._resolution.rollback() or []
+                    self._report_resolution_cleanup_issues(cleanup_issues)
+                finally:
+                    self._restore_manifest()
                 self._rolled_back = True
                 self._completed = True
             finally:

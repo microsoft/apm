@@ -74,6 +74,10 @@ Cause: deployed primitive files in the project differ from the content recorded 
 
 Fix: run `apm install` to re-deploy from the cache. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
+For `unmanaged-conflict`, ordinary reinstall refuses the selected plan instead.
+Rename the conflicting local skill or choose a valid existing skill/target
+selection first. Audit does not adopt, overwrite, or delete the local file.
+
 See also: [Install failures](../install-failures/)
 
 ### `Content hash mismatch for <pkg>: expected <a>, got <b>`

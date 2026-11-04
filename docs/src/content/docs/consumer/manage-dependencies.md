@@ -193,6 +193,89 @@ For reserved aliases `.` and `..`, see [Rejected dependency aliases](../../troub
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).
 
+## Replace a source (candidate)
+
+:::caution[Development-build contract]
+Root source replacement is an unratified implementation candidate, not a
+released OpenAPM contract. It requires a build containing this feature and the
+explicit schema selector below; a first supported release has not been assigned.
+The selector is not yet a published JSON Schema.
+
+Verified older clients v0.25.0, v0.32.0 and v0.33.0 reject this selector and
+replacement lock version `"3"`. v0.24.1 can ignore them and install upstream
+instead. These observations do not establish feature support or a safe minimum
+client version. Do not share replacement manifests or locks with unqualified
+clients.
+:::
+
+Keep the dependency declaration unchanged. In the consumer's root `apm.yml`,
+redirect its exact Git identity to a local checkout:
+
+```yaml
+$schema: https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json
+replace:
+  - for:
+      git: https://github.com/example/catalog.git
+      path: packages/base
+    with:
+      path: ../catalog/packages/base
+```
+
+Run `apm install`. The rule applies to direct and transitive requirements,
+including shared dependencies. Only root rules apply; dependency-owned rules
+cannot redirect the consumer. Matching includes the normalized host, endpoint,
+repository and optional subdirectory, not a package name or wildcard.
+Local paths are relative to the consumer manifest, even for a transitive
+requirement. Keep the same sibling-checkout layout on other machines.
+
+For a fork, replace the `with` mapping with an explicit source and ref:
+
+```yaml
+with:
+  git: https://github.com/my-org/catalog-fork.git
+  path: packages/base
+  ref: patched-base
+```
+
+This substitutes the complete source and ref. An omitted fork `path` selects
+the repository root, not the original subdirectory. Original refs remain
+provenance, not constraints on the replacement. Rules do not chain through the
+selected source, but that source's own dependencies can match root rules.
+The original identity still owns one installed slot and its deployed files.
+Authentication, policy, integrity and executable approval use the selected
+source; replacement is not a trust grant. HTTP replacement sources are rejected,
+including with `--allow-insecure`.
+
+Ordinary installs replay a matching fork pin. `apm update` refreshes mutable fork
+refs but retains an explicitly selected SHA. `apm outdated` checks the fork;
+local sources are shown as not remotely comparable. Its table shows original
+and selected sources; `--verbose` also prints per-dependency replacement details.
+`apm deps why` shows source
+provenance and original request paths. Missing or invalid selected sources fail
+without falling back upstream.
+
+`apm install --dry-run` previews locally available replacement dependencies
+without changing installed outputs. Transitive local replacements keep the
+consumer-root anchor; unavailable selected sources make the preview incomplete.
+
+`--frozen` compares the complete rule table, including unused rules, and verifies
+local content against its recorded baseline before deployment. Changed, added
+or removed files, missing sources and missing content hashes are refused.
+Review changes and run a normal install to accept a new baseline.
+
+Ordinary `apm install` persists the entire normalized root replacement table in
+`apm.lock.yaml`, even after the last dependency is removed. This includes
+clearing it with `replace: []` or removing `replace`. Recording dormant rules
+does not read or fetch their sources, even if a local path is absent.
+
+Delete a matching rule and run `apm install` to return to upstream requirements
+and reconcile owned outputs. Shared replacements remain until their last parent
+is removed. If reachability cannot be verified, uninstall names the affected
+dependencies so you can restore their missing or invalid manifests and retry.
+Uninstall retains dormant rules; remove them explicitly if no longer
+needed. See the [candidate manifest contract](../../reference/manifest-schema/#313-replace-candidate)
+and [lock evidence](../../reference/lockfile-spec/#root-source-replacement-evidence-candidate).
+
 ## Incompatible immutable requirements
 
 APM installs one version per package identity. If two dependency paths require

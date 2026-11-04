@@ -65,6 +65,7 @@ devDependencies:
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
+replace:       <list<ReplacementRule>>    # candidate; explicit selector required
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
 ```
 
@@ -324,7 +325,7 @@ policy:
 
 | Sub-key | Type | Default | Allowed values | Semantic |
 |---|---|---|---|---|
-| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no enforceable policy is available (fetch failures or no-policy outcomes). `warn` keeps installs unblocked; `block` opts into fail-closed semantics for both `apm install` and `apm audit --ci`. |
+| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no enforceable policy is available (fetch failures or no-policy outcomes). `warn` keeps installs unblocked; `block` opts into fail-closed semantics for both `apm install` and `apm audit --ci`. With `apm audit --ci --policy org`, it applies only to fetch failures; `absent`, `no_git_remote`, and `empty` pass through. An explicit `apm audit --ci --policy <path\|url\|owner/repo>` always fails closed and ignores this field. |
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
@@ -376,6 +377,41 @@ x-team: platform
 x-internal:
   ticket: ABC-1
 ```
+
+---
+
+### 3.13. `replace` (candidate)
+
+This is an **unratified implementation candidate**, not an extension to the
+released OpenAPM schemas. A feature-capable development build requires the exact
+`$schema` identity
+`https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json`
+whenever `replace` is present, including an empty list. This URI is a candidate
+contract selector. Its [proposed schema](/apm/specs/schemas/manifest-source-replacements-v1.schema.json)
+is staged with [proposal 0.1.54](../../specs/openapm-v01/#481-root-source-replacements-proposed-capability);
+neither ratification nor a first supported release is claimed.
+Existing manifests without `replace` keep their current contract.
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `replace` | List of rules | Consumer-root rules; not inherited from dependencies. |
+| `for` | `{git: <explicit-host Git locator>, path?: <package subdirectory>}` | Exact normalized host, endpoint, repository and subpath. No ref, alias, wildcard, single-file primitive, registry or marketplace selector. |
+| `with` (local) | `{path: <local path>}` | Complete source substitution, anchored to the consumer manifest. |
+| `with` (Git) | `{git: <explicit HTTPS/SSH URL or SCP-style locator>, path?: <subdirectory>, ref: <ref>}` | Complete source/ref substitution. `ref` is required; omitted `path` means repository root. HTTP, `owner/repo` shorthand and scheme-free `host/repo` shorthand are rejected. |
+
+Unknown rule fields and duplicate normalized selectors fail. Original alias,
+skill/target subset and dev-selection semantics are preserved. Rules bind
+original requirements before graph selection; selected sources are not chained
+through other rules. Their own dependency declarations are new requirements.
+Cycles and ambiguous materialization slots fail rather than selecting a winner.
+An unused rule warns without reading its source, but remains part of frozen
+comparison.
+
+The explicit selector is essential: older readers can silently ignore an
+additive `replace` key. Verified v0.25.0, v0.32.0 and v0.33.0 readers reject this
+selector and lock version `"3"`; v0.24.1 does not. Rejection is not feature support,
+and untested clients are not qualified. See the
+[usage and compatibility warning](../../consumer/manage-dependencies/#replace-a-source-candidate).
 
 ---
 

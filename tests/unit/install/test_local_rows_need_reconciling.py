@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.helpers.no_work import local_rows_need_reconciling, retained_local_work
 
@@ -77,6 +79,24 @@ def test_bundle_only_rows_are_not_install_work(tmp_path: Path) -> None:
     assert not local_rows_need_reconciling(
         lockfile, tmp_path, SimpleNamespace(), target="claude", scope=None
     )
+
+
+@pytest.mark.parametrize("value", [None, ["claude"]], ids=["unrestricted", "resolved"])
+def test_cleanup_reuses_an_existing_target_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: list[str] | None
+) -> None:
+    unexpected = Mock(side_effect=AssertionError("Target decision must not be recomputed"))
+    monkeypatch.setattr("apm_cli.core.target_detection.resolve_package_target_decision", unexpected)
+
+    assert local_rows_need_reconciling(
+        _lockfile(),
+        tmp_path,
+        SimpleNamespace(),
+        target=None,
+        scope=None,
+        target_decision=EffectiveTargetDecision(value=value, source="test"),
+    ) is (value is not None)
+    unexpected.assert_not_called()
 
 
 @pytest.mark.parametrize(

@@ -533,12 +533,16 @@ def test_diff_engine_100kb_inline_cap(tmp_path):
 
 
 def _target_with_skill_deploy_root(root_dir: str = ".github", deploy_root: str = ".agents"):
-    """Build a minimal TargetProfile-like stub for governed-root tests."""
-    from types import SimpleNamespace
+    """Use a real target profile for governed-root and collision routing."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
-    return SimpleNamespace(
+    target = KNOWN_TARGETS["copilot"]
+    return dataclasses.replace(
+        target,
         root_dir=root_dir,
-        primitives={"skills": SimpleNamespace(deploy_root=deploy_root)},
+        primitives={
+            "skills": dataclasses.replace(target.primitives["skills"], deploy_root=deploy_root)
+        },
     )
 
 
@@ -571,7 +575,7 @@ def test_diff_engine_walks_skill_deploy_root_detects_drift(tmp_path):
 
     findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
     assert len(findings) == 1
-    assert findings[0].kind == "modified"
+    assert findings[0].kind == "unmanaged-conflict"
     assert findings[0].path == rel
 
 

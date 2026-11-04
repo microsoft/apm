@@ -186,6 +186,52 @@ def _assert_bundle_kept(project: Path, bundled: str) -> None:
     ) == frozenset({bundled})
 
 
+def _assert_replacement_intent_preserves_receipts(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = project / "apm.lock.yaml"
+    before = LockFile.read(lock_path)
+    manifest_path = project / "apm.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["$schema"] = (
+        "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+    )
+    rule = {"for": {"git": "https://github.com/example/base.git"}, "with": {"path": "./absent"}}
+    for declared in ([rule], []):
+        manifest["replace"] = declared
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+        _install(project, monkeypatch, "--no-policy")
+        after = LockFile.read(lock_path)
+        assert before is not None and after is not None
+        assert after.replacements == declared
+        assert after.lockfile_version == "3"
+        after.replacements = before.replacements
+        after.lockfile_version = before.lockfile_version
+        assert after.is_semantically_equivalent(before)
+        stable = lock_path.read_bytes()
+        _install(project, monkeypatch, "--no-policy")
+        assert lock_path.read_bytes() == stable
+        assert not (project / "absent").exists()
+
+
+@pytest.mark.parametrize("targets", [None, ("claude", "copilot")])
+def test_bundle_only_receipts_allow_replacement_intent_persistence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, targets: tuple[str, ...] | None
+) -> None:
+    manifest: dict[str, object] = {"name": "bundle-only", "version": "1.0.0"}
+    if targets:
+        manifest["targets"] = list(targets)
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    LockFile(replacements=[]).save(tmp_path / "apm.lock.yaml")
+    bundled = _record_bundle(tmp_path, "bundled")
+
+    _assert_replacement_intent_preserves_receipts(tmp_path, monkeypatch)
+
+    _assert_bundle_kept(tmp_path, bundled)
+    assert (tmp_path / bundled).read_text(encoding="utf-8") == "bundled"
+    assert not (tmp_path / "apm_modules").exists()
+
+
 @pytest.mark.parametrize(
     "between",
     [("install",), ("uninstall", "./dep"), ("install", "--legacy-skill-paths")],
@@ -258,9 +304,11 @@ def test_alias_target_contracts_attributed_local_rows(
 def test_install_does_not_expand_unattributed_dependency_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The local provenance fix must not sweep ambiguous historical dependency rows."""
+    """Retire proven absent members without sweeping still-present historical skills."""
     _write_project(tmp_path, ("claude", "copilot"))
     _write_skill(tmp_path / "dep", "dep-extra")
+    obsolete_source = tmp_path / "dep/.apm/skills/dep-skill/obsolete.md"
+    obsolete_source.write_text("Old member.\n", encoding="ascii")
     _install(tmp_path, monkeypatch)
     _mark_shared_root_rows_unattributed(tmp_path, owner="./dep")
     shared_skill = tmp_path / ".agents/skills/dep-extra/SKILL.md"
@@ -268,6 +316,13 @@ def test_install_does_not_expand_unattributed_dependency_cleanup(
     expected_hash = compute_file_hash(shared_skill)
 
     shutil.rmtree(tmp_path / "dep" / ".apm" / "skills" / "dep-extra")
+    obsolete_source.unlink()
+    obsolete = {
+        ".agents/skills/dep-skill/obsolete.md",
+        ".claude/skills/dep-skill/obsolete.md",
+    }
+    for path in obsolete:
+        (tmp_path / path).unlink()
     _install(tmp_path, monkeypatch)
 
     dependency = next(
@@ -280,6 +335,10 @@ def test_install_does_not_expand_unattributed_dependency_cleanup(
     assert dependency["deployed_file_hashes"][".agents/skills/dep-extra/SKILL.md"] == expected_hash
     assert not (tmp_path / ".claude" / "skills" / "dep-extra").exists()
     assert _deployment_targets(_lock(tmp_path))[".agents/skills/dep-extra/SKILL.md"] == "legacy"
+    assert obsolete.isdisjoint(dependency["deployed_files"])
+    assert obsolete.isdisjoint(dependency["deployed_file_hashes"])
+    assert obsolete.isdisjoint(_deployment_targets(_lock(tmp_path)))
+    assert all(not (tmp_path / path).exists() for path in obsolete)
 
 
 def test_historical_bundle_without_owner_evidence_survives_install(
@@ -321,6 +380,8 @@ def test_deleted_local_tree_without_known_targets_stays_a_no_op(
     _install(tmp_path, monkeypatch)
 
     assert (tmp_path / "apm.lock.yaml").read_bytes() == before
+    assert (tmp_path / ".agents" / "skills" / "demo" / "SKILL.md").exists()
+    _assert_replacement_intent_preserves_receipts(tmp_path, monkeypatch)
     assert (tmp_path / ".agents" / "skills" / "demo" / "SKILL.md").exists()
 
 

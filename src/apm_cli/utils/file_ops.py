@@ -162,7 +162,7 @@ def _on_readonly_retry(func: Callable, path: str, _exc_info: Any) -> None:
     try:
         os.chmod(path, stat.S_IWRITE)
         func(path)
-    except OSError:
+    except FileNotFoundError:
         pass
 
 
@@ -195,7 +195,18 @@ def robust_rmtree(
     path_s = str(path)
 
     def _do_rmtree() -> None:
-        shutil.rmtree(path_s, onerror=_on_readonly_retry)
+        failures: list[OSError] = []
+
+        def recover_or_record(func: Callable, failed_path: str, exc_info: Any) -> None:
+            try:
+                _on_readonly_retry(func, failed_path, exc_info)
+            except OSError as exc:
+                failures.append(exc)
+
+        shutil.rmtree(path_s, onerror=recover_or_record)
+        if failures:
+            # Finish independent removals, but never report a partial tree as removed.
+            raise failures[0]
 
     try:
         _retry_on_lock(_do_rmtree, f"rmtree {path_s}", max_retries=max_retries)

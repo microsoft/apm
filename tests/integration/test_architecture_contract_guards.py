@@ -555,6 +555,11 @@ def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:
         ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.schema.json"),
         ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.41.schema.json"),
         ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.48.schema.json"),
+        (
+            "https",
+            "microsoft.github.io",
+            "/apm/specs/schemas/manifest-source-replacements-v1.schema.json",
+        ),
     ]
 
 

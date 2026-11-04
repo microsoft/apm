@@ -166,6 +166,7 @@ def maybe_resolve_git_semver(
         locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if (
             locked is not None
+            and locked.matches_replacement(dep_ref)
             and locked.constraint == constraint
             and locked.resolved_tag
             and locked.resolved_commit
@@ -182,6 +183,7 @@ def maybe_resolve_git_semver(
                 resolved_at=locked.resolved_at or "",
             )
 
+    dep_ref = dep_ref.source_reference
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
 
     if transport_selector is None:

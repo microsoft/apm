@@ -335,6 +335,7 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     findings: list[Violation] = []
     owner, owner_fail = _facts_for(provider, _SOURCE_PLAN_OWNER, rule_id)
     services, services_fail = _facts_for(provider, "src/apm_cli/install/services.py", rule_id)
+    plan, plan_fail = _facts_for(provider, "src/apm_cli/install/deployment_plan.py", rule_id)
     scan, scan_fail = _facts_for(provider, "src/apm_cli/install/helpers/security_scan.py", rule_id)
     engine, engine_fail = _facts_for(provider, "src/apm_cli/commands/uninstall/engine.py", rule_id)
     skill, skill_fail = _facts_for(provider, "src/apm_cli/integration/skill_integrator.py", rule_id)
@@ -345,6 +346,7 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     failures = (
         list(owner_fail)
         + list(services_fail)
+        + list(plan_fail)
         + list(scan_fail)
         + list(engine_fail)
         + list(skill_fail)
@@ -366,7 +368,8 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     block_failed = (
         _count_re(owner, class_pattern) != 1
-        or not _present(services, "source_plan = DeployableSourcePlan.create(")
+        or not _present(plan, "source_plan = DeployableSourcePlan.create(")
+        or not _present(services, "source_plan = deployment_plan.source_plan")
         or not _present(scan, "source_plan.scan_security(")
         or not _present(owner, "paths=self.paths")
         or not _present(services, "source_plan=source_plan")

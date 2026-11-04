@@ -42,7 +42,11 @@ lockfile-exists -> ref-consistency -> deployment-ledger-owners
 
 After the baseline passes, it replays the install in a scratch directory
 and diffs against the working tree to surface `unintegrated`, `modified`,
-`orphaned`, and `unrecorded` files. Root-local primitives use the same
+`orphaned`, `unrecorded`, and `unmanaged-conflict` files. An unmanaged skill
+conflict is not managed drift: ordinary reinstall now refuses that selected
+plan before deployment. Rename the local skill or choose a valid existing
+skill/target selection first; audit does not adopt, overwrite, or delete it.
+Root-local primitives use the same
 source discovery scope as a normal install; the scratch directory is
 only the deployment destination. `unrecorded` means replay produced the
 same normalized bytes as the project but no exact or directory
@@ -65,7 +69,9 @@ Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
 Scans every deployed primitive for hidden Unicode (zero-width characters,
 bidi overrides, tag characters) and runs the drift replay as advisory
-output. Exits 0 even when findings exist. Add `--strip` to remove hidden
+output. Drift alone is advisory by default; content findings and configured
+drift failures can return nonzero. See [exit codes](../../reference/cli/audit/#exit-codes).
+Add `--strip` to remove hidden
 characters in place; add `--file <path>` to scan a single file outside
 the lockfile.
 
@@ -116,12 +122,13 @@ the goal is detecting a developer who forgot to run `apm install` after
 editing `apm.yml`. The install step regenerates deployed files so the
 subsequent audit can compare them against the lockfile.
 
-That sequence has a blind spot: `apm install` overwrites every managed file
-with a clean copy before the audit runs. If a deployed file was modified on
-disk after the last install -- for example a hand-edit to
-`.github/instructions/` -- the install step restores the original bytes.
-The `content-integrity` check then compares the restored file against a
-matching hash and reports no finding.
+That sequence has a blind spot: `apm install` can restore managed output
+before the audit runs. For example, a hand-edit to `.github/instructions/`
+can be replaced with the original bytes, so `content-integrity` sees a
+matching hash rather than the pre-install change. Edited managed skill
+members behave differently: ordinary reinstall preserves their bytes and
+original deployment hashes; restoration requires explicit `--force`
+consent.
 
 For repos that commit their deployed files, use `setup-only: true` on the
 action so it only provides the CLI without running `apm install`, then run

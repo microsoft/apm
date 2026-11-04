@@ -1038,9 +1038,11 @@ def test_kiro_prompt_body_arguments_and_loss_diagnostics(
     assert "${input:name}" in warnings[1].message
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize("force", [False, True])
 def test_kiro_prompt_collision_adoption_and_force(
-    tmp_path: Path, kiro_prompt_source: Path, force: bool
+    tmp_path: Path, kiro_prompt_source: Path, force: bool, newline: str
 ) -> None:
     target = tmp_path / ".kiro/prompts/review.md"
     target.parent.mkdir()
@@ -1049,11 +1051,14 @@ def test_kiro_prompt_collision_adoption_and_force(
     assert result.files_integrated == int(force)
     assert result.files_skipped == int(not force)
     assert target.read_text() == ("Review ${1}\n" if force else "User-authored prompt\n")
-    target.write_text("Review ${1}\n")
+    original_bytes = f"Review ${{1}}{newline}".encode()
+    target.write_bytes(original_bytes)
     before = target.stat().st_mtime_ns
     adopted = _install_prompt(tmp_path)
-    assert adopted.files_adopted == 1
-    assert adopted.target_paths == [target]
+    assert adopted.files_adopted == int(newline == "\n")
+    assert adopted.files_skipped == int(newline != "\n")
+    assert adopted.target_paths == ([target] if newline == "\n" else [])
+    assert target.read_bytes() == original_bytes
     assert target.stat().st_mtime_ns == before
 
 

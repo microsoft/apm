@@ -365,6 +365,58 @@ def test_preserved_hook_makes_completed_package_removal_nonzero(
     assert "Uninstall complete" not in result.output
 
 
+@pytest.mark.parametrize("failure", [None, "lock", "receipt"])
+def test_survivor_receipts_bind_only_after_successful_final_lock_persistence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
+    removed, survivor = "owner/removed", "owner/survivor"
+    _write_manifest(tmp_path, [removed, survivor])
+    lock_path = tmp_path / "apm.lock.yaml"
+    LockFile(
+        dependencies={key: LockedDependency(repo_url=key) for key in (removed, survivor)}
+    ).write(lock_path)
+    before = lock_path.read_bytes()
+    monkeypatch.chdir(tmp_path)
+    session = MagicMock()
+    original_write = LockFile.write
+
+    def persist(lockfile: LockFile, path: Path) -> None:
+        if failure == "lock":
+            raise OSError("injected final lock persistence failure")
+        original_write(lockfile, path)
+
+    def bind(lockfile: LockFile) -> None:
+        assert set(LockFile.read(lock_path).dependencies) == {survivor}
+        assert lock_path.read_bytes() == lockfile.to_yaml().encode("utf-8")
+        if failure == "receipt":
+            raise OSError("injected receipt publication failure")
+
+    session.bind_committed_claims.side_effect = bind
+    with (
+        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts"),
+        patch("apm_cli.commands.uninstall.cli._remove_packages_from_disk", return_value=0),
+        patch(
+            "apm_cli.commands.uninstall.cli._cleanup_transitive_orphans", return_value=(0, set())
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+            return_value=IntegrationCleanupOutcome({}, {}, [], 0, session),
+        ),
+        patch.object(LockFile, "write", autospec=True, side_effect=persist),
+    ):
+        result = CliRunner().invoke(uninstall, [removed])
+    if failure == "lock":
+        session.bind_committed_claims.assert_not_called()
+        assert lock_path.read_bytes() == before
+        assert "Failed to update lockfile" in result.output
+    else:
+        session.bind_committed_claims.assert_called_once()
+        assert result.exit_code == (1 if failure == "receipt" else 0), result.output
+        if failure == "receipt":
+            assert "injected receipt publication failure" in result.output
+            assert "Uninstall complete" not in result.output
+
+
 @pytest.mark.parametrize("survivor_mode", ("missing", "malformed"))
 def test_shared_slot_staging_failure_is_nonzero_and_read_only(
     tmp_path: Path,

@@ -79,6 +79,7 @@ def test_installed_legacy_mixed_targets_preserve_audit_discovery(
         assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
 
+@pytest.mark.parametrize("tampered_bytes", [b"# changed\n", b"# changed\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize(
     ("target", "workflow", "configured"),
     [
@@ -94,6 +95,7 @@ def test_installed_target_survives_audit_and_reinstall(
     target: str,
     workflow: bool,
     configured: bool,
+    tampered_bytes: bytes,
 ) -> None:
     scenario = _new_scenario(tmp_path / "scenario", apm_binary_path)
     source = scenario.sources.create("example-package")
@@ -170,14 +172,28 @@ def test_installed_target_survives_audit_and_reinstall(
         if damage == "missing":
             managed.unlink()
         else:
-            managed.write_text("# changed\n", encoding="ascii")
+            managed.write_bytes(tampered_bytes)
         payload = audit(expected=1)
         failed = {check["name"] for check in payload["checks"] if not check["passed"]}
         assert "drift" in failed
         assert ("deployed-files-present" if damage == "missing" else "content-integrity") in failed
         assert any(row["path"] == expected_path for row in payload["drift"]["drift"])
+        before_reinstall = load_yaml(project.root / "apm.lock.yaml")
         run(*install)
+        if damage == "modified":
+            assert managed.read_bytes() == tampered_bytes
+            preserved = load_yaml(project.root / "apm.lock.yaml")
+            assert preserved["dependencies"] == before_reinstall["dependencies"]
+            assert preserved["deployments"] == before_reinstall["deployments"]
+            assert audit(expected=1)["passed"] is False
+            run(*install, "--force")
         assert managed.read_bytes() == expected_bytes
+        repaired = load_yaml(project.root / "apm.lock.yaml")
+        assert repaired["dependencies"][0]["deployed_file_hashes"][expected_path] == expected_hash
+        assert (
+            next(row for row in repaired["deployments"] if row["value"] == expected_path) == record
+        )
+        assert not (project.root / unexpected_path).exists()
         assert audit()["passed"] is True
 
     # A cold-cache replay must keep the same target identity, not redetect scratch.

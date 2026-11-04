@@ -65,6 +65,7 @@ class ResolutionStagingSession:
                 raise RuntimeError(f"Path is already staged for replacement: {resolved}")
             if resolved in self._replacement_by_destination:
                 raise RuntimeError(f"Path already has a replacement in progress: {resolved}")
+            self._acquire_staging_lock()
             if replacement.exists():
                 safe_rmtree(replacement, self._staging_root)
             replacement.parent.mkdir(parents=True, exist_ok=True)
@@ -95,9 +96,17 @@ class ResolutionStagingSession:
             try:
                 resolved.parent.mkdir(parents=True, exist_ok=True)
                 staged.replace(resolved)
-            except BaseException:
+            except BaseException as activation_error:
                 if backup is not None and backup.exists() and not resolved.exists():
-                    backup.replace(resolved)
+                    try:
+                        backup.replace(resolved)
+                    except (OSError, ValueError) as recovery_error:
+                        raise OSError(
+                            f"Could not activate {staged} at {resolved}: {activation_error}. "
+                            f"Could not restore prior package from {backup}: {recovery_error}. "
+                            "Prior data is retained for recovery; close programs using these "
+                            "paths and inspect the backup before retrying."
+                        ) from activation_error
                 raise
             self._replacement_by_destination.pop(resolved)
             self._destination_by_replacement.pop(staged)
@@ -147,12 +156,23 @@ class ResolutionStagingSession:
 
     def commit(self) -> list[tuple[Path, str]]:
         """Discard preserved pre-resolution contents after successful validation."""
-        self._remove_staging_root()
-        self._backups.clear()
-        self._replacement_by_destination.clear()
-        self._destination_by_replacement.clear()
-        self._relocations.clear()
-        return self._release_staging_lock()
+        cleanup_issues: list[tuple[Path, str]] = []
+        with self._lock:
+            # Deleting backups is irreversible. Never roll back to a partially
+            # removed backup if post-validation disposal itself fails.
+            self._backups.clear()
+            self._replacement_by_destination.clear()
+            self._destination_by_replacement.clear()
+            self._relocations.clear()
+            try:
+                self._remove_staging_root()
+            except (OSError, ValueError) as exc:
+                cleanup_issues.append(
+                    (self._staging_root, f"could not remove committed staging: {exc}")
+                )
+            finally:
+                cleanup_issues.extend(self._release_staging_lock())
+        return cleanup_issues
 
     def remove_abandoned_roots(self) -> list[tuple[Path, str]]:
         """Remove inactive backups created by lock-aware APM versions."""
@@ -169,39 +189,91 @@ class ResolutionStagingSession:
     def rollback(self) -> list[tuple[Path, str]]:
         """Remove session-created paths and restore every replaced path."""
         cleanup_issues: list[tuple[Path, str]] = []
+        blocked_paths: set[Path] = set()
+        blocked_ancestors: set[Path] = set()
+
+        def block_recovery(*paths: Path) -> None:
+            for path in paths:
+                blocked_paths.add(path)
+                blocked_ancestors.update(path.parents)
+
+        def defer_overlapping_recovery(recovery_path: Path, *paths: Path) -> bool:
+            if not any(
+                path in blocked_ancestors or not blocked_paths.isdisjoint((path, *path.parents))
+                for path in paths
+            ):
+                return False
+            # A deferred ancestor also blocks its other children: restoring them
+            # now would consume backups that the ancestor's retry can overwrite.
+            block_recovery(*paths)
+            cleanup_issues.append(
+                (
+                    recovery_path,
+                    f"deferred recovery of {paths[0]} because overlapping recovery failed; "
+                    "preserve the retained data and resolve the reported obstruction first",
+                )
+            )
+            return True
+
         with self._lock:
             for path, backup in reversed(self._backups.items()):
-                if backup is not None and backup.exists():
-                    if path.exists():
-                        safe_rmtree(path, self._modules_dir)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    backup.replace(path)
-                elif backup is None:
-                    if path.exists():
-                        safe_rmtree(path, self._modules_dir)
-                    self._remove_empty_parents(path.parent)
+                if defer_overlapping_recovery(backup or path, path):
+                    continue
+                try:
+                    if backup is not None and backup.exists():
+                        if path.exists():
+                            safe_rmtree(path, self._modules_dir)
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        backup.replace(path)
+                    elif backup is None:
+                        if path.exists():
+                            safe_rmtree(path, self._modules_dir)
+                        self._remove_empty_parents(path.parent)
+                except (OSError, ValueError) as exc:
+                    block_recovery(path)
+                    cleanup_issues.append((backup or path, f"could not restore {path}: {exc}"))
             for source, destination in reversed(self._relocations):
-                if destination.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    if source.exists() and os.path.samefile(source, destination):
-                        self._replace_case_only(destination, source)
-                    else:
-                        destination.replace(source)
-                self._remove_empty_parents(destination.parent)
+                try:
+                    recovery_paths = (
+                        ensure_path_within(source, self._modules_dir),
+                        ensure_path_within(destination, self._modules_dir),
+                    )
+                    if defer_overlapping_recovery(destination, *recovery_paths):
+                        continue
+                    if destination.exists():
+                        source.parent.mkdir(parents=True, exist_ok=True)
+                        if source.exists() and os.path.samefile(source, destination):
+                            self._replace_case_only(destination, source)
+                        else:
+                            destination.replace(source)
+                    self._remove_empty_parents(destination.parent)
+                except (OSError, ValueError) as exc:
+                    block_recovery(source, destination)
+                    cleanup_issues.append((destination, f"could not restore {source}: {exc}"))
             try:
-                self._remove_staging_root()
+                # Never dispose of prior data after a failed restoration.
+                if not cleanup_issues:
+                    self._remove_staging_root()
+            except (OSError, ValueError) as exc:
+                cleanup_issues.append((self._staging_root, f"could not remove staging: {exc}"))
             finally:
                 cleanup_issues.extend(self._release_staging_lock())
-            if (
-                not self._modules_existed
-                and self._modules_dir.exists()
-                and not any(self._modules_dir.iterdir())
-            ):
-                self._modules_dir.rmdir()
-            self._backups.clear()
-            self._replacement_by_destination.clear()
-            self._destination_by_replacement.clear()
-            self._relocations.clear()
+            try:
+                if (
+                    not self._modules_existed
+                    and self._modules_dir.exists()
+                    and not any(self._modules_dir.iterdir())
+                ):
+                    self._modules_dir.rmdir()
+            except OSError as exc:
+                cleanup_issues.append(
+                    (self._modules_dir, f"could not remove empty directory: {exc}")
+                )
+            if not cleanup_issues:
+                self._backups.clear()
+                self._replacement_by_destination.clear()
+                self._destination_by_replacement.clear()
+                self._relocations.clear()
         return cleanup_issues
 
     def _remove_empty_parents(self, path: Path) -> None:
@@ -257,7 +329,7 @@ class ResolutionStagingSession:
         ensure_path_within(self._staging_lock_path, staging_parent)
         if self._staging_lock_path.is_symlink():
             raise ValueError(f"Refusing symlinked staging lock: {self._staging_lock_path}")
-        lock = FileLock(str(self._staging_lock_path))
+        lock = FileLock(str(self._staging_lock_path), thread_local=False)
         lock.acquire(timeout=0)
         self._staging_lock = lock
 
@@ -277,9 +349,11 @@ class ResolutionStagingSession:
         except (OSError, ValueError) as exc:
             return [(self._staging_lock_path, f"could not remove activity lock: {exc}")]
         staging_parent = self._staging_root.parent
-        if staging_parent.exists() and not any(staging_parent.iterdir()):
-            with contextlib.suppress(OSError):
+        try:
+            if staging_parent.exists() and not any(staging_parent.iterdir()):
                 staging_parent.rmdir()
+        except OSError as exc:
+            return [(staging_parent, f"could not remove empty staging directory: {exc}")]
         return []
 
     def _remove_abandoned_staging_roots(self) -> list[tuple[Path, str]]:
@@ -344,6 +418,14 @@ class ResolutionStagingSession:
             except (OSError, Timeout, ValueError):
                 continue
             try:
+                if (candidate / "backups").exists():
+                    issues.append(
+                        (
+                            candidate,
+                            "prior package backups remain; inspect and recover before deleting",
+                        )
+                    )
+                    continue
                 safe_rmtree(candidate, staging_parent)
             except (OSError, ValueError) as exc:
                 issues.append((candidate, f"could not remove backup: {exc}"))

@@ -15,6 +15,7 @@ def test_run_records_complete_keys_before_only_filter(monkeypatch):
     }
     ctx = SimpleNamespace(
         only_packages=["acme/selected"],
+        existing_lockfile=None,
         deps_to_install=[],
         dependency_graph=SimpleNamespace(
             dependency_tree=SimpleNamespace(nodes=nodes),

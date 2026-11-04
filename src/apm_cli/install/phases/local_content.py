@@ -201,6 +201,18 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
         ) from exc
 
 
+def materialize_local_file_for_replay(
+    dep_ref: DependencyReference, base_dir: Path, modules_dir: Path
+) -> Path:
+    """Admit the authored leaf before materializing a scratch replay package."""
+    source = read_local_package_source(dep_ref, base_dir)
+    if source.content is None:
+        raise ValueError(f"Local single-file source changed kind during audit: {source.path}")
+    replay_path = dep_ref.get_install_path(modules_dir)
+    materialize_virtual_file_package(dep_ref, replay_path, source.path.name, source.content)
+    return replay_path
+
+
 def _copy_tree_dereferencing_validated(
     src: Path, dst: Path, pkg_root: Path, *, _visited: set[Path] | None = None
 ) -> None:

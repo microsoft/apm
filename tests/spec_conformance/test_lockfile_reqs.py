@@ -79,9 +79,8 @@ def test_ssh_marketplace_install_records_repository_and_exact_commit(
 
 @pytest.mark.req("req-lk-003")
 def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
-    from types import SimpleNamespace
-
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency import DependencyReference
     from apm_cli.policy.ci_checks import _check_ref_consistency
 
@@ -96,7 +95,12 @@ def test_full_sha_pin_audit_rejects_resolved_commit_mismatch():
             )
         }
     )
-    manifest = SimpleNamespace(get_all_apm_dependencies=lambda: [dependency])
+    manifest = APMPackage(
+        name="consumer",
+        version="1.0.0",
+        dependencies={"apm": [dependency]},
+    )
+    assert manifest.get_all_apm_dependencies() == [dependency]
 
     result = _check_ref_consistency(manifest, lock)
 

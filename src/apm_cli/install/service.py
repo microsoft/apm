@@ -298,7 +298,10 @@ class InstallService:
         """
         from apm_cli.deps.lockfile import LockFile, LockfileConflictError
         from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.install.plan import lockfile_satisfies_manifest
+        from apm_cli.install.plan import (
+            lockfile_satisfies_manifest,
+            lockfile_satisfies_replacements,
+        )
 
         lockfile_path = _frozen_lockfile_path(request)
         missing_message = (
@@ -327,17 +330,31 @@ class InstallService:
         if lockfile is None:
             raise FrozenInstallError(missing_message, tip="")
 
-        manifest_deps = list(request.apm_package.get_apm_dependencies())
-        manifest_deps.extend(request.apm_package.get_dev_apm_dependencies())
+        replacements_satisfied, replacement_reasons = lockfile_satisfies_replacements(
+            lockfile, getattr(request.apm_package, "replace_rules", None)
+        )
+        if not replacements_satisfied:
+            raise FrozenInstallError(
+                "--frozen: replacement rules differ from apm.lock.yaml.",
+                reasons=replacement_reasons,
+            )
 
-        satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
         from apm_cli.core.scope import get_modules_dir
+        from apm_cli.models.dependency.replacement import project_manifest_dependencies
+
+        modules_dir = (
+            get_modules_dir(request.scope)
+            if request.scope is not None
+            else lockfile_path.parent / "apm_modules"
+        )
+        manifest_deps = project_manifest_dependencies(request.apm_package, modules_dir=modules_dir)
+        satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
 
         reasons.extend(
             InstallService._frozen_mcp_reasons(
                 request.apm_package,
                 lockfile,
-                get_modules_dir(request.scope),
+                modules_dir,
                 trust_transitive_mcp=request.trust_transitive_mcp,
                 logger=request.logger,
                 allow_pending=allow_pending_mcp,
@@ -352,6 +369,38 @@ class InstallService:
             )
 
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
+
+    @staticmethod
+    def _selected_locked_replacements(
+        lockfile: LockFile, manifest_deps: list[DependencyReference]
+    ) -> list[DependencyReference]:
+        """Select reachable local replacements from locked edges without source I/O."""
+        from collections import deque
+
+        if lockfile.replacements is None:
+            return []
+        children: dict[str, list[str]] = {}
+        for key, dependency in lockfile.dependencies.items():
+            for parent in dependency.parent_keys:
+                if parent is not None:
+                    children.setdefault(parent, []).append(key)
+        queue = deque(dep.get_unique_key() for dep in manifest_deps)
+        seen: set[str] = set()
+        selected: list[DependencyReference] = []
+        while queue:
+            key = queue.popleft()
+            if key in seen:
+                continue
+            seen.add(key)
+            dependency = lockfile.get_dependency(key)
+            if (
+                dependency is not None
+                and dependency.replacement is not None
+                and dependency.is_local_source
+            ):
+                selected.append(dependency.to_dependency_ref())
+            queue.extend(children.get(key, ()))
+        return selected
 
     @staticmethod
     def _verify_frozen_local_content(
@@ -373,11 +422,15 @@ class InstallService:
         from apm_cli.install.phases.local_content import compute_local_package_hash
         from apm_cli.install.plan import lockfile_satisfies_manifest
         from apm_cli.models.apm_package import APMPackage
+        from apm_cli.models.dependency.replacement import build_replacement_index
 
         queue = deque(dep for dep in manifest_deps if dep.is_local)
+        queue.extend(InstallService._selected_locked_replacements(lockfile, manifest_deps))
         if not queue:
             return
         package_root = Path(request.apm_package.package_path).resolve()
+        consumer_root = request.apm_package.source_path or package_root
+        rules = build_replacement_index(request.apm_package.replace_rules or [])
         parent_index = build_local_parent_index(lockfile)
         resolved_cache: dict[str, Path] = {}
         seen: set[str] = set()
@@ -397,7 +450,7 @@ class InstallService:
                 source = resolve_local_dep_dir(
                     dependency,
                     lockfile,
-                    package_root,
+                    consumer_root,
                     parent_index=parent_index,
                     resolved_cache=resolved_cache,
                 )
@@ -429,7 +482,17 @@ class InstallService:
                 if (source / "apm.yml").is_file():
                     package = APMPackage.from_apm_yml(source / "apm.yml", source_path=source)
                     for child in package.get_apm_dependencies():
+                        child = rules.bind(
+                            child,
+                            consumer_root=consumer_root,
+                            modules_dir=package_root / "apm_modules",
+                            parent=key,
+                            is_dev=dependency.is_dev,
+                        )
                         if not child.is_local:
+                            continue
+                        if child.replacement is not None:
+                            queue.append(child)
                             continue
                         anchored = APMDependencyResolver._compute_dep_source_path(
                             child, package, source

@@ -25,9 +25,18 @@ subtrees for content integrity. Neither mode modifies those roots.
 Auditing the user metadata workspace (`~/.apm`) still requires its installed
 `apm_modules/`; if missing, restore it with `apm install --global`. Project
 scratch replay does not enable cold replay for global installations.
+Scratch replay preserves each scope's installed-source layout so relative
+links, including Kiro prompt links, compare against their deployed equivalents.
 
 Both modes also enforce the lockfile's canonical deployment ownership; see
 [Deployment-owner integrity](#deployment-owner-integrity).
+
+Drift reports distinguish a differing unowned skill file (`unmanaged-conflict`)
+from an edited managed file (`modified`). Ordinary reinstall refuses the former:
+rename the local skill or correct the dependency's existing skill/target
+selection first. Audit does not adopt, overwrite, or delete either file.
+JSON retains the finding's path and kind; SARIF uses
+`apm/drift/unmanaged-conflict` with error severity.
 
 Replay and coverage use the current `apm.yml` target declaration when present,
 otherwise the concrete target identities recorded by install. An unrelated
@@ -128,8 +137,8 @@ single-file `--file` operation is unchanged.
 | Flag | Default | Description |
 |---|---|---|
 | `--ci` | off | Run lockfile consistency checks and drift as a CI gate. Cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`. |
-| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. Experimental. Without `--ci` it is ignored with a warning. |
-| `--no-policy` | off | Skip policy discovery and enforcement. Equivalent to `APM_POLICY_DISABLE=1`. Overridden when `--policy` is passed explicitly. |
+| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. A path, URL, or `owner/repo` that cannot be loaded (missing, unreachable, malformed) fails the gate with exit 1; `org` keeps the discovery default (warn unless `policy.fetch_failure_default: block`). Experimental. Without `--ci` it is ignored with a warning. |
+| `--no-policy` | off | Skip policy discovery and enforcement. Overridden when `--policy` is passed explicitly. `APM_POLICY_DISABLE=1` also disables enforcement, but it is not overridden by `--policy`: audit prints a `[!]` warning that the explicit policy was not enforced and reports `policy.enforced: false`. |
 | `--no-cache` | off | Force a fresh policy fetch (skip the policy cache). Only relevant with policy discovery active. |
 | `--no-fail-fast` | off | Run every check even after the first failure, for a full diagnostic report. |
 
@@ -355,7 +364,9 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations). |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), or an explicit `--policy` source could not be loaded. |
+
+CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 
 ## Related
 

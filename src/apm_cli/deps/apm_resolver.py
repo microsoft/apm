@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
+from ..models.dependency.replacement import build_replacement_index
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
@@ -392,8 +393,10 @@ class APMDependencyResolver:
             child_dep,
             repo_url=parent_dep.repo_url,
             host=parent_dep.host,
+            host_type=parent_dep.host_type,
             port=parent_dep.port,
             explicit_scheme=parent_dep.explicit_scheme,
+            ssh_user=parent_dep.ssh_user,
             ado_organization=parent_dep.ado_organization,
             ado_project=parent_dep.ado_project,
             ado_repo=parent_dep.ado_repo,
@@ -688,6 +691,9 @@ class APMDependencyResolver:
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
+        self.replacement_index = build_replacement_index(root_package.replace_rules or [])
+        consumer_root = root_package.source_path or root_apm_yml.parent
+        modules_dir = self._apm_modules_dir or root_apm_yml.parent / "apm_modules"
         requirements = ImmutableRequirements(
             root_package.name,
             self._reference_resolver,
@@ -722,6 +728,13 @@ class APMDependencyResolver:
                     dep_ref = resolved
                 else:
                     continue
+            dep_ref = self.replacement_index.bind(
+                dep_ref,
+                consumer_root=consumer_root,
+                modules_dir=modules_dir,
+                parent=None,
+                is_dev=False,
+            )
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_resolution_key())
 
@@ -740,6 +753,13 @@ class APMDependencyResolver:
                     dep_ref = resolved
                 else:
                     continue
+            dep_ref = self.replacement_index.bind(
+                dep_ref,
+                consumer_root=consumer_root,
+                modules_dir=modules_dir,
+                parent=None,
+                is_dev=True,
+            )
             key = dep_ref.get_resolution_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
@@ -777,6 +797,7 @@ class APMDependencyResolver:
                 tuple[DependencyNode, DependencyReference, DependencyNode | None, bool]
             ]
             work_items = []
+            scheduled_nodes: set[str] = set()
             for dep_ref, depth, parent_node, is_dev in level_items:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
@@ -805,8 +826,10 @@ class APMDependencyResolver:
                         self._update_keys is not None
                         and dep_ref.get_unique_key() in self._update_keys
                         and dep_ref.get_unique_key() not in self._scoped_rechecked
+                        and existing_node.get_id() not in scheduled_nodes
                     ):
                         work_items.append((existing_node, dep_ref, parent_node, is_dev))
+                        scheduled_nodes.add(existing_node.get_id())
                     continue
 
                 # Create a new node for this dependency
@@ -832,6 +855,7 @@ class APMDependencyResolver:
                     parent_node.children.append(node)
 
                 work_items.append((node, dep_ref, parent_node, is_dev))
+                scheduled_nodes.add(node.get_id())
 
             winner_candidates.extend(item[0] for item in work_items)
             for node, _, _, _ in work_items:
@@ -873,6 +897,12 @@ class APMDependencyResolver:
 
             # --- Phase C (main thread): integrate results, enqueue sub-deps ---
             for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
+                if dep_ref.replacement is not None and loaded_package is None:
+                    detail = str(exc) if exc is not None else "selected source could not be loaded"
+                    tree.resolution_errors.append(
+                        f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
+                    )
+                    continue
                 if self._read_only and (exc is not None or loaded_package is None):
                     tree.resolution_errors.append(
                         f"{dep_ref.to_display_reference()}: "
@@ -961,6 +991,13 @@ class APMDependencyResolver:
                                 sub_dep = resolved
                             else:
                                 continue
+                        sub_dep = self.replacement_index.bind(
+                            sub_dep,
+                            consumer_root=consumer_root,
+                            modules_dir=modules_dir,
+                            parent=node.dependency_ref.get_unique_key(),
+                            is_dev=is_dev,
+                        )
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if (
@@ -969,7 +1006,7 @@ class APMDependencyResolver:
                         ):
                             self._update_keys.add(sub_dep.get_unique_key())
                         queue_key = sub_dep.get_resolution_key()
-                        if queue_key not in queued_keys:
+                        if sub_dep.replacement is not None or queue_key not in queued_keys:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
                             queued_keys.add(queue_key)
 
@@ -1192,7 +1229,12 @@ class APMDependencyResolver:
         # paths into remote virtual deps before they reach this loader. Anything
         # still local here lacks trusted parent repo coordinates, so refuse it
         # before the download callback can copy from the consumer filesystem.
-        if dep_ref.is_local and dep_ref.local_path and self._is_remote_parent(parent_pkg):
+        if (
+            dep_ref.replacement is None
+            and dep_ref.is_local
+            and dep_ref.local_path
+            and self._is_remote_parent(parent_pkg)
+        ):
             self._reject_remote_parent_local_path(
                 dep_ref,
                 parent_pkg,
@@ -1207,8 +1249,11 @@ class APMDependencyResolver:
             if dep_ref.is_local and dep_ref.local_path:
                 if self._project_root is None:
                     raise ValueError("Read-only resolution requires a project root")
-                base = self._effective_base_dir(parent_pkg, self._project_root)
-                install_path = (base / Path(dep_ref.local_path).expanduser()).resolve()
+                if dep_ref.replacement is not None:
+                    install_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
+                else:
+                    base = self._effective_base_dir(parent_pkg, self._project_root)
+                    install_path = (base / Path(dep_ref.local_path).expanduser()).resolve()
             elif self._update_refs or self._should_force_recheck(dep_ref):
                 raise ValueError("Package metadata requires fetching; preview is offline")
             if not install_path.exists():
@@ -1457,7 +1502,8 @@ class APMDependencyResolver:
             raise DownloadedPackageError(
                 f"Failed to activate downloaded dependency "
                 f"'{package.name}': {exc}. "
-                f"{self._replacement_failure_hint(had_existing_install)}"
+                "The candidate was not activated; inspect the failure and any "
+                "reported recovery paths before retrying."
             ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
@@ -1576,6 +1622,8 @@ class APMDependencyResolver:
         the materialized package location; repository-relative expansion derives
         separate source-coordinate anchors.
         """
+        if dep_ref.replacement is not None and dep_ref.is_local:
+            return dep_ref.replacement.local_source_path()
         if dep_ref.is_local and dep_ref.local_path:
             local = Path(dep_ref.local_path).expanduser()
             if not local.is_absolute() and parent_pkg is not None and parent_pkg.source_path:
@@ -1594,7 +1642,12 @@ class APMDependencyResolver:
         are reduced to one winner before worker dispatch.
         """
         base = dep_ref.get_unique_key()
-        if dep_ref.is_local and parent_pkg is not None and parent_pkg.source_path:
+        if (
+            dep_ref.replacement is None
+            and dep_ref.is_local
+            and parent_pkg is not None
+            and parent_pkg.source_path
+        ):
             return f"{base}@{parent_pkg.source_path}"
         return base
 

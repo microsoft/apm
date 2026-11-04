@@ -2,9 +2,10 @@
 
 Reproduces the integration step from the lockfile in an isolated scratch
 directory, then diffs the resulting tree against the working project to
-surface four kinds of divergence:
+surface five kinds of divergence:
 
 * ``modified``     -- a tracked deployed file's content differs.
+* ``unmanaged-conflict`` -- a selected skill differs at an unowned destination.
 * ``unintegrated`` -- a tracked deployed file is missing from the project.
 * ``orphaned``     -- a managed-directory file exists in the project but
   is not present in the scratch replay AND not tracked in the lockfile.
@@ -38,11 +39,16 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from apm_cli.core.scope import InstallScope, get_deploy_root, get_modules_dir
 from apm_cli.core.target_detection import (
     read_manifest_target as _read_apm_yml_target,  # noqa: F401 -- compatibility re-export
 )
 from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
+from apm_cli.install.audit_target_roots import (
+    canvas_deploy_prefixes as _canvas_deploy_prefixes,
+)
+from apm_cli.install.audit_target_roots import (
+    governed_root_dirs as _governed_root_dirs,
+)
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
 )
@@ -69,7 +75,6 @@ from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
-    from apm_cli.integration.targets import TargetProfile
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +106,7 @@ class DriftFinding:
     """A single divergence between the replay scratch tree and the project."""
 
     path: str
-    kind: str  # one of "modified" | "unintegrated" | "orphaned" | "unrecorded"
+    kind: str
     package: str = ""
     inline_diff: str = ""
 
@@ -258,8 +263,8 @@ def _materialize_install_path(
         corrupt-lockfile condition and MUST fail loud -- it is not caught
         by the drift gate's cache-miss soft-skip.
     """
-    if lock_dep.source == "local":
-        if not lock_dep.local_path:
+    if lock_dep.is_local_source:
+        if not lock_dep.local_path and lock_dep.replacement is None:
             raise CacheMissError(f"local dep {lock_dep.repo_url!r} has no local_path in lockfile")
         candidate = resolve_local_dep_dir(
             lock_dep,
@@ -269,12 +274,18 @@ def _materialize_install_path(
             resolved_cache=resolved_cache,
         )
         if not candidate.exists():
+            if lock_dep.replacement is not None:
+                from apm_cli.deps.path_anchoring import LocalResolutionError
+
+                raise LocalResolutionError(
+                    f"local replacement source missing for {lock_dep.get_unique_key()}: "
+                    f"expected {candidate}. Restore the source before auditing."
+                )
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
             )
         if candidate.is_file():
-            from apm_cli.deps.virtual_file import materialize_virtual_file_package
-            from apm_cli.install.phases.local_content import read_local_package_source
+            from apm_cli.install.phases.local_content import materialize_local_file_for_replay
 
             # Resolve the declaring directory through the same anchor owner.
             # Keep the original spelling for admission so file symlinks cannot
@@ -285,15 +296,9 @@ def _materialize_install_path(
                 project_root,
                 parent_index=parent_index,
             )
-            dependency = lock_dep.to_dependency_ref()
-            source = read_local_package_source(dependency, source_base)
-            if source.content is None:
-                raise ValueError(f"Local single-file source changed kind during audit: {candidate}")
-            replay_path = dependency.get_install_path(apm_modules_dir)
-            materialize_virtual_file_package(
-                dependency, replay_path, source.path.name, source.content
+            return materialize_local_file_for_replay(
+                lock_dep.to_dependency_ref(), source_base, apm_modules_dir
             )
-            return replay_path
         return candidate
 
     dep_ref = lock_dep.to_dependency_ref()
@@ -453,6 +458,8 @@ def _build_package_info(
             try:
                 pkg = APMPackage.from_apm_yml(apm_yml, source_path=install_path)
             except Exception:
+                if lock_dep.replacement is not None:
+                    raise
                 pkg = None
         if pkg is None:
             pkg = APMPackage(
@@ -519,7 +526,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep cannot be materialized.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import replay_target
+    from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
@@ -549,10 +556,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         else project_root / "apm_modules"
     )
     live_modules_dir = project_root / "apm_modules"
-    replay_scope = InstallScope.USER if config.user_scope else InstallScope.PROJECT
-    deployment_modules_dir = scratch_root / get_modules_dir(replay_scope).relative_to(
-        get_deploy_root(replay_scope)
-    )
+    deployment_modules_dir = replay_modules_root(scratch_root, user_scope=config.user_scope)
     codex_records = None
 
     live_targets = resolve_audit_targets(
@@ -638,7 +642,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             registry_resolver=registry_resolver,
                             registries=registries,
                         )
-                        if lock_dep.source == "local":
+                        if lock_dep.is_local_source:
                             install_path = _normalize_legacy_local_plugin_for_replay(
                                 lock_dep,
                                 install_path,
@@ -729,32 +733,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 # Diff engine
 
 
-def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
-    """Return the set of top-level managed directory names to walk.
-
-    Includes each target's top-level ``root_dir`` (plus ``.apm``) AND every
-    per-primitive ``deploy_root`` override (e.g. the ``copilot`` target routing
-    ``skills`` to ``.agents``). Walking the deploy roots is what lets the drift
-    differ compare committed skill bundles under ``.agents/skills/`` against the
-    replay, closing the gap where deployed skill content could silently diverge
-    from source (issue #1716). The replay reproduces the deploy-time link
-    rewrite faithfully, so byte-identical skills do not surface as false drift.
-    Only the first path segment is kept so nested deploy roots collapse to a
-    single walk root.
-    """
-    roots: set[str] = {".apm"}
-    for t in targets or []:
-        root = getattr(t, "root_dir", None)
-        if root:
-            roots.add(str(root).split("/", 1)[0])
-        primitives = getattr(t, "primitives", None) or {}
-        for mapping in primitives.values():
-            deploy_root = getattr(mapping, "deploy_root", None)
-            if deploy_root:
-                roots.add(str(deploy_root).split("/", 1)[0])
-    return roots
-
-
 def _walk_managed(root: Path, governed_roots: set[str]) -> dict[str, Path]:
     """Return a mapping of project-relative posix paths to absolute paths."""
     out: dict[str, Path] = {}
@@ -819,25 +797,6 @@ def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     return set(DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile))
 
 
-def _canvas_deploy_prefixes(targets) -> set[str]:
-    """Return ``root/subdir/`` prefixes for every target carrying a canvas mapping.
-
-    Used to exclude canvas extension deploy paths from drift comparison
-    (the replay deliberately does not re-integrate canvases).
-    """
-    prefixes: set[str] = set()
-    for target in targets or []:
-        mapping = getattr(target, "primitives", {}).get("canvas")
-        if mapping is None:
-            continue
-        effective_root = mapping.deploy_root or target.root_dir
-        if mapping.subdir:
-            prefixes.add(f"{effective_root}/{mapping.subdir}/")
-        else:
-            prefixes.add(f"{effective_root}/")
-    return prefixes
-
-
 def diff_scratch_against_project(
     scratch_root: Path,
     project_root: Path,
@@ -850,9 +809,10 @@ def diff_scratch_against_project(
 ) -> list[DriftFinding]:
     """Compare the replay scratch tree against the project tree.
 
-    Four kinds of findings are emitted:
+    Five kinds of findings are emitted:
 
     * ``modified``     -- file exists in both, normalized content differs.
+    * ``unmanaged-conflict`` -- a replayed skill differs from an unowned file.
     * ``unintegrated`` -- file exists in scratch but not in project, and the
       path is part of the committed working tree when git tracking is known.
     * ``orphaned``     -- file exists in project + tracked in lockfile
@@ -946,6 +906,14 @@ def diff_scratch_against_project(
         project_files = {r: p for r, p in project_files.items() if not _is_canvas(r)}
 
     findings: list[DriftFinding] = []
+    from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    collision_diagnostics = DiagnosticCollector()
+    managed = set(tracked)
+    skill_roots = [
+        target.skills_deploy_path(project_root) for target in targets if target.supports("skills")
+    ]
 
     for rel, scratch_path in sorted(scratch_files.items()):
         project_path = project_files.get(rel)
@@ -960,6 +928,11 @@ def diff_scratch_against_project(
                 )
             )
             continue
+        unmanaged_skill = any(project_path.is_relative_to(root) for root in skill_roots) and (
+            BaseIntegrator.check_collision(
+                project_path, rel, managed, False, diagnostics=collision_diagnostics
+            )
+        )
         try:
             s_bytes = _normalize(scratch_path.read_bytes())
             p_bytes = _normalize(project_path.read_bytes())
@@ -986,17 +959,20 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="modified",
+                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=f"(read error: {exc})",
                 )
             )
             continue
-        if s_bytes != p_bytes:
+        if s_bytes != p_bytes or (
+            unmanaged_skill
+            and not BaseIntegrator.is_content_identical_to_source(project_path, scratch_path)
+        ):
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="modified",
+                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
                 )
@@ -1005,8 +981,8 @@ def diff_scratch_against_project(
             # Content agrees, so nothing else in the audit will ever look at
             # this file again: no manifest entry means no hash baseline and no
             # Unicode scan. Reported only in the content-clean case -- when the
-            # bytes differ, ``modified`` already fails the check and 'apm
-            # install' is the same remedy for both.
+            # bytes differ, a content or ownership finding already reports
+            # the failure with its appropriate remedy.
             findings.append(DriftFinding(path=rel, kind="unrecorded", package=""))
 
     for rel in sorted(project_files.keys()):

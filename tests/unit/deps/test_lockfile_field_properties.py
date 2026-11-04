@@ -184,6 +184,8 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
             ),
         )
     )
+    # Replacement evidence has cross-field constraints tested separately.
+    kwargs["replacement"] = None
     kwargs["_unknown_fields"] = draw(
         st.one_of(st.just({}), st.just({"future_consumer_field": {"enabled": True}}))
     )

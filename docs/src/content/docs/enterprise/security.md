@@ -412,8 +412,9 @@ APM prevents this with a per-symlink containment check (see also
 When APM deploys a file, it checks whether a file already exists at the target path:
 
 - If the file is **tracked in the managed files set** (deployed by a previous APM install), it is overwritten.
-- If the file is **not tracked** (user-authored or created by another tool), APM skips it and prints a warning.
-- The `--force` flag overrides collision detection, allowing APM to overwrite untracked files.
+- If a selected **skill file is untracked and differs**, APM refuses the complete selected deployment plan before native writes or manifest/lock success state. Rename the local skill or use a valid existing skill/target selection. Matching names or shared directories alone are not conflicts.
+- Other untracked primitive files retain their existing warning-and-skip behavior.
+- The `--force` flag overrides collision detection, allowing APM to overwrite untracked files. It also bypasses the critical security-scan block; it is not the routine remedy for a skill conflict.
 
 ### Development dependency isolation
 

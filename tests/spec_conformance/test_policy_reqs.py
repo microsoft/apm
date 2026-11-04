@@ -785,3 +785,102 @@ def test_ado_policy_coordinate_fallback_is_404_only():
 
 
 _ = waive  # keep import for any future structural waiver
+
+
+def _req_pl_021_project(root):
+    (root / "apm.yml").write_text(
+        "name: req-pl-021\nversion: 1.0.0\npolicy:\n  fetch_failure_default: warn\n",
+        encoding="utf-8",
+    )
+    (root / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: []\n")
+
+
+@pytest.mark.req("req-pl-021")
+@pytest.mark.parametrize("case", ["missing-file", "malformed", "unreachable"])
+def test_explicit_policy_ref_that_cannot_load_fails_closed(tmp_path, monkeypatch, case):
+    from unittest.mock import patch
+
+    import requests
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+
+    monkeypatch.chdir(tmp_path)
+    _req_pl_021_project(tmp_path)
+    ref = {
+        "missing-file": "./missing-policy.yml",
+        "malformed": "bad-policy.yml",
+        "unreachable": "https://policy.invalid/apm-policy.yml",
+    }[case]
+    (tmp_path / "bad-policy.yml").write_text("enforcement: bogus\n", encoding="utf-8")
+
+    with (
+        patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=requests.exceptions.ConnectionError(),
+        ),
+        patch("apm_cli.policy.discovery._fetch_github_contents") as remote,
+    ):
+        result = CliRunner().invoke(
+            audit, ["--ci", "--no-drift", "--no-cache", "--policy", ref], catch_exceptions=False
+        )
+
+    assert result.exit_code != 0, result.output
+    assert "could not be loaded" in result.stderr
+    assert "enforcement skipped" not in result.stderr
+    remote.assert_not_called()
+
+
+@pytest.mark.req("req-pl-021")
+def test_explicit_policy_ref_served_from_stale_cache_counts_as_resolved(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+    from apm_cli.policy.discovery import PolicyFetchResult
+    from apm_cli.policy.schema import ApmPolicy
+
+    monkeypatch.chdir(tmp_path)
+    _req_pl_021_project(tmp_path)
+    stale = PolicyFetchResult(
+        policy=ApmPolicy(enforcement="block"),
+        source="url:https://policy.invalid/apm-policy.yml",
+        cached=True,
+        cache_stale=True,
+        fetch_error="Connection error",
+        outcome="cached_stale",
+    )
+
+    with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=stale):
+        result = CliRunner().invoke(
+            audit,
+            ["--ci", "--no-drift", "--policy", "https://policy.invalid/apm-policy.yml"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "could not be loaded" not in result.stderr
+
+
+@pytest.mark.req("req-pl-021")
+def test_explicit_policy_ref_under_operator_disable_is_disclosed(tmp_path, monkeypatch):
+    import json
+
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APM_POLICY_DISABLE", "1")
+    _req_pl_021_project(tmp_path)
+    (tmp_path / "policy.yml").write_text("name: p\nversion: '1.0'\nenforcement: block\n")
+
+    result = CliRunner().invoke(
+        audit,
+        ["--ci", "--no-drift", "--policy", "policy.yml", "-f", "json"],
+        catch_exceptions=False,
+    )
+
+    assert "--policy policy.yml ignored" in result.stderr
+    assert json.loads(result.stdout)["policy"]["enforced"] is False

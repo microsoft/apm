@@ -93,7 +93,10 @@ def test_nested_file_frozen_hash_uses_declaring_anchor_and_rejects_symlink(
     result = scenario.run("install", "--frozen", *args, expected=1)
     # The changed canonical source identity is rejected before leaf admission.
     diagnostic = " ".join((result.stdout + result.stderr).split())
-    assert actual.name in diagnostic, result.stdout + result.stderr
+    # Rich may wrap inside the filename; retain the complete canonical identity.
+    assert f"local:{actual.resolve().as_posix()}" in "".join(diagnostic.split()), (
+        result.stdout + result.stderr
+    )
     assert "missing from apm.lock.yaml" in diagnostic, result.stdout + result.stderr
     assert_unchanged(before, ArtifactSnapshot.capture(scenario.project.root))
     assert_unchanged(cache_before, ArtifactSnapshot.capture(scenario.isolated.cache_root))

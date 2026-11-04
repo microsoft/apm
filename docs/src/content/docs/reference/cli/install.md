@@ -17,6 +17,14 @@ apm install [PACKAGE_REF...] [OPTIONS]
 
 With no arguments it installs everything from `apm.yml`. With one or more `PACKAGE_REF` arguments it adds those packages to `apm.yml` (creating one if needed) and installs only what was added. `apm install --mcp NAME` is the dedicated path for adding an MCP server entry.
 
+Repeating an existing positional package without requesting a change reports
+`already in apm.yml`, not `updated ref in apm.yml`. It preserves the existing
+declaration and does not rewrite an otherwise unchanged manifest. Changed refs
+and explicit skill additions or resets still update the declaration.
+Explicit transport or resolver changes are not no-ops: an HTTPS request can
+replace an HTTP declaration, and a Git-qualified marketplace source can replace
+a shorthand routed through the default registry.
+
 `PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
 
 Local paths may select a directory package or one `.agent.md`,
@@ -142,9 +150,37 @@ still cleans up its managed files, subject to the usual user-edit protections.
 
 ## Behavior
 
+- **Unmanaged skill conflicts fail by default.** A differing user-owned file
+  at any selected skill destination refuses the complete selected deployment
+  plan before native writes, success-shaped manifest/lock updates, or cleanup.
+  This replaces warning-only success that could leave Claude and the shared
+  Copilot/Codex root with different skills. The error names the skill,
+  dependency, source file, local path, and affected targets. Rename the local
+  skill, or edit an existing `skills:`/`targets:` selection to exclude the
+  conflict. A skill allow-list does not automatically include future skills.
+  Matching names or shared directories alone are not conflicts; identical
+  files and exact managed paths retain their existing handling. Preparation
+  may populate caches; refusal does not delete an older partial installation
+  or promise rollback for later races, scripts, or unrelated failures.
+  `--force` remains explicitly destructive and also bypasses the critical
+  security-scan block; it is not the routine remedy.
+
 - **Stale-file cleanup.** `Cleaned N stale deployed files for DEPENDENCY` names
   the affected dependency, not a deletion location. Cleanup removes deployed
   files; a local dependency's source directory is not cleaned.
+
+- **Historical missing-file claims.** Normal `apm install` retires an obsolete
+  dependency file claim and its hash when the file is already absent and
+  complete source discovery and successful skill deployment prove it is no
+  longer shipped within a current source-backed skill. This also repairs older
+  locks with `legacy` target records or no deployment ledger, without a lock
+  reset or uninstall/reinstall.
+  Other owners, unprocessed targets and incomplete deployments remain protected.
+  Missing bytes, a saved hash or a directory prefix alone are not proof;
+  unresolved claims still appear in audit. Still-present content with unclear
+  ownership is not deleted or adopted by this repair. Audit is read-only;
+  `--frozen` neither repairs these claims nor accepts changed local sources.
+  After ordinary repair, unchanged frozen replay remains supported.
 
 - **Immutable dependency conflicts.** Install fails when two paths require
   different immutable commits for one package identity, showing both paths and
@@ -175,8 +211,12 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **Claude Code profiles.** For user-scope MCP installs, an absolute `CLAUDE_CONFIG_DIR` selects that profile's `.claude.json` for both installation and stale-server cleanup. Removing an APM-managed server in the selected profile preserves other profiles and user-owned entries. Cleanup refuses symlinked config files or profile directories; replace the link with a regular file or directory before retrying.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
-  If download, validation, or activation fails, APM keeps the previous package
-  and lockfile active and exits non-zero with retry guidance.
+  Failed downloads or validation leave the previous package active. Failed
+  activation attempts restoration and exits non-zero without changing the
+  lockfile. If the OS also denies restoration, APM reports both failures and
+  retains recovery data; the prior package may no longer be active.
+  Follow [Windows recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
+  before retrying.
 - **Git-hook isolation.** Dependency Git operations ignore repository-locating
   hook variables, preserving the caller's branch and HEAD. APM allows safe URL
   rewrites but rejects credentials, insecure transports including `http://` and
@@ -198,6 +238,23 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
 - **Conflicted lockfiles.** A lockfile containing unresolved Git merge conflict markers exits `1` for required readers and names the file; the conflicted bytes are never rewritten. Preview retains its warning and exit `0`. See [manual conflict repair](../../../troubleshooting/install-failures/#merge-conflict-markers-in-the-lockfile).
 - **Dependency versions after checkout.** Manifest-derived versions describe the acquired package, not an older copy in `apm_modules/`. The first ordinary install after switching branches records the current version; a second install is not needed to correct it. These values are inventory metadata, not frozen replay pins. Registry and Git-semver versions retain their resolver-selected meaning, which can differ from the package manifest or tag spelling.
+- **Skill bytes after checkout.** APM records successful rendered skill writes
+  locally, separately from the lockfile. After a branch switch, an unchanged
+  prior deployment can update even if modules and cache were removed. Edited
+  files remain protected, including edits matching an older package version.
+  The ignored `.apm-local/` installation identity and
+  `~/.apm/deployment-receipts/` are local state, not files to commit or share.
+  The identity lives in the project root, or your home directory for `--global`.
+  Configured external skill roots use the same ownership and receipt checks.
+  Switching targets that share a skill path refreshes valid same-writer evidence
+  through a guarded copy, even when the source bytes are unchanged.
+  Missing evidence, including installations predating these receipts, does not
+  authorize overwriting existing files. Preserve your edits and move the
+  conflicting file aside before reinstalling. Invalid evidence fails explicitly.
+  Creating this state requires filesystem hard-link support. State-write failures
+  are reported; successful earlier deployment writes are not rolled back.
+  Audit and dry-run never establish this authority. Frozen install may record
+  successful local writes but still preserves manifest and lockfile bytes.
 - **Frozen mode.** With `--frozen`, install replays the locked graph and **never writes `apm.lock.yaml`**. Missing lockfiles or direct dependencies, changed refs, full commit pins, host providers, HTTP/HTTPS transport, and available MCP declaration mismatches fail before the pipeline. This includes transport changes under an unchanged semver range. Add-style invocations (`apm install PACKAGE` and `apm install --mcp NAME`) are rejected because they mutate `apm.yml`. Orphan package lock entries do not fail manifest matching. Local-content verification ignores unused local entries, but MCP preflight can still reject unavailable local sources. Selected direct and transitive local-path dependencies are checked against their locked content hash before lifecycle or deployment: the hash covers the validated local-copy image, including dereferenced in-package symlinks, before integration transforms it. A missing entry or legacy lock without that hash requires a normal `apm install` to establish a baseline. See [`config-consistency`](../../baseline-checks/#config-consistency) for the full manifest rule. Use normal install to establish or intentionally repair lock state; use `apm audit --ci` for on-disk content verification.
 - **Cold frozen restoration.** A fresh checkout using a package-installing mode can restore supported locked remote packages, including whole plugins, without an ordinary-install-first workaround. Missing package bytes are not proof that their MCP declarations were removed. When the lock identifies an unavailable source unambiguously, APM downloads its pinned content and checks the actual restored declarations before deployment or native MCP configuration changes. Changed or removed declarations, ambiguous/shared origin evidence, invalid materialized shapes, missing local sources, and insufficient lock evidence still fail. A deferred MCP verification failure preserves previous native MCP configuration and user-owned settings; downloads/cache fills may already have happened. This is not rollback of arbitrary lifecycle scripts or every frozen failure.
   Inactive package lock entries without MCP declarations do not require hydration. This does not exempt active packages whose source evidence is still unavailable, or skip newly added declarations when the locked MCP set is empty.
@@ -226,6 +283,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed only when recorded hashes match (user-edited files are kept with a warning). The same checks apply to project-local `.apm/` output with recorded concrete target ownership, including after renames, deletions, or target removal; [ambiguous legacy rows](../../lockfile-spec/#unattributed-rows) remain untouched. Shared `.agents/skills/` files stay while another package or target claims them, including a declared target skipped by `--target`.
+  Narrowing one dependency's `targets:` also reconciles its removed targets
+  within the current install scope, even when the consumer still enables those
+  targets. Successfully removed files lose their file/hash/ledger claims;
+  edited files and targets skipped by `--target` retain protective records.
 - **Interrupted-install recovery.** After a successful install, APM removes inactive resolution backup directories left by interrupted lock-aware runs. Active install backups and entries that do not match APM's staging name format are preserved. Lockless backups from older APM versions are retained because they may belong to a running install; inactive orphaned activity-lock files are reported for manual cleanup. Stop other APM installs, rerun with `--verbose`, then manually delete the reported paths.
 - **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
 - **Security scan.** After target, subset, and executable authorization, APM scans

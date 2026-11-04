@@ -617,6 +617,7 @@ contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
+contracts-tooling-source-replacements
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -634,6 +635,7 @@ install-deployment-incomplete-chain-routing
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-skill-preflight
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract
@@ -696,6 +698,7 @@ mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_declaration_scope
+mutation_writes.mcp_omission_evidence
 mutation_writes.mcp_package_launcher
 mutation_writes.mcp_passthrough_denylist
 mutation_writes.mcp_target_selection

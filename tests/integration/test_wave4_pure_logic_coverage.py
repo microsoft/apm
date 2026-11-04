@@ -12,83 +12,77 @@ from __future__ import annotations
 
 import tarfile
 from pathlib import Path
-from typing import Any
 
 import pytest
+
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.types import ResolvedReference, parse_git_reference
 
 # ===================================================================
 # install/plan.py -- pure-function update-plan builder
 # ===================================================================
 
 
-class _FakeLockedDep:
-    """Minimal stand-in for LockedDependency."""
-
-    def __init__(
-        self,
-        repo_url: str = "https://github.com/owner/repo",
-        resolved_ref: str | None = "main",
-        resolved_commit: str | None = "abc1234567890",
-        content_hash: str | None = "sha256:deadbeef",
-        deployed_files: list[str] | None = None,
-        virtual_path: str | None = None,
-    ) -> None:
-        self.repo_url = repo_url
-        self.resolved_ref = resolved_ref
-        self.resolved_commit = resolved_commit
-        self.content_hash = content_hash
-        self.deployed_files = deployed_files or []
-        self.virtual_path = virtual_path
-
-    def get_unique_key(self) -> str:
-        if self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+def _FakeLockedDep(
+    repo_url: str = "https://github.com/owner/repo",
+    resolved_ref: str | None = "main",
+    resolved_commit: str | None = "abc1234567890",
+    content_hash: str | None = "sha256:deadbeef",
+    deployed_files: list[str] | None = None,
+    virtual_path: str | None = None,
+) -> LockedDependency:
+    return LockedDependency(
+        repo_url=repo_url,
+        resolved_ref=resolved_ref,
+        resolved_commit=resolved_commit,
+        content_hash=content_hash,
+        deployed_files=deployed_files or [],
+        virtual_path=virtual_path,
+        is_virtual=virtual_path is not None,
+    )
 
 
-class _FakeLockFile:
-    """Minimal stand-in for LockFile."""
-
-    def __init__(self, deps: dict[str, _FakeLockedDep] | None = None) -> None:
-        self.dependencies = deps or {}
+def _FakeLockFile(deps: dict[str, LockedDependency] | None = None) -> LockFile:
+    return LockFile(dependencies=deps or {})
 
 
-class _FakeDepRef:
-    """Minimal stand-in for DependencyReference."""
+def _FakeDepRef(
+    repo_url: str = "https://github.com/owner/repo",
+    reference: str | None = "main",
+    is_local: bool = False,
+    local_path: str | None = None,
+    is_virtual: bool = False,
+    virtual_path: str | None = None,
+    host: str | None = None,
+    resolved_reference: ResolvedReference | None = None,
+) -> DependencyReference:
+    ref = DependencyReference(
+        repo_url=repo_url,
+        reference=reference,
+        is_local=is_local,
+        source="local" if is_local else None,
+        local_path=local_path,
+        is_virtual=is_virtual,
+        virtual_path=virtual_path,
+        host=host,
+    )
+    ref.resolved_reference = resolved_reference
+    return ref
 
-    def __init__(
-        self,
-        repo_url: str = "https://github.com/owner/repo",
-        reference: str | None = "main",
-        is_local: bool = False,
-        local_path: str | None = None,
-        is_virtual: bool = False,
-        virtual_path: str | None = None,
-        host: str | None = None,
-        resolved_reference: Any = None,
-    ) -> None:
-        self.repo_url = repo_url
-        self.reference = reference
-        self.is_local = is_local
-        self.local_path = local_path
-        self.is_virtual = is_virtual
-        self.virtual_path = virtual_path
-        self.host = host
-        self.resolved_reference = resolved_reference
 
-
-class _FakeResolvedRef:
-    """Minimal stand-in for ResolvedReference."""
-
-    def __init__(
-        self,
-        ref_name: str | None = None,
-        original_ref: str | None = None,
-        resolved_commit: str | None = None,
-    ) -> None:
-        self.ref_name = ref_name
-        self.original_ref = original_ref
-        self.resolved_commit = resolved_commit
+def _FakeResolvedRef(
+    ref_name: str | None = None,
+    original_ref: str | None = None,
+    resolved_commit: str | None = None,
+) -> ResolvedReference:
+    original = original_ref or ref_name or ""
+    return ResolvedReference(
+        original_ref=original,
+        ref_type=parse_git_reference(original)[0],
+        resolved_commit=resolved_commit,
+        ref_name=ref_name or "",
+    )
 
 
 class TestPlanEntryDataclass:
@@ -194,7 +188,7 @@ class TestUpdatePlanDataclass:
 
 
 class TestBuildUpdatePlan:
-    """Test build_update_plan with fake deps and lockfiles."""
+    """Test build_update_plan with real dependency and lock models."""
 
     def test_all_new_deps(self) -> None:
         from apm_cli.install.plan import build_update_plan

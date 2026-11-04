@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from apm_cli.agent_plugins.ir import AgentPlugin
     from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.models.dependency.replacement import ReplacementRule
 
 _log = logging.getLogger(__name__)
 
@@ -292,6 +293,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "scripts",
         "includes",
         "registries",
+        "replace",
         "dependencies",
         "devDependencies",
         "compilation",
@@ -444,6 +446,13 @@ class APMPackage:
     # Vendor extension keys (``x-*``) from apm.yml, in declaration order.
     # Empty when the manifest declares none. Values are not interpreted.
     extensions: dict[str, Any] = field(default_factory=dict)
+
+    # Root-only ``replace:`` block: typed replacement rules that redirect
+    # upstream package identities to local checkouts or forks.  Only the
+    # consumer root manifest owns these rules; dependency manifests must
+    # not declare them (enforced by the resolver, not the parser).
+    # ``None`` means the key was absent; ``[]`` means it was present but empty.
+    replace_rules: "list[ReplacementRule] | None" = None
 
     def __post_init__(self) -> None:
         """Derive the canonical target projection for compatibility callers."""
@@ -704,6 +713,40 @@ class APMPackage:
 
         extensions = _collect_manifest_extensions(data, source_manifest, warning_handler)
 
+        # Parse root-owned ``replace:`` block.  Only present in the consumer
+        # root manifest; dependency manifests should not declare it (enforced
+        # by the resolver, not here).  Parsing errors are raised as ValueError
+        # to match existing manifest-key error handling.
+        #
+        # Contract gate (D3): when ``replace`` is present (including empty list),
+        # require the source-replacements-v1 ``$schema`` so that old readers
+        # (>=v0.33) reject the manifest before touching managed files.
+        # Schema-less/released contracts are unchanged otherwise.
+        replace_rules: list[ReplacementRule] | None = None
+        raw_replace = data.get("replace")
+        if raw_replace is not None:
+            from .manifest_contract import (
+                SOURCE_REPLACEMENTS_V1_SCHEMA_URI,
+                ManifestContract,
+            )
+
+            if manifest_contract not in (ManifestContract.SOURCE_REPLACEMENTS_V1,):
+                raise ValueError(
+                    "'replace' requires the source-replacements-v1 manifest contract. "
+                    "Add this to your apm.yml:\n"
+                    f'  $schema: "{SOURCE_REPLACEMENTS_V1_SCHEMA_URI}"'
+                )
+
+            from .dependency.replacement import (
+                ReplacementConfigError,
+                parse_replace_block,
+            )
+
+            try:
+                replace_rules = parse_replace_block(raw_replace)
+            except ReplacementConfigError as exc:
+                raise ValueError(str(exc)) from exc
+
         result = cls(
             name=data["name"],
             version=data["version"],
@@ -725,6 +768,7 @@ class APMPackage:
             manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
             extensions=extensions,
+            replace_rules=replace_rules,
         )
         return result
 

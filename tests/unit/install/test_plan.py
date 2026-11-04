@@ -61,6 +61,51 @@ def _resolved_dep(repo_url: str, ref: str, commit: str | None) -> DependencyRefe
 
 
 class TestBuildUpdatePlan:
+    @pytest.mark.parametrize(
+        ("existing", "old_hash", "new_hash", "expected_action"),
+        [
+            (False, None, "sha256:new", "add"),
+            (True, "sha256:old", "sha256:new", "update"),
+            (True, None, "sha256:new", "update"),
+            (True, "sha256:same", "sha256:same", "unchanged"),
+            (True, "sha256:old", None, "unchanged"),
+        ],
+    )
+    def test_resolved_content_hash_controls_action_and_is_preserved(
+        self,
+        existing: bool,
+        old_hash: str | None,
+        new_hash: str | None,
+        expected_action: str,
+    ) -> None:
+        """Content can change independently of an unchanged ref and commit."""
+        dep = _resolved_dep("owner/package", "main", "a" * 40)
+        lock = _new_lockfile()
+        if existing:
+            locked = _locked(dep.repo_url, "main", "a" * 40)
+            locked.content_hash = old_hash
+            lock.add_dependency(locked)
+        hashes = {"unrelated/package": "sha256:unrelated"}
+        if new_hash is not None:
+            hashes[dep.get_unique_key()] = new_hash
+
+        plan = build_update_plan(lock, [dep], resolved_content_hashes=hashes)
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key=dep.get_unique_key(),
+                action=expected_action,
+                display_name=dep.repo_url,
+                old_resolved_ref="main" if existing else None,
+                old_resolved_commit="a" * 40 if existing else None,
+                old_content_hash=old_hash,
+                new_resolved_ref="main",
+                new_resolved_commit="a" * 40,
+                new_content_hash=new_hash,
+            ),
+        )
+        assert plan.has_changes is (expected_action != "unchanged")
+
     def test_entries_preserve_full_state_and_canonical_action_order(self):
         lock = _new_lockfile()
         update = _locked("https://github.com/u/r", "main", "a" * 40, ["update.md"])

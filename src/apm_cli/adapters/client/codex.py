@@ -320,8 +320,12 @@ class CodexClientAdapter(MCPClientAdapter):
                 self._annotate_registry_id(server_config, registry_id)
 
             # Update configuration using the chosen key
+            from apm_cli.install.mcp.ownership import mcp_native_hash
+
+            fingerprint = mcp_native_hash(self.managed_server_config(server_config))
             if not self.update_config({config_key: server_config}):
                 return False
+            self.written_mcp_hashes[server_url] = fingerprint
 
             _rich_success(
                 f"Configured MCP server '{config_key}' for Codex CLI",

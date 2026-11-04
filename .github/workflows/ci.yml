@@ -300,8 +300,9 @@ jobs:
         finally:
             source.write_bytes(original)
 
-  test-architecture:
-    name: Test Architecture Ratchets
+  # Separate the two unchanged workloads so setup and cleanup fit each cap.
+  test-architecture-contracts:
+    name: Architecture Ratchet Contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -335,6 +336,29 @@ jobs:
           tests/quality/test_lifecycle_bug_ledger.py \
           tests/quality/test_ci_topology.py
 
+  test-architecture-scaling:
+    name: Architecture Scaling (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
     - name: Run bounded architecture scaling gate
       env:
         PYTEST_PERF: '1'
@@ -342,6 +366,24 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q
         -m benchmark
         tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+
+  test-architecture:
+    name: Test Architecture Ratchets
+    needs: [test-architecture-contracts, test-architecture-scaling]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+    - name: Require both architecture executions
+      env:
+        CONTRACT_RESULT: ${{ needs.test-architecture-contracts.result }}
+        SCALING_RESULT: ${{ needs.test-architecture-scaling.result }}
+      run: |
+        if [ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]; then
+          echo "Architecture execution failed: contracts=$CONTRACT_RESULT scaling=$SCALING_RESULT"
+          exit 1
+        fi
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
@@ -538,6 +580,15 @@ jobs:
         chmod +x scripts/build-binary.sh
         uv run ./scripts/build-binary.sh
 
+    - name: Test packaged audit workspace identity
+      timeout-minutes: 5
+      env:
+        APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
+      run: >-
+        uv run --frozen --extra dev pytest
+        tests/integration/test_audit_workspace_identity_lifecycle.py
+        -vv -ra --tb=long --show-capture=all --no-showlocals
+
   # Dogfood the audit-only CI gate we ship and document to users:
   #   - `apm audit --ci` -- the full producer+consumer gate. Runs the
   #     lockfile / content-integrity checks AND the install-replay drift
@@ -641,24 +692,27 @@ jobs:
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
-  # Two healthy runs completed all 307 selected cases in 7:22 and 7:59 of
-  # pytest time, but setup/cleanup brought their job totals to 8:10 and 8:29.
-  # Ten minutes leaves 91 seconds above the slower observed total while
-  # retaining a hard hang bound. Keep per-test durations visible below.
+  # The growing corpus exhausted this cap on run 39737354179. Two shards
+  # retain the full selection and xdist affinity without increasing the cap.
+  # pytest-split balances whole affinity units by their member counts;
+  # these weights are not claimed as measured test durations.
+  # The required aggregate checks both explicit job results independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
   # merge-group-only, and required selections and guards their set partition,
   # this exact expression, the unfiltered merge-group integration path,
   # --strict-markers, required-check membership, E2E opt-in placement, and
   # credential/network prohibitions.
-  lifecycle-smoke:
-    name: Lifecycle Smoke (Linux)
+  lifecycle-smoke-shard-1:
+    name: Lifecycle Smoke Shard 1 (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
+    env:
+      LIFECYCLE_SHARD: "1"
 
-    steps:
+    steps: &lifecycle-smoke-steps
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
@@ -690,6 +744,35 @@ jobs:
       run: |
         printf 'Runner logical CPUs: '
         nproc
-        uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+        uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+          -p scripts.lifecycle_smoke_sharding --lifecycle-shard "$LIFECYCLE_SHARD" \
           -n 4 --dist loadgroup --durations=20 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+
+  lifecycle-smoke-shard-2:
+    name: Lifecycle Smoke Shard 2 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      LIFECYCLE_SHARD: "2"
+    steps: *lifecycle-smoke-steps
+
+  lifecycle-smoke:
+    name: Lifecycle Smoke (Linux)
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+    - name: Require both lifecycle shards
+      env:
+        SHARD_1_RESULT: ${{ needs.lifecycle-smoke-shard-1.result }}
+        SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
+      run: |
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ]; then
+          echo "::error::Both lifecycle shards must succeed; got '$SHARD_1_RESULT' and '$SHARD_2_RESULT'."
+          exit 1
+        fi

@@ -118,3 +118,80 @@ def test_rebuilt_lock_carries_selected_version_only_for_same_pin(
     assert current.constraint == (None if changed_field else "^1.0.0")
     assert current.resolved_tag == (None if changed_field else previous.resolved_tag)
     assert current.resolved_at == (None if changed_field else previous.resolved_at)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"port": 8443},
+        {"resolved_commit": "b" * 40},
+        {"resolved_ref": "arbitrary/tool@1.2.4"},
+        {"resolved_tag": "arbitrary/tool@1.2.4"},
+        {"constraint": "~1.2.0"},
+        {"version": "1.2.4"},
+        {"discovered_via": "other-catalog"},
+        {"marketplace_plugin_name": "other-tool"},
+        {"source_url": "https://catalog.example.test/marketplace.json"},
+        {"source_digest": "sha256:" + "b" * 64},
+        pytest.param({"source": "local"}, id="changed-source"),
+        pytest.param({"host_type": "gitlab"}, id="changed-host-type"),
+    ],
+)
+def test_marketplace_rediscovery_preserves_time_only_for_unchanged_selection(
+    changes: dict[str, object],
+) -> None:
+    """A no-op discovery retains pin age, but changed selection evidence does not."""
+    previous = _locked()
+    current = replace(previous, **changes)
+    refreshed_at = "2026-10-21T15:00:00+00:00"
+    provenance = {
+        field: getattr(current, field)
+        for field in (
+            "discovered_via",
+            "marketplace_plugin_name",
+            "source_url",
+            "source_digest",
+            "constraint",
+            "resolved_tag",
+        )
+    }
+    provenance.update(resolved_version=current.version, resolved_at=refreshed_at)
+    lock = LockFile(dependencies={current.get_unique_key(): current})
+    context = SimpleNamespace(
+        existing_lockfile=LockFile(dependencies={previous.get_unique_key(): previous}),
+        marketplace_provenance={current.get_unique_key(): provenance},
+    )
+
+    LockfileBuilder(context)._attach_marketplace_provenance(lock)
+
+    assert current.resolved_at == (refreshed_at if changes else previous.resolved_at)
+    assert previous.resolved_at == "2026-10-20T19:26:55+00:00"
+
+
+@pytest.mark.parametrize("missing", ["resolved_commit", "resolved_at"])
+def test_marketplace_rediscovery_does_not_reuse_incomplete_timestamp_evidence(
+    missing: str,
+) -> None:
+    """An incomplete prior pin cannot preserve a historical resolution time."""
+    previous = _locked(**{missing: None})
+    current = replace(previous)
+    refreshed_at = "2026-10-21T15:00:00+00:00"
+    context = SimpleNamespace(
+        existing_lockfile=LockFile(dependencies={previous.get_unique_key(): previous}),
+        marketplace_provenance={
+            current.get_unique_key(): {
+                "discovered_via": current.discovered_via,
+                "marketplace_plugin_name": current.marketplace_plugin_name,
+                "constraint": current.constraint,
+                "resolved_tag": current.resolved_tag,
+                "resolved_version": current.version,
+                "resolved_at": refreshed_at,
+            }
+        },
+    )
+    lock = LockFile(dependencies={current.get_unique_key(): current})
+
+    LockfileBuilder(context)._attach_marketplace_provenance(lock)
+
+    assert current.resolved_at == refreshed_at

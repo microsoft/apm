@@ -240,6 +240,10 @@ and the full flag reference, or run `apm install --help`.
 - **Critical security finding.** Install aborts with the offending
   characters and file path. Patch upstream when you can; use
   `--force` only when you can document the exception.
+- **Unmanaged skill conflict.** A differing local skill file refuses the
+  complete selected plan before native deployment or manifest/lock success
+  state. Rename the local skill or narrow a valid existing skill/target
+  selection; see [install behavior](../../reference/cli/install/#behavior).
 - **Policy violation.** Install aborts before any file is written.
   Adjust the dependency or update org policy. See
   [Governance on the consumer ramp](../governance-on-the-consumer-ramp/).

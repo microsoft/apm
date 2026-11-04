@@ -26,6 +26,13 @@ def reconcile_uninstall_deployment_state(
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
+    replacement_changed = False
+    if lockfile.replacements is not None:
+        surviving_keys = set(lockfile.dependencies)
+        for dependency in lockfile.get_package_dependencies():
+            if dependency.replacement is not None:
+                replacement_changed |= dependency.replacement.retain_parents(surviving_keys)
+
     previous_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
     records_by_value = {}
     for record in previous_ledger.records.values():
@@ -63,8 +70,8 @@ def reconcile_uninstall_deployment_state(
             authoritative_targets=False,
         ),
     )
-    changed = reconciled.changed
-    if changed:
+    changed = reconciled.changed or replacement_changed
+    if reconciled.changed:
         DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
     for dep_key in sorted(fully_refreshed_dependency_keys or set()):
         if dep_key not in lockfile.dependencies:
@@ -89,4 +96,5 @@ def lockfile_has_persisted_state(lockfile) -> bool:
         or lockfile.lsp_servers
         or lockfile.local_deployed_files
         or lockfile.deployment_ledger.records
+        or lockfile.replacements is not None
     )

@@ -7,19 +7,38 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.context import InstallContext
+    from apm_cli.models.apm_package import APMPackage
 
 
-def write_empty_lockfile(apm_dir: Path) -> None:
-    """Materialize an empty lockfile for a dependency-free ``apm lock``."""
+def write_empty_lockfile(
+    apm_dir: Path,
+    *,
+    apm_package: APMPackage | None = None,
+    logger: InstallLogger | None = None,
+    lockfile_only: bool = True,
+) -> None:
+    """Persist dependency-free root intent without resolving sources or targets."""
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.install.context import InstallContext
+    from apm_cli.install.phases.lockfile import LockfileBuilder
 
     lock_path = get_lockfile_path(apm_dir)
-    new_lock = LockFile.from_installed_packages([], None)
     existing_lock = LockFile.read(lock_path) if lock_path.exists() else None
-    if not (existing_lock and new_lock.is_semantically_equivalent(existing_lock)):
-        new_lock.save(lock_path)
+    builder = LockfileBuilder(
+        InstallContext(
+            project_root=apm_dir,
+            apm_dir=apm_dir,
+            apm_package=apm_package,
+            existing_lockfile=existing_lock,
+            logger=logger,
+            lockfile_only=lockfile_only,
+        )
+    )
+    builder.save_replacement_intent()
 
 
 def _has_authored_rows(lockfile: LockFile | None) -> bool:
@@ -35,6 +54,7 @@ def local_rows_need_reconciling(
     *,
     target: str | list[str] | None,
     scope: object,
+    target_decision: EffectiveTargetDecision | None = None,
 ) -> bool:
     """Return whether *lockfile*'s retained project rows give an install work.
 
@@ -50,6 +70,8 @@ def local_rows_need_reconciling(
 
     if not _has_authored_rows(lockfile):
         return False
+    if target_decision is not None:
+        return target_decision.value is not None
     try:
         decision = resolve_package_target_decision(
             project_root,
@@ -83,14 +105,18 @@ def is_no_work_install(
     *,
     all_apm_deps: Collection[object],
     root_has_local_primitives: bool,
-    old_local_deployed: Collection[object],
+    local_cleanup_pending: bool,
     has_orphan_deps: bool,
     lockfile_only: bool,
     apm_dir: Path | None,
+    apm_package: APMPackage | None = None,
+    logger: InstallLogger | None = None,
 ) -> bool:
     """Return whether an install has no deployment, cleanup, or lock work."""
-    if all_apm_deps or root_has_local_primitives or old_local_deployed or has_orphan_deps:
+    if all_apm_deps or root_has_local_primitives or local_cleanup_pending or has_orphan_deps:
         return False
-    if lockfile_only and apm_dir is not None:
-        write_empty_lockfile(apm_dir)
+    if apm_dir is not None:
+        write_empty_lockfile(
+            apm_dir, apm_package=apm_package, logger=logger, lockfile_only=lockfile_only
+        )
     return True

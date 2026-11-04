@@ -4,7 +4,7 @@
     {
       "id": "single-file-package-materialization",
       "decision": "Single-file dependency package layout and local source admission for replacement, audit replay and frozen hash images",
-      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, compute_local_package_hash); DependencyReference owns suffix vocabulary",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, compute_local_package_hash, materialize_local_file_for_replay); DependencyReference owns suffix vocabulary",
       "selectors": [
         "src/apm_cli/deps/virtual_file.py",
         "src/apm_cli/deps/github_downloader.py",
@@ -35,7 +35,7 @@
     },
     {
       "id": "legacy-mcp-ownership-key-migration",
-      "decision": "MCP native connection baseline comparison and safe removal, plus legacy target ownership migration and adoption",
+      "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
       "owner": "install/mcp/ownership.py",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
       "guards": ["install-deployment-mcp-ownership-migration"]
@@ -43,7 +43,7 @@
     {
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
-      "owner": "deployment_ledger.py; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
+      "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
         "src/apm_cli/integration/skill_support.py",
@@ -54,8 +54,13 @@
     {
       "id": "target-scoped-deployed-file-contraction",
       "decision": "Target-scoped deployed-file contraction",
-      "owner": "install/manifest_reconcile.py (reconcile_target_deployed_files, surviving_deployed_paths delegates claim/target decisions to DeploymentReconciler)",
-      "selectors": ["src/apm_cli/install/manifest_reconcile.py"],
+      "owner": "install/manifest_reconcile.py routes target contraction, survivor claims and absent dependency claims through core/deployment_state.py (DeploymentReconciler)",
+      "selectors": [
+        "src/apm_cli/install/manifest_reconcile.py",
+        "src/apm_cli/install/helpers/absence_observation.py",
+        "src/apm_cli/install/helpers/reconciliation_scope.py",
+        "src/apm_cli/core/deployment_state.py"
+      ],
       "guards": ["install-deployment-target-file-contraction"]
     },
     {
@@ -104,6 +109,16 @@
       "guards": ["install-deployment-source-plan"]
     },
     {
+      "id": "unmanaged-skill-preflight",
+      "decision": "Whole-plan unmanaged skill refusal before native deployment",
+      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment",
+      "selectors": [
+        "src/apm_cli/install/deployment_plan.py",
+        "src/apm_cli/integration/skill_preflight.py"
+      ],
+      "guards": ["install-deployment-skill-preflight"]
+    },
+    {
       "id": "primitive-kind-classification",
       "decision": "Primitive artifact kind classification precedence",
       "owner": "install/primitive_classification.py (classify_plugin_manifest, classify_agent_source_file)",
@@ -144,7 +159,7 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; see integrators.instructions.md)",
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
         "src/apm_cli/install/services.py"
@@ -182,9 +197,10 @@
     {
       "id": "ci-audit-scratch-materialization",
       "decision": "CI audit scratch materialization",
-      "owner": "install/audit_replay.py (prepare_ci_audit_replay)",
+      "owner": "install/audit_replay.py (prepare_ci_audit_replay) + install/audit_target_roots.py (scratch deployment projections)",
       "selectors": [
         "src/apm_cli/install/audit_replay.py",
+        "src/apm_cli/install/audit_target_roots.py",
         "src/apm_cli/install/project_package.py"
       ],
       "guards": ["install-deployment-audit-replay"]

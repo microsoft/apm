@@ -232,14 +232,9 @@ def test_success_commit_preserves_lockless_legacy_staging(tmp_path: Path) -> Non
     transaction.commit(InstallResult())
 
     assert (legacy / "package" / "marker").read_text(encoding="ascii") == "keep"
-    transaction._logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item. "
-        "Stop other APM installs, then run again with --verbose "
-        "to see paths you can delete manually."
-    )
-    assert (
-        "legacy backup has no activity lock" in transaction._logger.verbose_detail.call_args[0][0]
-    )
+    assert transaction._logger.warning.call_count == 2
+    assert "Do not delete backups" in transaction._logger.warning.call_args_list[0].args[0]
+    assert "legacy backup has no activity lock" in transaction._logger.warning.call_args.args[0]
 
 
 def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> None:
@@ -271,8 +266,8 @@ def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> N
 
     assert result.committed is True
     assert (package / "marker").read_text(encoding="ascii") == "replacement"
-    transaction._logger.warning.assert_called_once()
-    assert "permission denied" in transaction._logger.verbose_detail.call_args[0][0]
+    assert transaction._logger.warning.call_count == 2
+    assert "permission denied" in transaction._logger.warning.call_args.args[0]
 
 
 def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -> None:
@@ -294,12 +289,8 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
         result = transaction.commit(InstallResult())
 
     assert result.committed is True
-    transaction._logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item. "
-        "Stop other APM installs, then run again with --verbose "
-        "to see paths you can delete manually."
-    )
-    detail = transaction._logger.verbose_detail.call_args[0][0]
+    assert transaction._logger.warning.call_count == 2
+    detail = transaction._logger.warning.call_args.args[0]
     assert str(lock_path) in detail
     assert "could not remove activity lock: permission denied" in detail
 
@@ -313,11 +304,8 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
     )
     rerun.commit(InstallResult())
 
-    rerun_logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item. "
-        "Stop other APM installs, then delete the paths listed below manually."
-    )
-    rerun_detail = rerun_logger.verbose_detail.call_args[0][0]
+    assert rerun_logger.warning.call_count == 2
+    rerun_detail = rerun_logger.warning.call_args.args[0]
     assert str(lock_path) in rerun_detail
     assert "orphaned activity lock remains" in rerun_detail
 
@@ -332,16 +320,15 @@ def test_rollback_releases_staging_lock_when_root_cleanup_fails(tmp_path: Path) 
     package.mkdir()
     lock_path = transaction.resolution._staging_lock_path
 
-    with (
-        patch.object(
-            transaction.resolution,
-            "_remove_staging_root",
-            side_effect=OSError("permission denied"),
-        ),
-        pytest.raises(OSError, match="permission denied"),
+    with patch.object(
+        transaction.resolution,
+        "_remove_staging_root",
+        side_effect=OSError("permission denied"),
     ):
         transaction.rollback()
 
+    assert "permission denied" in transaction._logger.warning.call_args.args[0]
+    assert (package / "marker").read_text(encoding="ascii") == "original"
     probe = FileLock(str(lock_path))
     with probe.acquire(timeout=0):
         assert probe.is_locked
@@ -416,10 +403,11 @@ def test_rollback_reports_action_when_created_manifest_cannot_be_removed(
     with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
         transaction.rollback()
 
-    logger.warning.assert_called_once_with(
-        "Failed to remove apm.yml created by this install. Delete apm.yml manually before retrying."
-    )
-    assert "permission denied" in logger.verbose_detail.call_args[0][0]
+    logger.warning.assert_called_once()
+    warning = logger.warning.call_args.args[0]
+    assert str(manifest) in warning
+    assert "permission denied" in warning
+    assert "before retrying" in warning
 
 
 def test_rollback_removes_new_path_and_restores_existing_path(tmp_path: Path) -> None:

@@ -228,13 +228,19 @@ def test_onboarding_does_not_grant_install_collision_ownership(
     assert_snapshot_set_unchanged(before, onboarding.artifacts())
     source = ArtifactSnapshot.capture(onboarding.source)
     target = ArtifactSnapshot.capture(destination)
+    install_before = onboarding.state()
     install = onboarding.runner.run(
         _INSTALL,
         scenario_id="onboarding-collision-install",
         cwd=onboarding.root,
         env=onboarding.isolated.subprocess_env(),
     )
-    assert install.returncode == 0, install.stdout + install.stderr
+    assert install.returncode != 0, install.stdout + install.stderr
+    assert "Installation refused" in install.stdout + install.stderr
+    install_after = onboarding.state()
+    assert install_after.manifest_bytes == install_before.manifest_bytes
+    assert install_after.lockfile_bytes == install_before.lockfile_bytes
+    assert install_after.deployment_records == install_before.deployment_records
     assert (destination / "SKILL.md").read_bytes() == user_skill
     assert_unchanged(target, ArtifactSnapshot.capture(destination))
     assert_unchanged(source, ArtifactSnapshot.capture(onboarding.source))

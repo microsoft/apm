@@ -134,19 +134,18 @@ never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
 
-Claude Code merges approved updates key by key and retains runtime-owned
-`oauthAccount` metadata. A self-defined connection is updated only when its
-native configuration still matches its recorded APM baseline. Switching an
-unchanged managed server from `http` to `stdio` removes the previous `url` and
-`headers`; a user-modified or ambiguous historical entry instead requires
-[manual reconciliation](#resolve-a-connection-name-conflict). Matching entries
-are left byte-identical.
+Claude Code updates self-defined connections only when the native entry matches
+its recorded APM baseline. Updates remove previously managed fields omitted
+from the new declaration, including `env`, while preserving runtime-owned
+`oauthAccount` metadata. Switching from `http` to `stdio` removes `url` and
+`headers`. Modified or unverifiable entries require
+[manual reconciliation](#resolve-a-connection-name-conflict); matching entries
+remain byte-identical.
 
-For an already managed Claude stdio connection, a valid native-only `cwd`
-does not block updates when both the old and new declarations omit it.
-Stdio updates retain that directory; switching to HTTP removes the incompatible
-stdio fields. This does not adopt a user connection or relax removal checks.
-Native edits to a declared `cwd`, or other managed fields, still require reconciliation.
+Managed Claude stdio updates retain a valid native-only `cwd` when both
+declarations omit it; switching to HTTP removes incompatible stdio fields.
+This exception permits updates, not foreign adoption or cleanup. Edits to a
+declared `cwd` or other managed fields still require reconciliation.
 
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
@@ -200,17 +199,15 @@ alias itself remains supported.
 
 ## Resolve a connection name conflict
 
-For self-defined Claude and Codex connections, APM distinguishes an unchanged
-managed connection from a same-name user connection. A normal package update
-or root override updates the unchanged managed connection. A differing user
-connection is preserved, the affected target is named, and install exits
-nonzero. Other targets may already have been configured; their successful
-writes remain recorded. This is not a whole-command rollback.
+For self-defined Claude and Codex connections, a normal package update or root
+override updates an unchanged managed connection. A differing native entry
+is preserved, the affected target is named, and install exits `1`.
+Successful writes, including registry entries written before a later
+self-defined conflict, remain recorded. This is not a whole-command rollback.
 
-For example, Claude may already have a personal `notes` connection while a
-company package requests a different `notes` connection for Claude and Codex.
-APM preserves the personal connection and reports the Claude conflict, even
-if it successfully configures Codex. Choose which connection to keep:
+If Claude has a personal `notes` connection and a package requests a different
+`notes` connection for Claude and Codex, APM preserves the personal connection
+even if Codex succeeds. Choose which connection to keep:
 
 1. To keep both, rename your personal connection in the affected runtime's
    native config, leaving unrelated settings intact.
@@ -218,13 +215,17 @@ if it successfully configures Codex. Choose which connection to keep:
 3. Rerun the original install command with the same scope and targets, such as
    `apm install --global --target claude,codex`.
 
-An identical foreign connection needs no write and does not become APM-owned.
+An identical foreign connection stays byte-identical and unowned: APM revokes
+any stale ownership claim without attempting target retirement.
+Registry conflicts do not prevent nonconflicting self-defined updates; the
+command still exits `1` and retains ownership of its successful writes.
 `--force` grants no takeover permission; `--frozen` does not turn a conflicting
 connection into a successful install or repair lock intent. Prune, target
 narrowing, and uninstall likewise preserve entries that differ from a
-trustworthy managed baseline. If an older ownership record cannot be verified,
-review and rename or remove the affected native entry, then retry; do not
-delete the lockfile or the entire native config as a workaround.
+trustworthy [managed baseline or receipt](../../reference/lockfile-spec/#canonical-deployment-rows).
+If an older ownership record cannot be verified, rename or remove only the
+affected native entry, then retry. Deleting the lockfile never authorizes
+adoption of existing native entries; do not reset it or the entire native config.
 
 These operations change connection settings, not notes or other data stored
 by the MCP service.
@@ -269,16 +270,9 @@ the gate took effect:
 ```
 
 On reinstall, removing a previously configured target also removes the
-APM-managed server entries from that target's native config. User-authored
-servers and unrelated JSON or TOML settings remain unchanged.
-
-This single rule replaces two older ones that used to coexist:
-
-- A "directory opt-in" carve-out for Cursor / Gemini / OpenCode -- now
-  redundant, because `targets:` (or auto-detection) drives the gate
-  for those runtimes too.
-- The pre-#1335 silent skip path, which dropped non-listed runtimes
-  without telling you.
+verified APM-managed entries from that target's native config. Cleanup checks
+the exact native key: retiring `@company/notes` does not touch personal `notes`.
+User-authored servers and unrelated JSON or TOML settings remain unchanged.
 
 A malformed `targets:` field (both `target:` and `targets:` set,
 `targets: []`, or an unknown target name) fails closed before machine discovery:

@@ -998,6 +998,8 @@ class TestConfigConsistency:
         result = _check_config_consistency(manifest, lock)
         assert not result.passed
         assert any("my-server" in d and "differs" in d for d in result.details)
+        assert "repeat 'apm install' with the intended selection" in result.message
+        assert "'--only apm' for skills-only" in result.message
 
     def test_genuine_orphan_mcp_still_flagged(self, tmp_path):
         """Provenance must not mask a real orphan (server absent from manifest

@@ -64,10 +64,10 @@
     },
     {
       "id": "mcp-declaration-scope",
-      "decision": "Root vs dependency MCP declaration scope",
+      "decision": "Root vs dependency MCP declaration scope and dependency-bound intentional omission evidence",
       "owner": "integration/mcp_config_view.py (CurrentMcpConfigView)",
       "selectors": ["src/apm_cli/integration/mcp_config_view.py"],
-      "guards": ["hooks-integrations-mcp-declaration-scope"]
+      "guards": ["hooks-integrations-mcp-declaration-scope", "hooks-integrations-mcp-omission-evidence"]
     },
     {
       "id": "mcp-package-launcher",

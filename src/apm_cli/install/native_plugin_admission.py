@@ -231,7 +231,7 @@ def verify_native_plugin_cache(
 
     candidate = lock_dep.to_dependency_ref().get_install_path(live_modules)
     ensure_path_within(candidate, live_modules)
-    if lock_dep.source == "local":
+    if lock_dep.is_local_source:
         ensure_path_within(replay_path, scratch_root)
         _copy_tree_dereferencing_validated(source, replay_path, source)
         expected_hash = compute_package_hash(replay_path)

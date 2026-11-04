@@ -45,6 +45,7 @@ def _make_dep(
     dep.ado_organization = "myorg"
     dep.ado_project = "myproject"
     dep.ado_repo = "myrepo"
+    dep.source_reference = dep
     return dep
 
 

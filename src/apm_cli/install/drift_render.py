@@ -80,7 +80,9 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
 
     status = (
         "error"
-        if any(finding.kind in {"modified", "unrecorded"} for finding in findings)
+        if any(
+            finding.kind in {"modified", "unrecorded", "unmanaged-conflict"} for finding in findings
+        )
         else "warning"
     )
     lines = [f"{STATUS_SYMBOLS[status]} Drift detected: {len(findings)} file(s)", ""]
@@ -88,7 +90,7 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
     for finding in findings:
         by_kind.setdefault(finding.kind, []).append(finding)
 
-    for kind in ("modified", "unintegrated", "orphaned", "unrecorded"):
+    for kind in ("unmanaged-conflict", "modified", "unintegrated", "orphaned", "unrecorded"):
         items = by_kind.get(kind, [])
         if not items:
             continue
@@ -100,7 +102,18 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
                 lines.append(f"      {item.inline_diff}")
         lines.append("")
 
-    if by_kind.get("unrecorded"):
+    if by_kind.get("unmanaged-conflict"):
+        lines.append(
+            f"  {STATUS_SYMBOLS['info']} Rename the conflicting local skill or choose a valid "
+            "skill/target selection before reinstalling. Ordinary 'apm install' refuses "
+            "unmanaged conflicts; it cannot repair these files."
+        )
+        if any(finding.kind != "unmanaged-conflict" for finding in findings):
+            lines.append(
+                f"  {STATUS_SYMBOLS['info']} After resolving ownership conflicts, "
+                "run 'apm install' to re-sync the other findings."
+            )
+    elif by_kind.get("unrecorded"):
         lines.append(f"  {STATUS_SYMBOLS['info']} 1. Run 'apm install' to re-sync deployed files.")
         lines.append(
             f"  {STATUS_SYMBOLS['info']} 2. Commit the regenerated apm.lock.yaml "
@@ -134,7 +147,11 @@ def render_drift_sarif(findings: list[DriftFinding]) -> list[dict]:
     return [
         {
             "ruleId": f"apm/drift/{finding.kind}",
-            "level": "error" if finding.kind in {"modified", "unrecorded"} else "warning",
+            "level": (
+                "error"
+                if finding.kind in {"modified", "unrecorded", "unmanaged-conflict"}
+                else "warning"
+            ),
             "message": {"text": f"drift ({finding.kind}): {finding.path}"},
             "locations": [
                 {

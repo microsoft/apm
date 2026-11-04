@@ -32,8 +32,14 @@ RULE = "install-deployment-single-file-materialization"
         ),
         (
             "src/apm_cli/install/drift.py",
-            "source = read_local_package_source(dependency, source_base)",
-            "source = bypass_admission(dependency, source_base)",
+            "return materialize_local_file_for_replay(",
+            "return bypass_admission(",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/local_content.py",
+            "source = read_local_package_source(dep_ref, base_dir)\n    if source.content is None:",
+            "source = bypass_admission(dep_ref, base_dir)\n    if source.content is None:",
+            id="replay-admission",
         ),
         (
             "src/apm_cli/deps/github_downloader.py",

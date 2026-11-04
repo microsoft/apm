@@ -13,14 +13,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.cursor/rules/*.mdc` for the Cursor target. Previously they were skipped
   based on an incorrect assumption that Cursor global rules were
   Settings-UI-only. (closes #3054) (#2506)
-- OpenCode MCP references now use native `{env:VAR}` syntax without saving resolved values; authored literals and registry overlays are preserved. Export referenced variables when launching OpenCode. -- by @leninworld (#3303)
-- Legacy Claude plugin packing preserves hook scripts and sibling assets, rewrites commands to packed paths, and declares hooks in the native manifest; unsafe or excluded resources fail before replacing an existing bundle. (#3301)
-- Lockfile conflict diagnostics now name the affected file and direct manual resolution or restoration before retrying the original command, preserving bytes and frozen/preview behavior. Automatic recovery remains deferred to #2979. -- by @lachieh (#3028)
+
+## [0.35.0] - 2026-10-22
+
+### Added
+
+- Root `replace` rules can substitute a local checkout or explicit-ref fork throughout the dependency graph while preserving the original dependency's ownership. This opt-in capability requires the candidate schema selector; its manifest and lock-v3 contracts remain unratified, and older clients may ignore replacement intent. (#3309)
+- The opt-in `manifest-v0.1.48.schema.json` candidate accepts supported Git/subpath, registry and MCP declarations rejected by older schemas. Earlier schema resources remain unchanged, and the correction remains a proposal rather than a ratified OpenAPM amendment. (#3308)
+
+### Fixed
+
+- `apm install` accepts local `.agent.md`, `.instructions.md` and `.prompt.md` dependencies, with copied snapshots, frozen verification and audit replay matching remote single-file packages. (#3310)
+- Kiro CLI prompt installs now use `.kiro/prompts/<stem>.md` at project scope and the corresponding user directory, preserving the command name and prompt body instead of copying unsupported frontmatter. -- by @DBVamsi (#3263)
+- Codex compatibility bundles retain their complete plugin tree, resources and MCP declarations through native user-scope install, restore, update, audit and removal. The native route is qualified for Codex CLI 0.163.0 at user scope; existing disabled settings and unrelated user state are preserved. (#3294)
+- `apm install` preserves separately owned assets when dependencies share a skill directory and records only files it successfully deploys, preventing reinstall from deleting another package's resources. (#3313)
+- `apm install` checks the complete selected skill plan for differing unmanaged files before deploying any dependency, avoiding partial native deployment on a collision. Audit now distinguishes ownership conflicts from managed drift and offers nondestructive recovery. (#3314)
+- Ordinary `apm install` retires obsolete claims for already-absent skill files after complete reintegration, so audit no longer demands files the dependency stopped supplying. Present content, other owners, unprocessed targets and frozen protections remain unchanged. (#3315)
+- Skill installs retain trustworthy local evidence of successfully rendered files, allowing updates after a lockfile checkout and cold frozen replay to replace untouched old content while preserving user edits and foreign ownership. (#3344)
+- `apm install --frozen` verifies direct and transitive local dependency snapshots before deployment, refusing changed content or missing trustworthy hashes without modifying managed files or the lockfile. Run an ordinary install to accept a changed local snapshot and record its baseline. -- by @dajiaohuang (#3236)
+- Cold `apm install --frozen` restores pinned remote plugins without a preliminary ordinary install and verifies their actual MCP declarations before activation. (#3305)
+- `apm install --frozen` preserves lockfile bytes through late MCP/LSP integration and MCP-only installs, while checking recorded native-service ownership and ignoring inactive orphan lock rows. (#3307)
+- `apm install --dry-run` includes locally known required indirect dependencies instead of falsely previewing their files as orphan removals; unavailable subtrees produce an explicit incomplete-preview warning. (#3302)
+- The first ordinary install after a branch switch records the version from the acquired package snapshot rather than stale metadata at the same installation path. (#3311)
+- Repeating an unchanged positional `apm install` preserves `apm.yml` bytes, pinned refs and metadata instead of treating serialization as an update request; genuine dependency changes still apply. (#3346)
+- `apm install` persists changed, cleared or removed root replacement rules even after the final dependency is removed, without fetching dormant sources or cleaning deployed files. (#3328)
+- Unchanged marketplace reinstalls preserve the existing `resolved_at` timestamp, keeping otherwise identical lockfile replay byte-stable. (#3325)
+- Windows install failures retain both the original error and any recovery failures while preserving recoverable prior package data and manifest snapshots. Active staging directories are protected from concurrent cleanup. (#3318)
+- Lockfile conflict diagnostics name the affected file and explain how to resolve or restore it before retrying the original command, without modifying conflicted bytes. Automatic recovery remains deferred. -- by @lachieh (#3028)
+- Git marketplace installs accept versioned plugin directories while rejecting file, symlink and submodule responses during directory validation. -- by @Pybsama (#3156)
+- Object-form marketplace dependencies now use locked provenance and selected-version evidence consistently across install, frozen replay and audit, avoiding false ref-consistency failures without fetching today's catalog during audit. -- by @Fire162 (#3221)
+- Private GitHub single-file downloads can recover through authenticated Git after API throttling, without letting the earlier API error suppress an independent Git credential retry. (#3278)
+- `apm --version` reports a Git revision only when it belongs to the loaded APM checkout, rather than borrowing an unrelated parent repository's SHA, and succeeds without Git installed. (#3280)
+- `apm audit` correctly replays native Copilot Agent Plugins, including plugins without `apm.yml`, instead of reporting false configuration inconsistencies. -- by @bodapatisaikrishna (#3257)
+- `apm audit` preserves recorded Grok Cloud target identity despite unrelated GitHub workflows and verifies retained historical files after target changes instead of falsely reporting them missing. (#3289)
+- `apm audit` recognizes Windows short-path spellings of a project checkout, avoiding a false refusal that asks for `apm install --global`. (#3316)
+- `apm audit` accepts intentionally omitted dependency MCP from `apm install --only apm` or default refusal of transitive self-defined servers, while continuing to detect drift in root and admitted services. (#3304)
+- Claude and Codex self-defined MCP installs preserve conflicting native user connections and report incomplete configuration instead of claiming success; verified APM-owned updates remain supported. (#3317)
+- MCP cleanup removes only the exact connections whose ownership is verified, preserving similarly named personal connections and retaining managed ownership across partial installs, registry writes and later conflicts. (#3329)
+- OpenCode MCP references use native `{env:VAR}` syntax without saving resolved values; authored literals and registry overlays are preserved. Export referenced variables when launching OpenCode. -- by @leninworld (#3303)
+- Codex MCP entries no longer emit the unsupported `id` setting; reinstalling repairs recorded APM-owned entries while preserving registry identity, user settings and ownership safeguards. -- by @Pybsama (#3157)
+- Legacy Claude plugin packing preserves hook scripts and sibling assets, rewrites commands to packed paths and declares hooks in the native manifest; unsafe or excluded resources fail before replacing an existing bundle. (#3301)
 - Hook-only Git-path packages using `hooks/*.json` or `.apm/hooks/*.json` install without a placeholder manifest or skill, and invalid updates preserve the installed source, lockfile and deployment ownership. (#3282)
-- Codex MCP entries no longer emit the unsupported `id` setting; reinstalling repairs recorded APM-owned entries while preserving registry identity, user settings, and ownership safeguards. -- by @Pybsama (#3157)
-- Git marketplace installs accept versioned plugin directories while rejecting file, symlink, and submodule responses during directory validation. -- by @Pybsama (#3156)
-- `apm install` and `apm update` no longer fail with `Object of type mappingproxy is not JSON serializable` when a hook carries nested metadata such as `env`; Claude, Codex, Gemini and Antigravity hook files keep that metadata as plain JSON. (by @abhishekacharya200, with regression coverage from @MohammedAlkindi in #3199, closes #3167) (#3211)
-- `apm install` now writes untyped flat command hooks as Claude `"type": "command"` handlers, including alongside Claude-shaped hook files. Explicit types and other targets are unchanged; reinstall to refresh existing entries. -- by @Parth-Vasave (#3153, closes #3130)
+- `apm install` and `apm update` no longer fail with `Object of type mappingproxy is not JSON serializable` when hooks carry nested metadata such as `env`; Claude, Codex, Gemini and Antigravity keep that metadata as plain JSON. -- by @abhishekacharya200, with regression coverage from @MohammedAlkindi (#3211)
+- `apm install` writes untyped flat command hooks as Claude `"type": "command"` handlers, including alongside Claude-shaped hook files. Explicit types and other targets are unchanged; reinstall to refresh existing entries. -- by @Parth-Vasave (#3153)
+- The README's starter manifest now declares `targets: [copilot]`, so the documented install works in a fresh project without existing harness markers. -- by @venkatayedidavs (#3086)
+
+### Security
+
+- `apm audit --ci --policy <path|url|owner/repo>` exits 1 when the explicitly selected policy cannot be loaded, rather than passing without enforcement, and JSON/SARIF reports whether a policy was enforced. Correct the named source and retry; auto-discovery and `--policy org` retain their warn default, and proposed `req-pl-021` remains unratified. (#3230)
 
 ## [0.34.0] - 2026-10-16
 

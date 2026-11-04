@@ -375,6 +375,52 @@ def _count_span_fixed(facts: FileFacts, span: tuple[int, int], needle: str) -> i
     return sum(1 for _, text in _span_lines(facts, span) if needle in text)
 
 
+def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]:
+    """Persistent MCP omission decisions must remain in the current-view owner."""
+    rule_id = "mutation_writes.mcp_omission_evidence"
+    required = {
+        _MCP_SCOPE_OWNER: (
+            "def omission_evidence(",
+            "def with_recorded_omissions(",
+            "def _declaration_fingerprint(",
+            '"dependency": dependency.get_unique_key()',
+            '"declaration": declaration.to_dict()',
+            "if valid and name not in admitted:",
+        ),
+        "src/apm_cli/policy/ci_checks.py": (").with_recorded_omissions(lock)",),
+        "src/apm_cli/install/mcp/integration.py": (
+            "include_dependency_mcp=should_install",
+            "current_view.omission_evidence(lockfile or LockFile())",
+            "current_view if should_install else None",
+        ),
+    }
+    facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "MCP omission evidence must retain dependency/declaration binding and owner routing",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
+            pattern=r"^\s*def (?:omission_evidence|with_recorded_omissions|_declaration_fingerprint)\(",
+            message="MCP omission selection and comparison belong to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 def _check_mcp_package_launcher(provider: FactsProvider) -> Iterable[Violation]:
     """MCP launcher selection and argv shape must route through the adapter.
 
@@ -763,6 +809,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-mcp-declaration-scope",),
         description="Root vs dependency MCP declaration scope must use production-only collection.",
         check=_check_mcp_declaration_scope,
+    ),
+    Rule(
+        id="mutation_writes.mcp_omission_evidence",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-omission-evidence",),
+        description="Dependency MCP omission evidence and comparison use the current-view owner.",
+        check=_check_mcp_omission_evidence,
     ),
     Rule(
         id="mutation_writes.mcp_package_launcher",

@@ -108,6 +108,7 @@ def build_materialization_path(
     apm_modules_dir: Path,
 ) -> Path:
     """Build the source-cased path for one dependency below ``apm_modules``."""
+    dependency = dependency.ownership_reference
     if dependency.is_marketplace:
         raise ValueError(
             "Cannot compute install path for unresolved marketplace dependency "
@@ -365,6 +366,7 @@ def prepare_materialization_path(
     on_migrate: Callable[[Path, Path], None] | None = None,
 ) -> Path:
     """Return the display-cased path, transactionally migrating stale casing."""
+    dependency = dependency.ownership_reference
     desired = dependency.get_install_path(apm_modules_dir)
     if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:
         return desired

@@ -56,6 +56,42 @@ OWNERS_DIR = ROOT / ".apm/architecture/owners"
 
 
 @pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "replay_modules_root(scratch_root, user_scope=config.user_scope)",
+            "private_modules_root(scratch_root, user_scope=config.user_scope)",
+            id="replay-call",
+        ),
+        pytest.param(
+            "src/apm_cli/install/audit_target_roots.py",
+            "InstallScope.USER if user_scope else InstallScope.PROJECT",
+            "InstallScope.PROJECT",
+            id="user-scope",
+        ),
+        pytest.param(
+            "src/apm_cli/install/audit_target_roots.py",
+            "get_modules_dir(scope).relative_to(get_deploy_root(scope))",
+            'Path("apm_modules")',
+            id="canonical-layout",
+        ),
+    ],
+)
+def test_audit_replay_scope_projection_cannot_bypass_owner(
+    path: str, original: str, replacement: str
+) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-audit-replay"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
     ("path", "original", "replacement", "refused"),
     [
         (
@@ -498,6 +534,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Root context writes lose the canonical hand-authored ownership gate.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-source-replacements",
+        rule_id="contracts-tooling-source-replacements",
+        path="src/apm_cli/models/dependency/replacement.py",
+        old="return (self.host, self.port, self.repo_url, self.subpath)",
+        new="return ('github.com', None, self.repo_url, self.subpath)",
+        intent="Root replacement matching becomes host- and endpoint-blind.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-claude-mcp-paths",
         rule_id="mutation_writes.claude_mcp_paths",
         path="src/apm_cli/integration/mcp_integrator.py",
@@ -536,6 +580,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="root.get_all_mcp_dependencies()",
         new="root.get_mcp_deps()",
         intent="MCP config view stops deriving scope from the aggregated declaration owner.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-mcp-omission-evidence",
+        rule_id="mutation_writes.mcp_omission_evidence",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old='"dependency": dependency.get_unique_key(),',
+        new='"dependency": dependency.name,',
+        intent="Omission evidence binds only a display name instead of canonical dependency identity.",
     ),
     MutationCase(
         guard_id="hooks-integrations-mcp-package-launcher",
@@ -765,9 +817,25 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-single-file-materialization",
         rule_id="install-deployment-single-file-materialization",
         path="src/apm_cli/install/phases/local_content.py",
-        old="source = read_local_package_source(dep_ref, base_dir)",
-        new="source = bypass_local_package_source(dep_ref, base_dir)",
+        old=(
+            "    try:\n"
+            "        source = read_local_package_source(dep_ref, base_dir)\n"
+            "    except LocalPackageError as exc:"
+        ),
+        new=(
+            "    try:\n"
+            "        source = bypass_local_package_source(dep_ref, base_dir)\n"
+            "    except LocalPackageError as exc:"
+        ),
         intent="Local copying bypasses the canonical single-file admission authority.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-skill-preflight",
+        rule_id="install-deployment-skill-preflight",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)",
+        new="deployment_plans, local_plan = {}, None",
+        intent="Integration bypasses whole-plan unmanaged skill preflight before native writes.",
     ),
     MutationCase(
         guard_id="install-deployment-skills-root-derivation",
@@ -780,10 +848,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-source-plan",
         rule_id="install-deployment-source-plan",
-        path="src/apm_cli/install/services.py",
+        path="src/apm_cli/install/deployment_plan.py",
         old="source_plan = DeployableSourcePlan.create(",
         new="source_plan_x = DeployableSourcePlan.create(",
-        intent="Install services stop binding the shared deployable source plan.",
+        intent="Deployment preparation stops binding the shared deployable source plan.",
     ),
     MutationCase(
         guard_id="install-deployment-target-file-contraction",
@@ -1801,13 +1869,15 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         ),
         (
             "src/apm_cli/integration/mcp_integrator_install.py",
-            "state = compare_native_mcp_connection(",
-            "state = noncanonical_comparison(",
+            "state = compare_native_mcp_connection(\n                    client,\n"
+            "                    dep.name,",
+            "state = noncanonical_comparison(\n                    client,\n"
+            "                    dep.name,",
         ),
         (
             "src/apm_cli/integration/mcp_integrator.py",
-            "require_removable_mcp_connections(codex_client, stale_names, stored_configs or {})",
-            "None",
+            "verified_keys = require_removable_mcp_connections(\n                codex_client,",
+            "verified_keys = bypass_removal_owner(\n                codex_client,",
         ),
         (
             "src/apm_cli/commands/uninstall/engine.py",
@@ -1838,6 +1908,38 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
             '    """Refuse removal when recorded names do not prove unchanged native content."""\n'
             "    client.project_managed_server_config({}, baseline={}, requested={})",
         ),
+        (
+            "src/apm_cli/core/conflict_detector.py",
+            "class MCPConflictDetector:",
+            "def mcp_native_hash(native):\n    return 'unverified'\n\n\nclass MCPConflictDetector:",
+        ),
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "                codex_cfg,\n                verified_keys,",
+            "                codex_cfg,\n                expanded_stale,",
+        ),
+        (
+            "src/apm_cli/adapters/client/claude.py",
+            "fingerprint = mcp_native_hash(",
+            "fingerprint = unverified_hash(",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "retain_deferred_mcp_claims(managed_targets, previous_targets, new_names)",
+            "bypass_deferred_claims(managed_targets, previous_targets, new_names)",
+        ),
+        (
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "state = compare_native_mcp_connection(\n                            client,\n"
+            "                            dep,",
+            "state = noncanonical_comparison(\n                            client,\n"
+            "                            dep,",
+        ),
+        (
+            "src/apm_cli/install/phases/lockfile.py",
+            "native_hashes=DeploymentLedgerCodec.mcp_native_hashes(",
+            "native_hashes=DeploymentLedgerCodec.unverified_mcp_native_hashes(",
+        ),
     ],
     ids=[
         "legacy-resolver",
@@ -1848,6 +1950,12 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         "projection-bypass",
         "projection-external",
         "projection-cleanup",
+        "second-fingerprint-owner",
+        "cleanup-expanded-alias",
+        "actual-write-fingerprint",
+        "bundle-deferred-claims",
+        "registry-install-routing",
+        "rebuild-receipt-routing",
     ],
 )
 def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) -> None:

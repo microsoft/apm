@@ -17,13 +17,16 @@ Covers missing lines/branches in resolve module:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 from apm_cli.install.context import InstallContext
 from apm_cli.install.resolution_staging import ResolutionStagingSession
+from apm_cli.models.apm_package import APMPackage, GitReferenceType, ResolvedReference
 from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
@@ -37,6 +40,16 @@ _CHECK_INSECURE = "apm_cli.install.insecure_policy._check_insecure_dependencies"
 _COLLECT_INSECURE = "apm_cli.install.insecure_policy._collect_insecure_dependency_infos"
 _WARN_INSECURE = "apm_cli.install.insecure_policy._warn_insecure_dependencies"
 _GUARD_INSECURE = "apm_cli.install.insecure_policy._guard_transitive_insecure_dependencies"
+
+
+@pytest.fixture(autouse=True)
+def _remote_ref_resolution() -> Iterator[None]:
+    """Isolate ref I/O now that real references no longer supply truthy mock metadata."""
+    with patch(
+        "apm_cli.deps.github_downloader.GitHubPackageDownloader.resolve_git_reference",
+        return_value=ResolvedReference("main", GitReferenceType.BRANCH, "a" * 40, "main"),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +67,7 @@ def _make_ctx(
 ) -> InstallContext:
     (tmp_path / "apm.yml").write_text(yaml.safe_dump({"name": "testapp", "version": "0.1.0"}))
     ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path)
+    ctx.apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml", create_config=False)
     ctx.update_refs = update_refs
     ctx.only_packages = only_packages
     ctx.verbose = verbose
@@ -160,7 +174,7 @@ def test_refresh_keeps_registered_hook_live_while_replacement_downloads(
 
     ctx = _make_ctx(tmp_path)
     ctx.apm_modules_dir = modules
-    ctx.apm_package = MagicMock(registries={})
+    ctx.apm_package = APMPackage(name="testapp", version="0.1.0", registries={})
     ctx.all_apm_deps = [dependency]
     ctx.existing_lockfile = None
     ctx.downloader = downloader
@@ -196,13 +210,11 @@ class TestVerboseLockfileIteration:
         mock_logger.verbose = True
         ctx = _make_ctx(tmp_path, verbose=True, logger=mock_logger)
 
-        dep1 = MagicMock()
-        dep1.get_unique_key.return_value = "org/pkg"
+        dep1 = DependencyReference.parse("org/pkg")
         dep1.resolved_commit = "abc123"
         dep1.resolved_ref = "main"
 
-        dep2 = MagicMock()
-        dep2.get_unique_key.return_value = "org/pkg2"
+        dep2 = DependencyReference.parse("org/pkg2")
         dep2.resolved_commit = None
         dep2.resolved_ref = None
 
@@ -347,13 +359,9 @@ class TestOnlyFiltering:
     def test_only_package_filters_dep_list(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path, only_packages=["org/pkg"])
 
-        dep_a = MagicMock()
-        dep_a.get_unique_key.return_value = "org/pkg"
-        dep_a.get_identity.return_value = "org/pkg"
+        dep_a = DependencyReference.parse("org/pkg")
 
-        dep_b = MagicMock()
-        dep_b.get_unique_key.return_value = "org/other"
-        dep_b.get_identity.return_value = "org/other"
+        dep_b = DependencyReference.parse("org/other")
 
         graph = _make_mock_graph(deps=[dep_a, dep_b])
         graph.dependency_tree.nodes = {}
@@ -367,25 +375,19 @@ class TestOnlyFiltering:
     def test_only_with_children_expands_tree(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path, only_packages=["org/pkg"])
 
-        dep_a = MagicMock()
-        dep_a.get_unique_key.return_value = "org/pkg"
-        dep_a.get_identity.return_value = "org/pkg"
+        dep_a = DependencyReference.parse("org/pkg")
 
-        dep_child = MagicMock()
-        dep_child.get_unique_key.return_value = "org/child"
-        dep_child.get_identity.return_value = "org/child"
+        dep_child = DependencyReference.parse("org/child")
 
         graph = _make_mock_graph(deps=[dep_a, dep_child])
 
         # Build tree node with child
-        child_ref = MagicMock()
-        child_ref.get_identity.return_value = "org/child"
+        child_ref = DependencyReference.parse("org/child")
         child_node = MagicMock()
         child_node.children = []
         child_node.dependency_ref = child_ref
 
-        parent_ref = MagicMock()
-        parent_ref.get_identity.return_value = "org/pkg"
+        parent_ref = DependencyReference.parse("org/pkg")
         parent_node = MagicMock()
         parent_node.children = [child_node]
         parent_node.dependency_ref = parent_ref
@@ -401,9 +403,7 @@ class TestOnlyFiltering:
     def test_only_invalid_ref_falls_back_to_raw(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path, only_packages=["INVALID_REF_NO_SLASH"])
 
-        dep_a = MagicMock()
-        dep_a.get_unique_key.return_value = "INVALID_REF_NO_SLASH"
-        dep_a.get_identity.return_value = "INVALID_REF_NO_SLASH"
+        dep_a = DependencyReference(repo_url="INVALID_REF_NO_SLASH")
 
         graph = _make_mock_graph(deps=[dep_a])
         graph.dependency_tree.nodes = {}
@@ -429,8 +429,7 @@ class TestDepBaseDirs:
         parent_pkg = MagicMock()
         parent_pkg.source_path = parent_source
 
-        child_ref = MagicMock()
-        child_ref.get_unique_key.return_value = "org/child"
+        child_ref = DependencyReference.parse("org/child")
 
         parent_node = MagicMock()
         parent_node.parent = None
@@ -469,8 +468,7 @@ class TestDepBaseDirs:
         parent_node_b.parent = None
         parent_node_b.package = pkg_b
 
-        child_ref = MagicMock()
-        child_ref.get_unique_key.return_value = "org/child"
+        child_ref = DependencyReference.parse("org/child")
 
         # Two different nodes declaring same key
         node1 = MagicMock()
@@ -509,8 +507,7 @@ class TestDepBaseDirs:
     def test_parent_none_skipped(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path)
 
-        child_ref = MagicMock()
-        child_ref.get_unique_key.return_value = "org/root_dep"
+        child_ref = DependencyReference.parse("org/root_dep")
 
         root_node = MagicMock()
         root_node.parent = None
@@ -528,9 +525,7 @@ class TestDepBaseDirs:
     def test_intended_dep_keys_populated(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path)
 
-        dep = MagicMock()
-        dep.get_unique_key.return_value = "org/pkg"
-        dep.get_identity.return_value = "org/pkg"
+        dep = DependencyReference.parse("org/pkg")
 
         graph = _make_mock_graph(deps=[dep])
         graph.dependency_tree.nodes = {}

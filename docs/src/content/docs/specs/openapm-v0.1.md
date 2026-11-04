@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **129 normative statements (124 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **136 normative statements (131 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -830,6 +830,122 @@ manifest MUST emit a non-blocking diagnostic naming the key as
 reserved for v0.2 and MUST NOT attach any semantics to its value.
 The diagnostic MUST NOT fail install.
 
+### 4.8.1 Root source replacements (proposed capability)
+
+This is an opt-in capability proposal for issue #3180, not workspace
+composition or a change to the reserved `workspaces:` key. Section 9.3
+reviewer approvals and public comment remain pending. Staging its
+implementation and schema artifacts does not ratify the proposal or
+identify a first supporting release. Consumers not providing this
+capability acquire no new mandatory feature.
+
+The manifest selector is
+`https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json`.
+The following obligations apply to consumers providing this capability.
+
+<a id="req-rpl-001"></a>
+**[req-rpl-001]** A conforming **consumer** providing root source
+replacements MUST require the explicit manifest selector above before
+accepting a `replace:` key, and MUST validate its list of rules and bind
+them as follows:
+
+- Each rule has exactly `for` and `with`. `for` contains a nonempty
+  explicit-host Git locator and optional package-directory `path`.
+  `with` is either a nonempty local `path`, or an explicit Git locator
+  with a required nonempty `ref` and optional package-directory `path`.
+  Unknown fields, shorthand Git locators, embedded refs, query strings,
+  HTTP credentials and single-primitive selectors are rejected.
+  HTTPS, SSH and SCP-style Git locators are supported; an original HTTP
+  selector can redirect to a secure source, but an HTTP selected source
+  is rejected.
+- Match the original (normalized host, port, repository, package subpath)
+  exactly, using the existing dependency-coordinate normalization.
+  Ref, alias and display name are not selector dimensions. Duplicate
+  normalized selectors are rejected. Local, registry, marketplace and
+  parent-inheritance references do not match.
+- Apply the root table once to every original edge, including direct,
+  transitive and diamond requests, before graph deduplication and
+  immutable-source admission. A selected source does not trigger another
+  replacement. Dependency-owned rules do not redirect the consumer.
+  Incompatible original identities sharing an existing materialization
+  slot, and logical or physical dependency cycles, are refused rather
+  than resolved by arbitrary winner selection.
+
+<a id="req-rpl-002"></a>
+**[req-rpl-002]** A conforming **consumer** providing this capability MUST
+keep original identity as graph, lock-entry and materialization ownership,
+including alias, skill and target selections and every incoming request,
+while using the selected source for transport, authentication, ref
+resolution, cache acquisition, content scanning, integrity and policy
+evaluation. Replacement MUST NOT grant executable consent or bypass
+existing security checks. Existing host-blind policy matching remains
+host-blind, but evaluates the selected package, not the original package.
+Original ref constraints are provenance, not constraints on the fully
+substituted source; immutable obligations introduced by the selected
+source's own dependencies still apply.
+
+Relative selected local paths are anchored to the root manifest directory,
+including intentional siblings; explicit absolute and home-relative paths
+retain their normal local-path meaning. Nested local dependencies resolve
+relative to their selected parent's source. Missing selected content MUST NOT
+fall back upstream. Install and update MUST use the selected source; update
+MUST retain an explicit fork SHA and refresh a mutable fork ref. Removing a
+rule returns that identity upstream on the next non-frozen resolution.
+Audit MUST verify selected-source evidence without repair; outdated MUST query
+the selected fork and reports a local replacement as not remotely
+comparable. Dry-run MUST remain read-only and may return its existing
+successful but explicitly incomplete preview for unavailable metadata.
+Uninstall MUST use surviving selected-source manifests, preserve shared
+dependencies, and refuse destructive cleanup if reachability is incomplete.
+
+<a id="req-rpl-003"></a>
+**[req-rpl-003]** A conforming **consumer** providing this capability MUST
+write the proposed `lockfile_version: "3"` when a root replacement table
+is present, including `replace: []`, and record its complete normalized
+table as top-level `replacements`, including dormant rules. The written
+table MUST preserve manifest declaration order. Each matched
+Git-owned entry retains its original coordinates and records
+`replacement: {source: ..., requests: [...]}`. A matched entry MUST NOT
+carry entry-level `source` or `local_path`; `replacement.source` is its
+sole selected-source record. `source` has the selected
+`with` shape. Each nonempty incoming-request record contains `parent`,
+`ref`, `skills`, `targets`, `dev` and `alias`; nullable fields and explicit
+empty selections remain distinguishable. Parent values are exact original
+lock keys. Existing resolved-commit/tag and content-hash fields describe
+selected bytes; a local replacement has no fabricated Git commit.
+Git-fork content retains the existing [req-lk-015](#req-lk-015) integrity
+obligation over selected bytes; this proposal does not claim to discharge
+any implementation's existing conformance debt. Local `content_hash`
+retains the documented implementation-specific tree convention under the
+v0.2 canonical-tree reservation; [req-rpl-004](#req-rpl-004) requires a
+trustworthy baseline using that convention, not a newly invented algorithm.
+Malformed evidence, evidence inconsistent with the recorded table, or a
+matched entry missing its evidence is rejected on read.
+
+The capability does not reinterpret version `"1"` or `"2"`. Without a
+replacement table, their existing rules apply; removal of the table
+permits returning from `"3"` to `"2"`, not a downgrade from `"2"` to `"1"`.
+Unknown-version refusal remains governed by [req-lk-004](#req-lk-004).
+Neither an additive field nor this proposal can retrofit support into an
+older client. Tested v0.25.0, v0.32.0 and v0.33.0 refuse this candidate;
+v0.24.1 can ignore replacement intent and is unsafe for these manifests
+and lockfiles. No universal minimum-safe-version claim follows.
+
+<a id="req-rpl-004"></a>
+**[req-rpl-004]** A conforming **consumer** providing this capability MUST
+compare the complete normalized manifest and locked replacement tables
+before a frozen install mutates state, including dormant rules and the
+distinction between absent and explicitly empty tables. A changed table
+is refused. For reachable selected local sources and their local
+dependencies, frozen verification requires trustworthy locked content
+evidence and current source bytes under the existing local-content
+verification contract; missing baseline, missing source and changed content
+are refused without lock, deployment or cache mutation. Comparison uses
+the normalized set of rules, not serialization order. Equivalent locator
+spelling does not create a table change when canonical normalization
+produces the same rule. This extends [req-lk-006](#req-lk-006); it does
+not permit frozen resolution to accept changed replacement intent.
+
 ### 4.9 Conformance requirements (manifest)
 
 This section's normative statements are:
@@ -852,6 +968,9 @@ This section's normative statements are:
   [req-ext-002](#req-ext-002),
   [req-ext-003](#req-ext-003),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
+- Consumer (conditional on providing the proposed root-source-replacement
+  capability): [req-rpl-001](#req-rpl-001), [req-rpl-002](#req-rpl-002),
+  [req-rpl-003](#req-rpl-003), [req-rpl-004](#req-rpl-004).
 
 ---
 
@@ -1149,6 +1268,54 @@ diagnostic MUST name the offending path, the expected envelope, and
 the observed envelope. The same re-verification MUST run on `apm
 audit`.
 
+#### 5.2.1 Staged replacement recovery (proposed)
+
+> **PROPOSED amendment 0.1.52**, implementing the bounded recovery behavior
+> accepted in issue #3293. Section 9.3 review and public comment remain
+> pending. Inclusion in this working draft, its requirement index, or its
+> conformance tests is not evidence of adoption or a released implementation.
+
+For this section, staged dependency replacement means preparing a candidate
+outside its final package-materialization path before atomically creating
+or replacing that path. Direct writes without a separate candidate are
+outside this capability.
+
+<a id="req-lk-023"></a>
+**[req-lk-023]** A conforming **consumer** implementation providing staged
+dependency replacement MUST preserve the following recovery guarantees:
+
+1. Candidate download or activation failure produces a nonzero install
+   result identifying the failed operation, affected path, and original
+   error, including the actual filesystem error where applicable. A later
+   rollback or cleanup failure is reported alongside that original failure,
+   not substituted for it.
+2. Such failure, before committing the replacement, preserves existing
+   lockfile bytes and restores the prior package and manifest through the
+   implementation's transaction mechanism where filesystem access permits.
+   If restoration is denied, the consumer retains available prior data or
+   backups and identifies their recovery locations and the denied operation;
+   it does not claim that rollback completed.
+3. A failed recovery of one package does not prevent independent package
+   or manifest restoration attempts. Cleanup preserves active staging,
+   unknown or legacy roots, and retained prior-data backups; it removes only
+   paths established as safe, inactive, implementation-owned staging without
+   following symlinked staging roots or deleting outside the authorized
+   staging boundary. A later retry after the obstruction clears uses a fresh
+   candidate, not an incomplete clone target.
+4. Once replacement is committed, backup-disposal failure is reported with
+   residual paths, without rolling the validated replacement back to an old
+   backup that disposal may already have partially removed.
+
+This proposal does not extend transaction coverage to arbitrary lifecycle
+scripts or promise successful filesystem operations under persistent OS or
+endpoint-policy denial. Validation-before-activation, pin verification,
+atomic replacement, and existing security requirements remain unchanged,
+including [req-lk-013](#req-lk-013) and [req-lk-015](#req-lk-015) on retries.
+Under Section 9.2 this adds a conditional recovery obligation, not
+behavior-neutral errata; consumers without staged replacement acquire no
+new replacement capability.
+The optional-feature disclosure in Section 11.2 item 3 covers this capability.
+
 ### 5.3 Self-entry semantics
 
 A project that ships its own primitives records the files it deploys
@@ -1177,6 +1344,10 @@ This specification defines two lockfile schema versions, `"1"` and
 `"2"`. Both are valid on-disk formats; `"2"` is a strict superset of
 `"1"`. Editorial reconciliation with the companion is consolidated
 in [Appendix E](#appendix-e-editorial-reconciliation-notes).
+
+The separately proposed opt-in source-replacement capability uses `"3"`
+under [req-rpl-003](#req-rpl-003). It is not an adopted expansion of
+the base version set.
 
 <a id="req-lk-002"></a>
 **[req-lk-002]** A conforming **consumer** implementation MUST set
@@ -1264,6 +1435,39 @@ skip the download step when a local checkout already matches the
 locked commit. This optimisation MUST NOT change observable
 behaviour; the post-install workspace state MUST be identical to a
 fresh install.
+
+#### Proposed obsolete dependency-claim repair (informative)
+
+The accepted implementation scope in
+[apm#3281](https://github.com/microsoft/apm/issues/3281) distinguishes a
+missing desired file from an obsolete claim for an already-absent file.
+The former remains drift under [req-lk-017](#req-lk-017). The proposed
+repair handles the latter during an ordinary, non-frozen install, at
+project or user scope, without resetting or uninstalling the dependency.
+
+Retirement requires successful, authoritative, complete reintegration
+of the dependency in the processed target scope and current source
+selection proving it no longer deploys the path. Missing bytes, a
+directory prefix, a saved hash, or a list of copied files alone do not
+establish that proof. File lists, corresponding hashes, and any canonical
+ownership ledger would change together, including when an older lockfile
+has no ledger. The proposal does not require a new lockfile format.
+
+The repair removes metadata only, not disk content. Desired paths,
+other owners, unprocessed targets, and failed, skipped, incomplete, or
+refused selections retain their claims. Present edited, untracked, or
+ambiguously owned content gains no deletion, adoption, or detachment
+authority. Existing no-hash compatibility, project-self cleanup, and
+imperative bundle cleanup are outside this change. Audit does not perform
+the repair; frozen install remains subject to
+[req-lk-006](#req-lk-006) and does not migrate claims.
+
+This proposal would introduce a narrow obsolete-claim exception to the
+target-based preservation rule in [req-lk-020](#req-lk-020); it does not
+reinterpret that rule as proof of current source membership. It adds no
+normative requirement or conformance claim and does not assert that the
+repair is available in a released consumer. Amendment status remains
+governed by [Section 9.3](#93-amendment-process).
 
 ### 5.6 git-semver fields (constraint, resolved_tag, resolved_at)
 
@@ -1361,7 +1565,8 @@ This section's normative statements are:
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
-  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022).
+  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+  [req-lk-023](#req-lk-023) (proposed staged-replacement capability).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -1383,6 +1588,22 @@ registered **discovery provider** invoked in the configured order
 [req-pl-011](#req-pl-011)). No other discovery mechanism MAY be
 substituted for this order. When no provider yields a policy, no
 policy is applied.
+
+<a id="req-pl-021"></a>
+**[req-pl-021]** A conforming **governance** implementation MUST,
+when an explicit `--policy <ref>` argument names a concrete policy
+source (rather than requesting discovery) and that source cannot be
+resolved, fetched, or parsed into a valid policy, terminate the
+governance operation non-zero with a diagnostic that names the ref
+and the cause. It MUST NOT fall back to discovery or proceed as
+though no policy applies, and the effective `fetch_failure` default
+MUST NOT relax this outcome. A previously fetched valid policy that
+the implementation serves from cache under its documented
+stale-cache rules counts as resolved. An operator-level switch that
+disables policy enforcement for the whole invocation is outside this
+requirement, because the ref is never loaded; an implementation that
+honours such a switch MUST state in its diagnostics that the explicit
+ref was not enforced.
 
 #### 6.1.1 Discovery providers
 
@@ -1899,7 +2120,8 @@ This section's normative statements are:
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
   [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
   [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
-  [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020).
+  [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020),
+  [req-pl-021](#req-pl-021).
 
 ---
 
@@ -2562,6 +2784,76 @@ When two dependencies provide primitives with the same name and
 same type, the **first declared** dependency wins; later
 dependencies' versions MUST NOT replace the resolved primitive.
 
+#### 8.3.1 Unmanaged skill-file preflight (proposed)
+
+<a id="req-pr-008"></a>
+**[req-pr-008]** A conforming **consumer** that deploys skills as files
+MUST, by default and without requiring an opt-in flag, refuse an install
+with a nonzero result per clause (b) when its complete effective selected
+skill-deployment plan (all skill files the consumer would write during
+this install, computed by clause (a)) contains a differing unmanaged
+destination file. A differing unmanaged destination
+file is an existing file that the consumer's deployment-ownership rules
+do not establish as managed and whose raw bytes differ from the exact
+bytes the consumer would write at deployment after applying the same
+target-specific rendering transforms used for that destination.
+A shared directory or skill name alone MUST NOT establish either file
+ownership or this conflict.
+
+(a) The consumer MUST inspect the complete selected plan at its
+preparation/selection boundary (source selection and effective-target
+resolution are complete but native deployment has not begun), including
+standalone skills, package
+subskills and selected project-local skills, every selected physical
+destination, and every supported selected scope. Source selection,
+effective targets and authorization decisions MUST be the same for
+inspection and deployment. The result MUST NOT depend on target order;
+targets sharing one physical destination do not create independent
+ownership. Excluded or withheld sources MUST NOT enter the inspected
+deployment plan.
+
+(b) A known conflict MUST cause a nonzero result before any native
+deployment from the plan, any manifest or lockfile write representing
+successful installation of that plan, or collateral cleanup attributable
+to the rejected install operation, including retirement of selected or
+obsolete dependencies' deployed files. This
+preserves the conflicting user file, earlier native bytes, manifest
+intent and existing ownership/hash records, including prior partial
+installations and repeated attempts. Acquisition and cache/materialization
+preparation MAY remain; this requirement does not promise rollback for
+arbitrary scripts, later races or unrelated failures. Frozen operations
+remain subject to [req-lk-006](#req-lk-006).
+
+(c) The ordinary diagnostic MUST identify the skill, dependency or local
+source, conflicting path and affected targets, state refusal and offer
+a viable nondestructive correction: for example, renaming the local skill
+or an existing valid selection that excludes the conflict. A consumer
+auditing this condition MUST distinguish unresolved ownership conflict
+from modification of a managed file, preserve native bytes and recorded
+state, and MUST NOT recommend an ordinary reinstall as if it could resolve
+the unchanged conflict. When the consumer emits machine-readable findings,
+they MUST retain that distinction using a distinguishing category or type
+in its existing structured output.
+
+This requirement does not prohibit existing identical-content recovery,
+grant ownership over ambiguous legacy state, or redefine managed
+primitive priority under [req-pr-002](#req-pr-002) and
+[req-pr-003](#req-pr-003). Existing explicit destructive replacement
+remains an operator choice, not default recovery advice; this amendment
+adds no replacement permission or security-scan bypass. It does not
+change native-plugin registration, MCP policy, or collision policy for
+agents, prompts or instructions.
+
+> **Proposal and migration status.** PR #3314 records the behavior accepted
+> in issue #3202. Warning/success on a known differing unmanaged skill file
+> becomes whole-plan refusal; this is a new hard conformance obligation,
+> not behavior-neutral errata or an interpretation of the audit-only
+> [req-pl-015](#req-pl-015). Valid narrowing or renaming the local skill is
+> the nondestructive migration path. The Section 9.3 review and public
+> comment process remains pending; issue acceptance, implementation tests
+> and this proposed text do not constitute ratification, publication or a
+> release commitment. Section 9.5 migration obligations are not waived.
+
 #### Proposed shared-skill preservation amendment (informative)
 
 PR #3313 implements the accepted repair in issue #3288: reinstalling
@@ -3164,7 +3456,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
   [req-tg-014](#req-tg-014), [req-tg-015](#req-tg-015),
   [req-pr-006](#req-pr-006),
-  [req-pr-007](#req-pr-007), [req-tg-016](#req-tg-016),
+  [req-pr-007](#req-pr-007), [req-pr-008](#req-pr-008),
+  [req-tg-016](#req-tg-016),
   [req-tg-017](#req-tg-017).
 
 ---
@@ -3534,7 +3827,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -3550,6 +3843,8 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 20| Source-only or symlinked package content materialization | [req-sc-015](#req-sc-015)                                      | Consumer-default  |
 | 21| Native plugin namespace collision or ownership-ledger loss | [req-tg-013](#req-tg-013)                                      | Consumer-default  |
 | 22| Silent hook passthrough or double-activation via native-format conversion | [req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017) | Consumer-default |
+| 23| Partial native deployment with false successful-state persistence | [req-pr-008](#req-pr-008) | Consumer-default |
+| 24| Manifest-directed dependency redirection via a root replacement table | [req-rpl-001](#req-rpl-001), [req-rpl-002](#req-rpl-002), [req-rpl-004](#req-rpl-004) | Consumer-default when capability is provided |
 
 For Codex conversion metadata diagnostics, [req-tg-015](#req-tg-015)
 separately constrains field-name display and excludes dropped values.
@@ -3794,6 +4089,7 @@ conformance statement identifying:
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+[req-lk-023](#req-lk-023) (proposed staged-replacement capability),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -3806,6 +4102,7 @@ conformance statement identifying:
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007),
+[req-pr-008](#req-pr-008),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
@@ -3824,6 +4121,11 @@ conformance statement identifying:
 [req-sc-014](#req-sc-014), [req-sc-015](#req-sc-015),
 [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
+
+Consumers providing the proposed root-source-replacement capability
+additionally conform to [req-rpl-001](#req-rpl-001),
+[req-rpl-002](#req-rpl-002), [req-rpl-003](#req-rpl-003),
+[req-rpl-004](#req-rpl-004).
 
 #### 11.3.3 Registry
 
@@ -3854,7 +4156,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
 [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
 [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
-[req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020).
+[req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020),
+[req-pl-021](#req-pl-021).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -4122,6 +4425,8 @@ The schemas below define this specification's normative structural contract.
 | Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.48.schema.json`](/apm/specs/schemas/manifest-v0.1.48.schema.json) (JSON Schema 2020-12; proposed). |
 | Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.46.schema.json`](/apm/specs/schemas/lockfile-v0.1.46.schema.json) (JSON Schema 2020-12). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
+| Proposed replacement manifest | [`schemas/manifest-source-replacements-v1.schema.json`](/apm/specs/schemas/manifest-source-replacements-v1.schema.json), distinct opt-in candidate, not ratified. |
+| Proposed replacement lock version 3 | [`schemas/lockfile-source-replacements-v1.schema.json`](/apm/specs/schemas/lockfile-source-replacements-v1.schema.json), distinct candidate, not ratified. |
 | Claude-Code marketplace (informational, emitted output) | `tests/fixtures/schemas/claude-code-marketplace.schema.json`         |
 | Claude-Code plugin (informational, emitted output)      | `tests/fixtures/schemas/claude-code-plugin.schema.json`              |
 
@@ -4142,6 +4447,14 @@ The selected 0.1.46 lockfile schema additionally
 checks the `extensions` mapping's key names for [req-ext-003](#req-ext-003);
 its values remain unconstrained. Validation against older structural schemas
 does not waive newer prose or runtime requirements.
+
+The replacement resources stage the structural part of proposal 0.1.54.
+Their semantic constraints (canonical matching, table/evidence agreement,
+source verification and graph safety) are defined in Section 4.8.1 and
+exercised against the consumer; schema validation alone does not establish
+them. No earlier schema URL or bytes are replaced.
+Offline validators load both candidate resources and their referenced
+0.1.48 manifest and 0.1.46 lockfile resources; no network fetch is required.
 
 `src/apm_cli/policy/schema.py` is a **non-normative cross-reference**;
 the policy JSON Schema is authoritative. Manifest and lockfile validation
@@ -4184,6 +4497,10 @@ renumbering of conformance classes.
 ---
 
 ## Appendix C. Index of normative statements
+
+Conditional requirements retain the applicability limits in their bodies.
+In particular, [req-lk-023](#req-lk-023) applies only to the proposed
+staged-replacement capability, not every consumer implementation.
 
 | ID                                       | Keyword | Section | Class       |
 |------------------------------------------|---------|---------|-------------|
@@ -4237,6 +4554,7 @@ renumbering of conformance classes.
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
 | [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-lk-022](#req-lk-022)                | MUST    | 5.2     | consumer    |
+| [req-lk-023](#req-lk-023)                | MUST    | 5.2.1   | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -4257,6 +4575,7 @@ renumbering of conformance classes.
 | [req-pl-018](#req-pl-018)                | MUST    | 6.3.1   | governance  |
 | [req-pl-019](#req-pl-019)                | MUST    | 6.8.1   | governance  |
 | [req-pl-020](#req-pl-020)                | MUST    | 6.8.1   | governance  |
+| [req-pl-021](#req-pl-021)                | MUST    | 6.1     | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -4281,6 +4600,7 @@ renumbering of conformance classes.
 | [req-pr-005](#req-pr-005)                | SHOULD  | 7.8     | producer    |
 | [req-pr-006](#req-pr-006)                | MUST    | 8.1     | consumer    |
 | [req-pr-007](#req-pr-007)                | MUST    | 8.1     | consumer    |
+| [req-pr-008](#req-pr-008)                | MUST    | 8.3.1   | consumer    |
 | [req-tg-001](#req-tg-001)                | MUST    | 8.4     | consumer    |
 | [req-tg-002](#req-tg-002)                | MUST    | 8.5     | consumer    |
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
@@ -4316,8 +4636,12 @@ renumbering of conformance classes.
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
+| [req-rpl-001](#req-rpl-001)              | MUST    | 4.8.1   | consumer    |
+| [req-rpl-002](#req-rpl-002)              | MUST    | 4.8.1   | consumer    |
+| [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
+| [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 129** (124 MUST, 5 SHOULD).
+**Total normative statements: 136** (131 MUST, 5 SHOULD).
 
 ---
 
@@ -4375,6 +4699,15 @@ renumbering of conformance classes.
 | 0.1.46 (proposed) | 2026-10-13 | Spec-citation fold for manifest extension keys (closes #3219 Mode-B silent-extension gate). Added [req-ext-003] (Section 4.6.2, consumer MUST): top-level keys matching `x-[a-z][a-z0-9-]*` are vendor extensions preserved on the parsed package in declaration order without validating or interpreting values; a dependency lock entry records them under optional `extensions` and omits that field when empty; any other unrecognised top-level key produces a non-failing warning without failing parse or install solely because it is unknown. Independent validation, policy, and security failures still apply. The warning does not relax [req-mf-006] (writers still preserve unknown top-level keys on rewrite). Additive optional lockfile field under Section 9.2: previously silent unknown keys now warn. `extensions` added to the Section 5.2 field table and selected through the distinct proposed `lockfile-v0.1.46.schema.json`; earlier schema bytes and `lockfile_version` are unchanged. Sections 1.3, 4.9, and 11.3.2, and Appendices A and C updated. Statement count: 128 -> 129 (124 MUST, 5 SHOULD). Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. |
 | 0.1.47 (proposed) | 2026-10-15 | Amendment for accepted issue #3204. Revised [req-mf-022] to require a nonzero install result and preservation of previously deployed skill files and ownership records for an unmatched non-empty persisted selection. This intentionally replaces permitted warning-only success; it is not behavior-neutral errata. Section 9.3 review and public-comment requirements remain pending; issue-scope acceptance is not specification adoption. Statement count remains 129 (124 MUST, 5 SHOULD). |
 | 0.1.48 (proposed) | 2026-10-21 | Schema correction candidate for issue #3223; existing prose requirement text (req-mf-011, req-mf-012) and statement count are unchanged. The structural validator validation outcomes change as described below. Selects a distinct manifest resource for Sections 4.3.2, 4.3.6 and 4.4. Compared with the old structural validators, Git plus subpath, registry ID plus registry/version, registry MCP objects and valid self-defined MCP objects can newly pass; incomplete registry identities, empty source fields, invalid MCP field types and missing transport/command/URL or whitespace-command violations can newly fail. Git/id conflicts remain rejected. These are observable validator changes, not behavior-neutral schema errata under Section 9.4. The old v0.1 and 0.1.41 URLs, IDs and bytes remain unchanged; no field or feature is removed from the prose contract. Existing requirements, statement count (129: 124 MUST, 5 SHOULD), working-draft behavior and runtime safeguards are unchanged. Section 9.3 non-author review and the subsequent 14-day public comment period remain pending; product scope acceptance is not ratification. Section 9.2 classification of this correction is pending human determination under the Section 9.3 amendment process. In-tree selection proves neither public deployment nor released CLI support. |
+| 0.1.52 (proposed) | 2026-10-21 | Accepted Windows staging-recovery behavior for issue #3293 / PR #3318. Adds conditional consumer [req-lk-023](#req-lk-023), Section 5.2.1: retain original and secondary failures, recover prior state where permitted, preserve residual prior data under denied restoration, protect active/unknown staging and retry with a fresh candidate, and never undo a committed replacement because backup disposal failed. This is a new recovery obligation under Section 9.2, not behavior-neutral errata. No schema, lockfile version, privilege, or arbitrary lifecycle-script rollback change. Section 9.3 review and public comment remain pending; source landing and conformance tests do not establish adoption or release. Statement count: 129 -> 130 (125 MUST, 5 SHOULD). |
+| 0.1.53 (proposed) | 2026-10-21 | Amendment for accepted issue #3202 in PR #3314. Added [req-pr-008](#req-pr-008) (Section 8.3.1, consumer MUST): default refusal of a differing unmanaged skill file checks the complete effective selected plan before native deployment, success-state persistence or cleanup; preserves prior bytes and ownership; and provides truthful read-only audit and nondestructive correction. Warning/success becomes refusal, a new hard conformance obligation rather than errata. Identical-content recovery, existing explicit destructive replacement, managed-source priority, native-plugin and non-skill/MCP policies remain outside this change. No schema or lockfile-version change. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived; no ratification or release is claimed. Sections 1.3, 8.7, 10.11, 11.3.2, Appendix C, requirements manifest and conformance test binding updated. Statement count: 129 -> 130 (125 MUST, 5 SHOULD). |
+| 0.1.54 (proposed) | 2026-10-21 | Opt-in root source-replacement proposal for #3180 / PR #3309. Added four conditional consumer requirements [req-rpl-001] through [req-rpl-004] for exact root-owned graph binding, original ownership with selected-source lifecycle/security, proposed lock version 3 evidence, and frozen full-table/content verification. Distinct candidate schema identities preserve earlier published bytes; version 1/2 semantics remain unchanged. This is a new opt-in capability and explicit versioned lock extension, not behavior-neutral errata. Section 9.3 review/public comment and first supporting release remain pending; source staging is not adoption. Statement count: 130 -> 134 (129 MUST, 5 SHOULD). |
+| 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
+
+The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one
+MUST; 0.1.54 adds four. Together, this working draft contains 136 statements
+(131 MUST, 5 SHOULD). Combining the proposals does not establish
+Section 9.3 adoption or CLI release.
 
 Errata (none at publication).
 

@@ -515,9 +515,11 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
             "compute_native_bundle_hash(",
             "git_no_hooks_args()",
         ),
-        "src/apm_cli/install/services.py": (
+        "src/apm_cli/install/deployment_plan.py": (
             "plan_native_codex_plugin(",
             "native_plugin_root=",
+        ),
+        "src/apm_cli/install/services.py": (
             "finalize_codex_native(",
             "read_only=scratch_root is not None",
         ),

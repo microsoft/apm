@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from enum import Enum
@@ -21,6 +23,12 @@ class NativeMcpConnectionState(Enum):
     CONFLICT = "conflict"
 
 
+def mcp_native_hash(native: dict) -> str:
+    """Fingerprint a written native entry without retaining its resolved secrets."""
+    encoded = json.dumps(native, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def compare_native_mcp_connection(
     client: Any,
     name: str,
@@ -29,6 +37,11 @@ def compare_native_mcp_connection(
     stored_config: dict | None,
     managed: bool,
     existing_configs: Mapping[str, Any] | None = None,
+    managed_fields: set[str] | None = None,
+    native_hash: str | None = None,
+    registry_request: bool = False,
+    env_overrides: dict | None = None,
+    runtime_vars: dict | None = None,
 ) -> NativeMcpConnectionState:
     """Compare a connection with its requested and previously recorded native shapes."""
     from apm_cli.core.conflict_detector import MCPConflictDetector
@@ -44,7 +57,15 @@ def compare_native_mcp_connection(
     if key not in existing:
         return NativeMcpConnectionState.ABSENT
     native = existing[key]
-    requested = client.render_server_config(requested_info) if requested_info is not None else None
+    requested = None
+    if requested_info is not None:
+        requested = (
+            client.render_server_config(
+                requested_info, env_overrides=env_overrides, runtime_vars=runtime_vars
+            )
+            if registry_request
+            else client.render_server_config(requested_info)
+        )
     comparison = native
     matches_baseline = False
     if managed and isinstance(stored_config, dict):
@@ -59,11 +80,24 @@ def compare_native_mcp_connection(
                         native, baseline=expected, requested=requested
                     )
                 matches_baseline = client.matches_managed_server_config(comparison, expected)
+                if matches_baseline and managed_fields is not None:
+                    managed_fields.update(expected)
+            elif native_hash is not None and isinstance(native, dict):
+                comparable = client.managed_server_config(native)
+                matches_baseline = mcp_native_hash(comparable) == native_hash
+                if matches_baseline and managed_fields is not None:
+                    managed_fields.update(comparable)
         except (TypeError, ValueError):
             logger.debug("Unusable MCP baseline for %s on %s", name, client.target_name)
     if requested is not None:
         requested_native = comparison if matches_baseline else native
-        if client.matches_managed_server_config(requested_native, requested):
+        matches_request = (
+            isinstance(requested_native, dict)
+            and client.managed_server_config(requested_native) == requested
+            if registry_request
+            else client.matches_managed_server_config(requested_native, requested)
+        )
+        if matches_request:
             return (
                 NativeMcpConnectionState.MATCHING_MANAGED
                 if matches_baseline
@@ -80,7 +114,8 @@ def require_removable_mcp_connections(
     client: Any,
     names: set[str],
     stored_configs: dict[str, dict],
-) -> None:
+    native_hashes: dict[str, str] | None = None,
+) -> set[str]:
     """Refuse removal when recorded names do not prove unchanged native content."""
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.install.errors import RequiredIntegrationError
@@ -96,6 +131,7 @@ def require_removable_mcp_connections(
             stored_config=stored_configs.get(name),
             managed=True,
             existing_configs=existing,
+            native_hash=(native_hashes or {}).get(name),
         )
         is NativeMcpConnectionState.CONFLICT
     ]
@@ -108,6 +144,18 @@ def require_removable_mcp_connections(
             "only the entries you intend to retire), then retry the same command. "
             "--force does not take ownership of user connections."
         )
+    return {client._determine_config_key(name, None) for name in names}
+
+
+def retain_deferred_mcp_claims(
+    current: dict[str, set[str]],
+    previous: dict[str, set[str]],
+    requested_names: set[str],
+) -> None:
+    """Retain untouched claims without restoring revoked current-name ownership."""
+    for target, names in previous.items():
+        deferred = names - requested_names if target in current else names
+        current.setdefault(target, set()).update(deferred)
 
 
 def resolve_mcp_target_servers(

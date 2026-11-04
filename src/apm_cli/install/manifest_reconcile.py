@@ -26,101 +26,31 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .helpers.reconciliation_scope import (
+    _has_gated_resolver,
+    _is_manifest_target,
+    _profiles_by_name,
+    _record_inactive_resolver_skip,
+    _scoped_known_targets_for_reconciliation,
+)
 from .presentation import surface_target_cleanup
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
-    from apm_cli.core.deployment_state import DeploymentLedger
+    from apm_cli.core.deployment_state import (
+        CompletedReintegration,
+        DeploymentIntent,
+        DeploymentLedger,
+    )
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
-
-
-def _profiles_by_name(
-    targets: Iterable[TargetProfile] | None,
-) -> dict[str, TargetProfile]:
-    """Return profiles keyed by catalog target name."""
-    by_name: dict[str, TargetProfile] = {}
-    for target in targets or ():
-        name = getattr(target, "name", None)
-        if isinstance(name, str) and name not in by_name:
-            by_name[name] = target
-    return by_name
-
-
-def _is_manifest_target(name: str) -> bool:
-    """Return whether *name* can be declared in ``apm.yml`` ``targets:``.
-
-    Every other profile in the declared universe is supplemental, included
-    only so its rows are not dropped as ghosts.
-    """
-    from apm_cli.core.apm_yml import CANONICAL_TARGETS
-
-    return name in CANONICAL_TARGETS
-
-
-def _has_gated_resolver(profile: TargetProfile) -> bool:
-    """Return whether an inactive supplemental target must not resolve."""
-    return profile.requires_flag is not None and profile.user_root_resolver is not None
-
-
-def _record_inactive_resolver_skip(
-    profile: TargetProfile,
-    diagnostics: DiagnosticCollector | None,
-) -> None:
-    """Record the intentional skip of an inactive experimental resolver."""
-    if diagnostics is None:
-        return
-    from apm_cli.utils.diagnostics import CATEGORY_INFO
-
-    message = (
-        f"Skipped inactive experimental resolver for target '{profile.name}' "
-        "during lockfile reconciliation."
-    )
-    if any(
-        diagnostic.message == message
-        for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
-    ):
-        return
-    flag = profile.requires_flag or profile.name
-    diagnostics.info(
-        message,
-        detail=(
-            f"To include it, enable '{flag.replace('_', '-')}' and select "
-            f"target '{profile.name}' for this install."
-        ),
-    )
-
-
-def _scoped_known_targets_for_reconciliation(
-    *,
-    user_scope: bool,
-    active_targets: Iterable[TargetProfile],
-    declared_targets: Iterable[TargetProfile] | None,
-) -> dict[str, TargetProfile]:
-    """Return known targets without running inactive experimental resolvers."""
-    from apm_cli.integration.targets import KNOWN_TARGETS
-
-    active_by_name = _profiles_by_name(active_targets)
-    declared_by_name = _profiles_by_name(declared_targets)
-    scoped_known_targets: dict[str, TargetProfile] = {}
-    for name, profile in KNOWN_TARGETS.items():
-        resolved = active_by_name.get(name) or declared_by_name.get(name)
-        if resolved is not None:
-            scoped_known_targets[name] = resolved
-            continue
-        if _has_gated_resolver(profile):
-            scoped_known_targets[name] = profile
-            continue
-        scoped = profile.for_scope(user_scope=user_scope)
-        if scoped is not None:
-            scoped_known_targets[name] = scoped
-    return scoped_known_targets
 
 
 def install_governance(
@@ -249,12 +179,12 @@ def union_preserving(
     on_ghost_drop: Callable[[str], None] | None = None,
     prior_ledger: DeploymentLedger | None = None,
     cleanup_retained_hashes: dict[str, str | None] | None = None,
-    current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
-    desired_owners: frozenset[str] | None = None,
-    generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
+    intent: DeploymentIntent | None = None,
+    project_root: Path | None = None,
+    diagnostics: DiagnosticCollector | None = None,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Union the current install's manifest with preserved other-target entries.
 
@@ -281,11 +211,16 @@ def union_preserving(
     legacy preserve-all behaviour is kept so a genuine multi-target deploy is
     never clobbered (issue #1716).
 
-    Unattributed historical rows are preserved unless the caller supplies
-    explicit ``generic_governed_values``. A path partition and saved hash
-    cannot distinguish old project-local output from imperative bundles.
-    Local installation persists its concrete locators instead of expanding
-    this compatibility cleanup policy (#3179).
+    ``intent`` carries trust, ownership, and completion evidence together; its
+    target scope must match the supplied profiles. Omitted intent preserves
+    the default trusted-run behavior without granting absence authority.
+
+    Unattributed historical rows require explicit ``intent.generic_governed_values``
+    or completed, source-backed skill evidence plus safe absence observations.
+    The latter retires only dependency metadata within the proven skill domain.
+    A path partition and saved hash cannot distinguish old project-local output
+    from imperative bundles. Local installation persists its concrete locators
+    instead of expanding this compatibility cleanup policy (#3179).
     """
     from apm_cli.core.deployment_ledger import UNATTRIBUTED_TARGET, DeploymentLedgerCodec
     from apm_cli.core.deployment_state import (
@@ -312,6 +247,18 @@ def union_preserving(
         if declared_targets is not None
         else None
     )
+    active_names = frozenset(active_by_name)
+    declared_names = frozenset(declared_by_name) if declared_by_name is not None else None
+    if intent is None:
+        intent = DeploymentIntent(
+            active_targets=active_names,
+            declared_targets=declared_names,
+            desired_owners=None,
+            authoritative_targets=True,
+        )
+    elif intent.active_targets != active_names or intent.declared_targets != declared_names:
+        raise ValueError("Reconciliation intent must match the supplied target profiles")
+    completed = intent.completed_reintegration
     manifest_declared = {name for name in declared_by_name or () if _is_manifest_target(name)}
     cleanup_retained_hashes = cleanup_retained_hashes or {}
     attribution_profiles = _profiles_by_name(
@@ -354,7 +301,7 @@ def union_preserving(
             content_hash=prior_hashes.get(path),
         )
         prior_record_values.add(path)
-    sweep = generic_governed_values
+    sweep = intent.generic_governed_values
     if sweep and prior_ledger is not None:
         # Imperative bundle output is never re-produced by an install, so its
         # absence from this run is not evidence that a generic row is stale.
@@ -388,28 +335,29 @@ def union_preserving(
         if path in current_files
     )
     reconciled = DeploymentReconciler(
-        Path.cwd(),
+        project_root if project_root is not None else Path.cwd(),
         scoped_known_targets,
-        diagnostics=DiagnosticCollector(),
+        diagnostics=diagnostics if diagnostics is not None else DiagnosticCollector(),
     ).reconcile(
         DeploymentLedger(records=prior_records),
         current_results,
-        DeploymentIntent(
-            active_targets=frozenset(active_by_name),
-            declared_targets=(
-                frozenset(declared_by_name) if declared_by_name is not None else None
-            ),
-            desired_owners=desired_owners,
-            authoritative_targets=current_run_trusted,
+        replace(
+            intent,
             generic_governed_values=sweep or None,
             unprocessed_claims=(
-                frozenset(
-                    path
-                    for path in prior_values
-                    if is_governed_by_install(path, unprocessed_prefixes, unprocessed_schemes)
+                intent.unprocessed_claims
+                | (
+                    frozenset(
+                        path
+                        for path in prior_values
+                        if is_governed_by_install(path, unprocessed_prefixes, unprocessed_schemes)
+                    )
+                    if unprocessed
+                    else frozenset()
                 )
-                if unprocessed
-                else frozenset()
+            ),
+            completed_reintegration=(
+                completed if completed is not None and completed.owner == owner else None
             ),
         ),
     )
@@ -556,7 +504,11 @@ def surviving_deployed_paths(
     from collections import defaultdict
 
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-    from apm_cli.core.deployment_state import DeploymentLedger, DeploymentReconciler
+    from apm_cli.core.deployment_state import (
+        DeploymentIntent,
+        DeploymentLedger,
+        DeploymentReconciler,
+    )
 
     ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
     records_by_path = defaultdict(dict)
@@ -586,7 +538,16 @@ def surviving_deployed_paths(
                     for key, record in records_by_path.get(path, {}).items()
                 }
             ),
-            current_run_trusted=owner not in failed_owners,
+            intent=DeploymentIntent(
+                active_targets=frozenset(target.name for target in targets),
+                declared_targets=(
+                    frozenset(target.name for target in declared_targets)
+                    if declared_targets is not None
+                    else None
+                ),
+                desired_owners=None,
+                authoritative_targets=owner not in failed_owners,
+            ),
             owner=owner,
             user_scope=user_scope,
         )
@@ -626,6 +587,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     desired_owners: frozenset[str] | None = None,
     generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
+    completed_reintegration: CompletedReintegration | None = None,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
 
@@ -637,6 +599,26 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     ``remove_stale_deployed_files`` chokepoint (issue #2296).
     ``user_scope`` permits cleanup of registered user-root compatibility paths.
     """
+    from apm_cli.core.deployment_state import DeploymentIntent
+    from apm_cli.install.helpers.absence_observation import verified_absent_dependency_values
+
+    verified_absent = frozenset()
+    if (
+        completed_reintegration is not None
+        and completed_reintegration.owner == owner == dep_key
+        and current_run_trusted
+        and apply_disk_deletion
+    ):
+        verified_absent = verified_absent_dependency_values(
+            project_root=project_root,
+            completed=completed_reintegration,
+            prior_files=prior_files,
+            current_files=current_files,
+            targets=active_targets,
+            cleanup_retained_hashes=cleanup_retained_hashes,
+            diagnostics=diagnostics,
+            user_scope=user_scope,
+        )
     files, hashes, ledger = union_preserving(
         current_files,
         current_hashes,
@@ -647,12 +629,24 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         on_ghost_drop=on_ghost_drop,
         prior_ledger=prior_ledger,
         cleanup_retained_hashes=cleanup_retained_hashes,
-        current_run_trusted=current_run_trusted,
         owner=owner,
         include_ledger=True,
-        desired_owners=desired_owners,
-        generic_governed_values=generic_governed_values,
         user_scope=user_scope,
+        intent=DeploymentIntent(
+            active_targets=frozenset(_profiles_by_name(active_targets)),
+            declared_targets=(
+                frozenset(_profiles_by_name(declared_targets))
+                if declared_targets is not None
+                else None
+            ),
+            desired_owners=desired_owners,
+            authoritative_targets=current_run_trusted,
+            generic_governed_values=generic_governed_values,
+            completed_reintegration=completed_reintegration,
+            verified_absent_values=verified_absent,
+        ),
+        project_root=project_root,
+        diagnostics=diagnostics,
     )
     dropped = set(prior_files) - set(files)
     # Ledger-authoritative orphan detection. A prior value that HELD a ledger
@@ -669,6 +663,8 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         prior_owned = {record.locator.value for record in prior_ledger.records.values()}
         surviving = {record.locator.value for record in ledger.records.values()}
         dropped |= (set(prior_files) & prior_owned) - surviving
+    # Absence permits only metadata retirement, never a later unlink if a file appears.
+    dropped -= verified_absent
     if not dropped:
         if include_ledger:
             return files, hashes, ledger

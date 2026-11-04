@@ -266,7 +266,7 @@ See [`apm cache`](../../reference/cli/cache/) for the full subcommand reference.
 
 ## 5. Partial install recovery
 
-`apm install` is designed to be re-run safely. If a previous invocation died mid-flight (Ctrl-C, OOM, network drop), just run it again:
+`apm install` is designed to be re-run safely. If a previous invocation died mid-flight (Ctrl-C, OOM, network drop), run it again unless it reported incomplete recovery; in that case, inspect the retained paths as described below first:
 
 ```bash
 apm install
@@ -291,13 +291,42 @@ apm install --refresh --force
 
 `--force` overwrites locally-authored files on collision **and** bypasses the security scan's critical-finding block -- use it only after you've inspected the diff. See [`apm install`](../../reference/cli/install/#policy-and-trust).
 
-To wipe everything and start clean:
+To wipe everything and start clean, first save any user changes and recovery
+backups you need. Do not use this reset when APM reports an incomplete rollback:
 
 ```bash
 rm -rf apm_modules/
 apm cache clean
 apm install
 ```
+
+### Windows file locks and incomplete recovery
+
+`WinError 5` (access denied) or `WinError 32` (sharing violation) during
+activation does not mean the destination parent is missing. APM downloads and
+validates a candidate before replacing the installed package. If activation
+fails, it attempts to restore the prior package and manifest without changing
+the locked dependency pins.
+
+Close editors, terminals, or other programs holding the named paths, then retry
+the same command. Do not elevate APM, change ACLs, disable security controls, or
+use `--force` to bypass an OS denial. A persistent denial still fails.
+
+If restoration or cleanup also fails, APM reports those errors and retained
+recovery paths alongside the original failure. The prior package may be in
+`.apm-resolution-staging/<session>/backups/`, **not active at its usual path**.
+Recovery of overlapping parent and child packages is deferred after an
+obstruction so their backups remain recoverable; unrelated packages can still
+be restored.
+Preserve that directory, inspect its contents, and recover needed prior data
+before retrying. Do not delete the entire staging directory: unknown, legacy,
+active, and prior-backup roots can belong to another install or contain the
+only recoverable copy. Include the original and recovery errors when reporting
+an unresolved failure.
+
+Cleanup after a committed install is different: a warning about committed
+staging leaves the validated new package active; it does not roll back to a
+partially deleted backup.
 
 ## 6. Verbose diagnostics
 

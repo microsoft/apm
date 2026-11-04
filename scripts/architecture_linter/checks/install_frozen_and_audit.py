@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import re
 
+from scripts.architecture_linter.checks.contracts_dependency_policy import _unique_definitions
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _INSTALL_ADAPTER,
     _SRC_PREFIX,
@@ -99,7 +100,7 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     local_bundle = _first_line(adapter, "if len(packages) == 1 and not mcp_name")
     acquisition = _first_line(integration, "prepare_integration_materialization(source)")
     hydrated_check = _first_line(integration, "InstallService.enforce_hydrated_mcp(")
-    deployment = _first_line(integration, "run_integration_template(source,")
+    deployment = _first_line(integration, "run_integration_template(")
 
     duplicates = _duplicate_definition_lines(
         provider,
@@ -124,12 +125,25 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         and _present(owner, "active_package_keys=active_package_keys,")
         and _first_line(owner, "project_dir = get_lockfile_dir(request.scope)") is not None
     )
+    enforce_body = _awk_body(
+        owner, re.compile(r"^    def enforce_frozen\("), re.compile(r"^    def ")
+    )
+    replacement_preflight = all(
+        _body_has(enforce_body, needle)
+        for needle in (
+            "lockfile_satisfies_replacements(",
+            "if not replacements_satisfied:",
+            "project_manifest_dependencies(request.apm_package,",
+            "InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)",
+        )
+    )
 
     def _before(first: int | None, second: int | None) -> bool:
         return first is not None and second is not None and first < second
 
     failed = (
         not owner_methods
+        or not replacement_preflight
         or preflight is None
         or migration is None
         or not _before(preflight, migration)
@@ -244,14 +258,20 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             prefix=_SRC_PREFIX,
             pattern=re.compile(
                 r"^[ \t]*(?:def (?:compare_native_mcp_connection|"
-                r"require_removable_mcp_connections)\(|class NativeMcpConnectionState\b)"
+                r"require_removable_mcp_connections|mcp_native_hash|"
+                r"retain_deferred_mcp_claims)\(|class NativeMcpConnectionState\b)"
             ),
             owner=_MCP_OWNERSHIP_OWNER,
             message="Native MCP connection ownership must stay owned by install/mcp/ownership.py",
             respect_exempt=False,
         )
     )
-    for name in ("compare_native_mcp_connection", "require_removable_mcp_connections"):
+    for name in (
+        "compare_native_mcp_connection",
+        "require_removable_mcp_connections",
+        "mcp_native_hash",
+        "retain_deferred_mcp_claims",
+    ):
         if not _present_re(owner, re.compile(rf"^def {name}\(")):
             findings.append(
                 _summary(rule_id, _MCP_OWNERSHIP_OWNER, f"Missing canonical MCP owner: {name}")
@@ -283,6 +303,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         )
     for path, function, required_call in (
         (_MCP_INTEGRATOR, "_install_self_defined_deps", "compare_native_mcp_connection"),
+        (_MCP_INTEGRATOR, "_install_registry_group", "compare_native_mcp_connection"),
         (_MCP_INTEGRATOR, "run_mcp_install", "compare_native_mcp_connection"),
         (
             _MCP_OWNERSHIP_OWNER,
@@ -294,10 +315,35 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "remove_stale",
             "require_removable_mcp_connections",
         ),
+        (_MCP_OWNERSHIP_OWNER, "compare_native_mcp_connection", "mcp_native_hash"),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "run_mcp_integration",
+            "retain_deferred_mcp_claims",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "run_owned_mcp_integration",
+            "retain_deferred_mcp_claims",
+        ),
+        ("src/apm_cli/adapters/client/claude.py", "configure_mcp_server", "mcp_native_hash"),
+        ("src/apm_cli/adapters/client/codex.py", "configure_mcp_server", "mcp_native_hash"),
+        (
+            "src/apm_cli/install/phases/lockfile.py",
+            "_preserve_existing_mcp_state",
+            "DeploymentLedgerCodec.mcp_native_hashes",
+        ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
-        if not failures and required_call not in _name_calls_in(facts, function):
+        if (
+            not failures
+            and required_call not in _name_calls_in(facts, function)
+            and not any(
+                call.scope == function and call.qualname == required_call
+                for call in getattr(facts, "calls", ())
+            )
+        ):
             findings.append(
                 _summary(
                     rule_id,
@@ -306,6 +352,27 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                 )
             )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
+    index = cleanup.tree_index
+    if index is not None:
+        for node in index.nodes:
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"_clean_toml_mcp_config", "_clean_claude_config"}
+                and (
+                    len(node.args) < 2
+                    or not isinstance(node.args[1], ast.Name)
+                    or node.args[1].id != "verified_keys"
+                )
+            ):
+                findings.append(
+                    violation(
+                        rule_id,
+                        cleanup.path,
+                        "Claude/Codex cleanup must consume exact keys returned by the MCP owner",
+                        line=node.lineno,
+                    )
+                )
     if (
         sum(
             call.scope == "remove_stale"
@@ -426,6 +493,7 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
 
 
 _AUDIT_REPLAY_OWNER = "src/apm_cli/install/audit_replay.py"
+_AUDIT_ROOTS_OWNER = "src/apm_cli/install/audit_target_roots.py"
 
 
 def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -439,6 +507,27 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     failures = list(drift_fail) + list(owner_fail) + list(audit_fail) + list(ci_fail)
     if failures:
         return tuple(failures)
+
+    findings.extend(
+        _unique_definitions(provider, rule_id, _AUDIT_ROOTS_OWNER, ("replay_modules_root",))
+    )
+    roots, roots_fail = _facts_for(provider, _AUDIT_ROOTS_OWNER, rule_id)
+    findings.extend(roots_fail)
+    replay_calls = _name_calls_in(drift, "run_replay")
+    projection_calls = _name_calls_in(roots, "replay_modules_root")
+    if (
+        "replay_modules_root" not in replay_calls
+        or {"get_modules_dir", "get_deploy_root"} & replay_calls
+        or not {"get_modules_dir", "get_deploy_root"} <= projection_calls
+        or not _present(roots, "InstallScope.USER if user_scope else InstallScope.PROJECT")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _AUDIT_ROOTS_OWNER,
+                "Audit deployment modules must use the canonical scope projection",
+            )
+        )
 
     run_replay_body = _awk_body(
         drift,

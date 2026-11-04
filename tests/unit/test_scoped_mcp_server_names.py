@@ -28,7 +28,7 @@ def test_scoped_server_name_is_preserved_as_config_key(adapter_cls, raw_stdio_se
     """Adapters must not truncate npm scoped package names to the basename."""
     captured_keys = []
     adapter = adapter_cls(project_root=Path.cwd(), user_scope=True)
-    adapter.update_config = lambda updates: captured_keys.extend(updates.keys()) or True
+    adapter.update_config = lambda updates, **_kwargs: captured_keys.extend(updates.keys()) or True
 
     result = adapter.configure_mcp_server("@playwright/mcp", server_info_cache=raw_stdio_servers)
 
@@ -44,7 +44,7 @@ def test_two_scoped_server_names_do_not_collide(adapter_cls, raw_stdio_servers):
     """Distinct scoped packages with the same basename must keep distinct keys."""
     captured_keys = []
     adapter = adapter_cls(project_root=Path.cwd(), user_scope=True)
-    adapter.update_config = lambda updates: captured_keys.extend(updates.keys()) or True
+    adapter.update_config = lambda updates, **_kwargs: captured_keys.extend(updates.keys()) or True
 
     for server_ref in raw_stdio_servers:
         result = adapter.configure_mcp_server(server_ref, server_info_cache=raw_stdio_servers)
@@ -56,6 +56,7 @@ def test_two_scoped_server_names_do_not_collide(adapter_cls, raw_stdio_servers):
 def test_safe_installer_passes_scoped_server_name_to_adapter():
     """Installer must preserve scoped dependency names as server_name."""
     mock_adapter = Mock()
+    mock_adapter.written_mcp_hashes = {}
     mock_adapter.configure_mcp_server.return_value = True
     mock_conflict_detector = Mock()
     mock_conflict_detector.check_server_exists.return_value = False
@@ -79,6 +80,7 @@ def test_safe_installer_passes_scoped_server_name_to_adapter():
 def test_safe_installer_keeps_owner_repo_fallback_available():
     """Installer must not override owner/repo basename fallback keys."""
     mock_adapter = Mock()
+    mock_adapter.written_mcp_hashes = {}
     mock_adapter.configure_mcp_server.return_value = True
     mock_conflict_detector = Mock()
     mock_conflict_detector.check_server_exists.return_value = False

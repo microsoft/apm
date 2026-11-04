@@ -200,7 +200,7 @@ class TestDetectLocalBundle:
         bundle = _make_plugin_bundle(tmp_path / "source")
         lock_path = bundle / "apm.lock.yaml"
         lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
-        lock["lockfile_version"] = "3"
+        lock["lockfile_version"] = "4"
         lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
         source = {
             "directory": bundle,
@@ -210,7 +210,7 @@ class TestDetectLocalBundle:
 
         with pytest.raises(
             UnsupportedLockfileVersionError,
-            match=r"Unsupported lockfile version '3'; supported versions: 1, 2",
+            match=r"Unsupported lockfile version '4'; supported versions: 1, 2, 3",
         ):
             detect_local_bundle(source)
 

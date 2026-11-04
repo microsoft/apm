@@ -17,6 +17,13 @@ Standalone `apm --version` does not require Git to be installed.
 
 ## Dependency management
 
+Repeating an existing positional package without a requested change reports
+`already in apm.yml` and preserves its declaration. An otherwise unchanged
+manifest is not rewritten; changed refs and explicit skill additions or resets
+still update it.
+Explicit HTTPS upgrades and Git-qualified marketplace requests are not no-ops
+when they change the stored transport or default-registry routing.
+
 During install or uninstall, `Cleaned N stale deployed files for DEPENDENCY`
 names the affected dependency, not a deletion location. A local source path in
 that message identifies the package; cleanup removes deployed files, not source
@@ -71,6 +78,23 @@ keeps recorded ownership. Overwrite warnings name the previous owner when known.
 Fix unreadable sources before retrying, not by resetting the lockfile. See
 [shared-skill behavior](https://microsoft.github.io/apm/reference/cli/install/#behavior).
 
+Loose-skill updates use local receipts of successful final rendered writes, not
+the checked-out lock as proof of the previous local deployment. Keep the ignored
+`.apm-local/` identity and `~/.apm/deployment-receipts/` local; do not commit or
+share them. The identity lives in the project root, or your home for `--global`;
+configured external skill roots retain the same ownership and receipt checks.
+Switching targets that share a skill path refreshes valid same-writer evidence
+through a guarded copy, not by adopting existing files.
+Uninstall records actual surviving-skill rebuilds and binds those receipts only
+after final lock persistence, so the surviving package can update normally.
+Branch switches and cold-cache replay can update unchanged files,
+but edited files and legacy files without receipts stay protected. Preserve
+edits and move conflicting files aside before reinstalling. Audit and dry-run
+do not create receipts; frozen install can record local writes without changing
+the manifest or lockfile.
+Creating this state requires filesystem hard-link support; unsupported or
+unwritable state paths fail instead of disabling preservation.
+
 For `apm install -g --mcp`, mixed target selections warn and skip
 workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
@@ -89,22 +113,15 @@ For Cursor credential repair, edit `.cursor/mcp.json` at project scope or
 `~/.cursor/mcp.json` with `--global`; replace only the affected values with
 native `${env:NAME}` references and preserve other fields and servers.
 
-For self-defined Claude/Codex MCP connections, a same-name native entry must
-match the requested config or an unchanged APM-managed baseline. Otherwise
-install preserves it, identifies the conflicting target, and exits nonzero;
-successful writes to other targets remain managed. An identical foreign
-connection is left unowned. `--force` does not authorize takeover, and
-`--frozen` does not certify a conflicting connection. Rename or remove only
-the conflicting native entry you intend to replace, then rerun the original
-command with the same scope and targets. Cleanup also preserves modified or
-unverifiable historical entries and asks for manual reconciliation; do not
-delete the lockfile or unrelated native settings to bypass it. This concerns
-connection settings, not data held by the MCP service.
-
-An already managed Claude stdio connection may retain a valid native-only `cwd`
-when both old and requested declarations omit it. This comparison exception
-allows managed updates, not foreign adoption or removal. Native edits to a
-declared `cwd` remain conflicts; switching to HTTP removes the incompatible stdio fields.
+Self-defined Claude/Codex MCP conflicts preserve differing native entries and
+exit `1`; successful writes, including earlier registry writes, stay managed.
+Registry conflicts do not skip nonconflicting self-defined updates. Full APM
+lockfile rebuilds, including `--only apm`, retain prior MCP write receipts.
+`--force` cannot take over a foreign connection; `--frozen` cannot certify it.
+Rename or remove only the conflicting native entry, then retry with the same
+scope and targets. Do not delete the lockfile to bypass ownership checks.
+See [MCP conflict recovery](https://microsoft.github.io/apm/consumer/install-mcp-servers/#resolve-a-connection-name-conflict)
+and [cleanup receipts and partial-failure ownership](https://microsoft.github.io/apm/reference/lockfile-spec/#canonical-deployment-rows).
 
 `apm install --dry-run` includes required indirect APM dependencies in its
 counts using local source metadata and unchanged installed remote metadata.
@@ -122,9 +139,18 @@ Global dry-run bootstrap leaves an absent `~/.apm` uncreated.
 or runtime configuration.
 
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
-validate replacement packages before publication. A failed download,
-validation, or staged activation leaves the previous package and lockfile active;
-fix the reported cause and rerun the command. Late Codex native reconciliation
+validate replacement packages before publication. A failed download
+or validation leaves the previous package active. Failed staged activation
+attempts restoration without changing the lockfile. If restoration or cleanup
+also fails, preserve the reported recovery paths: the prior package may be in
+`.apm-resolution-staging/<session>/backups/` rather than active. Close programs
+holding the affected paths and inspect/recover prior data before retrying the
+same command. Overlapping parent/child recovery is deferred after an obstruction
+to retain the needed backups; unrelated packages can still be restored.
+Do not delete unknown, legacy, active, or recovery staging roots,
+elevate APM, change ACLs, or disable security controls to bypass a Windows denial.
+Cleanup of committed staging warns without rolling back the validated package.
+Late Codex native reconciliation
 runs after APM persistence and is not part of that rollback; see its qualified
 contract below.
 
@@ -146,6 +172,31 @@ sidecar when their runtime requires it; see
 `apm publish --package OWNER/REPO` normalizes the owner and repository to
 lowercase before constructing the package-registry path.
 
+### Root replacement lifecycle (candidate)
+
+For the unratified development-build syntax and old-reader limits, see
+[Root source replacement](dependencies.md#root-source-replacement-candidate).
+No new command or flag is added: edit root `replace`, then run `apm install`.
+Original identities remain selectors and ownership keys.
+
+`apm install --dry-run` resolves locally available replacement dependencies
+without deployment writes. Selected local paths stay consumer-root-relative
+at every depth; missing source evidence makes the preview incomplete.
+
+Ordinary install replays matching fork pins; `apm update` refreshes mutable fork
+refs and local content but retains explicit replacement SHAs. Partial updates
+refuse a changed rule table: run a full install/update to apply it.
+`--frozen` compares the entire normalized table, including unused rules, and
+refuses missing or changed selected-local content and missing baseline hashes
+before deployment. Use normal install after reviewing an intentional change.
+`apm outdated` checks selected Git sources and marks local sources not remotely
+comparable. Its table shows original and selected sources; `--verbose` adds
+per-dependency replacement details. `apm deps list`/`why` show selected-source provenance; tree/why retain
+shared original parents. `apm audit --ci` replays selected sources read-only.
+Uninstall preserves shared dependencies until their last parent is removed,
+repairs incoming requests and retains dormant root rules. Missing source
+evidence that prevents safe reachability verification blocks removal and names
+the affected dependencies whose manifests must be restored.
 ### Local single-file dependencies
 
 Local single files use `apm install ./ai/agents/xyz.agent.md` (also
@@ -184,6 +235,21 @@ The local-source check is APM-specific frozen-install behavior, not a new
 lockfile schema requirement. Legacy bare SHA-256 digests are accepted without
 rewriting the lock. Normal non-frozen installs can establish missing baselines.
 
+Narrowing a dependency's `targets:` reconciles its removed targets within the
+current install scope, even if the consumer still enables them. Removed files
+lose their file/hash/ledger claims; edited files and targets skipped by
+`--target` retain protective records.
+
+Normal `apm install` repairs obsolete dependency claims for already-absent files
+when complete source discovery and successful skill deployment prove those
+files are no longer shipped within a current source-backed skill. It synchronizes
+file lists, hashes and deployment records, including historical `legacy` records
+and locks without a ledger. No lock reset or uninstall/reinstall is needed.
+Other owners, unprocessed targets and incomplete deployments remain protected.
+Missing bytes, a saved hash or a directory prefix alone are not proof. Unresolved
+claims remain visible in read-only audit; still-present content with unclear
+ownership is not deleted or adopted. `--frozen` cannot perform the repair or
+accept changed local sources; unchanged frozen replay works after ordinary repair.
 Manifest-derived dependency versions come from the acquired package snapshot,
 not an older descriptor in `apm_modules/`. The first ordinary install after a
 branch switch records the current version. These values are inventory metadata,
@@ -484,6 +550,14 @@ Native Copilot Agent Plugins replay through the canonical package loader, with o
 
 Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: in a project with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, it prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first, but local dependency sources must be available at their declared paths. Windows long and native 8.3 spellings of the same project retain project scope; they do not require a global install. Auditing the actual user metadata workspace (`~/.apm`) still refuses missing modules and requires `apm install --global`. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
 
+`config-consistency` respects dependency MCP deliberately omitted by `apm install --only apm` or the secure default refusal of transitive self-defined MCP. Install records evidence bound to that dependency and authored declaration, before plugin-root expansion; empty MCP fields alone are not evidence. Direct MCP admission supersedes old omission evidence for that server. Root and previously admitted MCP still participate in drift checks, and a later skills-only install preserves their baseline. Unknown, damaged or stale evidence requires repeating the intended selection: use `apm install --only apm`, or `apm install --global --target agent-skills --only apm` for global skills-only. Do not enable MCP or add `--trust-transitive-mcp` merely to pass audit. The MCP consistency check does not rewrite the lockfile or runtime configuration. See the [config-consistency reference](https://microsoft.github.io/apm/reference/baseline-checks/#config-consistency) for the full contract.
+
+`apm install --only apm --frozen` also preserves the admitted MCP baseline and
+exact lockfile and native-configuration bytes without selecting MCP integration.
+Existing frozen source and consent checks still apply: a baseline that already
+admitted transitive MCP requires the same explicit `--trust-transitive-mcp`.
+Omission evidence does not grant consent.
+
 For project-local content, replay uses the same package interpretation as install.
 A sibling `skills/<name>/SKILL.md` alongside `.apm/` is not promoted to a local
 skill or reported as `unintegrated`. Other supported source layouts and actual
@@ -492,6 +566,8 @@ dependency skill bundles keep their existing discovery behavior.
 Use `--no-drift` to opt out with reduced coverage (e.g. fast inner loops); the flag is mutually exclusive with `--strip`/`--file`. Drift is advisory in bare audit by default unless policy enables `security.audit.fail_on_drift`; `--ci` always gates on drift. Invalid selections, manifest/lock mismatches, and deployed-file integrity failures still fail `apm audit --ci`. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`.
 
 A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
+
+With `--ci --policy <path|url|owner/repo>`, a policy that cannot be loaded (missing file, unreachable, malformed, garbage, not found) exits 1 with `[x] Policy '<source>' could not be loaded: <cause>`; `policy.fetch_failure_default` only governs auto-discovery and `--policy org`. CI JSON (top-level `policy`) and SARIF (`invocations[0].properties.policy`) report `enforced`, `source`, and `enforcement`.
 
 
 **External scanners (experimental, behind `apm experimental enable external-scanners`).** `--external NAME` runs a third-party SARIF scanner (e.g. `skillspector`) and merges its findings. `--external-llm/--no-external-llm` toggles LLM-powered analysis (default off; sends scanned content to a third-party API, so APM prints a `[!]` egress banner and forwards `OPENAI_API_KEY`/`NVIDIA_INFERENCE_KEY` only when on). `--external-args TEXT` is a single shlex-split string of extra scanner flags, validated against a per-adapter allowlist -- non-allowlisted flags, secret-looking flags, and out-of-cwd paths are rejected fail-closed. SkillSpector's `--baseline` must carry exactly one value, in either spelling, and that value is resolved inside the working directory even when it has no path separator. `--external-llm`/`--external-args` without `--external` is a usage error (exit 2). Scanner configuration or infrastructure errors (feature disabled, scanner not found, malformed SARIF) exit **3**. Persist defaults with `apm config set external.<name>.llm true` and `apm config set external.<name>.args -- "--model gpt-4o"`. Precedence: CLI > config > policy floor.
@@ -671,6 +747,16 @@ Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-t
 > **Note:** `--target agents` is **deprecated** -- it maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` or `--target agent-skills` instead.
 
 ### Skill routing convergence
+
+Unmanaged skill conflicts now fail by default instead of warning and exiting
+successfully. Install preflights every selected skill destination before
+deploying any package in the plan or committing manifest/lock success state.
+Rename the local skill or correct an existing `skills:`/`targets:` selection;
+an allow-list does not automatically include future skills. Cached preparation
+may remain, and old partial state is preserved. A shared name/directory alone
+is not a conflict. `--force` remains destructive and also bypasses the critical
+security-scan block. Audit reports unowned differing skill files as
+`unmanaged-conflict`, not managed `modified` drift, and does not repair them.
 
 By default, Copilot, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf deploy skills to `.agents/skills/` (the agentskills.io standard). Claude, Grok Build, and Kiro retain native per-client routing (`.claude/skills/`, `.grok/skills/`, `.kiro/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 

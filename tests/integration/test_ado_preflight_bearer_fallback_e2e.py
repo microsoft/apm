@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.install.context import InstallContext
+from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.git_env import reset_git_cache
 
 pytestmark = pytest.mark.skipif(
@@ -194,26 +196,15 @@ def test_preflight_falls_back_from_stale_pat_to_bearer(tmp_path, monkeypatch):
 
     get_bearer_provider().clear_cache()
 
-    from unittest.mock import MagicMock
-
     from apm_cli.core.auth import AuthResolver
     from apm_cli.install.pipeline import _preflight_auth_check
 
-    # Build a real-enough dep ref + ctx.
-    dep = MagicMock()
-    dep.host = "dev.azure.com"
-    dep.repo_url = "myorg/myproject/_git/myrepo"
-    dep.port = None
-    dep.is_azure_devops.return_value = True
-    dep.explicit_scheme = None
-    dep.is_insecure = False
-    dep.ado_organization = "myorg"
-    dep.ado_project = "myproject"
-    dep.ado_repo = "myrepo"
-
-    ctx = MagicMock()
-    ctx.deps_to_install = [dep]
-    ctx.update_refs = True
+    dep = DependencyReference.parse("dev.azure.com/myorg/myproject/_git/myrepo")
+    assert dep.source_reference.host == "dev.azure.com"
+    assert dep.source_reference.is_azure_devops()
+    ctx = InstallContext(
+        project_root=tmp_path, apm_dir=tmp_path, deps_to_install=[dep], update_refs=True
+    )
 
     # Real AuthResolver -- this drives execute_with_bearer_fallback through
     # the real azure_cli provider, which shells out to our fake `az`.
@@ -324,26 +315,16 @@ sys.exit(0)
 
     get_bearer_provider().clear_cache()
 
-    from unittest.mock import MagicMock
-
     from apm_cli.core.auth import AuthResolver
     from apm_cli.install.errors import AuthenticationError
     from apm_cli.install.pipeline import _preflight_auth_check
 
-    dep = MagicMock()
-    dep.host = "dev.azure.com"
-    dep.repo_url = "myorg/myproject/_git/myrepo"
-    dep.port = None
-    dep.is_azure_devops.return_value = True
-    dep.explicit_scheme = None
-    dep.is_insecure = False
-    dep.ado_organization = "myorg"
-    dep.ado_project = "myproject"
-    dep.ado_repo = "myrepo"
-
-    ctx = MagicMock()
-    ctx.deps_to_install = [dep]
-    ctx.update_refs = True
+    dep = DependencyReference.parse("dev.azure.com/myorg/myproject/_git/myrepo")
+    assert dep.source_reference.host == "dev.azure.com"
+    assert dep.source_reference.is_azure_devops()
+    ctx = InstallContext(
+        project_root=tmp_path, apm_dir=tmp_path, deps_to_install=[dep], update_refs=True
+    )
 
     resolver = AuthResolver()
 

@@ -45,6 +45,8 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
+from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
+
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
@@ -65,6 +67,7 @@ from .transaction import InstallTransaction, transactional_pipeline
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
     from ..core.command_logger import InstallLogger
+    from ..core.deployment_ledger import DeploymentMaterializationSession
     from ..core.target_detection import EffectiveTargetDecision
     from .context import InstallContext
 
@@ -100,18 +103,27 @@ def _run_phase(name: str, phase, ctx):
             logger.verbose_detail(f"Phase: {name} -> {elapsed:.3f}s")
 
 
-def _run_integration_phase(ctx: InstallContext) -> None:
+def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+
     from .phases import integrate as _integrate_phase
 
+    session = (
+        None
+        if ctx.lockfile_only or ctx.dry_run
+        else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
+    )
     with (
         contextlib.nullcontext()
         if ctx.lockfile_only
         else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None
+            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+            materialization_session=session,
         )
     ):
         _run_phase("integrate", _integrate_phase, ctx)
+    return session
 
 
 def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
@@ -161,6 +173,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
 
     seen: builtins.set = builtins.set()
     for dep in ctx.deps_to_install:
+        dep = dep.source_reference
         host = dep.host
         if not host or is_github_hostname(host):
             continue  # github.com uses API probe with unauth fallback
@@ -445,15 +458,31 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         _early_lockfile and any(k != _SELF_KEY for k in _early_lockfile.dependencies)
     )
 
-    from .helpers.no_work import is_no_work_install, retained_local_work
+    from .helpers.no_work import (
+        is_no_work_install,
+        local_rows_need_reconciling,
+        retained_local_work,
+    )
 
     if is_no_work_install(
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
-        old_local_deployed=_old_local_deployed,
+        local_cleanup_pending=(
+            not lockfile_only
+            and local_rows_need_reconciling(
+                _early_lockfile,
+                project_root,
+                apm_package,
+                target=target,
+                scope=scope,
+                target_decision=target_decision,
+            )
+        ),
         has_orphan_deps=_has_orphan_deps,
         lockfile_only=lockfile_only,
         apm_dir=apm_dir,
+        apm_package=apm_package,
+        logger=logger,
     ):
         return InstallResult()
 
@@ -564,14 +593,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # collision.
     # ------------------------------------------------------------------
     if plan_callback is not None:
-        from .plan import build_update_plan
-
-        complete_dep_keys = ctx.update_plan_complete_dep_keys if ctx.only_packages else None
-        plan = build_update_plan(
-            _early_lockfile,
-            ctx.deps_to_install,
-            complete_resolved_dep_keys=complete_dep_keys,
-        )
+        plan = build_resolved_update_plan(ctx, _early_lockfile)
         proceed = plan_callback(plan)
         if not proceed:
             transaction.rollback()
@@ -768,7 +790,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ctx.installed_packages = installed_packages
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
-        _run_integration_phase(ctx)
+        materialization_session = _run_integration_phase(ctx)
 
         # Fail-loud: if any direct dependency failed validation or
         # download, render the diagnostic summary and raise so the
@@ -888,6 +910,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             from .phases import post_deps_local as _post_deps_local_phase
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
+            if materialization_session is not None:
+                materialization_session.bind_committed_claims(
+                    LockFile.read(get_lockfile_path(ctx.apm_dir))
+                )
 
         # ------------------------------------------------------------------
         # Phase: Optional install-time content audit (external_scanners flag).

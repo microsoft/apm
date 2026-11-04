@@ -337,6 +337,7 @@ class MCPClientAdapter(ABC):
         """
         self._project_root = Path(project_root) if project_root is not None else None
         self.user_scope = user_scope
+        self.written_mcp_hashes: dict[str, str] = {}
         # Per-server tracking populated by the env-resolution helpers and
         # consumed by ``configure_mcp_server`` for the post-install summary
         # and the aggregated legacy-syntax deprecation warning. Defined on
@@ -367,12 +368,18 @@ class MCPClientAdapter(ABC):
             return self._project_root
         return Path(os.getcwd())
 
-    def render_server_config(self, server_info: dict) -> dict:
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
         """Render one native server entry for exact baseline comparisons."""
         rendered = self._format_server_config(
             server_info,
-            env_overrides={},
-            runtime_vars={},
+            env_overrides=env_overrides or {},
+            runtime_vars=runtime_vars or {},
         )
         if isinstance(rendered, tuple):
             rendered = rendered[0]
@@ -383,6 +390,10 @@ class MCPClientAdapter(ABC):
     def matches_managed_server_config(self, native: object, expected: dict) -> bool:
         """Compare the native connection with the adapter's rendered baseline."""
         return native == expected
+
+    def managed_server_config(self, native: dict) -> dict:
+        """Return connection data for an actual-write fingerprint."""
+        return dict(native)
 
     def project_managed_server_config(
         self, native: object, *, baseline: dict, requested: dict

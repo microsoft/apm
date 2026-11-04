@@ -6,9 +6,15 @@ scope=InstallScope.USER (global install), and IS called for PROJECT scope.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.core.scope import InstallScope
+
+pytestmark = pytest.mark.component
 
 
 def _make_pkg_with_dep() -> MagicMock:
@@ -22,12 +28,12 @@ def _make_pkg_with_dep() -> MagicMock:
     return pkg
 
 
-def _common_patches():
+def _common_patches(deploy_root: Path) -> list[AbstractContextManager]:
     """Return a list of patch context managers shared by all tests."""
     return [
         patch("apm_cli.deps.lockfile.LockFile"),
         patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=None),
-        patch("apm_cli.core.scope.get_deploy_root", return_value=MagicMock()),
+        patch("apm_cli.core.scope.get_deploy_root", return_value=deploy_root),
         patch("apm_cli.core.scope.get_apm_dir", return_value=None),
         patch(
             "apm_cli.install.phases.local_content._project_has_root_primitives",
@@ -47,13 +53,13 @@ def _common_patches():
 class TestGitignoreScopeGuard:
     """_update_gitignore_for_apm_modules must not run under InstallScope.USER."""
 
-    def test_global_scope_does_not_call_update_gitignore(self) -> None:
+    def test_global_scope_does_not_call_update_gitignore(self, tmp_path: Path) -> None:
         """Regression: apm install -g (USER scope) must never touch .gitignore."""
         from apm_cli.install.pipeline import run_install_pipeline
 
         pkg = _make_pkg_with_dep()
 
-        patches = _common_patches()
+        patches = _common_patches(tmp_path)
         with (
             patches[0] as mock_lf_cls,
             patches[1],
@@ -80,13 +86,13 @@ class TestGitignoreScopeGuard:
 
         mock_gitignore.assert_not_called()
 
-    def test_project_scope_calls_update_gitignore(self) -> None:
+    def test_project_scope_calls_update_gitignore(self, tmp_path: Path) -> None:
         """PROJECT scope (the default) must still update .gitignore."""
         from apm_cli.install.pipeline import run_install_pipeline
 
         pkg = _make_pkg_with_dep()
 
-        patches = _common_patches()
+        patches = _common_patches(tmp_path)
         with (
             patches[0] as mock_lf_cls,
             patches[1],

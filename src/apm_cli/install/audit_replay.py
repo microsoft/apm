@@ -22,9 +22,10 @@ from apm_cli.install.drift import (
     _make_scratch_root,
     run_replay,
 )
-from apm_cli.install.plan import lockfile_satisfies_manifest
+from apm_cli.install.plan import lockfile_satisfies_manifest, lockfile_satisfies_replacements
 from apm_cli.integration.targets import TargetProfile, resolve_audit_targets
 from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.dependency.replacement import project_manifest_dependencies
 
 
 @dataclass(frozen=True)
@@ -81,8 +82,16 @@ def prepare_ci_audit_replay(
     if lockfile is None:
         raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")
 
-    manifest_deps = list(manifest.get_apm_dependencies())
-    manifest_deps.extend(manifest.get_dev_apm_dependencies())
+    unchanged, replacement_reasons = lockfile_satisfies_replacements(
+        lockfile, manifest.replace_rules
+    )
+    if not unchanged:
+        raise CiAuditReplayError(
+            "Replacement rules differ from apm.lock.yaml. "
+            + " ".join(replacement_reasons)
+            + " Run 'apm install' to record the selected sources."
+        )
+    manifest_deps = project_manifest_dependencies(manifest)
     satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
     if not satisfied:
         raise CiAuditReplayError("apm.lock.yaml is out of sync with apm.yml. " + " ".join(reasons))

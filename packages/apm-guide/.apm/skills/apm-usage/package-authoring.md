@@ -693,6 +693,12 @@ my-skill/
 
 ### 7. Marketplace Plugin (`plugin.json`)
 
+For loose skill deployment, a differing unmanaged destination file refuses the
+whole selected install plan before native writes. Use distinct skill directory
+names or an existing consumer skill/target selection; there is no new namespace
+or collision flag. This does not change native plugin identities or decide
+precedence between managed packages.
+
 Packaged distribution format created with `apm pack` (the default, no-flag
 Claude plugin bundle). This is the Claude-compatible `plugin.json` layout,
 distinct from the portable Agent Plugins v1 `plugin.json` produced by
