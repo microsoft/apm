@@ -181,6 +181,10 @@ _EVENT_FINGERPRINT_DOMAINS = {"pre-compile": 2}
 
 
 def _fingerprint_domain(lifecycle: object) -> int:
+    """Return the highest fingerprint domain an event in the block introduced.
+
+    1 is the original domain, used when the block names no later event.
+    """
     if not isinstance(lifecycle, dict):
         return 1
     return max((_EVENT_FINGERPRINT_DOMAINS.get(key, 1) for key in lifecycle), default=1)

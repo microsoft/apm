@@ -163,7 +163,7 @@ without a valid Build ID, hand-authored files, and symbolic links are retained.
 |------|-------------|
 | `--watch` | Re-run compilation on file changes. See [Watch mode](#watch-mode). |
 | `--validate` | Validate primitives and exit. No files written. |
-| `--dry-run` | Show placement decisions without writing files. |
+| `--dry-run` | Show placement decisions without writing files or running `pre-compile` scripts. |
 | `-v, --verbose` | Show source attribution and optimizer analysis. |
 
 ### Global compilation

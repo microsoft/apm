@@ -134,24 +134,20 @@ ignored with a warning naming the script, and the default applies.
 
 A `pre-compile` script can generate instructions from the project's own
 toolchain, for example a framework that composes guidance from installed
-dependencies. It writes under `.apm/`, and `apm compile` reads the result like
-any other primitive:
+dependencies. Point it at a source under `.apm/`, such as
+`.apm/instructions/framework.instructions.md` with its own `applyTo`
+frontmatter, never at `AGENTS.md` or `CLAUDE.md`, which compile owns:
 
 ```yaml
 lifecycle:
   pre-compile:
     - type: command
-      description: "Generate framework guidelines"
       run: "./scripts/generate-guidelines.sh"
-      timeoutSec: 120
 ```
 
-Point the generator at a source file such as
-`.apm/instructions/framework.instructions.md`, with its own `applyTo`
-frontmatter, never at `AGENTS.md` or `CLAUDE.md`, which compile owns. As with
-every lifecycle script, a failure does not stop the compile. Compile holds
-APM's lifecycle lock while the script runs, so the script must not call other
-`apm` commands that change state.
+A failure does not stop the compile. The script runs while compile holds
+APM's lifecycle lock, so an `apm` command it starts that changes state waits
+for that lock and fails after its timeout.
 
 ### HTTP
 

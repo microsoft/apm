@@ -133,6 +133,9 @@ def test_record_from_before_pre_compile_does_not_cover_it(apm_home: Path, tmp_pa
     assert fingerprint_lifecycle_subtree(lifecycle) != _plain_fingerprint(lifecycle)
     assert not is_project_scripts_trusted(path), "old record silently covers pre-compile"
 
+    trust_project_scripts(path)
+    assert is_project_scripts_trusted(path), "fresh trust must cover pre-compile"
+
 
 def test_blocks_without_new_events_keep_their_fingerprint() -> None:
     """Existing trust for blocks without pre-compile survives the upgrade."""

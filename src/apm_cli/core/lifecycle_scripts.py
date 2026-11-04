@@ -42,6 +42,8 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.core.command_logger import CommandLogger
 
 _logger = logging.getLogger(__name__)
@@ -113,6 +115,32 @@ class LifecycleEvent:
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )
+
+
+def event_for_dependencies(
+    event_name: str,
+    dependencies: Iterable[object],
+    *,
+    scope: str,
+    working_directory: str | None,
+) -> LifecycleEvent:
+    """Build the event payload for a manifest's dependency references.
+
+    The one place that turns dependencies into the payload's package list,
+    shared by install, update and compile.
+    """
+    return LifecycleEvent.create(
+        event=event_name,
+        packages=[
+            PackageInfo(
+                name=getattr(dep, "repo_url", None) or str(dep),
+                reference=getattr(dep, "reference", None),
+            )
+            for dep in dependencies
+        ],
+        scope=scope,
+        working_directory=working_directory,
+    )
 
 
 # -- Script entry (one action inside a script file) ------------------------

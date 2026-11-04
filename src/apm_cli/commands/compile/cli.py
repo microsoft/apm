@@ -582,40 +582,36 @@ def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -
     Best-effort, like every lifecycle event: a failing script never stops
     the compile.
     """
-    from ...core.lifecycle_scripts import (
-        LifecycleEvent,
-        PackageInfo,
-        build_runner_from_context,
-    )
+    from ...core.lifecycle_scripts import build_runner_from_context, event_for_dependencies
     from ...models.apm_package import APMPackage
 
     manifest = source_root / APM_YML_FILENAME
     if not manifest.exists():
         return
     project_root = str(source_root)
-    try:
-        runner = build_runner_from_context(
-            logger=logger, verbose=verbose, project_root=project_root, events=("pre-compile",)
-        )
-        packages = [
-            PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference)
-            for dep in APMPackage.from_apm_yml(manifest).get_apm_dependencies()
-        ]
-        event = LifecycleEvent.create(
-            event="pre-compile",
-            packages=packages,
-            scope="project",
-            working_directory=project_root,
-        )
-        runner.fire("pre-compile", event)
-    except Exception:
-        logger.verbose_detail("[i] pre-compile lifecycle scripts could not run")
+    runner = build_runner_from_context(
+        logger=logger, verbose=verbose, project_root=project_root, events=("pre-compile",)
+    )
+    dependencies = []
+    if runner.scripts_for_event("pre-compile"):
+        try:
+            dependencies = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        except (OSError, ValueError) as e:
+            logger.verbose_detail(
+                f"[i] pre-compile payload lists no packages: {type(e).__name__} reading apm.yml"
+            )
+    runner.fire(
+        "pre-compile",
+        event_for_dependencies(
+            "pre-compile", dependencies, scope="project", working_directory=project_root
+        ),
+    )
 
 
-def _generate_sources(
+def _pre_compile_then_validate(
     logger: CommandLogger, verbose: bool, source_root: Path | None, *, clean: bool, run: bool
 ) -> None:
-    """Run pre-compile scripts, then check the project they may have populated."""
+    """When ``run``, fire pre-compile scripts, then check the project they may have populated."""
     if not run or source_root is None:
         return
     _fire_pre_compile(logger, verbose, source_root)
@@ -879,7 +875,7 @@ def _run_compilation(
     strategies, emits the canonical target-provenance line, runs the
     compiler, reports results, and hard-fails on critical security findings.
     """
-    _generate_sources(logger, verbose, source_root, clean=clean, run=run_scripts and not dry_run)
+    _pre_compile_then_validate(logger, verbose, source_root, clean=clean, run=run_scripts)
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,
         ResolvedTargets,
@@ -1247,7 +1243,10 @@ def _run_compilation(
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Preview compilation without writing files (shows placement decisions)",
+    help=(
+        "Preview compilation without writing files or running pre-compile scripts "
+        "(shows placement decisions)"
+    ),
 )
 @click.option("--no-links", is_flag=True, help="Skip markdown link resolution")
 @click.option("--chatmode", help="Chatmode to prepend to AGENTS.md files")

@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import click
 
+from apm_cli.core.lifecycle_scripts import LIFECYCLE_EVENTS
 from apm_cli.install.locking import serialized_lifecycle
 from apm_cli.utils.console import (
     STATUS_SYMBOLS,
@@ -106,18 +107,7 @@ def lifecycle(ctx: click.Context) -> None:
     "event",
     required=False,
     default="post-install",
-    type=click.Choice(
-        [
-            "pre-install",
-            "post-install",
-            "pre-update",
-            "post-update",
-            "pre-uninstall",
-            "post-uninstall",
-            "pre-compile",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(LIFECYCLE_EVENTS, case_sensitive=False),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.option(

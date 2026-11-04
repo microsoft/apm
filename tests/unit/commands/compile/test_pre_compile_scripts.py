@@ -8,8 +8,11 @@ lifecycle script, a failing one never stops the compile.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -18,7 +21,7 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = pytest.mark.component
 
 GENERATOR = """\
 from pathlib import Path
@@ -27,7 +30,7 @@ import sys
 target = Path(".apm/instructions/generated.instructions.md")
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text('---\\napplyTo: "**"\\n---\\nGenerated guidance from the toolchain.\\n')
-Path("generator-ran").write_text("yes")
+Path("generator-ran").write_text(sys.stdin.read())
 sys.exit(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
 """
 
@@ -44,7 +47,7 @@ Path("lock-state").write_text(state)
 """
 
 
-def _project(tmp_path: Path, *, exit_code: int = 0) -> Path:
+def _project(tmp_path: Path, *, exit_code: int = 0, event: str = "pre-compile") -> Path:
     project = tmp_path / "project"
     project.mkdir()
     (project / "gen.py").write_text(GENERATOR)
@@ -53,9 +56,13 @@ def _project(tmp_path: Path, *, exit_code: int = 0) -> Path:
         "description": "Generate instructions",
         "run": f'"{sys.executable}" gen.py {exit_code}',
     }
-    (project / "apm.yml").write_text(
-        yaml.safe_dump({"name": "demo", "version": "0.1.0", "lifecycle": {"pre-compile": [entry]}})
-    )
+    manifest = {
+        "name": "demo",
+        "version": "0.1.0",
+        "dependencies": {"apm": ["acme/guidelines#v1.2.0"]},
+        "lifecycle": {event: [entry]},
+    }
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest))
     return project
 
 
@@ -75,10 +82,19 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         yield tmp_path
 
 
-def _compile(project: Path, monkeypatch: pytest.MonkeyPatch, *args: str, trusted: bool = True):
+def _compile(
+    project: Path, monkeypatch: pytest.MonkeyPatch, *args: str, trusted: bool | None = True
+):
+    """Run compile; ``trusted=None`` uses the real trust store."""
     monkeypatch.chdir(project)
+    if trusted is None:
+        return CliRunner().invoke(cli, ["compile", "--target", "codex", *args])
     with patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=trusted):
         return CliRunner().invoke(cli, ["compile", "--target", "codex", *args])
+
+
+def _output(result) -> str:
+    return " ".join(result.output.split())
 
 
 def test_generated_instructions_reach_agents_md(isolated: Path, monkeypatch) -> None:
@@ -86,6 +102,17 @@ def test_generated_instructions_reach_agents_md(isolated: Path, monkeypatch) -> 
     result = _compile(project, monkeypatch)
     assert result.exit_code == 0, result.output
     assert "Generated guidance from the toolchain." in (project / "AGENTS.md").read_text()
+
+
+def test_script_receives_the_event_payload(isolated: Path, monkeypatch) -> None:
+    project = _project(isolated)
+    _compile(project, monkeypatch)
+    payload = json.loads((project / "generator-ran").read_text())
+    assert payload["event"] == "pre-compile"
+    assert payload["scope"] == "project"
+    assert [(p["name"], p["reference"]) for p in payload["packages"]] == [
+        ("acme/guidelines", "v1.2.0")
+    ]
 
 
 def test_failing_script_does_not_stop_compile(isolated: Path, monkeypatch) -> None:
@@ -101,7 +128,59 @@ def test_untrusted_script_is_skipped_with_notice(isolated: Path, monkeypatch) ->
     result = _compile(project, monkeypatch, trusted=False)
     assert result.exit_code == 0, result.output
     assert not (project / "generator-ran").exists()
-    assert "apm lifecycle trust" in " ".join(result.output.split())
+    assert "Skipped 1 untrusted project script(s). Run 'apm lifecycle trust'" in _output(result)
+
+
+def test_untrusted_scripts_for_other_events_add_no_notice(isolated: Path, monkeypatch) -> None:
+    project = _project(isolated, event="post-install")
+    _commit_instruction(project)
+    result = _compile(project, monkeypatch, trusted=False)
+    assert result.exit_code == 0, result.output
+    assert "untrusted" not in result.output
+
+
+def test_org_deny_all_suppresses_scripts(isolated: Path, monkeypatch) -> None:
+    project = _project(isolated)
+    _commit_instruction(project)
+    policy = SimpleNamespace(policy=SimpleNamespace(executables=SimpleNamespace(deny_all=True)))
+    with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=policy):
+        result = _compile(project, monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert not (project / "generator-ran").exists()
+
+
+def test_trust_record_from_before_pre_compile_needs_fresh_trust(
+    isolated: Path, monkeypatch
+) -> None:
+    project = _project(isolated)
+    _commit_instruction(project)
+    lifecycle = yaml.safe_load((project / "apm.yml").read_text())["lifecycle"]
+    canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
+    store = isolated / "apmhome" / "scripts-trust.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "projects": {
+                    str((project / "apm.yml").resolve()): hashlib.sha256(
+                        canonical.encode("utf-8")
+                    ).hexdigest()
+                },
+            }
+        )
+    )
+
+    skipped = _compile(project, monkeypatch, trusted=None)
+    assert skipped.exit_code == 0, skipped.output
+    assert not (project / "generator-ran").exists()
+    assert "Skipped 1 untrusted project script(s)" in _output(skipped)
+
+    trusted = CliRunner().invoke(cli, ["lifecycle", "trust"])
+    assert trusted.exit_code == 0, trusted.output
+    ran = _compile(project, monkeypatch, trusted=None)
+    assert ran.exit_code == 0, ran.output
+    assert (project / "generator-ran").exists()
 
 
 def test_apm_no_scripts_skips_scripts(isolated: Path, monkeypatch) -> None:
@@ -123,8 +202,22 @@ def test_read_only_and_redirected_modes_run_no_scripts(
 ) -> None:
     project = _project(isolated)
     _commit_instruction(project)
-    _compile(project, monkeypatch, *flags)
+    result = _compile(project, monkeypatch, *flags)
+    assert result.exit_code == 0, result.output
     assert not (project / "generator-ran").exists()
+
+
+def test_global_mode_runs_no_scripts(isolated: Path, monkeypatch) -> None:
+    project = _project(isolated)
+    monkeypatch.chdir(project)
+    with (
+        patch("apm_cli.commands.compile.cli._handle_global_flag", return_value=0) as handle,
+        patch("apm_cli.commands.compile.cli._fire_pre_compile") as fire,
+    ):
+        result = CliRunner().invoke(cli, ["compile", "--global"])
+    assert result.exit_code == 0, result.output
+    handle.assert_called_once()
+    fire.assert_not_called()
 
 
 def test_watch_mode_runs_no_scripts(isolated: Path, monkeypatch) -> None:
