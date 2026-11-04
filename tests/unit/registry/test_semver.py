@@ -159,3 +159,25 @@ class TestPickBest:
     def test_prerelease_sorts_before_release(self):
         versions = ["1.0.0-beta.1", "1.0.0"]
         assert pick_best(">=1.0.0-beta.1 <2.0.0", versions) == "1.0.0"
+
+
+class TestPickBestPrereleasePolicy:
+    """OpenAPM v0.1 §7.3.1: stable ranges must not select pre-releases."""
+
+    def test_stable_range_skips_prerelease_above_it(self):
+        assert pick_best("^1.2.3", ["1.2.3", "1.3.0-beta.1"]) == "1.2.3"
+
+    def test_stable_bounded_range_skips_rc(self):
+        assert pick_best(">=1.2.0 <2.0.0", ["1.9.0", "2.0.0-rc.1"]) == "1.9.0"
+
+    def test_tilde_range_skips_alpha(self):
+        assert pick_best("~1.2.0", ["1.2.4", "1.2.5-alpha.1"]) == "1.2.4"
+
+    def test_prerelease_range_may_select_prerelease(self):
+        assert pick_best(">=1.3.0-beta.1 <2.0.0", ["1.3.0", "1.3.0-beta.2"]) == "1.3.0"
+
+    def test_include_prerelease_opts_in(self):
+        assert (
+            pick_best("^1.2.3", ["1.2.3", "1.3.0-beta.1"], include_prerelease=True)
+            == "1.3.0-beta.1"
+        )
