@@ -110,6 +110,40 @@ rewrites `apm.lock.yaml`.
 | `apm install --mcp` (MCP servers) | No -- separate registry |
 | `apm marketplace` (`marketplace.json` fetch) | Yes; falls back to GitHub Contents API unless `PROXY_REGISTRY_ONLY=1` |
 | Policy file fetch (`apm-policy.yml`) | No -- uses the GitHub API directly |
+| Ref/version enumeration (`apm outdated`, downloader ref listings) | No -- the proxy exposes no listing surface; returns no remote refs when `PROXY_REGISTRY_ONLY=1` |
+
+### Version enumeration and semver ranges
+
+The proxy serves a package only at a ref it is given
+(`{base}/{owner}/{repo}/zip/refs/tags/{ref}`); it has no endpoint that
+lists the available tags. Resolving a semver range therefore needs a
+version listing that only the upstream host can provide.
+
+With `PROXY_REGISTRY_ONLY=1`, APM does not query the upstream host for
+that listing. The consequences are:
+
+- Ref enumeration (`apm outdated`, internal ref listings) reports no
+  remote refs, the same as for an explicitly Artifactory-hosted
+  dependency. `apm outdated` cannot report newer versions.
+- A semver range in `apm.yml` (`^1.2.0`, `1.4.x`) fails with an
+  actionable error rather than silently resolving from upstream tags.
+- An exact version (`1.2.3`) needs no listing, so it is kept as a
+  literal ref and resolved straight through the proxy. Note that
+  `ref_kind` classifies a bare `1.2.3` as a semver constraint rather
+  than a literal tag, so this is a deliberate exemption rather than a
+  side effect of that classification.
+
+Pin exact versions when running registry-only:
+
+```yaml
+dependencies:
+  apm:
+    - myorg/my-package#1.4.0    # resolves through the proxy
+    # - myorg/my-package#1.4.x  # needs a listing the proxy cannot serve
+```
+
+Unset `PROXY_REGISTRY_ONLY` if you need range resolution and can reach
+the upstream host.
 
 ### Nested-group repos (GitLab subgroups behind the proxy)
 
@@ -275,6 +309,8 @@ and `apm cache clean`.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `RuntimeError: PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured for '<dep>'` | `PROXY_REGISTRY_ONLY=1` with no `PROXY_REGISTRY_URL`, or dep is on an unproxied host (ADO, MCP) | Set `PROXY_REGISTRY_URL`, or unset `PROXY_REGISTRY_ONLY` for that dep type |
+| `Cannot resolve the range '<constraint>' for '<dep>' in registry-only mode` | A semver range needs a tag listing the proxy cannot serve; see [Version enumeration and semver ranges](#version-enumeration-and-semver-ranges) | Pin an exact version, or unset `PROXY_REGISTRY_ONLY` |
+| `apm outdated` reports nothing with `PROXY_REGISTRY_ONLY=1` | Ref enumeration is suppressed rather than querying the upstream host | Expected; check for updates with the mode unset |
 | `ERROR: ... locked to direct VCS hosts` | Lockfile predates the proxy | `apm install --update` |
 | HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN` | Verify the token has read on the upstream repo path |
 | `git clone` hangs through the proxy | `HTTPS_PROXY` not set in the env that runs `git` | Export it in the shell that invokes `apm install`; CI secrets often miss this |

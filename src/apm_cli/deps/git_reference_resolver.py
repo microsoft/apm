@@ -128,7 +128,8 @@ class GitReferenceResolver:
 
         Uses ``git ls-remote --tags --heads`` for all git hosts (GitHub,
         Azure DevOps, GitLab, generic). Artifactory dependencies return
-        an empty list (no git repo).
+        an empty list (no git repo), as do all dependencies when
+        registry-only mode (``PROXY_REGISTRY_ONLY``) is active.
         """
         return self._list_remote_refs(dep_ref, include_heads=True)
 
@@ -146,6 +147,15 @@ class GitReferenceResolver:
         host = self._host
 
         if dep_ref.is_artifactory():
+            return []
+
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: the proxy is the only sanctioned source,
+            # so skip the direct ls-remote against the upstream host. Mirrors
+            # the is_artifactory() short-circuit above: a registry-only
+            # dependency has no git remote we are permitted to enumerate.
             return []
 
         is_ado = dep_ref.is_azure_devops()
