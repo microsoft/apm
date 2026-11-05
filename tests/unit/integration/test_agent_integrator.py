@@ -1671,6 +1671,52 @@ class TestCodexAgentIntegration:
 
         assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
+    def test_codex_agent_drops_claude_model_alias(self):
+        """A Claude alias must not be copied into the Codex TOML (issue #3477)."""
+        source = self.root / "claude-model.agent.md"
+        source.write_text(
+            "---\nname: claude-model\ndescription: Agent\nmodel: sonnet\n---\nReview.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "claude-model.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        parsed = tomllib.loads(target.read_text(encoding="utf-8"))
+        assert "model" not in parsed
+        warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        assert len(warnings) == 1
+        assert "Claude model" in warnings[0].message
+        assert "codex:" in warnings[0].detail
+
+    def test_codex_agent_keeps_codex_model(self):
+        """A Codex model id is a native field and must be preserved."""
+        source = self.root / "codex-model.agent.md"
+        source.write_text(
+            "---\nname: codex-model\ndescription: Agent\nmodel: gpt-5-codex\n---\nReview.\n",
+            encoding="utf-8",
+        )
+        target = self.root / ".codex" / "agents" / "codex-model.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics = DiagnosticCollector()
+
+        AgentIntegrator._write_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name="test-pkg",
+        )
+
+        assert 'model = "gpt-5-codex"' in target.read_text(encoding="utf-8")
+        assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
+
     def test_codex_agent_user_invocable_false_emits_lossy_compilation_warning(self, capsys):
         """Codex cannot encode programmatic-only, so the drop must be announced."""
         from apm_cli.integration.targets import KNOWN_TARGETS
