@@ -546,6 +546,18 @@ class AgentIntegrator(BaseIntegrator):
             ),
         )
 
+    # Claude Code model aliases (and claude-* ids) are not valid Codex models;
+    # copying them verbatim produced an unusable .codex agent (issue #3477).
+    _CLAUDE_MODEL_ALIASES = frozenset({"opus", "sonnet", "haiku", "inherit"})
+
+    @staticmethod
+    def _is_claude_model(value: str) -> bool:
+        """Whether *value* names a Claude Code model alias or id."""
+        normalized = value.strip().lower()
+        return normalized in AgentIntegrator._CLAUDE_MODEL_ALIASES or normalized.startswith(
+            "claude-"
+        )
+
     @staticmethod
     def _write_codex_agent(
         source: Path,
@@ -584,6 +596,22 @@ class AgentIntegrator(BaseIntegrator):
                         if field not in fm:
                             continue
                         if isinstance(fm[field], str):
+                            if field == "model" and AgentIntegrator._is_claude_model(fm[field]):
+                                if diagnostics is not None:
+                                    diagnostics.lossy_agent_compilation(
+                                        message=(
+                                            f"Codex agent {printable_ascii_text(source.name)}: "
+                                            "frontmatter field 'model' names a Claude model "
+                                            f"({printable_ascii_text(fm[field])}) and was dropped."
+                                        ),
+                                        package=printable_ascii_text(package_name),
+                                        detail=(
+                                            "Fix: add a 'codex:' block with a Codex model, or drop "
+                                            "'model' from the shared agent source; then rerun "
+                                            "'apm install'."
+                                        ),
+                                    )
+                                continue
                             model_settings[field] = fm[field]
                         elif diagnostics is not None:
                             diagnostics.lossy_agent_compilation(
