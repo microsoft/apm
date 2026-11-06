@@ -358,7 +358,10 @@ class BaseIntegrator:
                         "Preserve your changes before reinstalling with --force."
                     )
                     if diagnostics is not None:
-                        diagnostics.warn(message)
+                        if expected is None:
+                            diagnostics.error(message)
+                        else:
+                            diagnostics.warn(message)
                     else:
                         _rich_warning(message)
                     if on_member_skipped is not None:
