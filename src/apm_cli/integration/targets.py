@@ -18,6 +18,7 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,25 @@ and :meth:`InstructionIntegrator._render_instruction` dispatches on this same
 set.  Adding a new rule format means: add it here, set ``output_compare=True``
 on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 """
+
+
+def _codex_home() -> Path:
+    """Return the Codex CLI user config root.
+
+    ``$CODEX_HOME`` wins when set (Codex CLI's own override), otherwise the
+    default ``~/.codex``. A relative ``CODEX_HOME`` cannot locate the directory
+    reliably and is rejected, matching the Codex MCP adapter.
+    """
+    raw = os.environ.get("CODEX_HOME", "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            raise PathTraversalError(
+                "CODEX_HOME is set to a non-absolute path; cannot locate the "
+                "Codex CLI configuration directory."
+            )
+        return path
+    return Path.home() / ".codex"
 
 
 @dataclass(frozen=True)
@@ -661,6 +681,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     "codex": TargetProfile(
         capability=TARGET_CAPABILITIES["codex"],
         root_dir=".codex",
+        user_root_resolver=_codex_home,
         primitives={
             "agents": PrimitiveMapping(
                 "agents", ".toml", "codex_agent", prompt_fields=("developer_instructions",)

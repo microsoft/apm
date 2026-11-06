@@ -842,3 +842,41 @@ class TestDiscoverGlobalInstructions:
 
         # scoped dropped; remaining sorted by file_path (aaa before bbb)
         assert result == [global_a, global_b]
+
+
+class TestCodexHomeUserScope:
+    """Codex user-scope deploy root honours CODEX_HOME (issue #3483)."""
+
+    def test_codex_home_overrides_default_root(self, tmp_path, monkeypatch):
+        from apm_cli.compilation.user_root_context import _resolve_deploy_root
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        codex_home = tmp_path / "codex-home"
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert profile is not None
+        assert _resolve_deploy_root(profile) == codex_home
+
+    def test_codex_home_unset_falls_back_to_home_dot_codex(self, monkeypatch):
+        from apm_cli.compilation.user_root_context import _resolve_deploy_root
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert profile is not None
+        assert _resolve_deploy_root(profile) == Path.home() / ".codex"
+
+    def test_relative_codex_home_is_rejected(self, monkeypatch):
+        import pytest
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.path_security import PathTraversalError
+
+        monkeypatch.setenv("CODEX_HOME", "relative/codex")
+
+        with pytest.raises(PathTraversalError):
+            KNOWN_TARGETS["codex"].for_scope(user_scope=True)
