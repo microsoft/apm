@@ -353,10 +353,16 @@ class BaseIntegrator:
                         if expected is None
                         else "modified since deployment"
                     )
-                    message = (
-                        f"Skipped {entry}: {reason}. "
-                        "Preserve your changes before reinstalling with --force."
-                    )
+                    if expected is None:
+                        message = (
+                            f"Skipped {entry}: {reason}. Move the conflicting file aside "
+                            "and retry; use --force only to intentionally overwrite it."
+                        )
+                    else:
+                        message = (
+                            f"Skipped {entry}: {reason}. "
+                            "Preserve your changes before reinstalling with --force."
+                        )
                     if diagnostics is not None:
                         if expected is None:
                             diagnostics.error(message)
