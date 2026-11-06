@@ -651,4 +651,13 @@ APM is distributed as a PyPI package (`apm-cli`) and as pre-built binaries attac
 
 ### Where is the source code?
 
-APM is open source under the MIT license, hosted on GitHub under the `microsoft` organization. The full source code, build pipeline, and release process are publicly auditable.
+APM-owned code, bundled packages, documentation and the OpenAPM specification are
+licensed under [Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE).
+Third-party material retains its applicable license; attribution and the
+historical MIT notice are preserved in
+[NOTICE](https://github.com/microsoft/apm/blob/main/NOTICE). Previously published
+MIT releases are unchanged. Downstream redistributors should review the Apache-2.0
+terms and retain the applicable license and notices when updating.
+
+APM is hosted on GitHub under the `microsoft` organization. The full source code,
+build pipeline, and release process are publicly auditable.
