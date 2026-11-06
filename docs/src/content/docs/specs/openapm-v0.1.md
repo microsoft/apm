@@ -14,7 +14,7 @@ It is published to invite review, implementation feedback, and adversarial
 critique. It MAY be updated, replaced, or made obsolete at any time. Citing
 this document as anything other than work in progress is inappropriate.
 
-OpenAPM is published under the **MIT License**.
+OpenAPM is published under the **Apache License 2.0**.
 
 Version **0.1** is a `0.x` editor's draft under semantic-version-zero
 discipline: no backward-compatibility guarantee applies until version

@@ -197,4 +197,8 @@ for the coupled specification, manifest, test, and conformance-statement edits.
 
 ## License
 
-Contributions are licensed under the project's [MIT License](LICENSE).
+Contributions are licensed under the project's [Apache License 2.0](LICENSE).
+This covers APM-owned code, bundled packages, documentation and the OpenAPM
+specification. Third-party material retains its applicable license and notices.
+Previously published MIT releases remain available under their original terms;
+the historical MIT notice is retained in [NOTICE](NOTICE).
