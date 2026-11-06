@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Public `MAINTAINERS.md` roster with names, GitHub IDs, and affiliations, preserving `AUTHORS` attribution and existing governance approval remits. (#3489)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
