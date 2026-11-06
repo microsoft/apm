@@ -13,7 +13,7 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = [pytest.mark.component, pytest.mark.integration]
+pytestmark = [pytest.mark.component, pytest.mark.integration, pytest.mark.lifecycle_smoke]
 
 
 def _skill(directory: Path) -> None:
