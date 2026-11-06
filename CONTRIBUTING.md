@@ -7,7 +7,8 @@ reviews, and code are all valuable contributions. Please follow our
 **Start with an issue, not an implementation.** For substantive changes, wait
 for a responsible human maintainer to approve the scope before coding for
 inclusion in APM. This avoids work the project cannot support or accept.
-[GOVERNANCE.md](GOVERNANCE.md) names the maintainers and their decision areas.
+[GOVERNANCE.md](GOVERNANCE.md) defines maintainer roles and approval remits;
+[MAINTAINERS.md](MAINTAINERS.md) lists public names, GitHub IDs, and affiliations.
 
 ## Find work or propose an idea
 
