@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving existing files and lock contents during cold `--frozen` replay with overlapping dependencies. Preserve local edits before an intentional `--force` overwrite. (#3490)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
