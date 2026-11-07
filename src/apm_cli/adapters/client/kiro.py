@@ -215,6 +215,8 @@ class KiroClientAdapter(CopilotClientAdapter):
             if server_info is None:
                 return False
 
+            config_key = self._determine_config_key(server_url, server_name, server_info)
+
             self._last_env_placeholder_keys = set()
             self._last_legacy_angle_vars = set()
 

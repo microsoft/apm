@@ -428,7 +428,10 @@ class MCPIntegrator:
         Mimics the structure returned by the MCP registry so that existing
         adapter code can consume self-defined deps without changes.
         """
-        info: dict = {"name": dep.name}
+        info: dict = {
+            "name": dep.name,
+            "is_self_defined": True,
+        }
 
         # For stdio self-defined deps, store raw command/args so adapters
         # can bypass registry-specific formatting (npm, docker, etc.).
