@@ -196,6 +196,16 @@ See the [experimental flag recipe](docs/src/content/docs/contributing/developmen
 See the [normative requirement workflow](docs/src/content/docs/contributing/development-guide.md#adding-or-changing-a-normative-requirement-openapm-v01)
 for the coupled specification, manifest, test, and conformance-statement edits.
 
+## Contributors
+
+APM is built by contributors from many organizations and independent
+developers. See the [full contributor list](https://github.com/microsoft/apm/graphs/contributors).
+
+Maintainers' work on APM is supported by their employers. Project
+decisions are made in the interest of APM and its users, independent
+of any single employer's commercial priorities. Maintainers disclose
+conflicts of interest when they arise.
+
 ## License
 
 Contributions are licensed under the project's [MIT License](LICENSE).

@@ -11,9 +11,9 @@ security reporting, and the transition for existing contributions.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
 The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)
-lists names, GitHub IDs, and affiliations; it does not grant approval authority.
-Author and contributor attribution remains in
-[AUTHORS](https://github.com/microsoft/apm/blob/main/AUTHORS).
+lists names, GitHub IDs, and affiliations. See
+[contributor credit](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#contributors)
+in the contribution guide.
 The [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
 separates priorities from scope approval and release targets. Follow the public
 [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) for current
