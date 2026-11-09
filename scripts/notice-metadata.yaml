@@ -1,19 +1,23 @@
 _header:
   preamble: |
     This file is generated and maintained per the Microsoft CELA "Manual NOTICE
-    Generation" process. It enumerates third-party open-source components that ship
-    with this project (the runtime dependencies of the `apm` Python package). Build-
-    time and contributor-only tooling (test runners, linters, type-checkers, the
-    PyInstaller build backend, and the `setuptools` / `wheel` build system) are not
-    distributed and are intentionally omitted, as is install-time user state created
-    by the CLI under `apm_modules/`. No third-party source is vendored into this
-    repository.
+    Generation" process. The generator enumerates the direct Python runtime
+    dependencies declared in `pyproject.toml`. This is not a complete inventory
+    of transitive, vendored, native, website or build-tool components. In
+    particular, setuptools is also a transitive runtime dependency through llm;
+    its nested components require their own review. Installed Python packages
+    and standalone binaries can contain different components. Redistributors
+    must assess the actual distribution and preserve all applicable notices.
+    Packages installed by users under `apm_modules/` are outside this inventory.
 
     APM
     Copyright (c) Microsoft Corporation.
 
-    APM-owned code, bundled packages, documentation and the OpenAPM specification
-    are licensed under the Apache License, Version 2.0; see `LICENSE`.
+    APM-owned software, bundled agent primitives, code examples and the
+    software-facing OpenAPM specification use the Apache License, Version 2.0;
+    see `LICENSE`. General documentation is licensed under Creative Commons
+    Attribution 4.0 International (CC-BY-4.0); see `LICENSE-DOCS`.
+    `LICENSING.md` defines the scope and exclusions.
     Third-party material retains its applicable license and notices below.
 
     ## Historical MIT notice
@@ -154,9 +158,9 @@ components:
   - name: filelock
     pyproject_name: filelock
     upstream: https://github.com/tox-dev/filelock
-    spdx: Unlicense
-    copyright_snippet: Released into the public domain via The Unlicense (no copyright claimed by upstream).
-    notes: Used for cross-process file-based locks in the persistent install cache.
+    spdx: MIT
+    copyright_snippet: "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors"
+    notes: Used for cross-process file-based locks in the persistent install cache. Attribution verified against the locked 3.29.0 release; this does not assert that every release admitted by filelock>=3.12 uses MIT.
   - name: watchdog
     pyproject_name: watchdog
     upstream: https://github.com/gorakhargosh/watchdog

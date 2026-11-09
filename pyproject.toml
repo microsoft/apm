@@ -62,6 +62,9 @@ build = [
 [project.scripts]
 apm = "apm_cli.entrypoint:main"
 
+[tool.setuptools]
+license-files = ["LICENSE", "LICENSE-DOCS", "LICENSING.md", "NOTICE"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["apm_cli*"]

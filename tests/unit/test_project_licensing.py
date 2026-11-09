@@ -34,6 +34,92 @@ def test_python_distribution_declares_apache_license() -> None:
     assert "END OF TERMS AND CONDITIONS" in license_text
 
 
+def test_documentation_license_matches_official_legal_text() -> None:
+    """Preserve the official legal text across LF and CRLF checkouts."""
+    legal_text = (ROOT / "LICENSE-DOCS").read_text(encoding="utf-8")
+    assert hashlib.sha256(legal_text.encode("utf-8")).hexdigest() == (
+        "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411"
+    )
+
+
+def test_python_distribution_includes_licenses_scope_and_notice() -> None:
+    """Wheel and sdist configuration must carry the documentation scope too."""
+    config = toml.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert set(config["tool"]["setuptools"]["license-files"]) == {
+        "LICENSE",
+        "LICENSE-DOCS",
+        "LICENSING.md",
+        "NOTICE",
+    }
+
+
+def test_documentation_scope_excludes_software_and_specification() -> None:
+    """Markdown syntax must not relicense executable primitives or OpenAPM."""
+    scope = (ROOT / "LICENSING.md").read_text(encoding="utf-8")
+    assert "## General documentation: CC-BY-4.0" in scope
+    assert "Root Markdown documents" in scope
+    assert "docs/src/content/docs/" in scope
+    assert "Code and configuration examples" in scope
+    assert "Markdown used as an agent\n  primitive is software" in scope
+    assert "docs/src/content/docs/specs/openapm-*.md" in scope
+    assert "excluded from this\ndocumentation grant" in scope
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "CONTRIBUTING.md",
+        "NOTICE",
+        "docs/src/content/docs/index.mdx",
+        "docs/src/content/docs/enterprise/security.md",
+    ],
+)
+def test_documentation_license_is_discoverable(filename: str) -> None:
+    """Contributor and redistributor entry points link the scoped doc license."""
+    content = (ROOT / filename).read_text(encoding="utf-8")
+    assert "CC-BY-4.0" in content
+    assert "LICENSE-DOCS" in content
+    assert "LICENSING.md" in content
+
+
+def test_docs_footer_exposes_both_license_scopes() -> None:
+    """The site-wide footer must not imply that OpenAPM is CC-BY licensed."""
+    config = (ROOT / "docs" / "astro.config.mjs").read_text(encoding="utf-8")
+    footer = (ROOT / "docs" / "src" / "components" / "Footer.astro").read_text(encoding="utf-8")
+    assert "Footer: './src/components/Footer.astro'" in config
+    assert "<DefaultFooter />" in footer
+    assert "General documentation:" in footer
+    assert "CC-BY-4.0" in footer
+    assert "Software, code examples and OpenAPM:" in footer
+    assert "Apache-2.0" in footer
+
+
+def test_filelock_notice_matches_reviewed_release() -> None:
+    """Catch the stale Unlicense/public-domain override for filelock 3.29.0."""
+    metadata = yaml.safe_load(
+        (ROOT / "scripts" / "notice-metadata.yaml").read_text(encoding="utf-8")
+    )
+    component = next(item for item in metadata["components"] if item["name"] == "filelock")
+    assert component["spdx"] == "MIT"
+    assert component["copyright_snippet"] == (
+        "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors"
+    )
+    assert "locked 3.29.0 release" in component["notes"]
+    notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
+    section = notice.split("## Component. filelock\n", 1)[1].split("\n## Component.", 1)[0]
+    assert "Unlicense" not in section
+    assert component["copyright_snippet"] in section
+    assert "MIT License" in section
+
+
+def test_notice_discloses_direct_dependency_coverage_limit() -> None:
+    """A drift-free NOTICE must not imply automatic coverage of nested deps."""
+    notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
+    assert "direct Python runtime\ndependencies" in notice
+    assert "not a complete inventory" in notice
+    assert "setuptools is also a transitive runtime dependency through llm" in notice
+
+
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda path: path.relative_to(ROOT).as_posix())
 def test_first_party_manifest_declares_apache_license(manifest: Path) -> None:
     """Published first-party packages and installed skill copies agree."""
@@ -69,6 +155,6 @@ def test_standalone_build_includes_license_and_notice() -> None:
     )
     assert isinstance(datas, ast.List)
     entries = {ast.dump(item) for item in datas.elts}
-    for filename in ("LICENSE", "NOTICE"):
+    for filename in ("LICENSE", "LICENSE-DOCS", "LICENSING.md", "NOTICE"):
         expected = ast.parse(f"(str(repo_root / {filename!r}), '.')", mode="eval").body
         assert ast.dump(expected) in entries, filename

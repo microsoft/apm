@@ -208,8 +208,11 @@ conflicts of interest when they arise.
 
 ## License
 
-Contributions are licensed under the project's [Apache License 2.0](LICENSE).
-This covers APM-owned code, bundled packages, documentation and the OpenAPM
-specification. Third-party material retains its applicable license and notices.
+Contributions use the license for the material being contributed:
+[Apache License 2.0](LICENSE) for software, bundled agent primitives, code
+examples and the software-facing OpenAPM specification;
+[CC-BY-4.0](LICENSE-DOCS) for general documentation.
+[LICENSING.md](LICENSING.md) defines the scope and exclusions.
+Third-party material retains its applicable license and notices.
 Previously published MIT releases remain available under their original terms;
 the historical MIT notice is retained in [NOTICE](NOTICE).

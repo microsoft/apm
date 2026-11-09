@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Switch APM-owned code, bundled packages, documentation and `specs/openapm-v0.1.md` to Apache-2.0, retaining historical MIT and third-party notices and bundling `LICENSE` and `NOTICE` in standalone distributions. Redistributors should review the Apache-2.0 terms and retain applicable notices when updating; previous MIT releases are unchanged. (#3487)
+- Switch APM-owned software, agent primitives, code examples and OpenAPM to Apache-2.0, with general documentation under CC-BY-4.0; distribute both licenses and their scope, preserve historical MIT and third-party notices, and correct filelock attribution and NOTICE coverage wording. Redistributors should review the applicable terms and retain notices when updating; previous MIT releases are unchanged. (#3487)
 
 ### Added
 
