@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving existing files and lock contents during cold `--frozen` replay with overlapping dependencies. Preserve local edits before an intentional `--force` overwrite. (#3490)
+- `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving refused files and prior lock contents during cold `--frozen` replay with overlapping dependencies. Files admitted earlier in a failed install may remain; move conflicting files aside before retrying or use `--force` only for intentional overwrites. (#3490)
+
+### Added
+
+- Public `MAINTAINERS.md` roster replaces the duplicate `AUTHORS` file, with contributor credit in `CONTRIBUTING.md` and unchanged governance approval remits. (#3489)
 
 ## [0.35.0] - 2026-10-22
 
