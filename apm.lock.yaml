@@ -56,7 +56,7 @@ dependencies:
   - .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py
   deployed_file_hashes:
     .agents/skills/autopilot-pr-merge-worker/SKILL.md: sha256:bff587a94c928a8d3e0104edde83cf4323939a737f5ee17fed4918f00810f981
-    .agents/skills/autopilot-pr-merge-worker/apm.yml: sha256:efae1514c8d1ca5469e2c38c361e3953c3f38e659c7a3f4f49cf1298c272ab67
+    .agents/skills/autopilot-pr-merge-worker/apm.yml: sha256:e421410ed6fe9e77256036f998036bdad5b8706e1d185d8a0414d285f9f9cfa9
     .agents/skills/autopilot-pr-merge-worker/assets/ci-recovery-checklist.md: sha256:99a56f316d6f8c859703e281d4c8177771e47d642dc098da0d8441813336d59b
     .agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json: sha256:6e0a06fa98f3e0544f5ebd6039da28f9cbdfeccd807565365b761265f8515a5c
     .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md: sha256:18d2476f70df6154849e7a6c06a906d7eb4a73a844455e7562b37af1f095e1bb
@@ -118,7 +118,7 @@ dependencies:
   - .agents/skills/autopilot-comment/apm.yml
   deployed_file_hashes:
     .agents/skills/autopilot-comment/SKILL.md: sha256:8707dbc45d8327dceab976f12008fe8384854c9fddf1b399c175d87e74041339
-    .agents/skills/autopilot-comment/apm.yml: sha256:4db657c42507061d9bfbd795a498e32f2492817b91343e4ff158886619c17fd0
+    .agents/skills/autopilot-comment/apm.yml: sha256:2cf7614f8a5629f2acb49d9ddd1599ae39efa1c53cb1cb327dcc8a3a06a177e3
   source: local
   local_path: ../autopilot-comment
   content_hash: sha256:99f30af2deabe503620dfdb31d5f9c9d475b6649933d0e9acca5f1a2b3cc31dd
@@ -200,7 +200,7 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md
   deployed_file_hashes:
     .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:671433a866ce90de3aa2864ead74c5939eec49081e4065589eb63fe9cb0e032a
-    .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:e30032b751ffbeda9944024052b8ac51de0fe5e8e1a1f79f1fed13dcf9f9c42a
+    .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:c40c6fd4b99933d80ba66aa2de43cbada2a3f20a055c86a0b06d16d784905e10
     .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:e37365e25911cca25775b1b111f38bbd1ccd09f6b57b7739ea09471d245d3d35
   source: local
@@ -234,7 +234,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
   deployed_file_hashes:
     .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:9f648dd0bc893b1368ecd858480a8e2f5425b5a05ca3d94e9187ca43a1693258
-    .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:140ac5ad227d28c8f7ed26b8e9ba7c262ce8abc598497fcbfb228258018d468f
+    .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:1f76ef69f9b7c08ade71bbbb7cf3e88ad262b788858a1ab08567e7dc263072bf
     .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
     .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md: sha256:2d535e4ee141fcb865df7689f2be100d636e3dfa0410054d610cf9a1d9623c8d
     .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json: sha256:959a9e744cf3a062c906ca7ec716731cfc440561c8ef6c1b57f3c7fc108c8c44
@@ -306,7 +306,7 @@ dependencies:
   - .agents/skills/pr-description-skill/scripts/run_evals.py
   deployed_file_hashes:
     .agents/skills/pr-description-skill/SKILL.md: sha256:d07254e9d0b95ea52d1a81d3262ca42da8c4c51d801eac4f11b6bc454cfb01a0
-    .agents/skills/pr-description-skill/apm.yml: sha256:ee9bb48581e62279708a9a12dc57174c9f5f7d347a384e4ca6b99c050c63879d
+    .agents/skills/pr-description-skill/apm.yml: sha256:1e157404d5437d7a355f596a04266585c2e9b36cd8149becf53b616ef47b78fb
     .agents/skills/pr-description-skill/assets/mermaid-conventions.md: sha256:3d9c7adf95d40db00833ec087d699a7d04b3d799e9b9d07271cf2ae7d51524ca
     .agents/skills/pr-description-skill/assets/pr-body-template.md: sha256:aaeb885fbfa87364724f575eb150c9c39dc3cb60ab0459972e76185df9c98f97
     .agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md: sha256:bbb386b6f48974bbb78a380fd4674ed7a3a81810a6c2136e30c80158153596ae
@@ -359,7 +359,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-comment
   active_owner: local:packages/autopilot/autopilot-comment
-  content_hash: sha256:4db657c42507061d9bfbd795a498e32f2492817b91343e4ff158886619c17fd0
+  content_hash: sha256:2cf7614f8a5629f2acb49d9ddd1599ae39efa1c53cb1cb327dcc8a3a06a177e3
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-scheduler
@@ -683,7 +683,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:e30032b751ffbeda9944024052b8ac51de0fe5e8e1a1f79f1fed13dcf9f9c42a
+  content_hash: sha256:c40c6fd4b99933d80ba66aa2de43cbada2a3f20a055c86a0b06d16d784905e10
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json
@@ -728,7 +728,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:efae1514c8d1ca5469e2c38c361e3953c3f38e659c7a3f4f49cf1298c272ab67
+  content_hash: sha256:e421410ed6fe9e77256036f998036bdad5b8706e1d185d8a0414d285f9f9cfa9
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/assets/ci-recovery-checklist.md
@@ -863,7 +863,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:140ac5ad227d28c8f7ed26b8e9ba7c262ce8abc598497fcbfb228258018d468f
+  content_hash: sha256:1f76ef69f9b7c08ade71bbbb7cf3e88ad262b788858a1ab08567e7dc263072bf
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json
@@ -1097,7 +1097,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:ee9bb48581e62279708a9a12dc57174c9f5f7d347a384e4ca6b99c050c63879d
+  content_hash: sha256:1e157404d5437d7a355f596a04266585c2e9b36cd8149becf53b616ef47b78fb
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/assets/mermaid-conventions.md

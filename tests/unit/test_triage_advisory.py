@@ -226,6 +226,10 @@ def test_installed_skill_files_and_recorded_hashes_match_sources(tmp_path: Path)
     """Exercise the published package and its generated installation contract."""
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     for name, source in [
+        ("autopilot-comment", ROOT / "packages/autopilot/autopilot-comment"),
+        ("autopilot-pr-merge-worker", ROOT / "packages/autopilot/autopilot-pr-merge-worker"),
+        ("autopilot-pr-review-worker", ROOT / "packages/autopilot/autopilot-pr-review-worker"),
+        ("pr-description-skill", ROOT / "packages/pr-description-skill"),
         ("autopilot-issue-triage-worker", WORKER),
         ("autopilot-issue-delivery-worker", WORKER_CODE),
         ("autopilot-issue-triage-scheduler", PACKAGE),
