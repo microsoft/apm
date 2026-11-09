@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Switch APM-owned code, bundled packages, documentation and `specs/openapm-v0.1.md` to Apache-2.0, retaining historical MIT and third-party notices and bundling `LICENSE` and `NOTICE` in standalone distributions. Redistributors should review the Apache-2.0 terms and retain applicable notices when updating; previous MIT releases are unchanged. (#3487)
 
+### Added
+
+- Public `MAINTAINERS.md` roster replaces the duplicate `AUTHORS` file, with contributor credit in `CONTRIBUTING.md` and unchanged governance approval remits. (#3489)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
