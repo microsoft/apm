@@ -25,6 +25,7 @@ from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
+from ..utils.paths import portable_relpath
 
 _logger = logging.getLogger(__name__)
 
@@ -599,6 +600,7 @@ def synthesize_apm_yml_from_plugin(
         plugin_path,
         manifest,
         substitute_plugin_root=substitute_plugin_root,
+        warn_on_invalid=warn_on_invalid_servers,
     )
     if mcp_servers:
         mcp_deps = _mcp_servers_to_apm_deps(
@@ -667,12 +669,13 @@ def _extract_mcp_servers(
     manifest: dict[str, Any],
     *,
     substitute_plugin_root: bool = True,
+    warn_on_invalid: bool = True,
 ) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
 
     Resolves ``mcpServers`` by type (per Claude Code spec):
-    - ``str``  -> read that file path relative to plugin root, parse JSON,
-      extract ``mcpServers`` key.
+    - ``str``  -> read that file path relative to plugin root and parse it
+      as wrapped or flat MCP JSON (see :func:`_read_mcp_json`).
     - ``list`` -> read each file path, merge (last-wins on name conflict).
     - ``dict`` -> use directly as inline server definitions.
 
@@ -689,24 +692,28 @@ def _extract_mcp_servers(
     Args:
         plugin_path: Root of the plugin directory.
         manifest: Parsed plugin.json dict.
+        substitute_plugin_root: Whether to resolve plugin-root placeholders.
+        warn_on_invalid: Whether an MCP file with no usable server warns.
 
     Returns:
         dict mapping server name -> server config.  Empty on failure.
     """
     logger = logging.getLogger("apm")
     mcp_value = manifest.get("mcpServers")
+    plugin_name = str(manifest.get("name") or plugin_path.name)
+    read_options: dict[str, Any] = {"plugin_name": plugin_name, "warn": warn_on_invalid}
 
     if mcp_value is not None:
         # Manifest explicitly defines mcpServers
         if isinstance(mcp_value, dict):
             servers = dict(mcp_value)
         elif isinstance(mcp_value, str):
-            servers = _read_mcp_file(plugin_path, mcp_value, logger)
+            servers = _read_mcp_file(plugin_path, mcp_value, logger, **read_options)
         elif isinstance(mcp_value, list):
             servers = {}
             for entry in mcp_value:
                 if isinstance(entry, str):
-                    servers.update(_read_mcp_file(plugin_path, entry, logger))
+                    servers.update(_read_mcp_file(plugin_path, entry, logger, **read_options))
                 else:
                     logger.warning("Ignoring non-string entry in mcpServers array: %s", entry)
         else:
@@ -718,7 +725,7 @@ def _extract_mcp_servers(
         for fallback in ("mcp.json", ".mcp.json", ".github/.mcp.json"):
             candidate = plugin_path / fallback
             if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
-                servers = _read_mcp_json(candidate, logger)
+                servers = _read_mcp_json(candidate, logger, plugin_path=plugin_path, **read_options)
                 if servers:
                     break
 
@@ -730,8 +737,15 @@ def _extract_mcp_servers(
     return servers
 
 
-def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> dict[str, Any]:
-    """Read a JSON file relative to *plugin_path* and return its ``mcpServers`` dict."""
+def _read_mcp_file(
+    plugin_path: Path,
+    rel_path: str,
+    logger: logging.Logger,
+    *,
+    plugin_name: str | None = None,
+    warn: bool = True,
+) -> dict[str, Any]:
+    """Read a JSON file relative to *plugin_path* and return its MCP server map."""
     target = (plugin_path / rel_path).resolve()
     # Security: must stay inside plugin_path and not be a symlink
     try:
@@ -746,20 +760,51 @@ def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> 
     if candidate.is_symlink():
         logger.warning("Skipping symlinked MCP file: %s", candidate)
         return {}
-    return _read_mcp_json(candidate, logger)
+    return _read_mcp_json(
+        candidate, logger, plugin_path=plugin_path, plugin_name=plugin_name, warn=warn
+    )
 
 
-def _read_mcp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
-    """Parse a JSON file and return the ``mcpServers`` mapping."""
+def _read_mcp_json(
+    path: Path,
+    logger: logging.Logger,
+    *,
+    plugin_path: Path | None = None,
+    plugin_name: str | None = None,
+    warn: bool = True,
+) -> dict[str, Any]:
+    """Parse an MCP JSON file and return its server mapping.
+
+    Accepts the two shapes Claude Code documents for plugin MCP files:
+    - Wrapped: ``{"mcpServers": {"name": {...}}}``. Returned unchanged.
+    - Flat: ``{"name": {...}}``. Accepted only when every value is a server
+      object, so unrelated top-level keys never become servers.
+
+    A file that yields no server object emits one user-facing warning that
+    names only the file and plugin, never file contents.
+    """
     try:
         data = _bounded_read_json(path)
     except (ValueError, OSError) as exc:
         logger.warning("Failed to read MCP config %s: %s", path, exc)
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    servers = data.get("mcpServers", {})
-    return dict(servers) if isinstance(servers, dict) else {}
+        data = None
+    servers: dict[str, Any] = {}
+    if isinstance(data, dict):
+        if "mcpServers" in data:
+            wrapped = data["mcpServers"]
+            if isinstance(wrapped, dict):
+                servers = dict(wrapped)
+        elif all(isinstance(value, dict) for value in data.values()):
+            servers = dict(data)
+    if warn and not any(isinstance(value, dict) for value in servers.values()):
+        root = plugin_path if plugin_path is not None else path.parent
+        _surface_warning(
+            f"MCP config '{portable_relpath(path, root)}' in plugin "
+            f"'{plugin_name or root.name}' declares no usable MCP servers; expected "
+            '{"mcpServers": {...}} or a top-level map of server objects',
+            logger,
+        )
+    return servers
 
 
 def _substitute_plugin_root(

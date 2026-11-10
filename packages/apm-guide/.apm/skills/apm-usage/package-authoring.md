@@ -20,6 +20,11 @@ An `apm.yml` is eligible when the root also has `.apm/` or the manifest
 declares APM or MCP dependencies. To intentionally select a plugin layout,
 omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
 
+Claude plugin MCP files (`.mcp.json`, `mcp.json`, `.github/.mcp.json`, or JSON
+files named by `plugin.json` `mcpServers`) may use `{"mcpServers": {...}}` or a
+flat top-level server map whose values are all server objects. A file with no
+usable server is skipped with a warning naming the file and plugin.
+
 Root `plugin.json` and `.claude-plugin/plugin.json` also precede the Codex
 compatibility overlay. The Codex route requires a native-discoverable skill
 with an unambiguous installed path. MCP declarations may be an inline server
