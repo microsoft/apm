@@ -138,7 +138,8 @@ For a self-defined Codex stdio connection at project scope (`.codex/config.toml`
 an `env` value written as exactly `KEY: ${KEY}` or `KEY: ${env:KEY}` under the
 same key becomes `env_vars = ["KEY"]`. Codex reads those variables from the
 environment that launches it, so APM never resolves, prompts for, or writes the
-value, whether or not `KEY` is set during install. Any other reference, such as
+value into `env`, whether or not `KEY` is set during install. An `args`
+reference to the same variable is still resolved. Any other reference, such as
 `TOKEN: ${OTHER}` or `AUTH: Bearer ${TOKEN}`, is still resolved at install time
 and written to `.codex/config.toml`; APM warns with the key names only and
 suggests declaring `KEY: ${KEY}` to forward instead. User scope (`-g`) is
