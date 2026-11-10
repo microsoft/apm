@@ -178,7 +178,11 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
         if logger:
             logger.orphan_cleanup(_orphan_total_deleted)
         if partial_dropped:
-            _remove_dropped_package_dirs(ctx, partial_dropped, orphan_cleanup_retained)
+            pinned = _pin_retained_ancestors(
+                existing_lockfile, partial_dropped, frozenset(orphan_cleanup_retained)
+            )
+            ctx.partial_pinned_dep_keys = pinned
+            _remove_dropped_package_dirs(ctx, partial_dropped, pinned)
 
     # ------------------------------------------------------------------
     # Stale-file cleanup: within each package still present in the
@@ -255,17 +259,48 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
 
 
+def _pin_retained_ancestors(
+    lockfile, dropped: frozenset[str], retained: frozenset[str]
+) -> frozenset[str]:
+    """Keep each retained dropped entry plus its dropped ancestors for a later retry.
+
+    A descendant whose deployed files could not be removed stays locked under
+    its recorded parent; keeping that parent chain lets the next targeted
+    install of the selected package rediscover and retry it.
+    """
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    by_identity = {
+        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements): key
+        for key in dropped
+        if key in lockfile.dependencies
+    }
+    pinned: set[str] = set()
+    queue = [key for key in dropped if key in retained]
+    while queue:
+        key = queue.pop()
+        if key in pinned or key not in lockfile.dependencies:
+            continue
+        pinned.add(key)
+        queue.extend(
+            by_identity[parent]
+            for parent in lockfile.dependencies[key].parent_keys
+            if parent in by_identity
+        )
+    return frozenset(pinned)
+
+
 def _remove_dropped_package_dirs(
     ctx: InstallContext,
     dropped: frozenset[str],
-    retained_orphans: dict[str, dict[str, str | None]],
+    pinned: frozenset[str],
 ) -> None:
     """Remove dropped descendants' ``apm_modules`` copies that nothing retained shares.
 
     Selection routes through the declaration-aware orphan owner so a path
-    still used by a declared, retained or newly selected package survives.
-    Entries whose deployed files could not all be removed keep their copy
-    alongside their retained lock entry for the next install.
+    still used by a resolved, retained, pinned or newly selected package
+    survives. Pinned entries keep their copy alongside their lock entry for
+    the next install.
     """
     from apm_cli.commands._helpers import _build_expected_install_paths, _find_orphaned_packages
     from apm_cli.deps.lockfile import _SELF_KEY
@@ -278,14 +313,21 @@ def _remove_dropped_package_dirs(
     removable = [
         dependency
         for key, dependency in sorted(existing_lockfile.dependencies.items())
-        if key in dropped and key not in retained_orphans
+        if key in dropped and key not in pinned
     ]
+    graph = getattr(ctx, "dependency_graph", None)
     try:
-        retained_refs = [*ctx.all_apm_deps, *ctx.deps_to_install]
+        # Resolved graph references, not raw declarations: unresolved
+        # marketplace entries have no install path of their own.
+        retained_refs = [*ctx.deps_to_install]
+        if graph is not None:
+            retained_refs.extend(
+                node.dependency_ref for node in graph.dependency_tree.nodes.values()
+            )
         retained_refs.extend(
             dependency.to_dependency_ref()
             for key, dependency in existing_lockfile.dependencies.items()
-            if key != _SELF_KEY and key not in dropped
+            if key != _SELF_KEY and (key not in dropped or key in pinned)
         )
         expected = _build_expected_install_paths(retained_refs, None, apm_modules_dir)
         candidates = _build_expected_install_paths(

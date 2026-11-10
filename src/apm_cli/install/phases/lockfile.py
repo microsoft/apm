@@ -533,15 +533,21 @@ class LockfileBuilder:
     def _reconcile_partial_subtree(self, existing: LockFile) -> None:
         """Retire the selected packages' dropped descendants from a partial merge (#3502).
 
+        Pinned entries -- undeleted files or their dropped ancestors -- stay
+        locked with only their retained files so the next install can retry.
         Rescued descendants -- still reached through another retained
-        package -- keep their entry but take their current parent from the
-        complete graph so later subtree scans and ``apm deps tree`` agree.
+        package -- keep their entry but take their current parent and local
+        declaration from the complete graph so later subtree scans, ``apm
+        deps tree`` and local-source anchoring agree.
         """
         retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
+        pinned = getattr(self.ctx, "partial_pinned_dep_keys", frozenset())
         for dep_key in sorted(getattr(self.ctx, "partial_dropped_dep_keys", ())):
             dep = existing.dependencies.pop(dep_key, None)
-            if dep is not None and (retained := retained_orphans.get(dep_key)):
-                self._keep_retained_orphan(existing, dep_key, dep, retained)
+            if dep is not None and dep_key in pinned:
+                self._keep_retained_orphan(
+                    existing, dep_key, dep, retained_orphans.get(dep_key, {})
+                )
         graph = getattr(self.ctx, "dependency_graph", None)
         if graph is None:
             return
@@ -554,6 +560,11 @@ class LockfileBuilder:
                 continue
             dep.resolved_by = locked_parent_identity(self.ctx, node)
             dep.depth = node.depth
+            reference = node.dependency_ref
+            if reference.is_local:
+                dep.local_path = reference.local_path
+                dep.declaring_parent = reference.declaring_parent
+                dep.anchored_local_path = reference.anchored_local_path
 
     def _maybe_merge_partial(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> LockFile:
         if self.ctx.only_packages:

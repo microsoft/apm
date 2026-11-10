@@ -950,7 +950,10 @@ def _record_partial_subtree_reconciliation(ctx: InstallContext) -> None:
     from apm_cli.install.package_selection import previous_selected_subtree_keys
 
     dropped, rescued = previous_selected_subtree_keys(
-        ctx.only_packages, ctx.existing_lockfile, ctx.update_plan_complete_dep_keys
+        ctx.only_packages,
+        ctx.all_apm_deps,
+        ctx.existing_lockfile,
+        ctx.update_plan_complete_dep_keys,
     )
     ctx.partial_dropped_dep_keys = dropped
     ctx.partial_rescued_dep_keys = rescued

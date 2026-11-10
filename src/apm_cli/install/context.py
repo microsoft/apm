@@ -103,6 +103,8 @@ class InstallContext:
     # (rescued). See package_selection.previous_selected_subtree_keys (#3502).
     partial_dropped_dep_keys: frozenset[str] = frozenset()  # resolve
     partial_rescued_dep_keys: frozenset[str] = frozenset()  # resolve
+    # Dropped entries kept for retry: undeleted files or their dropped ancestors.
+    partial_pinned_dep_keys: frozenset[str] = frozenset()  # cleanup
     dependency_graph: Any = None  # resolve
     existing_lockfile: Any = None  # resolve
     lockfile_path: Path | None = None  # resolve
