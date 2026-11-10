@@ -63,7 +63,11 @@ apm deps list [OPTIONS]
 ### `apm deps tree`
 
 Render the complete dependency graph as a hierarchical tree, following
-`resolved_by` relationships at every lockfile depth. When no lockfile is
+`resolved_by` relationships at every lockfile depth. When sibling
+subdirectory packages from one repository share a `resolved_by` value, each
+child is placed under the sibling whose installed `apm.yml` declares it; a
+child that no single parent declares is listed as `could not place in tree`.
+When no lockfile is
 present, the command falls back to a scan of `apm_modules/` and ignores
 parent-owned manifests embedded inside an installed package. Circular
 relationships are marked `(circular)` at the repeated ancestor and do not
@@ -91,7 +95,7 @@ apm deps info PACKAGE
 
 ### `apm deps why`
 
-Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
+Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. Subdirectory packages appear by their full path, and same-repository siblings are told apart by their installed manifests, as in `apm deps tree`. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
 
 ```bash
 apm deps why PACKAGE [OPTIONS]

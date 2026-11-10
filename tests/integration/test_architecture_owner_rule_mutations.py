@@ -720,6 +720,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Config mutation stops routing through the canonical lifecycle lock.",
     ),
     MutationCase(
+        guard_id="install-deployment-lock-parent-placement",
+        rule_id="install-deployment-lock-parent-placement",
+        path="src/apm_cli/deps/why_walker.py",
+        old="    legacy = lockfile.replacements is None\n",
+        new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
+        intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",

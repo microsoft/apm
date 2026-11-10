@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
+- `apm deps tree` and `apm deps why` place transitive dependencies under the declaring package when sibling subdirectory packages from one repository share a parent, instead of listing them as `could not place in tree`. (#PR_NUMBER)
 
 ## [0.35.0] - 2026-10-22
 
