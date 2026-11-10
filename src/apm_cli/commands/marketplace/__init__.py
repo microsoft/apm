@@ -436,7 +436,7 @@ def add(source, name, ref, branch, host, verbose):
             logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
-        # placeholder -- _auto_detect_path only consults url/ref/path/kind.
+        # placeholder -- _auto_detect_path_with_payload only consults url/ref/path/kind.
         probe_name = provisional_label
         probe_source = MarketplaceSource(
             name=probe_name,
