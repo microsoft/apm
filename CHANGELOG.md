@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Registry-only mode (`PROXY_REGISTRY_ONLY`) no longer enumerates refs from the upstream host. `apm outdated` and downloader ref listings return no remote refs instead of running `git ls-remote` against the source host, matching how Artifactory-backed dependencies are already treated, and `apm install` / `apm lock` reject a semver range with an actionable error rather than resolving it from upstream tags. Behaviour is unchanged when the mode is off. (#3448)
+- Registry-only mode (`PROXY_REGISTRY_ONLY`) no longer contacts the upstream host to enumerate refs or versions: `apm view <pkg> versions` fails with an actionable error instead of running `git ls-remote`, `apm outdated` reports git dependencies as unknown and names the remedy, `apm install` / `apm lock` reject a semver range with an actionable error while exact pins keep resolving through the proxy, and ref-to-SHA lookup skips the GitHub commits API. Behaviour is unchanged when the mode is off. (#3471)
+
 ### Changed
 
 - Switch APM-owned software, agent primitives, code examples and OpenAPM to Apache-2.0, with general documentation under CC-BY-4.0; distribute both licenses and their scope, preserve historical MIT and third-party notices, and correct filelock attribution and NOTICE coverage wording. Redistributors should review the applicable terms and retain notices when updating; previous MIT releases are unchanged. (#3487)
