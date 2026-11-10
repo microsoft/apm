@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Packages with in-repo symbolic links now record the same `content_hash` on Windows as on Linux and macOS, so `apm install --frozen` verifies a lockfile generated on another platform. APM pins `core.symlinks=true` on its own Git commands, re-creates older cached checkouts, and fails with a diagnostic naming the package when the host cannot create symlinks (on Windows, enable Developer Mode). (#3545)
 - `apm install` and `apm install -g` no longer fail with "installation binding does not match" after a reboot or remount changes only the root's device number on Linux (btrfs subvolumes) and macOS; the receipt is rebound when inode, path, installation identity and recorded creation time still match, and recreated roots stay rejected. -- by @TyceHerrman (#3439)
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
 
