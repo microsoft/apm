@@ -1512,3 +1512,27 @@ def test_local_plugin_redirect_requires_matching_lock_type(tmp_path: Path) -> No
     view = _derive(root, lockfile, modules)
 
     assert view.configs == {}
+
+
+@pytest.mark.parametrize("allow_pending", [True, False])
+def test_missing_local_plugin_manifest_is_pending_only_for_restorable_preflight(
+    tmp_path: Path, allow_pending: bool
+) -> None:
+    """Frozen preflight defers restoration; strict post-restoration checks still fail."""
+    root = _write_manifest(tmp_path, name="consumer")
+    modules = _write_local_claude_plugin(tmp_path / "plug", synthesized_mcp=None)
+    logger = _RecordingLogger()
+
+    view = CurrentMcpConfigView.derive(
+        root,
+        _local_plugin_lock("./plug"),
+        modules,
+        trust_transitive_self_defined=True,
+        logger=logger,
+        allow_pending=allow_pending,
+    )
+
+    assert view.configs == {}
+    assert view.pending_packages == ({"./plug"} if allow_pending else frozenset())
+    assert bool(view.problems) is not allow_pending
+    assert bool(logger.warning_messages) is not allow_pending

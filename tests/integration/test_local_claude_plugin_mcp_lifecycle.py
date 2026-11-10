@@ -186,3 +186,46 @@ def test_local_plugin_mcp_is_subject_to_policy_preflight(
     assert "demo" in result.output
     assert not (project / ".mcp.json").exists()
     assert not (project / ".codex" / "config.toml").exists()
+
+
+@patch(_PATCH_UPDATES, return_value=None)
+def test_local_plugin_mcp_frozen_replay_restores_cold_cache(
+    _updates, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deleted apm_modules is restored from verified local content under --frozen."""
+    _write_plugin(workspace / "plug", "dot-mcp-json")
+    project = workspace / "consumer"
+    _write_consumer(project, "../plug")
+    assert _install(project, monkeypatch, "--no-policy").exit_code == 0
+    locked = (project / "apm.lock.yaml").read_bytes()
+    native = (project / ".mcp.json").read_bytes()
+    shutil.rmtree(project / "apm_modules")
+
+    frozen = _install(project, monkeypatch, "--frozen", "--no-policy")
+
+    assert frozen.exit_code == 0, frozen.output
+    assert (project / "apm_modules" / "_local" / "plug" / "apm.yml").is_file()
+    assert (project / "apm.lock.yaml").read_bytes() == locked
+    assert (project / ".mcp.json").read_bytes() == native
+
+
+@patch(_PATCH_UPDATES, return_value=None)
+def test_local_plugin_mcp_frozen_cold_cache_rejects_changed_source(
+    _updates, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deferral never admits a changed local plugin declaration under --frozen."""
+    _write_plugin(workspace / "plug", "dot-mcp-json")
+    project = workspace / "consumer"
+    _write_consumer(project, "../plug")
+    assert _install(project, monkeypatch, "--no-policy").exit_code == 0
+    native = (project / ".mcp.json").read_bytes()
+    shutil.rmtree(project / "apm_modules")
+    changed = {"demo": {"type": "http", "url": "https://example.com/changed"}}
+    (workspace / "plug" / ".mcp.json").write_text(
+        json.dumps({"mcpServers": changed}), encoding="utf-8"
+    )
+
+    frozen = _install(project, monkeypatch, "--frozen", "--no-policy")
+
+    assert frozen.exit_code != 0, frozen.output
+    assert (project / ".mcp.json").read_bytes() == native

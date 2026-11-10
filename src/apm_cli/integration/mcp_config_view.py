@@ -547,6 +547,23 @@ def _collect_locked_dependencies(
             )
             continue
 
+        if (
+            allow_pending
+            and dependency.source == "local"
+            and not manifest_path.parent.exists()
+            and manifest_path.is_relative_to(modules_root.resolve())
+        ):
+            # A local Claude plugin's synthesized manifest is rebuilt from its
+            # verified source during install; strict post-restoration checks
+            # still compare it with the lockfile.
+            pending_packages.add(package_key)
+            if logger is not None:
+                logger.verbose_detail(
+                    f"Deferring cold-cache MCP verification for '{package_key}' "
+                    "until its local plugin is restored."
+                )
+            continue
+
         if allow_pending and not manifest_path.parent.exists() and dependency.source != "local":
             from apm_cli.drift import build_download_ref
 
