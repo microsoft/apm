@@ -169,6 +169,181 @@ class TestCheckExplicitRef:
 
 
 # ---------------------------------------------------------------------------
+# Entry with a commit-SHA ref (#3458)
+# ---------------------------------------------------------------------------
+
+_PIN_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _yml_with_ref(ref: str) -> str:
+    return textwrap.dedent(f"""\
+        name: test-marketplace
+        description: Test marketplace
+        version: 1.0.0
+        owner:
+          name: Test Owner
+        packages:
+          - name: sha-pkg
+            source: acme-org/sha-pkg
+            ref: "{ref}"
+    """)
+
+
+class TestCheckCommitShaRef:
+    """A full commit SHA ``ref`` is verified on the remote, not matched by name."""
+
+    @pytest.fixture
+    def sha_cwd(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("COLUMNS", "250")
+        return tmp_path
+
+    @staticmethod
+    def _write(cwd, ref):
+        (cwd / "marketplace.yml").write_text(_yml_with_ref(ref), encoding="utf-8")
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_reachable_sha_passes(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.commit_exists.return_value = True
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        assert "All 1 entries OK" in result.output
+        mock_inst.commit_exists.assert_called_once_with("acme-org/sha-pkg", _PIN_SHA)
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_sha_at_advertised_tip_passes_without_fetch(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/main", sha=_PIN_SHA),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_sha_peeled_from_annotated_tag_passes_without_fetch(
+        self, MockResolver, runner, sha_cwd
+    ):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_PIN_SHA, peeled_sha=_PIN_SHA),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_unreachable_sha_fails_with_actionable_message(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.commit_exists.return_value = False
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert f"Commit '{_PIN_SHA}' not reachable on remote" in result.output
+        assert "not found" not in result.output
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "0123456",  # abbreviated
+            _PIN_SHA[:39],  # one char short
+            _PIN_SHA.upper(),  # pack only pins lowercase SHAs
+            _PIN_SHA + "0",  # too long
+        ],
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_malformed_sha_fails_with_actionable_message(self, MockResolver, runner, sha_cwd, ref):
+        self._write(sha_cwd, ref)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert f"Ref '{ref}' not found" in result.output
+        assert "full 40-char lowercase SHA" in result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_branch_named_like_hex_still_matches_by_name(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, "cafe123")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/cafe123", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_non_hex_missing_ref_keeps_plain_message(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, "v9.9.9")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert "Ref 'v9.9.9' not found" in result.output
+        assert "40-char" not in result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_offline_sha_not_at_tip_fails_without_network(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check", "--offline"])
+
+        assert result.exit_code == 1
+        assert f"Commit '{_PIN_SHA}' cannot be verified offline" in result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_fetch_error_reports_unreachable_remote(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.commit_exists.side_effect = GitLsRemoteError(
+            package="", summary="git fetch timed out", hint="retry"
+        )
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert "git fetch timed out" in result.output
+
+
+# ---------------------------------------------------------------------------
 # Failed entries
 # ---------------------------------------------------------------------------
 
