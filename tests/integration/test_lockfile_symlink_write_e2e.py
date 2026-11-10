@@ -176,3 +176,94 @@ def test_global_install_fails_closed_on_symlinked_lockfile(
     assert "permissions" not in output
     assert link.is_symlink()
     assert target.read_bytes() == original
+
+
+def _invoke(args: list[str]):
+    from apm_cli.cli import cli
+
+    with patch(_PATCH_UPDATES, return_value=None):
+        result = CliRunner().invoke(cli, args)
+    return result, " ".join(((result.output or "") + (result.stderr or "")).split())
+
+
+def test_install_does_not_migrate_legacy_lockfile_onto_dangling_symlink(
+    symlinked_project: Path,
+) -> None:
+    link = symlinked_project / "apm.lock.yaml"
+    (symlinked_project / "shared.lock.yaml").unlink()
+    legacy = symlinked_project / "apm.lock"
+    legacy.write_text(_STALE_LOCKFILE, encoding="utf-8")
+    original = legacy.read_bytes()
+
+    result, output = _invoke(["install"])
+
+    assert result.exit_code != 0, output
+    assert "symbolic link" in output
+    assert link.is_symlink()
+    assert os.readlink(link) == "shared.lock.yaml"
+    assert legacy.read_bytes() == original
+
+
+def _project_with_two_locked_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for name in ("pkg", "pkg2"):
+        pkg = tmp_path / name
+        (pkg / ".apm" / "instructions").mkdir(parents=True)
+        (pkg / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0\n", encoding="utf-8")
+        (pkg / ".apm" / "instructions" / f"{name}.instructions.md").write_text(
+            '---\napplyTo: "**"\n---\nhello\n', encoding="utf-8"
+        )
+    (tmp_path / "apm.yml").write_text(
+        textwrap.dedent("""\
+            name: proj
+            version: 1.0.0
+            targets:
+              - copilot
+            dependencies:
+              apm:
+                - ./pkg
+                - ./pkg2
+        """),
+        encoding="utf-8",
+    )
+    result, output = _invoke(["install"])
+    assert result.exit_code == 0, output
+    (tmp_path / "apm.lock.yaml").rename(tmp_path / "shared.lock.yaml")
+    _symlink_or_skip(tmp_path / "apm.lock.yaml", "shared.lock.yaml")
+    clear_apm_yml_cache()
+    return tmp_path
+
+
+def test_uninstall_fails_closed_on_symlinked_lockfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _project_with_two_locked_packages(tmp_path, monkeypatch)
+    link = project / "apm.lock.yaml"
+    target = project / "shared.lock.yaml"
+    original = target.read_bytes()
+
+    result, output = _invoke(["uninstall", "./pkg2"])
+
+    assert result.exit_code != 0, output
+    assert "symbolic link" in output
+    assert "shared.lock.yaml" in output
+    assert "Uninstall complete" not in output
+    assert link.is_symlink()
+    assert target.read_bytes() == original
+
+
+def test_direct_mcp_install_names_symlinked_lockfile(symlinked_project: Path) -> None:
+    link = symlinked_project / "apm.lock.yaml"
+    target = symlinked_project / "shared.lock.yaml"
+    original = target.read_bytes()
+
+    args = ["install", "--mcp", "example", "--target", "copilot", "--", "echo", "hi"]
+    with patch("sys.argv", ["apm", *args]):
+        result, output = _invoke(args)
+
+    assert result.exit_code != 0, output
+    assert "symbolic link" in output
+    assert "shared.lock.yaml" in output
+    assert link.is_symlink()
+    assert target.read_bytes() == original

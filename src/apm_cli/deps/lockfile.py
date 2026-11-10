@@ -1580,7 +1580,9 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
     """
     new_path = get_lockfile_path(project_root)
     legacy_path = project_root / LEGACY_LOCKFILE_NAME
-    if not new_path.exists() and legacy_path.exists():
+    # A dangling symlink reports exists() == False; renaming onto it would
+    # replace the link, so leave it for the writer to refuse.
+    if not new_path.exists() and not new_path.is_symlink() and legacy_path.exists():
         try:
             legacy_path.rename(new_path)
         except OSError:
