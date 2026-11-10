@@ -109,6 +109,14 @@ For every selected target that passes its scope and adapter prerequisites,
 `apm install` writes a runtime-specific MCP config file. The schemas differ;
 the `apm.yml` source of truth does not.
 
+Self-defined servers (`registry: false`) are written under their exact
+declared `name`, including names with a slash such as `com.example/server`.
+Registry servers named `owner/repo` keep the short `repo` key in every target
+except VS Code. If an older APM release wrote a self-defined server under its
+final segment, `apm install` removes that entry only when APM's recorded
+ownership proves it wrote it; otherwise it leaves the entry and prints its name
+so you can remove it yourself.
+
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token
 prompts until you choose to configure one. See the

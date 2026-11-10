@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Public `MAINTAINERS.md` roster replaces the duplicate `AUTHORS` file, with contributor credit in `CONTRIBUTING.md` and unchanged governance approval remits. (#3489)
 
+### Fixed
+
+- Self-defined MCP servers whose names contain a slash, such as `com.example/server`, now keep their declared name as the config key in every target instead of colliding on the final segment; registry, `@scope/name` and plain names are unchanged. An older truncated entry is replaced only when APM's ownership records prove it wrote it, otherwise it is left in place with a warning. -- by @bodapatisaikrishna (#3493)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added
