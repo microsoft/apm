@@ -15,7 +15,24 @@ import contextlib
 import os
 import stat
 import tempfile
+import threading
 from pathlib import Path
+
+_UMASK_PROBE_LOCK = threading.Lock()
+
+
+def umask_file_mode() -> int:
+    """Return the mode a plain ``open()`` would give a new file under the umask.
+
+    Shared, committed artifacts pass this as ``new_file_mode`` so they do not
+    inherit ``mkstemp``'s owner-only 0600. The umask can only be read by
+    setting it; the transient probe value is owner-only so a file created
+    concurrently by another thread is never more permissive than intended.
+    """
+    with _UMASK_PROBE_LOCK:
+        current = os.umask(0o077)
+        os.umask(current)
+    return 0o666 & ~current
 
 
 def _replace_atomic_file(source: str, destination: Path) -> None:

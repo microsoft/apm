@@ -31,7 +31,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ..security.gate import BLOCK_POLICY, ScanVerdict, SecurityGate
-from ..utils.atomic_io import atomic_write_text
+from ..utils.atomic_io import atomic_write_text, umask_file_mode
 from .build_id import stabilize_build_id
 from .constants import BUILD_ID_PLACEHOLDER
 
@@ -84,6 +84,7 @@ class CompiledOutputWriter:
         validate-then-write batch.
         """
         prepared, verdict = self.prepare(outputs)
+        new_file_mode = umask_file_mode()
         for path, final in prepared.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             preserve = (
@@ -91,7 +92,12 @@ class CompiledOutputWriter:
                 if isinstance(preserve_line_endings, Mapping)
                 else preserve_line_endings
             )
-            atomic_write_text(path, final, normalize_line_endings=not preserve)
+            atomic_write_text(
+                path,
+                final,
+                new_file_mode=new_file_mode,
+                normalize_line_endings=not preserve,
+            )
         return verdict
 
     def write(
