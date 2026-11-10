@@ -497,6 +497,8 @@ def _reconcile_legacy_truncated_key(
     runtimes: list[str],
     *,
     previously_owned: dict[str, set[str]],
+    previous_native_hashes: dict[str, dict[str, str]],
+    stored_config: dict | None,
     claimed_keys: builtins.set,
     project_root,
     user_scope: bool,
@@ -507,7 +509,8 @@ def _reconcile_legacy_truncated_key(
 
     Older releases wrote ``com.example/srv`` under its final segment (``srv``).
     Now that the declared name is the key, the short entry is removed only when
-    the ownership ledger proves APM wrote *dep_name* to that runtime; otherwise
+    the ownership ledger proves APM wrote *dep_name* to that runtime (and, on
+    runtimes with native baselines, that its content is unchanged); otherwise
     it is left in place and named (never its contents) so the user can decide.
     """
     from apm_cli.adapters.client.base import MCPClientAdapter
@@ -528,20 +531,32 @@ def _reconcile_legacy_truncated_key(
                 rt, project_root=project_root, user_scope=user_scope
             )
             existing = MCPConflictDetector(client).get_existing_server_configs()
-        except Exception:
+        except Exception as exc:
+            logger.verbose_detail(f"Skipped truncated-key check for {rt}: {type(exc).__name__}")
             continue
         if legacy_key not in existing:
             continue
         if dep_name in previously_owned.get(rt, builtins.set()):
-            MCPIntegrator.remove_stale(
-                {legacy_key},
-                runtime=rt,
-                project_root=project_root,
-                user_scope=user_scope,
-                logger=logger,
-                scope=scope,
-                fail_on_write_error=fail_on_write_error,
-            )
+            legacy_hash = previous_native_hashes.get(rt, {}).get(dep_name)
+            try:
+                MCPIntegrator.remove_stale(
+                    {legacy_key},
+                    runtime=rt,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                    logger=logger,
+                    scope=scope,
+                    fail_on_write_error=fail_on_write_error,
+                    stored_configs={legacy_key: stored_config} if stored_config else {},
+                    native_hashes={rt: {legacy_key: legacy_hash}} if legacy_hash else None,
+                )
+            except RequiredIntegrationError:
+                logger.warning(
+                    f"Left existing MCP server '{legacy_key}' in {rt} config: it changed "
+                    f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
+                    f"an outdated copy of '{dep_name}'."
+                )
+                continue
             logger.progress(f"Replaced truncated MCP key '{legacy_key}' with '{dep_name}' for {rt}")
         else:
             logger.warning(
@@ -1148,6 +1163,7 @@ def _install_self_defined_deps(
     previously_owned = {
         rt: builtins.set(names) for rt, names in (managed_target_servers or {}).items()
     }
+    previous_native_hashes = {rt: dict(hashes) for rt, hashes in (native_hashes or {}).items()}
     claimed_keys = builtins.set(self_defined_names) | {
         MCPClientAdapter._determine_config_key(name, None) for name in registry_dep_names or ()
     }
@@ -1297,6 +1313,8 @@ def _install_self_defined_deps(
             dep.name,
             successful_runtimes,
             previously_owned=previously_owned,
+            previous_native_hashes=previous_native_hashes,
+            stored_config=stored_mcp_configs.get(dep.name),
             claimed_keys=claimed_keys,
             project_root=project_root,
             user_scope=user_scope,

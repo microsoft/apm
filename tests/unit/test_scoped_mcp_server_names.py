@@ -126,7 +126,7 @@ def test_self_defined_reverse_dns_name_is_preserved_as_config_key(
     """Adapters must preserve self-defined server names containing slashes."""
     captured_keys = []
     adapter = adapter_cls(project_root=Path.cwd(), user_scope=True)
-    adapter.update_config = lambda updates: captured_keys.extend(updates.keys()) or True
+    adapter.update_config = lambda updates, **_kwargs: captured_keys.extend(updates.keys()) or True
 
     result = adapter.configure_mcp_server(
         "com.azure.dev/mcp-remote-azure-devops",
@@ -147,7 +147,7 @@ def test_two_self_defined_names_with_same_final_segment_do_not_collide(
     """Distinct self-defined servers with identical final segments must keep distinct keys."""
     captured_keys = []
     adapter = adapter_cls(project_root=Path.cwd(), user_scope=True)
-    adapter.update_config = lambda updates: captured_keys.extend(updates.keys()) or True
+    adapter.update_config = lambda updates, **_kwargs: captured_keys.extend(updates.keys()) or True
 
     for server_ref in self_defined_reverse_dns_servers:
         result = adapter.configure_mcp_server(

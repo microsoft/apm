@@ -15,6 +15,7 @@ import pytest
 from apm_cli.core.conflict_detector import MCPConflictDetector
 from apm_cli.core.safe_installer import SafeMCPInstaller
 from apm_cli.factory import ClientFactory
+from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -81,19 +82,27 @@ def _written_keys(runtime: str, project_root: Path) -> set[str]:
     return set(MCPConflictDetector(client).get_existing_server_configs())
 
 
-def _seed_legacy_entry(runtime: str, project_root: Path) -> None:
+def _seed_legacy_entry(runtime: str, project_root: Path, dep: MCPDependency | None = None) -> None:
+    """Write the truncated entry older APM produced (or a user-edited one)."""
     client = ClientFactory.create_client(runtime, project_root=project_root, user_scope=False)
-    client.update_config({LEGACY_KEY: {"command": "npx", "args": ["-y", "old"]}})
+    if dep is None:
+        client.update_config({LEGACY_KEY: {"command": "npx", "args": ["-y", "edited"]}})
+    else:
+        cache = {dep.name: MCPIntegrator._build_self_defined_info(dep)}
+        assert client.configure_mcp_server(
+            dep.name, server_name=LEGACY_KEY, server_info_cache=cache
+        )
     assert LEGACY_KEY in _written_keys(runtime, project_root)
 
 
-def _install(deps, runtime, project_root, managed=None, logger=None):
+def _install(deps, runtime, project_root, managed=None, logger=None, stored=None):
     return run_mcp_install(
         deps,
         runtime=runtime,
         project_root=project_root,
         logger=logger or MagicMock(),
         managed_target_servers=managed,
+        stored_mcp_configs=stored,
     )
 
 
@@ -175,10 +184,11 @@ def test_adapter_fetch_failure_returns_false(project, runtime):
 
 @pytest.mark.parametrize("runtime", LEGACY_RUNTIMES)
 def test_owned_truncated_entry_is_replaced_by_declared_key(project, runtime):
-    _seed_legacy_entry(runtime, project)
+    dep = _dep(REVERSE_DNS, "http")
+    _seed_legacy_entry(runtime, project, dep)
     managed = {runtime: {REVERSE_DNS}}
 
-    assert _install([_dep(REVERSE_DNS, "http")], runtime, project, managed) == 1
+    assert _install([dep], runtime, project, managed, stored={REVERSE_DNS: dep.to_dict()}) == 1
 
     keys = _written_keys(runtime, project)
     assert REVERSE_DNS in keys
@@ -211,3 +221,57 @@ def test_truncated_key_claimed_by_current_dependency_is_kept(project):
 
     assert {REVERSE_DNS, LEGACY_KEY} <= _written_keys("copilot", project)
     assert not any(f"'{LEGACY_KEY}'" in c.args[0] for c in logger.warning.call_args_list)
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_owned_but_edited_truncated_entry_is_left_on_baseline_runtimes(project, runtime):
+    dep = _dep(REVERSE_DNS, "http")
+    _seed_legacy_entry(runtime, project)
+    logger = MagicMock()
+    managed = {runtime: {REVERSE_DNS}}
+
+    _install([dep], runtime, project, managed, logger, stored={REVERSE_DNS: dep.to_dict()})
+
+    assert {REVERSE_DNS, LEGACY_KEY} <= _written_keys(runtime, project)
+    guidance = [c.args[0] for c in logger.warning.call_args_list if f"'{LEGACY_KEY}'" in c.args[0]]
+    assert len(guidance) == 1
+    assert "edited" not in guidance[0]
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_reinstall_and_uninstall_use_declared_key_on_baseline_runtimes(project, runtime):
+    dep = _dep(REVERSE_DNS, "http")
+    managed: dict[str, set[str]] = {}
+    hashes: dict[str, dict[str, str]] = {}
+    stored = {REVERSE_DNS: dep.to_dict()}
+    run_mcp_install(
+        [dep],
+        runtime=runtime,
+        project_root=project,
+        logger=MagicMock(),
+        managed_target_servers=managed,
+        native_hashes=hashes,
+    )
+    assert REVERSE_DNS in _written_keys(runtime, project)
+
+    # Reinstall compares the declared-key entry: no native conflict is raised.
+    run_mcp_install(
+        [dep],
+        runtime=runtime,
+        project_root=project,
+        logger=MagicMock(),
+        managed_target_servers=managed,
+        native_hashes=hashes,
+        stored_mcp_configs=stored,
+    )
+
+    MCPIntegrator.remove_stale(
+        {REVERSE_DNS},
+        runtime=runtime,
+        project_root=project,
+        scope=None,
+        stored_configs=stored,
+        native_hashes=hashes,
+        fail_on_write_error=True,
+    )
+    assert REVERSE_DNS not in _written_keys(runtime, project)
