@@ -14,10 +14,11 @@ incorrect attribution -- a real legal/compliance risk.
 The generator combines two trusted inputs:
 
   1. `pyproject.toml` `[project] dependencies` -- the *direct* runtime
-     deps. Industry-standard NOTICE scope: transitive deps inherit
-     attribution via their parents and are typically covered by their
-     own NOTICE files (or are build-only, like `setuptools`/`wheel`,
-     which we explicitly exclude in the preamble).
+     deps. The generator does not enumerate transitive, vendored, native,
+     website or build-tool components. Their attribution obligations
+     require separate review of the actual distribution. For example,
+     setuptools is also a runtime dependency through llm, not universally
+     build-only; its nested components are not covered by this enumeration.
 
   2. `scripts/notice-metadata.yaml` -- curated overrides authored by a
      human reviewer the first time a dep is added. Holds the SPDX
