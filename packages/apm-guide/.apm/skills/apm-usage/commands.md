@@ -83,6 +83,8 @@ the checked-out lock as proof of the previous local deployment. Keep the ignored
 `.apm-local/` identity and `~/.apm/deployment-receipts/` local; do not commit or
 share them. The identity lives in the project root, or your home for `--global`;
 configured external skill roots retain the same ownership and receipt checks.
+On Linux and macOS a receipt survives a reboot or remount that changes only the
+root's device number; a recreated root is still rejected.
 Switching targets that share a skill path refreshes valid same-writer evidence
 through a guarded copy, not by adopting existing files.
 Uninstall records actual surviving-skill rebuilds and binds those receipts only
