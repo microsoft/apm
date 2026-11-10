@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `apm install -g` into one Claude profile (`CLAUDE_CONFIG_DIR`) or Hermes home (`HERMES_HOME`) no longer deletes files deployed to another profile through the shared user lockfile; stale-file cleanup is limited to the selected root. (#3423)
 ### Changed
 
 - Switch APM-owned software, agent primitives, code examples and OpenAPM to Apache-2.0, with general documentation under CC-BY-4.0; distribute both licenses and their scope, preserve historical MIT and third-party notices, and correct filelock attribution and NOTICE coverage wording. Redistributors should review the applicable terms and retain notices when updating; previous MIT releases are unchanged. (#3487)
@@ -17,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Public `MAINTAINERS.md` roster replaces the duplicate `AUTHORS` file, with contributor credit in `CONTRIBUTING.md` and unchanged governance approval remits. (#3489)
+
+### Fixed
+
+- `apm install -g` into one Claude profile (`CLAUDE_CONFIG_DIR`) or Hermes home (`HERMES_HOME`) no longer deletes files deployed to another profile through the shared user lockfile; stale-file cleanup is limited to the selected root. -- by @xronos-i-am (#3424)
 
 ## [0.35.0] - 2026-10-22
 
