@@ -12,9 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.core.conflict_detector import MCPConflictDetector
 from apm_cli.core.safe_installer import SafeMCPInstaller
 from apm_cli.factory import ClientFactory
+from apm_cli.install.mcp.ownership import _native_config_key
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.dependency.mcp import MCPDependency
@@ -86,7 +88,9 @@ def _seed_legacy_entry(runtime: str, project_root: Path, dep: MCPDependency | No
     """Write the truncated entry older APM produced (or a user-edited one)."""
     client = ClientFactory.create_client(runtime, project_root=project_root, user_scope=False)
     if dep is None:
-        client.update_config({LEGACY_KEY: {"command": "npx", "args": ["-y", "edited"]}})
+        client.update_config(
+            {LEGACY_KEY: {"command": "npx", "args": ["-y", "seeded-secret-value"]}}
+        )
     else:
         cache = {dep.name: MCPIntegrator._build_self_defined_info(dep)}
         assert client.configure_mcp_server(
@@ -208,7 +212,9 @@ def test_unowned_truncated_entry_is_left_with_names_only_guidance(project, runti
     guidance = [w for w in warnings if f"'{LEGACY_KEY}'" in w]
     assert len(guidance) == 1
     assert REVERSE_DNS in guidance[0]
-    assert "old" not in guidance[0]
+    client = ClientFactory.create_client(runtime, project_root=project, user_scope=False)
+    assert client.get_config_path() in guidance[0]
+    assert "seeded-secret-value" not in guidance[0]
 
 
 def test_truncated_key_claimed_by_current_dependency_is_kept(project):
@@ -235,7 +241,7 @@ def test_owned_but_edited_truncated_entry_is_left_on_baseline_runtimes(project, 
     assert {REVERSE_DNS, LEGACY_KEY} <= _written_keys(runtime, project)
     guidance = [c.args[0] for c in logger.warning.call_args_list if f"'{LEGACY_KEY}'" in c.args[0]]
     assert len(guidance) == 1
-    assert "edited" not in guidance[0]
+    assert "seeded-secret-value" not in guidance[0]
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
@@ -275,3 +281,20 @@ def test_reinstall_and_uninstall_use_declared_key_on_baseline_runtimes(project, 
         fail_on_write_error=True,
     )
     assert REVERSE_DNS not in _written_keys(runtime, project)
+
+
+@pytest.mark.parametrize("runtime", ALL_RUNTIMES)
+def test_native_config_key_follows_stored_self_defined_config(project, runtime):
+    client = ClientFactory.create_client(runtime, project_root=project, user_scope=False)
+
+    self_defined = _dep(REVERSE_DNS, "http").to_dict()
+    assert _native_config_key(client, REVERSE_DNS, stored_config=self_defined) == REVERSE_DNS
+    registry = {"name": REVERSE_DNS}
+    assert _native_config_key(client, REVERSE_DNS, stored_config=registry) == LEGACY_KEY
+
+
+@pytest.mark.parametrize("marker", [{"is_self_defined": True}, {"_raw_stdio": {"command": "x"}}])
+def test_registry_info_markers_cannot_choose_an_arbitrary_key(marker):
+    info = {"name": "user-owned-entry", **marker}
+
+    assert MCPClientAdapter._determine_config_key(REVERSE_DNS, None, info) == REVERSE_DNS

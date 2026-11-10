@@ -111,11 +111,13 @@ the `apm.yml` source of truth does not.
 
 Self-defined servers (`registry: false`) are written under their exact
 declared `name`, including names with a slash such as `com.example/server`.
-Registry servers named `owner/repo` keep the short `repo` key in every target
-except VS Code. If an older APM release wrote a self-defined server under its
-final segment, `apm install` removes that entry only when APM's recorded
-ownership proves it wrote it; otherwise it leaves the entry and prints its name
-so you can remove it yourself.
+Registry servers such as `io.github.github/github-mcp-server` keep the short
+`github-mcp-server` key in every target except VS Code. If an older APM release
+wrote a self-defined server under its final segment, `apm install` removes that
+entry only when APM's recorded ownership proves it wrote it (and, for Claude
+Code and Codex, that it is unchanged); otherwise it leaves the entry and prints
+its name and config path so you can remove it yourself. OpenCode entries are
+not checked.
 
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token

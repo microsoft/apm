@@ -532,10 +532,11 @@ def _reconcile_legacy_truncated_key(
             )
             existing = MCPConflictDetector(client).get_existing_server_configs()
         except Exception as exc:
-            logger.verbose_detail(f"Skipped truncated-key check for {rt}: {type(exc).__name__}")
+            logger.verbose_detail(f"Skipped legacy MCP entry check for {rt}: {exc}")
             continue
         if legacy_key not in existing:
             continue
+        config_path = client.get_config_path()
         if dep_name in previously_owned.get(rt, builtins.set()):
             legacy_hash = previous_native_hashes.get(rt, {}).get(dep_name)
             try:
@@ -552,15 +553,15 @@ def _reconcile_legacy_truncated_key(
                 )
             except RequiredIntegrationError:
                 logger.warning(
-                    f"Left existing MCP server '{legacy_key}' in {rt} config: it changed "
+                    f"Left existing MCP server '{legacy_key}' in {config_path}: it changed "
                     f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
                     f"an outdated copy of '{dep_name}'."
                 )
                 continue
-            logger.progress(f"Replaced truncated MCP key '{legacy_key}' with '{dep_name}' for {rt}")
+            logger.progress(f"Renamed MCP server '{legacy_key}' to '{dep_name}' in {config_path}")
         else:
             logger.warning(
-                f"Left existing MCP server '{legacy_key}' in {rt} config: APM has no "
+                f"Left existing MCP server '{legacy_key}' in {config_path}: APM has no "
                 f"record of writing it for '{dep_name}'. Remove it manually if it is "
                 f"an outdated copy of '{dep_name}'."
             )

@@ -1449,8 +1449,11 @@ class MCPClientAdapter(ABC):
         """
         if server_name:
             return server_name
+        # ``is_self_defined`` / ``_raw_stdio`` are APM-synthetic markers. Return
+        # the caller's reference, never ``server_info["name"]``, so a registry
+        # response carrying these keys cannot choose an arbitrary config key.
         if server_info and (server_info.get("is_self_defined") or "_raw_stdio" in server_info):
-            return server_info.get("name") or server_url
+            return server_url
         if server_url.startswith("@") and server_url.count("/") == 1:
             return server_url
         if "/" in server_url:
