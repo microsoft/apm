@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
+- `apm install` deploys a skill into a pre-existing empty (or nested-empty) skill directory and records it in `apm.lock.yaml`, instead of reporting success while skipping it; directories holding any file or symlink are still treated as unmanaged content. -- by @MohammedAlkindi (#3449)
 
 ## [0.35.0] - 2026-10-22
 
