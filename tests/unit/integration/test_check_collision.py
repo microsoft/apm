@@ -129,7 +129,9 @@ class TestCheckCollisionNoneSemantics:
         """#3441 scopes empty-tree tolerance to skills; the generic contract is unchanged."""
         target_dir = tmp_path / "empty_dir"
         target_dir.mkdir()
-        result = BaseIntegrator.check_collision(target_dir, ".github/agents/empty_dir", set(), False)
+        result = BaseIntegrator.check_collision(
+            target_dir, ".github/agents/empty_dir", set(), False
+        )
         assert result is True
 
     def test_non_empty_directory_is_collision(self, tmp_path: Path) -> None:
