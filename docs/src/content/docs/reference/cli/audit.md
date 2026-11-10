@@ -320,7 +320,10 @@ clean audit to exit `1`. An advisory cache-miss skip remains non-failing
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
 scratch replay through `install/audit_replay.py`; materialization failures
-fail closed without mutating the checkout.
+fail closed without mutating the checkout. Replay fetches each Git dependency
+over the transport its declaring `apm.yml` states, as install does: a
+`git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
+the usual [transport selection](../../../consumer/manage-dependencies/#transport-selection).
 
 ### Deployment-owner integrity
 

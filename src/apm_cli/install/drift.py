@@ -75,6 +75,7 @@ from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.replay_transport import DeclaredTransportIndex
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +238,7 @@ def _materialize_install_path(
     downloader: Any | None = None,
     registry_resolver: Any | None = None,
     registries: dict[str, str] | None = None,
+    declared_transports: DeclaredTransportIndex | None = None,
 ) -> Path:
     """Resolve the on-disk path for a locked dep's package contents.
 
@@ -350,6 +352,8 @@ def _materialize_install_path(
         raise CacheMissError(f"git replay unavailable for {lock_dep.repo_url}: no downloader")
     from apm_cli.drift import build_download_ref
 
+    if declared_transports is not None:
+        dep_ref = declared_transports.apply(lock_dep, dep_ref)
     download_ref = build_download_ref(
         dep_ref,
         lockfile,
@@ -568,16 +572,22 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None
+    declared_transports: DeclaredTransportIndex | None = None
     if not config.cache_only:
         from apm_cli.core.auth import AuthResolver
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.registry.resolver import RegistryPackageResolver
+        from apm_cli.install.replay_transport import DeclaredTransportIndex
         from apm_cli.models.apm_package import APMPackage
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        declared_transports = DeclaredTransportIndex()
         apm_yml = project_root / "apm.yml"
         if apm_yml.exists():
             manifest = APMPackage.from_apm_yml(apm_yml)
+            declared_transports.record(
+                [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]
+            )
             registries = getattr(manifest, "registries", None) or {}
             if registries:
                 registry_resolver = RegistryPackageResolver(registries)
@@ -641,7 +651,13 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             downloader=downloader,
                             registry_resolver=registry_resolver,
                             registries=registries,
+                            declared_transports=declared_transports,
                         )
+                        if declared_transports is not None:
+                            declared_transports.record_package(
+                                install_path,
+                                declared_transports.apply(lock_dep, lock_dep.to_dependency_ref()),
+                            )
                         if lock_dep.is_local_source:
                             install_path = _normalize_legacy_local_plugin_for_replay(
                                 lock_dep,
