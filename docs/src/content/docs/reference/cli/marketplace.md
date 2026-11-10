@@ -120,9 +120,8 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 
 For git-backed sources without a direct file path, APM looks for the catalog
 at `marketplace.json`, `.github/plugin/marketplace.json`, then
-`.claude-plugin/marketplace.json`, and registers the first one found. The
-catalog downloaded during that search is the one parsed and cached, so
-registration does not download it again.
+`.claude-plugin/marketplace.json`, and registers the first one found without
+downloading it again.
 
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the

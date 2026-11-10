@@ -520,7 +520,7 @@ APM tries unauthenticated access first for public repos to conserve rate limits 
 export GITHUB_TOKEN=ghp_any_valid_token
 ```
 
-When you install a subdirectory of a public github.com repository (for example a nested Claude plugin), APM first looks for every supported package marker through `raw.githubusercontent.com`, which does not count against the REST API limit. It calls the Contents API only if none of those markers are found, for example for a private repository. Fixed-ref subdirectory packages with a reachable marker therefore validate without Contents API calls, including on repeat installs and updates.
+For subdirectory packages in public github.com repositories (for example nested Claude plugins), APM checks package markers through `raw.githubusercontent.com`, which does not count against the REST API limit. It calls the Contents API only when no marker is found that way, for example in a private repository.
 
 ### SSO-protected organizations
 
