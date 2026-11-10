@@ -282,7 +282,8 @@ def test_native_transient_activation_hold_is_retried_and_activates(
     assert "Failed to activate downloaded dependency" not in output, output
     _assert_pin(consumer, sha)
     if replacement:
-        assert (_live(consumer) / "revision.txt").read_bytes() == b"replacement revision\n"
+        revision = (_live(consumer) / "revision.txt").read_bytes()
+        assert revision.replace(b"\r\n", b"\n") == b"replacement revision\n"
     assert not (consumer.root / "apm_modules" / ".apm-resolution-staging").exists()
 
 

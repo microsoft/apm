@@ -226,8 +226,8 @@ def test_resolver_persistent_denial_names_operation_path_and_error(
     message = str(caught.value)
     assert "Failed to activate downloaded dependency" in message
     assert "injected Windows denial" in message
-    assert str(candidate) in message
-    assert str(live.resolve()) in message
+    assert repr(str(candidate)) in message
+    assert repr(str(live.resolve())) in message
     assert len(attempts) == _ATTEMPTS
     assert (live / "apm.yml").read_text(encoding="utf-8") == "name: pkg\nversion: 0.9.0\n"
     assert staging.rollback() == []
