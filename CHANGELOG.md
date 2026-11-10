@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving refused files and prior lock contents during cold `--frozen` replay with overlapping dependencies. Files admitted earlier in a failed install may remain; move conflicting files aside before retrying or use `--force` only for intentional overwrites. (#3490)
 
+### Changed
+
+- Switch APM-owned software, agent primitives, code examples and OpenAPM to Apache-2.0, with general documentation under CC-BY-4.0; distribute both licenses and their scope, preserve historical MIT and third-party notices, and correct filelock attribution and NOTICE coverage wording. Redistributors should review the applicable terms and retain notices when updating; previous MIT releases are unchanged. (#3487)
+
 ### Added
 
 - Public `MAINTAINERS.md` roster replaces the duplicate `AUTHORS` file, with contributor credit in `CONTRIBUTING.md` and unchanged governance approval remits. (#3489)
