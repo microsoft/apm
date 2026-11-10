@@ -65,6 +65,16 @@ def _resolve_download_strategy(
     logger = ctx.logger
     dep_key = dep_ref.get_unique_key()
 
+    # A semver range already in apm_modules skips the resolve callback, so
+    # replay its locked tag here; never resolve the raw range as a ref (#3382).
+    if not update_refs and dep_key not in ctx.git_semver_resolutions:
+        from apm_cli.install.helpers.ref_reuse import replay_locked_git_semver
+
+        _locked_semver = replay_locked_git_semver(dep_ref, existing_lockfile)
+        if _locked_semver is not None:
+            ctx.git_semver_resolutions[dep_key] = _locked_semver
+            dep_ref.reference = _locked_semver.resolved_tag
+
     # npm-like behavior: Branches always fetch latest, only tags/commits use cache
     # Resolve git reference to determine type
     resolved_ref = None
