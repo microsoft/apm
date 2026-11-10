@@ -222,12 +222,74 @@ def test_native_locked_destination_preserves_prior_install_and_recovers(
     _assert_pin(consumer, sha)
 
 
+def _run_with_native_probe(
+    scenario: _Scenario,
+    consumer: LocalPackage,
+    source: _PublishedPackage,
+    mode: str,
+    record_property: Callable[[str, object], None],
+) -> tuple[CommandResult, list[dict[str, object]], list[dict[str, object]]]:
+    """Run the installed CLI with real native handles held at activation."""
+    evidence = scenario.isolated.root / "operations.jsonl"
+    probe = Path(__file__).parents[1] / "utils" / "resolution_failure_probe.py"
+    guard = scenario.isolated.root / "network_guard" / "sitecustomize.py"
+    original_guard = guard.read_text(encoding="utf-8")
+    guard.write_text(
+        original_guard
+        + "\nimport runpy\n"
+        + f"runpy.run_path({str(probe)!r})['install_probe']("
+        + f"{str(_live(consumer))!r}, {str(evidence)!r}, {mode!r})\n",
+        encoding="utf-8",
+    )
+    try:
+        result = _run(scenario, consumer, {**source.environment, "APM_NO_CACHE": "1"})
+    finally:
+        guard.write_text(original_guard, encoding="utf-8")
+    assert evidence.exists(), result.stdout + result.stderr
+    events = [json.loads(line) for line in evidence.read_text(encoding="utf-8").splitlines()]
+    record_property("native_operations", json.dumps(events, sort_keys=True))
+    held_paths = {event["path"] for event in events if event["operation"].startswith("held-")}
+    failures = [event for event in events if "winerror" in event and event["path"] in held_paths]
+    assert failures and failures[0]["winerror"] in {5, 32}, events
+    assert all(event["winerror"] in {5, 32, 145} for event in failures), events
+    return result, events, failures
+
+
+@pytest.mark.requires_windows_native_standard_user
+@pytest.mark.parametrize("replacement", [False, True], ids=["first-install", "replacement"])
+def test_native_transient_activation_hold_is_retried_and_activates(
+    scenario: _Scenario,
+    replacement: bool,
+    record_property: Callable[[str, object], None],
+) -> None:
+    """A real handle released after the first denial no longer fails the install (#3386)."""
+    context = probe_native_context(
+        scenario.isolated.root / "native-context", os.environ["APM_WINDOWS_NATIVE_EXPECTED_SID"]
+    )
+    record_property("native_context", json.dumps(context, sort_keys=True))
+    source = _publish_staging(scenario)
+    consumer = scenario.consumers.create("consumer", dependencies=(source.dependency,))
+    sha = source.commit.sha
+    if replacement:
+        _success(_run(scenario, consumer, source.environment))
+        sha = _advance(scenario, source, consumer)
+    result, _events, failures = _run_with_native_probe(
+        scenario, consumer, source, "transient", record_property
+    )
+    assert failures[0]["operation"] == "replace", failures
+    _success(result)
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "Failed to activate downloaded dependency" not in output, output
+    _assert_pin(consumer, sha)
+    if replacement:
+        assert (_live(consumer) / "revision.txt").read_bytes() == b"replacement revision\n"
+    assert not (consumer.root / "apm_modules" / ".apm-resolution-staging").exists()
+
+
 @pytest.mark.requires_windows_native_standard_user
 @pytest.mark.parametrize(
     ("replacement", "mode"),
     [
-        (False, "transient"),
-        (True, "transient"),
         (False, "cleanup-denied"),
         (True, "cleanup-denied"),
         (True, "restore-denied"),
@@ -258,28 +320,9 @@ def test_native_activation_failure_reports_original_and_recovery_errors(
         old_lock = (consumer.root / "apm.lock.yaml").read_bytes()
         sha = _advance(scenario, source, consumer)
     manifest = consumer.manifest_path.read_bytes()
-    evidence = scenario.isolated.root / "operations.jsonl"
-    probe = Path(__file__).parents[1] / "utils" / "resolution_failure_probe.py"
-    guard = scenario.isolated.root / "network_guard" / "sitecustomize.py"
-    original_guard = guard.read_text(encoding="utf-8")
-    guard.write_text(
-        original_guard
-        + "\nimport runpy\n"
-        + f"runpy.run_path({str(probe)!r})['install_probe']("
-        + f"{str(live)!r}, {str(evidence)!r}, {mode!r})\n",
-        encoding="utf-8",
+    result, events, failures = _run_with_native_probe(
+        scenario, consumer, source, mode, record_property
     )
-    try:
-        result = _run(scenario, consumer, {**source.environment, "APM_NO_CACHE": "1"})
-    finally:
-        guard.write_text(original_guard, encoding="utf-8")
-    assert evidence.exists(), result.stdout + result.stderr
-    events = [json.loads(line) for line in evidence.read_text(encoding="utf-8").splitlines()]
-    record_property("native_operations", json.dumps(events, sort_keys=True))
-    held_paths = {event["path"] for event in events if event["operation"].startswith("held-")}
-    failures = [event for event in events if "winerror" in event and event["path"] in held_paths]
-    assert failures and failures[0]["winerror"] in {5, 32}, events
-    assert all(event["winerror"] in {5, 32, 145} for event in failures), events
     assert result.returncode == 1, result.stdout + result.stderr
     assert consumer.manifest_path.read_bytes() == manifest
     lock = consumer.root / "apm.lock.yaml"
@@ -306,22 +349,21 @@ def test_native_activation_failure_reports_original_and_recovery_errors(
     else:
         assert "Failed to activate downloaded dependency" in output, output
     assert failures[0]["error"] in output, output
-    if mode != "transient":
-        assert len(failures) >= 2, events
-        if mode == "restore-denied":
-            recovery_failure = next(
-                event
-                for event in failures
-                if event["operation"] == "replace" and "backups" in Path(event["path"]).parts
-            )
-        else:
-            recovery_failure = next(
-                event
-                for event in failures
-                if event["operation"] in {"unlink", "rmdir"} and event["winerror"] in {5, 32}
-            )
-        assert recovery_failure["error"] in output, output
-        assert "recover" in output.lower(), output
+    assert len(failures) >= 2, events
+    if mode == "restore-denied":
+        recovery_failure = next(
+            event
+            for event in failures
+            if event["operation"] == "replace" and "backups" in Path(event["path"]).parts
+        )
+    else:
+        recovery_failure = next(
+            event
+            for event in failures
+            if event["operation"] in {"unlink", "rmdir"} and event["winerror"] in {5, 32}
+        )
+    assert recovery_failure["error"] in output, output
+    assert "recover" in output.lower(), output
     _success(_run(scenario, consumer, source.environment))
     _assert_pin(consumer, sha)
     if prior is not None and mode == "restore-denied":

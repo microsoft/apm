@@ -140,8 +140,10 @@ or runtime configuration.
 
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download
-or validation leaves the previous package active. Failed staged activation
-attempts restoration without changing the lockfile. If restoration or cleanup
+or validation leaves the previous package active. Activation and its restore
+retry transient Windows `WinError 5`/`32` holds with bounded backoff. A
+persistent activation failure attempts restoration without changing the
+lockfile. If restoration or cleanup
 also fails, preserve the reported recovery paths: the prior package may be in
 `.apm-resolution-staging/<session>/backups/` rather than active. Close programs
 holding the affected paths and inspect/recover prior data before retrying the
