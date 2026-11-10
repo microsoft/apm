@@ -7,7 +7,7 @@ description: >
   never requests reviewers, never merges, never runs skill logic in
   the canvas session. Agentic Workflows must not open this canvas.
 author: Microsoft
-license: MIT
+license: Apache-2.0
 targets:
   - copilot
 dependencies:
