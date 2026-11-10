@@ -223,11 +223,11 @@ Server hosts registered through `ADO_HOST` or `APM_ADO_HOSTS` use
 
 A `ref` that names a tag or branch must exist on the remote. A `ref` that
 is a full 40-character lowercase commit SHA passes when the remote serves
-that commit: an advertised tip passes directly, any other commit is
+that commit: a branch tip passes directly, any other commit is
 confirmed with a shallow fetch. Unreachable commits fail with
 `Commit '<sha>' not reachable on remote`. Abbreviated or uppercase SHAs
 are not commit pins and fail with a hint to use the full SHA. `--offline`
-cannot confirm a commit that is not a cached tip.
+cannot confirm a commit that is not a cached branch tip.
 
 | Flag | Description |
 |---|---|

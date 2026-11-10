@@ -237,19 +237,24 @@ class TestCheckCommitShaRef:
         mock_inst.commit_exists.assert_not_called()
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
-    def test_sha_peeled_from_annotated_tag_passes_without_fetch(
-        self, MockResolver, runner, sha_cwd
-    ):
+    @pytest.mark.parametrize(
+        "tag_ref",
+        [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_PIN_SHA),
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_B, peeled_sha=_PIN_SHA),
+        ],
+    )
+    def test_tagged_sha_is_still_verified_as_commit(self, MockResolver, runner, sha_cwd, tag_ref):
+        # A tag can name a tree or blob, so only branch tips skip the fetch.
         self._write(sha_cwd, _PIN_SHA)
         mock_inst = MockResolver.return_value
-        mock_inst.list_remote_refs.return_value = [
-            RemoteRef(name="refs/tags/v1.0.0", sha=_PIN_SHA, peeled_sha=_PIN_SHA),
-        ]
+        mock_inst.list_remote_refs.return_value = [tag_ref]
+        mock_inst.commit_exists.return_value = False
 
         result = runner.invoke(marketplace, ["check"])
 
-        assert result.exit_code == 0, result.output
-        mock_inst.commit_exists.assert_not_called()
+        assert result.exit_code == 1
+        mock_inst.commit_exists.assert_called_once_with("acme-org/sha-pkg", _PIN_SHA)
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_unreachable_sha_fails_with_actionable_message(self, MockResolver, runner, sha_cwd):

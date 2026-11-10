@@ -297,6 +297,15 @@ class TestCheckCommitShaRefRealGit:
         assert result.exit_code == 1
         assert _flat("full 40-char lowercase SHA") in _flat(result.output)
 
+    def test_tagged_tree_sha_is_not_a_commit_pin(self, tmp_path: Path, monkeypatch):
+        bare, _ = self._remote(tmp_path)
+        tree = self._git("--git-dir", str(bare), "rev-parse", "v1.0.0^{tree}", cwd=tmp_path)
+        # A lightweight tag naming a tree object, not a commit.
+        self._git("--git-dir", str(bare), "tag", "tree-tag", tree, cwd=tmp_path)
+        result = self._invoke(tmp_path, monkeypatch, bare, tree)
+        assert result.exit_code == 1
+        assert _flat(f"Commit '{tree}' not reachable on remote") in _flat(result.output)
+
     def test_tag_ref_still_passes(self, tmp_path: Path, monkeypatch):
         bare, _ = self._remote(tmp_path)
         result = self._invoke(tmp_path, monkeypatch, bare, "v1.0.0")

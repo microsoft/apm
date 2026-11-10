@@ -746,8 +746,7 @@ class RefResolver:
         url, env = self._git_url_and_env(owner_repo)
         git_exe = get_git_executable()
         timeout = max(self._timeout, 30.0)
-        base_temp = get_apm_temp_dir()
-        tmpdir = Path(tempfile.mkdtemp(prefix="apm-commit-probe-", dir=base_temp))
+        tmpdir = Path(tempfile.mkdtemp(prefix="apm-commit-probe-", dir=get_apm_temp_dir()))
         try:
             bare = tmpdir / "probe.git"
             subprocess.run(
@@ -810,7 +809,7 @@ class RefResolver:
             )
         finally:
             with contextlib.suppress(Exception):
-                safe_rmtree(tmpdir, base_temp)
+                safe_rmtree(tmpdir, tmpdir.parent)
 
     def close(self) -> None:
         """Release resources (cache, locks)."""

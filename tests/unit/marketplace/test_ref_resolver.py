@@ -1161,8 +1161,15 @@ class TestCommitExists:
     def test_non_commit_object_is_rejected(self, remote) -> None:
         assert remote.resolver.commit_exists("acme/pkg", remote.tree) is False
 
-    def test_probe_directory_is_removed(self, remote) -> None:
-        remote.resolver.commit_exists("acme/pkg", remote.old)
+    @pytest.mark.parametrize("configured", ["none", "str"])
+    def test_probe_directory_is_removed(self, remote, monkeypatch, configured) -> None:
+        # get_apm_temp_dir() returns None (system temp) or a str, never a Path.
+        if configured == "none":
+            monkeypatch.setattr("tempfile.tempdir", str(remote.probe_root))
+            monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: None)
+        else:
+            monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: str(remote.probe_root))
+        assert remote.resolver.commit_exists("acme/pkg", remote.old) is True
         assert list(remote.probe_root.iterdir()) == []
 
     @pytest.mark.parametrize("bad", ["abc1234", "A" * 40, "g" * 40, ""])

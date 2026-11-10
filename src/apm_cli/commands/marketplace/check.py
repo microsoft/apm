@@ -82,7 +82,7 @@ def _explicit_ref_error(
     """Return an error for an explicit ``ref``, or ``""`` when it resolves.
 
     Tag and branch names match first, as before. A full commit SHA that no
-    name matches is accepted when it is an advertised tip or when the
+    name matches is accepted when it is a branch tip or when the
     remote serves that commit; ``ls-remote`` alone never lists it.
     """
     for r in refs:
@@ -94,7 +94,8 @@ def _explicit_ref_error(
         if ref in (short, r.name):
             return ""
     if is_commit_pin_ref(ref):
-        if any(ref in (r.sha, r.peeled_sha) for r in refs):
+        # Only a branch tip is necessarily a commit; a tag may name a tree or blob.
+        if any(r.name.startswith("refs/heads/") and r.sha == ref for r in refs):
             return ""
         if offline:
             return f"Commit '{ref}' cannot be verified offline"
