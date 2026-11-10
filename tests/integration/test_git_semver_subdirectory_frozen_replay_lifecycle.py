@@ -6,6 +6,11 @@ and ``pkg-a--v1.1.0`` point at release 1.1.0. The consumer declares
 ``acme/mono/packages/pkg-a#^1.0.0``. Every lifecycle step must deploy the
 locked 1.1.0 bytes, keep the semver provenance recorded by the first install
 and pass ``apm audit --ci``.
+
+The bare-version layout tags releases ``1.0.0`` / ``1.1.0``. A bare tag is
+itself a semver string, so drift must be judged against the declared range.
+Frozen steps run with the origin and Git cache removed: a cached replay with
+no drift must not fetch.
 """
 
 from __future__ import annotations
@@ -13,6 +18,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -36,6 +44,10 @@ _STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 _AUDIT = ("audit", "--ci", "--no-policy", "--format", "json")
 _SKILL = Path(".agents") / "skills" / "s" / "SKILL.md"
 _PROVENANCE = ("constraint", "resolved_tag", "resolved_ref", "resolved_commit", "version")
+_LAYOUTS = {
+    "issue-3382": (("v1.0.0", "pkg-a-v1.0.0"), ("pkg-a-v1.1.0", "pkg-a--v1.1.0"), "pkg-a-v1.1.0"),
+    "bare-version": (("1.0.0",), ("1.1.0",), "1.1.0"),
+}
 
 
 def _skill_bytes(marker: str) -> bytes:
@@ -57,10 +69,27 @@ def _evidence(result: CommandResult) -> str:
     )
 
 
+@contextmanager
+def _offline(*paths: Path) -> Iterator[None]:
+    """Hide the origin and Git cache so a cached replay cannot fetch."""
+    moved = [(path, path.with_name(f"{path.name}.offline")) for path in paths if path.exists()]
+    for path, hidden in moved:
+        path.rename(hidden)
+    try:
+        yield
+    finally:
+        for path, hidden in moved:
+            shutil.rmtree(path, ignore_errors=True)
+            hidden.rename(path)
+
+
+@pytest.mark.parametrize("layout", sorted(_LAYOUTS))
 def test_git_semver_subdirectory_replays_locked_release_across_lifecycle(
     tmp_path: Path,
     apm_binary_path: Path,
+    layout: str,
 ) -> None:
+    first_tags, second_tags, expected_tag = _LAYOUTS[layout]
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     environment = isolated.subprocess_env()
     source = LocalPackageFactory(isolated.package_root).create("mono", targets=("copilot",))
@@ -69,12 +98,12 @@ def test_git_semver_subdirectory_replays_locked_release_across_lifecycle(
     repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
     repository = repositories.create("mono", source_tree=source.root)
     first = repositories.commit(repository, message="pkg-a 1.0.0")
-    repositories.tag(repository, "v1.0.0", first)
-    repositories.tag(repository, "pkg-a-v1.0.0", first)
+    for tag in first_tags:
+        repositories.tag(repository, tag, first)
     _write_release(repository.worktree, "1.1.0", "two")
     second = repositories.commit(repository, message="pkg-a 1.1.0")
-    repositories.tag(repository, "pkg-a-v1.1.0", second)
-    repositories.tag(repository, "pkg-a--v1.1.0", second)
+    for tag in second_tags:
+        repositories.tag(repository, tag, second)
     environment = repositories.url_rewrite_subprocess_env(
         repository, "https://github.com/acme/mono.git"
     )
@@ -96,7 +125,15 @@ def test_git_semver_subdirectory_replays_locked_release_across_lifecycle(
     baseline: dict[str, object] | None = None
 
     for step, args in _STEPS:
-        result = runner.run(args, scenario_id=f"3382-{step}", cwd=project, env=environment)
+        if step.startswith("frozen"):
+            with _offline(repository.origin, isolated.cache_root):
+                result = runner.run(
+                    args, scenario_id=f"3382-{layout}-{step}", cwd=project, env=environment
+                )
+        else:
+            result = runner.run(
+                args, scenario_id=f"3382-{layout}-{step}", cwd=project, env=environment
+            )
         assert result.returncode == 0, _evidence(result)
 
         assert (project / _SKILL).read_bytes() == expected_skill, f"{step} deployed wrong release"
@@ -106,8 +143,8 @@ def test_git_semver_subdirectory_replays_locked_release_across_lifecycle(
         if baseline is None:
             assert provenance == {
                 "constraint": "^1.0.0",
-                "resolved_tag": "pkg-a-v1.1.0",
-                "resolved_ref": "pkg-a-v1.1.0",
+                "resolved_tag": expected_tag,
+                "resolved_ref": expected_tag,
                 "resolved_commit": second.sha,
                 "version": "1.1.0",
             }
@@ -115,7 +152,9 @@ def test_git_semver_subdirectory_replays_locked_release_across_lifecycle(
         assert provenance == baseline, f"{step} changed semver provenance"
         assert locked[0]["deployed_file_hashes"][_SKILL.as_posix()] == expected_hash
 
-        audit = runner.run(_AUDIT, scenario_id=f"3382-{step}-audit", cwd=project, env=environment)
+        audit = runner.run(
+            _AUDIT, scenario_id=f"3382-{layout}-{step}-audit", cwd=project, env=environment
+        )
         assert audit.returncode == 0, _evidence(audit)
         payload = json.loads(audit.stdout)
         assert payload["passed"] is True

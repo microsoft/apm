@@ -16,6 +16,7 @@ remains a sibling helper here rather than a fourth ``DependencySource``.
 from __future__ import annotations
 
 import builtins
+import copy
 import os
 import sys
 from pathlib import Path
@@ -67,12 +68,16 @@ def _resolve_download_strategy(
 
     # A semver range already in apm_modules skips the resolve callback, so
     # replay its locked tag here; never resolve the raw range as a ref (#3382).
+    # Drift is still judged against the declared constraint: a bare ``1.1.0``
+    # tag is itself a semver string and would not equal the locked range.
+    drift_ref = dep_ref
     if not update_refs and dep_key not in ctx.git_semver_resolutions:
         from apm_cli.install.helpers.ref_reuse import replay_locked_git_semver
 
         _locked_semver = replay_locked_git_semver(dep_ref, existing_lockfile)
         if _locked_semver is not None:
             ctx.git_semver_resolutions[dep_key] = _locked_semver
+            drift_ref = copy.copy(dep_ref)
             dep_ref.reference = _locked_semver.resolved_tag
 
     # npm-like behavior: Branches always fetch latest, only tags/commits use cache
@@ -112,7 +117,7 @@ def _resolve_download_strategy(
     # Detect if manifest ref changed vs what the lockfile recorded.
     # detect_ref_change() handles all transitions including None->ref.
     _dep_locked_chk = existing_lockfile.get_dependency(dep_key) if existing_lockfile else None
-    ref_changed = detect_ref_change(dep_ref, _dep_locked_chk, update_refs=update_refs)
+    ref_changed = detect_ref_change(drift_ref, _dep_locked_chk, update_refs=update_refs)
     # When the manifest ref drifted from the lockfile, the content hash
     # will legitimately change after re-download.  Mark the dep so the
     # supply-chain check in sources.py doesn't treat it as an attack.

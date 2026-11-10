@@ -417,17 +417,17 @@ class TestDownloadStrategyReplaysLockedSemver:
     so integrate must replay the locked tag instead of resolving the raw
     range as a literal ref (which branch-drift healing then re-downloads)."""
 
-    def _lockfile(self, dep, *, constraint="^1.2.0"):
+    def _lockfile(self, dep, *, constraint="^1.2.0", tag="v1.5.3"):
         lockfile = LockFile()
         lockfile.dependencies[dep.get_unique_key()] = LockedDependency(
             host="github.com",
             repo_url="acme/widget",
             source="git",
-            resolved_ref="v1.5.3",
+            resolved_ref=tag,
             resolved_commit="a" * 40,
             version="1.5.3",
             constraint=constraint,
-            resolved_tag="v1.5.3",
+            resolved_tag=tag,
             resolved_at="2025-01-15T12:00:00Z",
         )
         return lockfile
@@ -463,6 +463,21 @@ class TestDownloadStrategyReplaysLockedSemver:
         assert resolution.constraint == "^1.2.0"
         assert resolution.resolved_tag == "v1.5.3"
         assert resolution.resolved_sha == "a" * 40
+
+    @pytest.mark.parametrize("tag", ["v1.5.3", "1.5.3"], ids=("v-prefixed", "bare-version"))
+    def test_replayed_tag_is_not_reported_as_ref_drift(self, tmp_path, tag):
+        """A bare ``1.5.3`` tag is itself a semver string; drift must still be
+        judged against the declared constraint, not the replayed tag."""
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        dep = _make_dep_ref(reference="^1.2.0", source="git")
+        ctx = self._ctx(self._lockfile(dep, tag=tag))
+
+        _, _, _, ref_changed = _resolve_download_strategy(ctx, dep, tmp_path / "missing")
+
+        assert dep.reference == tag
+        assert ref_changed is False
+        assert ctx.expected_hash_change_deps == set()
 
     @pytest.mark.parametrize(
         ("update_refs", "constraint"),
