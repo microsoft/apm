@@ -160,7 +160,7 @@ lsp_config_provenance:
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
-  .github/skills/my-local-skill/SKILL.md: "a1b2c3..."
+  .github/skills/my-local-skill/SKILL.md: "sha256:a1b2c3..."
 deployments:
   - kind: project-relative
     target: copilot
@@ -189,7 +189,7 @@ deployments:
 | `lsp_target_servers` | map of string lists | no | `target -> server names` for LSP entries APM successfully wrote. Reinstall and uninstall use this ownership record to remove stale executable entries without claiming legacy or user-owned content. |
 | `lsp_config_provenance` | map of strings | no | `server_name -> declaration owner` using `project:.`, `package:<identity>`, or `bundle:<identity>`. Reconciliation uses this field to preserve bundle and surviving-package entries while removing departed owners. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
-| `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
+| `local_deployed_file_hashes` | map | no | `path -> sha256:<hex>` for `local_deployed_files`. |
 | `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
 
 ## Canonical deployment rows
@@ -285,7 +285,7 @@ with one locked coordinate, not a durable catalog trust identity.
 | `skill_subset` | list of strings | no | For dependencies that expose selectable skills: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
 | `deployed_files` | list of strings | no | Sorted project-relative paths APM wrote for this dependency; powers `prune` and `audit`'s file-presence check. Shared paths have one canonical owner; uninstall transfers ownership to a surviving provider. Reinstall preserves other declared, gated, or dynamic targets' entries. On explicit manifest contraction, install/prune removes dropped targets' files only if recorded hashes match; edited files remain tracked on disk. `apm lock` preserves files and their `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows until normal install can verify and perform cleanup. Without `targets:` or `target:` in the consumer's `apm.yml`, reinstall preserves inactive targets' deployed files, merge-hook configuration, and ownership sidecars, even with `--target`. A `--target` override does not declare dropped targets; only explicit manifest contraction permits pruning them. |
-| `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
+| `deployed_file_hashes` | map | no | `path -> sha256:<hex>` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
 | `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
@@ -498,7 +498,7 @@ documented under [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 `lockfile_version` is the schema version of the file format itself.
 
-- The current versions are `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies.
+- Ordinary projects use `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies. Version `"3"` is an unratified candidate written only when a root replacement table is present; see [Root source replacement evidence](#root-source-replacement-evidence-candidate).
 - APM additively extends entries within each version - new optional fields
   may appear without bumping the version. Older APM clients ignore unknown
   fields.
@@ -543,8 +543,8 @@ dependencies:
       - .github/skills/code-review/SKILL.md
       - .github/skills/test-writing/SKILL.md
     deployed_file_hashes:
-      .github/skills/code-review/SKILL.md: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-      .github/skills/test-writing/SKILL.md: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+      .github/skills/code-review/SKILL.md: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      .github/skills/test-writing/SKILL.md: "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
 mcp_servers:
   - github
 mcp_configs:
@@ -555,7 +555,7 @@ mcp_configs:
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
-  .github/skills/my-local-skill/SKILL.md: "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
+  .github/skills/my-local-skill/SKILL.md: "sha256:fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
 ```
 
 ## See also
