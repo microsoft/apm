@@ -844,7 +844,6 @@ class TestDiscoverGlobalInstructions:
         assert result == [global_a, global_b]
 
 
-
 # ---------------------------------------------------------------------------
 # Codex user-scope root honours CODEX_HOME (issue #3483)
 # ---------------------------------------------------------------------------

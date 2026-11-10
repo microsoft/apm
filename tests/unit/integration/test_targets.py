@@ -581,7 +581,9 @@ class TestCodexHomeUserScope:
     def _mcp_codex_dir() -> Path:
         from apm_cli.adapters.client.codex import CodexClientAdapter
 
-        return CodexClientAdapter(registry_url="https://registry.invalid", user_scope=True)._get_codex_dir()
+        return CodexClientAdapter(
+            registry_url="https://registry.invalid", user_scope=True
+        )._get_codex_dir()
 
     def test_codex_home_under_home_is_home_relative(self, monkeypatch, tmp_path):
         home = self._home(monkeypatch, tmp_path)
