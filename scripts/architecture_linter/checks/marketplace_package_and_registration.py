@@ -534,6 +534,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
         ),
         "src/apm_cli/install/sources.py": (
             "is_codex_source_pin(cached_commit)",
+            "verify_marker(self.install_path, cached_commit)",
             "is_codex_compatibility_manifest(install_path, detect_package_type(install_path)[1])",
             "native_validation = validate_apm_package(install_path, source_path=install_path)",
         ),

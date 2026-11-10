@@ -346,6 +346,26 @@ class CachedDependencySource(DependencySource):
                 cached_commit = dep_ref.reference
         return cached_commit
 
+    def _cached_source_pin(self, cached_commit: str | None) -> str:
+        """Return the commit these cached bytes can vouch for, else ``cached``.
+
+        Only a full commit identity qualifies. A true cache hit must also
+        carry a ``.apm-pin`` marker recording that commit, so branch names,
+        short SHAs and missing or stale markers keep the sentinel and native
+        source-pin validation fails closed (#3388).
+        """
+        from apm_cli.codex_plugins.registrar import is_codex_source_pin
+        from apm_cli.install.cache_pin import CachePinError, verify_marker
+
+        if cached_commit is None or not is_codex_source_pin(cached_commit):
+            return "cached"
+        if not self.fetched_this_run:
+            try:
+                verify_marker(self.install_path, cached_commit)
+            except CachePinError:
+                return "cached"
+        return cached_commit
+
     def _materialized_resolved_ref(self) -> Any:
         """Return the reference that produced the bytes currently on disk."""
         pre_download_results = self.ctx.pre_download_results
@@ -509,8 +529,6 @@ class CachedDependencySource(DependencySource):
         # priority rules (PR #1158 -- branch-ref drift fix).
         cached_commit = self._resolve_cached_commit()
 
-        from apm_cli.codex_plugins.registrar import is_codex_source_pin
-
         # A cache hit without a live resolved reference still knows the commit
         # the bytes came from, and downstream consumers read it from here: the
         # Codex native path treats a resolved commit as a source pin, so the
@@ -521,8 +539,7 @@ class CachedDependencySource(DependencySource):
             else ResolvedReference(
                 original_ref=dep_ref.reference or "default",
                 ref_type=GitReferenceType.BRANCH,
-                # Short SHAs and branch names stay on the ``cached`` sentinel.
-                resolved_commit=cached_commit if is_codex_source_pin(cached_commit) else "cached",
+                resolved_commit=self._cached_source_pin(cached_commit),
                 ref_name=dep_ref.reference or "default",
             )
         )
