@@ -104,7 +104,9 @@ class TestRawCdnFirstSweep:
                 "try_with_fallback",
                 side_effect=lambda _host, fn, **kw: fn(None, {}),
             ),
-            patch.object(downloader, "_resilient_get", return_value=_not_found_response()) as api_mock,
+            patch.object(
+                downloader, "_resilient_get", return_value=_not_found_response()
+            ) as api_mock,
             patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(False, None)),
         ):
             ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
@@ -144,37 +146,38 @@ class TestRawCdnFirstSweep:
         assert ok is True
 
     def test_non_public_host_skips_sweep(self) -> None:
-        """Enterprise/ADO/GitLab hosts keep the legacy probe order."""
+        """GitHub Enterprise hosts keep the legacy probe order."""
         downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(
-            repo_url="https://github.enterprise.example.com/owner/repo"
+        dep_ref = DependencyReference(
+            repo_url="owner/repo",
+            host="acme.ghe.com",
+            reference="main",
+            virtual_path="plugins/skill-creator",
+            is_virtual=True,
         )
+        assert downloader.auth_resolver.uses_public_github_anonymous_first("acme.ghe.com") is False
         calls, wrapper = _recording_raw_wrapper(downloader)
 
         with (
             patch.object(downloader, "download_raw_file", side_effect=wrapper),
-            patch.object(
-                downloader.auth_resolver,
-                "uses_public_github_anonymous_first",
-                return_value=False,
-            ),
-            # Simulated legacy per-marker miss: keeps the probe entirely
-            # offline (a bare MagicMock return would be accepted as file
-            # content), while the directory and ls-remote fallbacks are
-            # stubbed at the validation-module boundary.
+            # Simulated legacy per-marker miss keeps the probe offline, while
+            # the directory and ls-remote fallbacks are stubbed at the
+            # validation-module boundary.
             patch.object(
                 downloader._strategies,
                 "download_github_file",
                 side_effect=RuntimeError("simulated miss"),
             ) as legacy_mock,
+            patch.object(downloader._strategies, "try_raw_download") as cdn_mock,
             patch.object(gdv, "_directory_exists_at_ref", return_value=False),
             patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(False, None)),
         ):
             ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
 
         assert ok is False
-        legacy_mock.assert_called()
-        assert calls and not any(calls), "no probe may run raw-only off public github"
+        assert legacy_mock.call_count == MARKER_COUNT
+        cdn_mock.assert_not_called()
+        assert calls == [False] * MARKER_COUNT, "no probe may run raw-only off public github"
 
     def test_virtual_file_probe_keeps_legacy_semantics(self) -> None:
         """Single-file virtual packages are unaffected by the sweep."""
@@ -195,9 +198,7 @@ class TestRawCdnFirstSweep:
                 "try_with_fallback",
                 side_effect=lambda _host, fn, **kw: fn(None, {}),
             ),
-            patch.object(
-                downloader, "_resilient_get", return_value=_not_found_response()
-            ),
+            patch.object(downloader, "_resilient_get", return_value=_not_found_response()),
         ):
             ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
 

@@ -32,9 +32,9 @@ class TestAutoDetectPathWithPayload:
         with patch.object(
             mp_client,
             "_fetch_file",
-            side_effect=lambda source, path, **kw: CATALOG
-            if path == ".claude-plugin/marketplace.json"
-            else None,
+            side_effect=lambda source, path, **kw: (
+                CATALOG if path == ".claude-plugin/marketplace.json" else None
+            ),
         ) as fetch_mock:
             detected, payload = mp_client._auto_detect_path_with_payload(_github_source())
 
@@ -63,9 +63,10 @@ class TestFetchMarketplaceDiscoveryPayload:
     def test_discovery_payload_skips_duplicate_fetch(self) -> None:
         source = _github_source()
 
-        with patch.object(mp_client, "_fetch_file") as fetch_mock, patch.object(
-            mp_client, "_write_cache"
-        ) as write_mock:
+        with (
+            patch.object(mp_client, "_fetch_file") as fetch_mock,
+            patch.object(mp_client, "_write_cache") as write_mock,
+        ):
             manifest = mp_client.fetch_marketplace(
                 source,
                 force_refresh=True,
@@ -80,9 +81,10 @@ class TestFetchMarketplaceDiscoveryPayload:
     def test_discovery_payload_none_fetches_normally(self) -> None:
         source = _github_source()
 
-        with patch.object(
-            mp_client, "_fetch_file", return_value=CATALOG
-        ) as fetch_mock, patch.object(mp_client, "_write_cache"):
+        with (
+            patch.object(mp_client, "_fetch_file", return_value=CATALOG) as fetch_mock,
+            patch.object(mp_client, "_write_cache"),
+        ):
             manifest = mp_client.fetch_marketplace(source, force_refresh=True)
 
         fetch_mock.assert_called_once()
@@ -95,8 +97,9 @@ class TestFetchMarketplaceDiscoveryPayload:
 
         source = _github_source()
 
-        with patch.object(mp_client, "_fetch_file") as fetch_mock, patch.object(
-            mp_client, "_cache_dir", return_value=mp_client._cache_dir()
+        with (
+            patch.object(mp_client, "_fetch_file") as fetch_mock,
+            patch.object(mp_client, "_cache_dir", return_value=mp_client._cache_dir()),
         ):
             # Real cache write under the test's HOME (see conftest), then a
             # second fetch must be served from the fresh sidecar cache.
