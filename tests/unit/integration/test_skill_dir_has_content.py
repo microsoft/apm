@@ -54,6 +54,51 @@ def test_symlinks_count_as_content(tmp_path: Path) -> None:
     assert skill_dir_has_content(root_link) is True
 
 
+def test_reparse_point_directories_count_as_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows junctions are not symlinks to islink() but must still count as content."""
+    import apm_cli.integration.skill_support as support
+
+    root = tmp_path / "skill"
+    junction = root / "junction"
+    junction.mkdir(parents=True)
+    real_lstat = os.lstat
+
+    class _Attributes:
+        def __init__(self, result: os.stat_result) -> None:
+            self._result = result
+            self.st_file_attributes = 0x400
+
+        def __getattr__(self, name: str):
+            return getattr(self._result, name)
+
+    def fake_lstat(candidate, *args, **kwargs):
+        result = real_lstat(candidate, *args, **kwargs)
+        if Path(candidate) == junction:
+            return _Attributes(result)
+        return result
+
+    monkeypatch.setattr(support.os, "lstat", fake_lstat)
+    assert skill_dir_has_content(root) is True
+    assert skill_dir_has_content(junction) is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-only")
+def test_real_windows_junction_counts_as_content(tmp_path: Path) -> None:
+    import _winapi
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    root = tmp_path / "skill"
+    root.mkdir()
+    _winapi.CreateJunction(str(elsewhere), str(root / "junction"))
+    root_junction = tmp_path / "root-junction"
+    _winapi.CreateJunction(str(elsewhere), str(root_junction))
+    assert skill_dir_has_content(root) is True
+    assert skill_dir_has_content(root_junction) is True
+
+
 @pytest.mark.skipif(
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="POSIX permission semantics required",

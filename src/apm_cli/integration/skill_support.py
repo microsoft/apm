@@ -9,19 +9,31 @@ from pathlib import Path
 from apm_cli.core.deployment_state import MaterializationResult
 
 
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_link_like(path: str | Path) -> bool:
+    """Treat symlinks and Windows reparse points (junctions) as links; fail closed."""
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return True
+    return os.path.islink(path) or bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def skill_dir_has_content(path: Path) -> bool:
     """Return whether a skill destination holds content; an empty directory tree does not.
 
-    Fails closed: symlinks, any non-directory entry, and unreadable subtrees
-    count as content so unmanaged material is never treated as absent.
+    Fails closed: symlinks, junctions, any non-directory entry, and unreadable
+    subtrees count as content so unmanaged material is never treated as absent.
     """
     if not os.path.lexists(path):
         return False
-    if path.is_symlink() or not path.is_dir():
+    if _is_link_like(path) or not path.is_dir():
         return True
     errors: list[OSError] = []
     for root, dirs, files in os.walk(path, onerror=errors.append):
-        if files or errors or any(os.path.islink(os.path.join(root, d)) for d in dirs):
+        if files or errors or any(_is_link_like(os.path.join(root, d)) for d in dirs):
             return True
     return bool(errors)
 
