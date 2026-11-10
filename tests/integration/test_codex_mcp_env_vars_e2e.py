@@ -149,6 +149,32 @@ def test_references_are_forwarded_for_set_and_unset_variables(
     assert MISMATCH_SECRET not in (project / "apm.lock.yaml").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("scope_flags", [(), ("--global",)], ids=["project", "user"])
+def test_extra_env_vars_passthrough(
+    tmp_path: Path, apm_binary_path: str, scope_flags: tuple[str, ...]
+) -> None:
+    """Modeled names win at project scope; user-scope passthrough is unchanged."""
+    declaration = _declaration({"E2E_SET": "${E2E_SET}"}, extra={"env_vars": ["E2E_PRIVATE_TOKEN"]})
+    if scope_flags:
+        _write_manifest(tmp_path / "home" / ".apm", declaration)
+        project = tmp_path / "project"
+        project.mkdir()
+        config_path = tmp_path / "codex-home" / "config.toml"
+        config_path.parent.mkdir()
+    else:
+        project = _project(tmp_path, declaration)
+        config_path = project / ".codex" / "config.toml"
+
+    result = _install(apm_binary_path, project, _secret_values_set(tmp_path), *scope_flags)
+
+    assert result.returncode == 0, _output(result)
+    server = toml.load(config_path)["mcp_servers"]["env-demo"]
+    expected = ["E2E_PRIVATE_TOKEN"] if scope_flags else ["E2E_SET"]
+    assert server["env_vars"] == expected
+    if not scope_flags:
+        assert SET_SECRET not in config_path.read_text(encoding="utf-8")
+
+
 def test_unforwardable_references_warn_with_names_only(
     tmp_path: Path, apm_binary_path: str
 ) -> None:
