@@ -2,7 +2,7 @@ name: autopilot-issue-triage-worker
 version: 0.1.0
 description: Advise on ONE microsoft/apm issue already selected by autopilot-issue-triage-scheduler. Advisory only. Never implements, never assigns, never lists the queue.
 author: Microsoft
-license: MIT
+license: Apache-2.0
 type: skill
 
 # Stand-alone primitive: no transitive APM deps. Persona lenses are

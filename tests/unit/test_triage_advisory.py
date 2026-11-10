@@ -14,8 +14,11 @@ import pytest
 import yaml
 
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.path_anchoring import resolve_local_dep_dirs
+from apm_cli.install.phases.local_content import compute_local_package_hash
 from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.git_env import get_git_executable
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
@@ -226,6 +229,10 @@ def test_installed_skill_files_and_recorded_hashes_match_sources(tmp_path: Path)
     """Exercise the published package and its generated installation contract."""
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     for name, source in [
+        ("autopilot-comment", ROOT / "packages/autopilot/autopilot-comment"),
+        ("autopilot-pr-merge-worker", ROOT / "packages/autopilot/autopilot-pr-merge-worker"),
+        ("autopilot-pr-review-worker", ROOT / "packages/autopilot/autopilot-pr-review-worker"),
+        ("pr-description-skill", ROOT / "packages/pr-description-skill"),
         ("autopilot-issue-triage-worker", WORKER),
         ("autopilot-issue-delivery-worker", WORKER_CODE),
         ("autopilot-issue-triage-scheduler", PACKAGE),
@@ -248,6 +255,37 @@ def test_installed_skill_files_and_recorded_hashes_match_sources(tmp_path: Path)
             assert compute_file_hash(checkout) == expected
             checkout.write_bytes(checkout.read_bytes() + b"\nchanged content\n")
             assert compute_file_hash(checkout) != expected
+
+
+@pytest.mark.windows_compat
+def test_local_package_snapshots_match_lockfile(tmp_path: Path) -> None:
+    """Committed package bytes must match frozen hashes, even on CRLF checkouts."""
+    lock = LockFile.read(ROOT / "apm.lock.yaml")
+    assert lock is not None
+    git = get_git_executable()
+    files = subprocess.check_output([git, "ls-files", "-z", "--", "packages"], cwd=ROOT)
+    subprocess.run(
+        [
+            git,
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "checkout-index",
+            "-z",
+            "--stdin",
+            f"--prefix={tmp_path.as_posix()}/",
+        ],
+        cwd=ROOT,
+        input=files,
+        check=True,
+    )
+    sources = resolve_local_dep_dirs(lock, tmp_path)
+    assert sources
+    for key, source in sources.items():
+        dependency = lock.get_dependency(key)
+        assert dependency is not None
+        assert dependency.content_hash == compute_local_package_hash(source), key
 
 
 def test_installed_triage_content_passes_canonical_integrity_audit() -> None:
