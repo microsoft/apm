@@ -30,11 +30,12 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
             "integrator._target_skill_dir(",
             "BaseIntegrator.check_collision(",
             "def preflight_skill_selection(",
-            "integrator._skill_filter_misses_available(",
+            "SkillIntegrator._skill_filter_misses_available(",
         ),
         "src/apm_cli/integration/skill_integrator.py": (
             "selected_skill_sources = staticmethod(selected_skill_sources)",
             "selection = self.selected_skill_sources(package_info)",
+            "preflight_skill_selection = staticmethod(_preflight_selection)",
         ),
         "src/apm_cli/install/template.py": (
             "def preflight_skill_materializations(",
@@ -44,7 +45,7 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
         ),
         "src/apm_cli/install/services.py": (
             "source_plan = deployment_plan.source_plan",
-            "not preflight_skill_selection(",
+            'getattr(integrators.skill, "preflight_skill_selection", None)',
         ),
         "src/apm_cli/install/deployment_plan.py": ("source_plan = DeployableSourcePlan.create(",),
     }

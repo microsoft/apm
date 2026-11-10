@@ -57,7 +57,6 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
 
 
 def preflight_skill_selection(
-    integrator: SkillIntegrator,
     package_info: PackageInfo,
     *,
     skill_subset: tuple[str, ...] | None,
@@ -70,7 +69,9 @@ def preflight_skill_selection(
     Uses the same route and availability that skill deployment consumes, so a
     selection refused here is exactly one deployment would also refuse (#3373).
     """
-    selection = integrator.selected_skill_sources(package_info)
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    selection = selected_skill_sources(package_info)
     if selection.route not in ("bundle", "subskills"):
         return True
     name_filter = (
@@ -79,10 +80,10 @@ def preflight_skill_selection(
         else skill_subset_filter_tokens(skill_subset)
     )
     available = frozenset(selection.children)
-    if not integrator._skill_filter_misses_available(name_filter, available):
+    if not SkillIntegrator._skill_filter_misses_available(name_filter, available):
         return True
     dependency = package_info.dependency_ref
-    integrator._error_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         available,
         tuple(skill_subset or ()),
         dependency.get_unique_key() if dependency is not None else package_info.install_path.name,

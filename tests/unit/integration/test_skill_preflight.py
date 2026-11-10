@@ -235,7 +235,7 @@ def test_selection_preflight_matches_deployment_availability(
     diagnostics = DiagnosticCollector()
 
     result = preflight_skill_selection(
-        SkillIntegrator(), info, skill_subset=subset, source_plan=plan, diagnostics=diagnostics
+        info, skill_subset=subset, source_plan=plan, diagnostics=diagnostics
     )
 
     assert result is admitted
@@ -251,7 +251,6 @@ def test_selection_preflight_ignores_native_skill_filter(tmp_path: Path) -> None
     diagnostics = DiagnosticCollector()
 
     assert preflight_skill_selection(
-        SkillIntegrator(),
         info,
         skill_subset=("renamed",),
         source_plan=None,
