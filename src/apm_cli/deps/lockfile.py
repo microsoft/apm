@@ -156,6 +156,23 @@ class LockfileConflictError(LockfileFormatError):
         )
 
 
+class LockfileSymlinkError(OSError):
+    """Raised instead of replacing a symlinked lockfile with a regular file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        try:
+            self.target = os.readlink(path)
+        except OSError:
+            self.target = "<unreadable>"
+        super().__init__(
+            f"{path} is a symbolic link to {self.target}. APM does not write "
+            "lockfiles through symbolic links, so the link and its target were "
+            "left unchanged.\nReplace the link with a regular file (for example, "
+            "copy the target over it), then retry your original command."
+        )
+
+
 # Git writes each marker at the start of a line, followed by a space and a label
 # (or nothing, for a bare ``=======`` separator). A separator alone is not
 # evidence of a conflict, so only the labelled markers are matched here.
@@ -1283,6 +1300,8 @@ class LockFile:
         if suppressed is not None:
             suppressed.append(self.to_yaml())
             return
+        if path.is_symlink():
+            raise LockfileSymlinkError(path)
         from ..utils.atomic_io import atomic_write_text
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
