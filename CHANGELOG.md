@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
 - `apm audit --ci` cold replay now fetches `git@` and `ssh://` dependencies over SSH, matching `apm install`, so private SSH-only packages no longer need `APM_GIT_PROTOCOL=ssh` for audit. HTTPS and shorthand selection and the strict no-fallback default are unchanged. (#PR)
+- `apm audit --ci` cold replay now fetches `git@` and `ssh://` dependencies over SSH, matching `apm install`, so private SSH-only packages no longer need `APM_GIT_PROTOCOL=ssh` for audit. HTTPS and shorthand selection and the strict no-fallback default are unchanged. (#3531)
 
 ## [0.35.0] - 2026-10-22
 
