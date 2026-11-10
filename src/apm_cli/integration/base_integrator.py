@@ -227,9 +227,7 @@ class BaseIntegrator:
         """
         if managed_files is None:
             managed_files = set()
-        if not target_path.exists() or (
-            target_path.is_dir() and not any(p.is_file() for p in target_path.rglob("*"))
-        ):
+        if not target_path.exists():
             return False
         # managed_files is pre-normalized at the call site  -- O(1) lookup
         if rel_path.replace("\\", "/") in managed_files:

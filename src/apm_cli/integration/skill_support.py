@@ -1,11 +1,29 @@
 """Supporting value objects and cleanup helpers for skill integration."""
 
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.core.deployment_state import MaterializationResult
+
+
+def skill_dir_has_content(path: Path) -> bool:
+    """Return whether a skill destination holds content; an empty directory tree does not.
+
+    Fails closed: symlinks, any non-directory entry, and unreadable subtrees
+    count as content so unmanaged material is never treated as absent.
+    """
+    if not os.path.lexists(path):
+        return False
+    if path.is_symlink() or not path.is_dir():
+        return True
+    errors: list[OSError] = []
+    for root, dirs, files in os.walk(path, onerror=errors.append):
+        if files or errors or any(os.path.islink(os.path.join(root, d)) for d in dirs):
+            return True
+    return bool(errors)
 
 
 def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dict[str, str]]:

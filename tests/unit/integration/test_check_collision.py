@@ -125,14 +125,12 @@ class TestCheckCollisionNoneSemantics:
 
         assert result is False
 
-    def test_empty_directory_is_not_collision(self, tmp_path: Path) -> None:
-        """An empty pre-existing directory contains no user files and is not a collision."""
+    def test_empty_directory_is_still_collision_for_generic_callers(self, tmp_path: Path) -> None:
+        """#3441 scopes empty-tree tolerance to skills; the generic contract is unchanged."""
         target_dir = tmp_path / "empty_dir"
         target_dir.mkdir()
-        result = BaseIntegrator.check_collision(
-            target_dir, ".agents/skills/empty_dir", set(), False
-        )
-        assert result is False
+        result = BaseIntegrator.check_collision(target_dir, ".github/agents/empty_dir", set(), False)
+        assert result is True
 
     def test_non_empty_directory_is_collision(self, tmp_path: Path) -> None:
         """A directory containing files is a collision when not managed."""
