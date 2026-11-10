@@ -347,12 +347,10 @@ class CachedDependencySource(DependencySource):
         return cached_commit
 
     def _cached_source_pin(self, cached_commit: str | None) -> str:
-        """Return the commit these cached bytes can vouch for, else ``cached``.
+        """Return the full commit these bytes vouch for, else ``cached`` (#3388).
 
-        Only a full commit identity qualifies. A true cache hit must also
-        carry a ``.apm-pin`` marker recording that commit, so branch names,
-        short SHAs and missing or stale markers keep the sentinel and native
-        source-pin validation fails closed (#3388).
+        A true cache hit also needs a matching ``.apm-pin`` marker, so native
+        source-pin validation fails closed on short, branch or stale identities.
         """
         from apm_cli.codex_plugins.registrar import is_codex_source_pin
         from apm_cli.install.cache_pin import CachePinError, verify_marker
@@ -529,10 +527,7 @@ class CachedDependencySource(DependencySource):
         # priority rules (PR #1158 -- branch-ref drift fix).
         cached_commit = self._resolve_cached_commit()
 
-        # A cache hit without a live resolved reference still knows the commit
-        # the bytes came from, and downstream consumers read it from here: the
-        # Codex native path treats a resolved commit as a source pin, so the
-        # ``cached`` sentinel made a locked SHA look like an invalid pin (#3388).
+        # Codex admission reads the fallback commit as its source pin.
         resolved_or_cached_ref = (
             resolved_ref
             if resolved_ref
