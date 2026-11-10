@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` and `apm install -g` no longer fail with "installation binding does not match" after a reboot or remount changes only the root's device number on Linux (btrfs subvolumes) and macOS; the receipt is rebound when inode, path, installation identity and recorded creation time still match, and recreated roots stay rejected. -- by @TyceHerrman (#3439)
+- Antigravity rules now follow Antigravity's documented schema: multi-pattern `applyTo` becomes one quoted comma-separated `globs` string instead of a list Antigravity rejects, and instructions without `applyTo` get `trigger: always_on` so Antigravity no longer discards them. Rules re-render on the next install; OpenAPM `req-tg-005` is amended to match. (#3546)
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
 
 ## [0.35.0] - 2026-10-22
