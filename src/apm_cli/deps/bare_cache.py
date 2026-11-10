@@ -576,6 +576,7 @@ def materialize_from_bare(
     env: dict[str, str],
     known_sha: str | None = None,
     sparse_paths: list[str] | None = None,
+    package: str | None = None,
 ) -> str:
     """Create a working-tree checkout from a bare repo via local-shared clone.
 
@@ -596,6 +597,9 @@ def materialize_from_bare(
     CRLF + LFS pinning before checkout:
       - ``core.autocrlf=false`` guarantees byte-identical content
         across consumers regardless of the user's global git config.
+      - ``git_symlink_pin_args`` checks out in-repo links as real
+        symlinks; a host that cannot create them raises
+        :class:`GitSymlinkCapabilityError` naming ``package`` (#3457).
       - ``filter.lfs.smudge=""`` + ``filter.lfs.required=false``
         disables LFS smudge cross-platform (the empty string trick
         works everywhere; ``cat`` is not on Windows PATH).
@@ -624,10 +628,13 @@ def materialize_from_bare(
         git_no_hooks_args,
         git_no_templates_args,
         git_subprocess_env,
+        git_symlink_pin_args,
+        raise_for_symlink_capability,
     )
 
     git_exe = get_git_executable()
     env = git_subprocess_env(env)
+    pin_args = list(git_symlink_pin_args())
 
     if known_sha:
         resolved_sha = known_sha
@@ -690,33 +697,45 @@ def materialize_from_bare(
             check=False,
         )
     checkout_target = known_sha or "HEAD"
-    if sparse_paths:
-        apply_sparse_cone(git_exe, consumer_dir, list(sparse_paths), env=env)
-    subprocess.run(
-        [
-            git_exe,
-            *git_no_hooks_args(),
-            "-C",
-            str(consumer_dir),
-            "checkout",
-            checkout_target,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env=env,
-        check=True,
-    )
-    if sparse_paths:
-        dangling = repair_dangling_cone_symlinks(git_exe, consumer_dir, list(sparse_paths), env=env)
-        if dangling is not None:
-            _log.info(
-                "Sparse-cone checkout of %s left a dangling symlink at %s "
-                "(target outside the requested cone); widened to a full "
-                "checkout so it resolves (#2707).",
-                consumer_dir,
-                dangling,
+    try:
+        if sparse_paths:
+            apply_sparse_cone(
+                git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
             )
+        subprocess.run(
+            [
+                git_exe,
+                *git_no_hooks_args(),
+                *pin_args,
+                "-C",
+                str(consumer_dir),
+                "checkout",
+                checkout_target,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+            check=True,
+        )
+        dangling = (
+            repair_dangling_cone_symlinks(
+                git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
+            )
+            if sparse_paths
+            else None
+        )
+    except subprocess.CalledProcessError as exc:
+        raise_for_symlink_capability(exc, package or str(consumer_dir))
+        raise
+    if dangling is not None:
+        _log.info(
+            "Sparse-cone checkout of %s left a dangling symlink at %s "
+            "(target outside the requested cone); widened to a full "
+            "checkout so it resolves (#2707).",
+            consumer_dir,
+            dangling,
+        )
     return resolved_sha
 
 

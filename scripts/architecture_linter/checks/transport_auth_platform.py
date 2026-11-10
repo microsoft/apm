@@ -839,6 +839,9 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 'return "-c", "core.hooksPath=/dev/null"',
                 'return ("--template=",)',
                 "def validate_git_url_rewrite_safety(",
+                "def git_symlink_pin_args(",
+                "retained.append((_SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE))",
+                "def raise_for_symlink_capability(",
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
         )
@@ -1055,6 +1058,31 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "Dependency Git repositories must suppress template-provided config",
             )
         )
+    for path in (
+        "src/apm_cli/cache/git_cache.py",
+        "src/apm_cli/deps/bare_cache.py",
+    ):
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_GIT_CHILD_ENV,
+                path,
+                ("git_symlink_pin_args(", "raise_for_symlink_capability("),
+                "Dependency checkouts must pin real symlinks and name capability failures",
+            )
+        )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(r"core\.symlinks="),
+            "The core.symlinks pin must route through utils/git_env.git_symlink_pin_args",
+            exempt=False,
+        )
+    )
     findings.extend(
         _forbid_scan(
             provider,

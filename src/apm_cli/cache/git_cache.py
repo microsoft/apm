@@ -75,12 +75,15 @@ def _safe_git_args() -> list[str]:
       not override ``core.eol`` or ``.gitattributes`` ``eol=crlf`` /
       ``text=auto`` requests.
 
+    - ``git_symlink_pin_args`` checks out in-repo links as real symlinks
+      so Windows hashes the same bytes as POSIX (#3457).
+
     These flags are scoped per-invocation via ``-c`` and never mutate
     the user's gitconfig. The cache layer is the single source of
     truth for git subprocess invocation -- callers must use this
     helper rather than ad-hoc ``git`` argv construction.
     """
-    from ..utils.git_env import git_long_paths_args, git_no_hooks_args
+    from ..utils.git_env import git_long_paths_args, git_no_hooks_args, git_symlink_pin_args
 
     return [
         *git_long_paths_args(),
@@ -89,23 +92,20 @@ def _safe_git_args() -> list[str]:
         "submodule.recurse=false",
         "-c",
         "core.autocrlf=false",
+        *git_symlink_pin_args(),
     ]
 
 
-def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
-    """Return whether the checkout's local gitconfig pins ``core.autocrlf=false``.
-
-    Pre-fix shards materialized under host ``core.autocrlf=true`` omit this
-    pin and may contain CRLF working-tree bytes. Cache hits rematerialize
-    those shards so existing Windows caches heal without ``apm cache clean``.
-    """
+def _checkout_core_values(checkout_dir: Path) -> dict[str, str] | None:
+    """Return the first ``[core]`` values in a checkout's local gitconfig."""
     config = checkout_dir / ".git" / "config"
     if not config.is_file():
-        return False
+        return None
     try:
         text = config.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
-        return False
+        return None
+    values: dict[str, str] = {}
     section = None
     for raw in text.splitlines():
         line = raw.split(";", 1)[0].split("#", 1)[0].strip()
@@ -118,11 +118,34 @@ def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
         if section != "core" or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        if key.strip().lower() != "autocrlf":
-            continue
-        normalized = value.strip().strip("\"'").lower()
-        return normalized in {"false", "0", "no", "off"}
-    return False
+        values.setdefault(key.strip().lower(), value.strip().strip("\"'").lower())
+    return values
+
+
+def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
+    """Return whether the checkout's local gitconfig pins ``core.autocrlf=false``.
+
+    Pre-fix shards materialized under host ``core.autocrlf=true`` omit this
+    pin and may contain CRLF working-tree bytes. Cache hits rematerialize
+    those shards so existing Windows caches heal without ``apm cache clean``.
+    """
+    values = _checkout_core_values(checkout_dir) or {}
+    return values.get("autocrlf") in {"false", "0", "no", "off"}
+
+
+def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
+    """Return whether a shard was materialized with every byte-determinism pin.
+
+    Shards written before the ``core.symlinks`` pin may hold Windows
+    link-text files instead of symlinks (#3457); cache hits rematerialize them.
+    """
+    values = _checkout_core_values(checkout_dir) or {}
+    return _checkout_pins_autocrlf_false(checkout_dir) and values.get("symlinks") in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    }
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -245,7 +268,7 @@ class GitCache:
         # Cache hit path (skip if refresh requested)
         if not self._refresh and checkout_dir.is_dir():
             sha_ok = verify_checkout_sha(checkout_dir, sha)
-            if sha_ok and _checkout_pins_autocrlf_false(checkout_dir):
+            if sha_ok and _checkout_has_materialization_pins(checkout_dir):
                 _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
                     return self._record_checkout_access(
@@ -687,7 +710,7 @@ class GitCache:
             # rule out a poisoned half-write (atomic_land guards
             # against that, but we re-check defensively).
             existing_ok = final_dir.is_dir() and verify_checkout_sha(final_dir, sha)
-            if existing_ok and _checkout_pins_autocrlf_false(final_dir):
+            if existing_ok and _checkout_has_materialization_pins(final_dir):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
                     _sanitize_url(url),
@@ -699,8 +722,7 @@ class GitCache:
                 )
             if existing_ok:
                 _log.info(
-                    "[*] Rematerializing git checkout missing core.autocrlf=false pin: "
-                    "%s @ %s [%s]",
+                    "[*] Rematerializing git checkout missing materialization pins: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
                     variant,
@@ -757,27 +779,20 @@ class GitCache:
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-                # Persist the pin so cache hits can recognize post-fix shards.
-                # Checkout itself still needs ``-c core.autocrlf=false`` from
+                # Persist the pins so cache hits can recognize post-fix shards.
+                # Checkout itself still needs the ``-c`` pins from
                 # ``_safe_git_args`` because env-frozen host config outranks
-                # this local value.
-                subprocess.run(
-                    [
-                        git_exe,
-                        *_safe_git_args(),
-                        "-C",
-                        str(staged),
-                        "config",
-                        "core.autocrlf",
-                        "false",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    env=subprocess_env,
-                    stdin=subprocess.DEVNULL,
-                    check=True,
-                )
+                # these local values.
+                for key, value in (("core.autocrlf", "false"), ("core.symlinks", "true")):
+                    subprocess.run(
+                        [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        env=subprocess_env,
+                        stdin=subprocess.DEVNULL,
+                        check=True,
+                    )
                 if promisor_url:
                     # Point origin at the real upstream (clone set it to the
                     # local bare). Single config call; the other two promisor
@@ -852,8 +867,10 @@ class GitCache:
                 raise
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
+                from ..utils.git_env import raise_for_symlink_capability
 
                 robust_rmtree(staged, ignore_errors=True)
+                raise_for_symlink_capability(exc, _sanitize_url(url))
                 raise RuntimeError(
                     f"Failed to create checkout for {_sanitize_url(url)} @ {sha[:12]}: {exc}"
                 ) from exc
@@ -863,9 +880,10 @@ class GitCache:
             if not atomic_land(staged, final_dir, lock):
                 # Another process landed first between our re-probe and
                 # the rename (only possible if our lock dropped, which
-                # it didn't); verify integrity and the autocrlf pin.
+                # it didn't); verify integrity and the materialization pins.
                 if not (
-                    verify_checkout_sha(final_dir, sha) and _checkout_pins_autocrlf_false(final_dir)
+                    verify_checkout_sha(final_dir, sha)
+                    and _checkout_has_materialization_pins(final_dir)
                 ):
                     self._evict_checkout(final_dir)
                     raise RuntimeError(

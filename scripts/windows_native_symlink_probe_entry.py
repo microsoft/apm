@@ -18,9 +18,9 @@ from apm_cli.utils.console import _rich_error, _rich_info
 from apm_cli.utils.git_env import get_git_executable
 
 NATIVE_NODE = (
-    "tests/integration/test_windows_native_symlink.py::test_native_standard_user_symlink_fallback"
+    "tests/integration/test_windows_native_symlink.py::test_native_standard_user_symlink_diagnostic"
 )
-MUTATION_FAILURE = "native-symlink-precedence: APM clone failed after native Git fallback succeeded"
+MUTATION_FAILURE = "native-symlink-pin: APM clone wrote link text instead of the capability error"
 
 
 def _whoami_rows(option: str) -> list[list[str]]:
@@ -147,7 +147,7 @@ def run_phase(root: Path, scratch: Path, name: str) -> dict[str, object]:
     mutation = name == "mutation"
     env = dict(os.environ)
     if mutation:
-        env["APM_WINDOWS_NATIVE_MUTATION"] = "drop-local-precedence"
+        env["APM_WINDOWS_NATIVE_MUTATION"] = "drop-symlink-pin"
     else:
         env.pop("APM_WINDOWS_NATIVE_MUTATION", None)
     report = scratch / f"{name}.xml"
@@ -237,7 +237,7 @@ def main() -> int:
         context = probe_native_context(scratch / "initial-capability", args.expected_sid)
         os.environ["APM_WINDOWS_NATIVE_EXPECTED_SID"] = args.expected_sid
         os.environ["APM_WINDOWS_NATIVE_STANDARD_USER"] = "1"
-        _rich_info("Native standard-user token confirmed; running fallback and mutation controls")
+        _rich_info("Native standard-user token confirmed; running diagnostic and mutation controls")
         phases = [run_phase(root, scratch, phase) for phase in ("baseline", "mutation", "restored")]
         if source_provenance(root, args.expected_head) != provenance:
             raise RuntimeError("Source/interpreter provenance changed during acceptance")
@@ -246,7 +246,7 @@ def main() -> int:
             json.dumps(proof, indent=2, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n"
         )
         _rich_info(
-            "Native fallback passed; the old-precedence mutation failed and restoration passed"
+            "Native diagnostic passed; the unpinned mutation failed and restoration passed"
         )
         return 0
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, ET.ParseError) as error:

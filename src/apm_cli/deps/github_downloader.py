@@ -33,6 +33,7 @@ from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
 from ..utils.git_env import (
+    GitSymlinkCapabilityError,
     checkout_git_worktree,
     get_git_executable,
     git_no_hooks_args,
@@ -746,6 +747,7 @@ class GitHubPackageDownloader:
         env: dict[str, str],
         known_sha: str | None = None,
         sparse_paths: list[str] | None = None,
+        package: str | None = None,
     ) -> str:
         """Thin delegate to :func:`bare_cache.materialize_from_bare` (kept on the class so test patches still work)."""
         return materialize_from_bare(
@@ -755,6 +757,7 @@ class GitHubPackageDownloader:
             env=env,
             known_sha=known_sha,
             sparse_paths=sparse_paths,
+            package=package,
         )
 
     def _fetch_sha_into_bare(
@@ -1390,6 +1393,8 @@ class GitHubPackageDownloader:
                     locked_sha=_resolved_sha_for_cache,
                     sparse_paths=[subdir_path],
                 )
+            except GitSymlinkCapabilityError:
+                raise
             except Exception:
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
@@ -1511,7 +1516,10 @@ class GitHubPackageDownloader:
                         # requesting different subdirs of the same
                         # repo+SHA still share the object DB.
                         sparse_paths=[subdir_path],
+                        package=_dep_display,
                     )
+                except GitSymlinkCapabilityError:
+                    raise
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed to prepare dependency from cached clone: {e}"
@@ -1575,12 +1583,18 @@ class GitHubPackageDownloader:
                             progress_reporter=progress_reporter,
                             **clone_kwargs,
                         )
+                    except GitSymlinkCapabilityError:
+                        raise
                     except Exception as e:
                         raise RuntimeError(f"Failed to clone repository: {e}") from e
 
                     if is_commit_sha:
                         try:
-                            checkout_git_worktree(temp_clone_path, ref, env=self.git_env)
+                            checkout_git_worktree(
+                                temp_clone_path, ref, env=self.git_env, package=_dep_display
+                            )
+                        except GitSymlinkCapabilityError:
+                            raise
                         except Exception as e:
                             detail = self._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(f"Failed to checkout commit {ref}: {detail}") from e
@@ -1899,7 +1913,7 @@ class GitHubPackageDownloader:
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
                     target_path.mkdir(parents=True, exist_ok=True)
-            except AgentPluginError:
+            except (AgentPluginError, GitSymlinkCapabilityError):
                 if target_path.exists():
                     _rmtree(target_path)
                 raise
@@ -1931,7 +1945,12 @@ class GitHubPackageDownloader:
                     dep_ref=dep_ref,
                     verbose_callback=verbose_callback,
                 )
-                checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
+                checkout_git_worktree(
+                    target_path,
+                    resolved_ref.resolved_commit,
+                    env=self.git_env,
+                    package=str(dep_ref),
+                )
             else:
                 # For branches and tags, we can use shallow clone
                 progress_reporter = (

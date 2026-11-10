@@ -77,14 +77,14 @@ fallback requires an exhausted plan with an executed same-origin effective
 HTTPS attempt. Path containment rejects symlink or traversal escapes.
 See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-self-managed).
 
-### Git symlink checkout fallback
+### Packages with symbolic links
 
-APM preserves Git's detected `core.symlinks` setting and explicit command-scope
-overrides without changing global Git configuration, so a successful checkout
-is not proof that a package requiring real symlinks works (common on non-admin
-Windows accounts). See [Install packages: symlink checkout
-fallback](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong)
-for the full behavior and troubleshooting steps.
+APM checks out in-repo links in a dependency as real symlinks
+(`core.symlinks=true` on its own Git commands only), so the `content_hash` is
+the same on every platform. A host that cannot create symlinks fails the
+install with a diagnostic naming the package; on Windows enable Developer
+Mode or the "Create symbolic links" privilege. See [Install packages: when
+things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
 ### Custom git ports
 

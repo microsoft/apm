@@ -490,6 +490,57 @@ def git_no_templates_args() -> tuple[str]:
     return ("--template=",)
 
 
+_SYMLINK_PIN_KEY = "core.symlinks"
+_SYMLINK_PIN_VALUE = "true"
+_SYMLINK_CREATE_FAILURE = "unable to create symlink"
+
+
+def git_symlink_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin that materializes real symlinks.
+
+    Dependency Git children never see user or system config, so Git for
+    Windows records ``core.symlinks=false`` and writes each in-repo link as a
+    text file holding its target path. The package hash then differs from
+    POSIX for the same commit (#3457). ``-c`` outranks every config file and
+    ``GIT_CONFIG_KEY_n`` entry, so the pin holds regardless of caller config.
+    """
+    return "-c", f"{_SYMLINK_PIN_KEY}={_SYMLINK_PIN_VALUE}"
+
+
+class GitSymlinkCapabilityError(RuntimeError):
+    """A dependency contains symbolic links that this host cannot create."""
+
+    def __init__(self, package: str) -> None:
+        self.package = package
+        super().__init__(
+            f"Package {package} contains symbolic links, but this host cannot create them. "
+            "APM checks out package links as real symlinks so the content hash is the "
+            "same on every platform. On Windows, enable Developer Mode or grant the "
+            "'Create symbolic links' privilege, then retry."
+        )
+
+
+def raise_for_symlink_capability(error: BaseException, package: str) -> None:
+    """Raise :class:`GitSymlinkCapabilityError` when Git could not create a link.
+
+    Walks the exception chain so wrapped subprocess failures are recognized.
+    An already classified error is re-raised unchanged. Any other failure
+    returns so the caller keeps its own handling.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, GitSymlinkCapabilityError):
+            raise current
+        for stream in (getattr(current, "stderr", None), getattr(current, "stdout", None)):
+            if isinstance(stream, bytes):
+                stream = stream.decode("utf-8", errors="replace")
+            if isinstance(stream, str) and _SYMLINK_CREATE_FAILURE in stream:
+                raise GitSymlinkCapabilityError(package) from error
+        current = current.__cause__ or current.__context__
+
+
 class _GitProgress(Protocol):
     """Git progress callback consumed by the clone subprocess adapter."""
 
@@ -985,15 +1036,6 @@ def _merge_parent_git_config_snapshot(
     )
 
 
-def _symlink_entry_wins(current: GitConfigEntry | None, candidate: GitConfigEntry) -> bool:
-    """Decide whether ``candidate`` should replace the retained core.symlinks entry.
-
-    Command-scope intent always wins over any other scope; otherwise the
-    last entry seen wins, matching Git's own scope-precedence ordering.
-    """
-    return current is None or current.scope != "command" or candidate.scope == "command"
-
-
 def _materialize_git_config_snapshot(
     env: dict[str, str],
     snapshot: _GitConfigSnapshot,
@@ -1014,14 +1056,11 @@ def _materialize_git_config_snapshot(
         else None
     )
     retained: list[tuple[str, str]] = []
-    symlinks: GitConfigEntry | None = None
     for entry in snapshot.entries:
         normalized = entry.key.lower()
-        if normalized == "core.symlinks":
-            # Parent command entries can precede child file entries after
-            # merging. Keep command intent above Git init's capability result.
-            if _symlink_entry_wins(symlinks, entry):
-                symlinks = entry
+        if normalized == _SYMLINK_PIN_KEY:
+            # Replaced by the pin below; Git init's capability result and
+            # inherited values must not turn package links into link text.
             continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
@@ -1046,8 +1085,7 @@ def _materialize_git_config_snapshot(
                 continue
         retained.append((entry.key, entry.value))
 
-    if symlinks is not None:
-        retained.append(("core.symlinks", symlinks.value))
+    retained.append((_SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE))
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:
@@ -1421,6 +1459,9 @@ def clone_git_worktree(
             )
         except subprocess.TimeoutExpired:
             raise subprocess.TimeoutExpired([get_git_executable(), "clone"], 300) from None
+        except subprocess.CalledProcessError as exc:
+            raise_for_symlink_capability(exc, redact_git_diagnostic(url))
+            raise
         return
 
     from git.cmd import handle_process_output
@@ -1454,12 +1495,14 @@ def clone_git_worktree(
         process.wait()
         raise subprocess.TimeoutExpired([get_git_executable(), "clone"], 300) from None
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(
+        failure = subprocess.CalledProcessError(
             process.returncode,
             args,
             output="".join(stdout),
             stderr="".join(stderr),
         )
+        raise_for_symlink_capability(failure, redact_git_diagnostic(url))
+        raise failure
 
 
 def checkout_git_worktree(
@@ -1467,23 +1510,29 @@ def checkout_git_worktree(
     ref: str,
     *,
     env: dict[str, object] | None = None,
+    package: str | None = None,
 ) -> None:
-    """Check out a ref in an explicitly located worktree."""
-    subprocess.run(
-        [
-            get_git_executable(),
-            *git_no_hooks_args(),
-            "-C",
-            str(worktree),
-            "checkout",
-            ref,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=git_subprocess_env(env),
-    )
+    """Check out a ref in an explicitly located worktree with real symlinks."""
+    try:
+        subprocess.run(
+            [
+                get_git_executable(),
+                *git_no_hooks_args(),
+                *git_symlink_pin_args(),
+                "-C",
+                str(worktree),
+                "checkout",
+                ref,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=git_subprocess_env(env),
+        )
+    except subprocess.CalledProcessError as exc:
+        raise_for_symlink_capability(exc, package or str(worktree))
+        raise
 
 
 def git_worktree_head(
