@@ -85,3 +85,20 @@ def test_existing_capability_error_is_reraised_unchanged() -> None:
             raise_for_symlink_capability(wrapped, "other/repo")
 
     assert raised.value is original
+
+
+def test_successful_checkout_reporting_link_failure_raises() -> None:
+    """``git checkout`` prints the failure but exits 0 on Windows without privilege."""
+    result = subprocess.CompletedProcess(["git", "checkout"], 0, "", _GIT_SYMLINK_STDERR)
+
+    with pytest.raises(GitSymlinkCapabilityError) as raised:
+        raise_for_symlink_capability(result, "owner/repo")
+
+    assert raised.value.__cause__ is None
+
+
+def test_clean_successful_checkout_returns() -> None:
+    raise_for_symlink_capability(
+        subprocess.CompletedProcess(["git", "checkout"], 0, "", "HEAD is now at abc\n"),
+        "owner/repo",
+    )

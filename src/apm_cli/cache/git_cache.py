@@ -682,6 +682,7 @@ class GitCache:
             git_network_env,
             git_no_templates_args,
             git_subprocess_env,
+            raise_for_symlink_capability,
         )
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if promisor_url else "")
@@ -831,8 +832,9 @@ class GitCache:
                         env=subprocess_env,
                         extra_git_args=_safe_git_args(),
                     )
-                # Checkout the specific SHA
-                subprocess.run(
+                # Checkout the specific SHA. Git reports a link it could not
+                # create on stderr but still exits 0.
+                checkout = subprocess.run(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -848,6 +850,7 @@ class GitCache:
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
+                raise_for_symlink_capability(checkout, _sanitize_url(url))
                 if sparse_paths:
                     # Correctness repair, not a failure fallback (#2707):
                     # if the cone left a dangling symlink (target outside
@@ -867,7 +870,6 @@ class GitCache:
                 raise
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
-                from ..utils.git_env import raise_for_symlink_capability
 
                 robust_rmtree(staged, ignore_errors=True)
                 raise_for_symlink_capability(exc, _sanitize_url(url))

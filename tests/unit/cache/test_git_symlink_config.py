@@ -190,7 +190,7 @@ def symlink_source(tmp_path: Path, config_env: dict[str, str]) -> Path:
     """Commit a real Git symlink without needing OS symlink-create privileges."""
     source = tmp_path / "source"
     _git(config_env, "init", "--quiet", "--template=", str(source))
-    (source / "CLAUDE.md").write_text("Package instructions\n", encoding="utf-8")
+    (source / "CLAUDE.md").write_bytes(b"Package instructions\n")
     _git(config_env, "-C", str(source), "add", "CLAUDE.md")
     oid = _git(config_env, "-C", str(source), "hash-object", "-w", "--stdin", input="CLAUDE.md")
     _git(

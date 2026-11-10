@@ -520,15 +520,19 @@ class GitSymlinkCapabilityError(RuntimeError):
         )
 
 
-def raise_for_symlink_capability(error: BaseException, package: str) -> None:
+def raise_for_symlink_capability(
+    error: BaseException | subprocess.CompletedProcess, package: str
+) -> None:
     """Raise :class:`GitSymlinkCapabilityError` when Git could not create a link.
 
-    Walks the exception chain so wrapped subprocess failures are recognized.
-    An already classified error is re-raised unchanged. Any other failure
-    returns so the caller keeps its own handling.
+    Accepts a failed exception or a completed process: ``git checkout``
+    reports ``unable to create symlink`` but still exits 0, so callers must
+    pass successful checkout results too. Walks the exception chain so
+    wrapped subprocess failures are recognized. An already classified error
+    is re-raised unchanged. Any other outcome returns to the caller.
     """
     seen: set[int] = set()
-    current: BaseException | None = error
+    current: BaseException | subprocess.CompletedProcess | None = error
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if isinstance(current, GitSymlinkCapabilityError):
@@ -537,8 +541,9 @@ def raise_for_symlink_capability(error: BaseException, package: str) -> None:
             if isinstance(stream, bytes):
                 stream = stream.decode("utf-8", errors="replace")
             if isinstance(stream, str) and _SYMLINK_CREATE_FAILURE in stream:
-                raise GitSymlinkCapabilityError(package) from error
-        current = current.__cause__ or current.__context__
+                cause = error if isinstance(error, BaseException) else None
+                raise GitSymlinkCapabilityError(package) from cause
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
 
 
 class _GitProgress(Protocol):
@@ -1513,8 +1518,9 @@ def checkout_git_worktree(
     package: str | None = None,
 ) -> None:
     """Check out a ref in an explicitly located worktree with real symlinks."""
+    label = package or str(worktree)
     try:
-        subprocess.run(
+        result = subprocess.run(
             [
                 get_git_executable(),
                 *git_no_hooks_args(),
@@ -1531,8 +1537,9 @@ def checkout_git_worktree(
             env=git_subprocess_env(env),
         )
     except subprocess.CalledProcessError as exc:
-        raise_for_symlink_capability(exc, package or str(worktree))
+        raise_for_symlink_capability(exc, label)
         raise
+    raise_for_symlink_capability(result, label)
 
 
 def git_worktree_head(

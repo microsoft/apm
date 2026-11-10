@@ -702,7 +702,7 @@ def materialize_from_bare(
             apply_sparse_cone(
                 git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
             )
-        subprocess.run(
+        checkout = subprocess.run(
             [
                 git_exe,
                 *git_no_hooks_args(),
@@ -718,6 +718,8 @@ def materialize_from_bare(
             env=env,
             check=True,
         )
+        # Git reports a link it could not create but still exits 0.
+        raise_for_symlink_capability(checkout, package or str(consumer_dir))
         dangling = (
             repair_dangling_cone_symlinks(
                 git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args

@@ -177,19 +177,24 @@ def test_pins_require_both_autocrlf_and_symlinks(tmp_path: Path) -> None:
     assert not _checkout_has_materialization_pins(checkout)
 
 
-def test_link_creation_failure_raises_diagnostic_and_cleans_stage(tmp_path: Path) -> None:
-    """Git's ``unable to create symlink`` becomes the named capability error."""
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_link_creation_failure_raises_diagnostic_and_cleans_stage(
+    tmp_path: Path, exit_code: int
+) -> None:
+    """Git's ``unable to create symlink`` becomes the named capability error.
+
+    Native Windows ``git checkout`` reports the failure on stderr yet exits 0.
+    """
     origin, sha = _symlink_origin(tmp_path)
     cache = GitCache(tmp_path / "cache")
     real_run = subprocess.run
+    stderr = "error: unable to create symlink pkg/AGENTS.md: Permission denied\n"
 
     def run(args: list[str], *pargs: object, **kwargs: object) -> subprocess.CompletedProcess:
         if "checkout" in args and sha in args:
-            raise subprocess.CalledProcessError(
-                128,
-                args,
-                stderr="error: unable to create symlink pkg/AGENTS.md: Permission denied\n",
-            )
+            if exit_code:
+                raise subprocess.CalledProcessError(exit_code, args, stderr=stderr)
+            return subprocess.CompletedProcess(args, 0, "", stderr)
         return real_run(args, *pargs, **kwargs)
 
     with (

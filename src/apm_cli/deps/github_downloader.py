@@ -39,6 +39,7 @@ from ..utils.git_env import (
     git_no_hooks_args,
     git_subprocess_error_text,
     git_worktree_head,
+    raise_for_symlink_capability,
     redact_git_diagnostic,
 )
 from ..utils.git_sparse import (
@@ -1238,6 +1239,7 @@ class GitHubPackageDownloader:
                 )
                 if checkout_result.returncode != 0:
                     return False
+                raise_for_symlink_capability(checkout_result, str(dep_ref))
                 return _repair(setup_env)
 
             # Resolve per-dependency auth via AuthResolver.
@@ -1308,6 +1310,7 @@ class GitHubPackageDownloader:
                         f"{redact_git_diagnostic(result.stderr.strip())}"
                     )
                     return False
+                raise_for_symlink_capability(result, str(dep_ref))
 
             return _repair(env)
         except Exception as e:
