@@ -1345,6 +1345,31 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     )
 
 
+@pytest.mark.req("req-tg-015")
+@pytest.mark.parametrize("model", ["opus", "sonnet", "haiku", "inherit", "claude-sonnet-4-5"])
+def test_codex_claude_model_value_preserved_verbatim(tmp_path: Path, model: str) -> None:
+    """req-tg-015: a Claude model string is still preserved verbatim for Codex.
+
+    The string values are opaque to the spec, so the implementation's
+    non-normative Claude-model warning (#3477) must not drop or rewrite them.
+    """
+    source = tmp_path / "shared.agent.md"
+    source.write_text(
+        f"---\n{yaml_to_str({'name': 'shared', 'model': model})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "shared.toml"
+    diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        source, target, diagnostics=diagnostics, package_name="spec-fixture"
+    )
+    doc = tomllib.loads(target.read_text(encoding="utf-8"))
+    assert doc["model"] == model
+    assert "model_reasoning_effort" not in doc
+    for warning in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []):
+        assert model not in f"{warning.message} {warning.detail}"
+
+
 # --- req-cf-001..002 --------------------------------------------------
 
 
