@@ -200,6 +200,11 @@ class TestCheckMissingYml:
         assert result.exit_code == 1
 
 
+def _flat(text: str) -> str:
+    """Drop all whitespace so assertions survive any terminal-width wrapping."""
+    return "".join(text.split())
+
+
 class TestCheckCommitShaRefRealGit:
     """#3458: a full commit SHA ``ref`` is verified against a real git remote.
 
@@ -265,7 +270,8 @@ class TestCheckCommitShaRefRealGit:
         project.mkdir(exist_ok=True)
         (project / "marketplace.yml").write_text(yml, encoding="utf-8")
         monkeypatch.chdir(project)
-        monkeypatch.setenv("COLUMNS", "250")
+        # Plain one-line rows keep detail assertions independent of terminal width.
+        monkeypatch.setattr("apm_cli.commands.marketplace._get_console", lambda: None)
         with patch(
             "apm_cli.marketplace.ref_resolver.RefResolver._git_url_and_env",
             lambda self, owner_repo, remote_url=None: (str(bare), {}),
@@ -276,20 +282,20 @@ class TestCheckCommitShaRefRealGit:
         bare, middle = self._remote(tmp_path)
         result = self._invoke(tmp_path, monkeypatch, bare, middle)
         assert result.exit_code == 0, result.output
-        assert "All 1 entries OK" in result.output
+        assert _flat("All 1 entries OK") in _flat(result.output)
 
     def test_unreachable_sha_fails(self, tmp_path: Path, monkeypatch):
         bare, _ = self._remote(tmp_path)
         missing = "0" * 40
         result = self._invoke(tmp_path, monkeypatch, bare, missing)
         assert result.exit_code == 1
-        assert f"Commit '{missing}' not reachable on remote" in result.output
+        assert _flat(f"Commit '{missing}' not reachable on remote") in _flat(result.output)
 
     def test_abbreviated_sha_fails_with_hint(self, tmp_path: Path, monkeypatch):
         bare, middle = self._remote(tmp_path)
         result = self._invoke(tmp_path, monkeypatch, bare, middle[:12])
         assert result.exit_code == 1
-        assert "full 40-char lowercase SHA" in result.output
+        assert _flat("full 40-char lowercase SHA") in _flat(result.output)
 
     def test_tag_ref_still_passes(self, tmp_path: Path, monkeypatch):
         bare, _ = self._remote(tmp_path)

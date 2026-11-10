@@ -189,13 +189,19 @@ def _yml_with_ref(ref: str) -> str:
     """)
 
 
+def _flat(text: str) -> str:
+    """Drop all whitespace so assertions survive any terminal-width wrapping."""
+    return "".join(text.split())
+
+
 class TestCheckCommitShaRef:
     """A full commit SHA ``ref`` is verified on the remote, not matched by name."""
 
     @pytest.fixture
     def sha_cwd(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("COLUMNS", "250")
+        # Plain one-line rows keep detail assertions independent of terminal width.
+        monkeypatch.setattr("apm_cli.commands.marketplace._get_console", lambda: None)
         return tmp_path
 
     @staticmethod
@@ -214,7 +220,7 @@ class TestCheckCommitShaRef:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 0, result.output
-        assert "All 1 entries OK" in result.output
+        assert _flat("All 1 entries OK") in _flat(result.output)
         mock_inst.commit_exists.assert_called_once_with("acme-org/sha-pkg", _PIN_SHA)
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
@@ -257,8 +263,8 @@ class TestCheckCommitShaRef:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 1
-        assert f"Commit '{_PIN_SHA}' not reachable on remote" in result.output
-        assert "not found" not in result.output
+        assert _flat(f"Commit '{_PIN_SHA}' not reachable on remote") in _flat(result.output)
+        assert _flat("not found") not in _flat(result.output)
 
     @pytest.mark.parametrize(
         "ref",
@@ -280,8 +286,8 @@ class TestCheckCommitShaRef:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 1
-        assert f"Ref '{ref}' not found" in result.output
-        assert "full 40-char lowercase SHA" in result.output
+        assert _flat(f"Ref '{ref}' not found") in _flat(result.output)
+        assert _flat("full 40-char lowercase SHA") in _flat(result.output)
         mock_inst.commit_exists.assert_not_called()
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
@@ -308,8 +314,8 @@ class TestCheckCommitShaRef:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 1
-        assert "Ref 'v9.9.9' not found" in result.output
-        assert "40-char" not in result.output
+        assert _flat("Ref 'v9.9.9' not found") in _flat(result.output)
+        assert _flat("40-char") not in _flat(result.output)
         mock_inst.commit_exists.assert_not_called()
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
@@ -323,7 +329,7 @@ class TestCheckCommitShaRef:
         result = runner.invoke(marketplace, ["check", "--offline"])
 
         assert result.exit_code == 1
-        assert f"Commit '{_PIN_SHA}' cannot be verified offline" in result.output
+        assert _flat(f"Commit '{_PIN_SHA}' cannot be verified offline") in _flat(result.output)
         mock_inst.commit_exists.assert_not_called()
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
@@ -340,7 +346,7 @@ class TestCheckCommitShaRef:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 1
-        assert "git fetch timed out" in result.output
+        assert _flat("git fetch timed out") in _flat(result.output)
 
 
 # ---------------------------------------------------------------------------
