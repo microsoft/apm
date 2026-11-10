@@ -175,6 +175,10 @@ one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
 
+For Codex, a non-blank `CODEX_HOME` selects `$CODEX_HOME/AGENTS.md` instead of
+`~/.codex/AGENTS.md`. The value must be an absolute path; a relative value
+fails before anything is written. Project-scope compile is unaffected.
+
 For Claude, each unconditional instruction is omitted from the compiled root
 only when its expected native rule matches the install renderer's output.
 Missing, unrelated, changed, or unsafe rules leave that instruction in the

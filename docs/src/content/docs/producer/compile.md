@@ -313,7 +313,7 @@ without `applyTo:` frontmatter) and writes user-scope root context files for
 root-context targets:
 
 - `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
-- `~/.codex/AGENTS.md`
+- `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`)
 - `~/.config/opencode/AGENTS.md`
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
