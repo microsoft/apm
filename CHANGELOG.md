@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
+- On Windows, `apm install` and `apm update` no longer fail when a scanner or indexer briefly holds a staged package during activation (`WinError 5`/`32`): the activation rename and its restore now retry with bounded backoff, while persistent denials still fail with the original error and recovery data preserved. (#3530)
 
 ## [0.35.0] - 2026-10-22
 
