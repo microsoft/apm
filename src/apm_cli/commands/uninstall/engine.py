@@ -1388,7 +1388,7 @@ def _sync_integrations_after_uninstall(
     _allow_executables = getattr(apm_package, "allow_executables", None)
     reintegration_diagnostics = DiagnosticCollector()
     materialization_session = (
-        DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile, targets=_targets)
+        DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)
         if target_survivor_plan
         else None
     )

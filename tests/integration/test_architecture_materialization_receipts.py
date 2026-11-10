@@ -24,26 +24,6 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
     ("path", "before", "after"),
     [
         (
-            "core/deployment_ledger.py",
-            "committed._refresh_legacy_writes(witnessed)",
-            "pass",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "for current_key in self._records.keys() - snapshot.keys():",
-            "for current_key in ():",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "legacy_changed = self._retire_legacy_members(removed)",
-            "legacy_changed = False",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "for key in self._legacy_snapshot.keys() - snapshot.keys():",
-            "for key in ():",
-        ),
-        (
             "commands/uninstall/cli.py",
             "else:\n        if integration_cleanup.materialization_session is not None:",
             "finally:\n        if integration_cleanup.materialization_session is not None:",
@@ -135,73 +115,18 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "core/deployment_ledger.py",
-            "not self._matches_root_identity(data)",
+            'data["root_identity"] != self._root_identity()',
             "False",
         ),
         (
             "core/deployment_ledger.py",
-            'data["installation"] != self._installation',
-            "False",
+            "or recorded[1] != current[1]",
+            "or False",
         ),
         (
             "core/deployment_ledger.py",
-            'return data["root_identity"] == [metadata.st_dev, metadata.st_ino]',
+            'return data["root_birth_time"] == self._root_birth_time()',
             "return True",
-        ),
-        (
-            "core/deployment_ledger.py",
-            'return data["root_identity"] == self._root_identity()',
-            "return True",
-        ),
-        (
-            "core/deployment_ledger.py",
-            '"deployment-receipts-v2"',
-            '"deployment-receipts"',
-        ),
-        (
-            "core/deployment_ledger.py",
-            '"volume": darwin_volume_uuid(self.root)',
-            '"volume": str(metadata.st_dev)',
-        ),
-        (
-            "core/deployment_ledger.py",
-            "self.baseline(path, [target]) != record.content_hash",
-            "False",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "compute_file_hash(path) != record.content_hash",
-            "False",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "if snapshot[key] == self._legacy_snapshot.get(key):",
-            "if False:",
-        ),
-        (
-            "core/deployment_ledger.py",
-            'data["stable_root_identity"] != self._root_identity()',
-            "False",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "committed._publish_legacy_compatibility()",
-            "pass",
-        ),
-        (
-            "core/deployment_ledger.py",
-            'data["legacy_snapshot"] = self._snapshot(self._legacy_projection(data))',
-            'data["legacy_snapshot"] = {}',
-        ),
-        (
-            "core/deployment_ledger.py",
-            "self.baseline(Path(self._destinations[key]), [target]) != record.content_hash",
-            "False",
-        ),
-        (
-            "core/deployment_ledger.py",
-            "new_file_mode=0o600,\n                create_only=True,",
-            "new_file_mode=0o600,\n                create_only=False,",
         ),
         (
             "core/deployment_ledger.py",

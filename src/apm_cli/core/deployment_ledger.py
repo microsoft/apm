@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import uuid
 from collections.abc import Collection, Mapping, Sequence
@@ -52,6 +53,9 @@ UNATTRIBUTED_TARGET = "legacy"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
 _SHA256_PREFIX = "sha256:"
 _LOWER_HEX = frozenset("0123456789abcdef")
+# Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
+# after a reboot or remount. Windows root identity is intentionally unchanged.
+_ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
 
 
 @dataclass(frozen=True)
@@ -82,32 +86,18 @@ class DeploymentMaterializationSession:
     create a prior-local baseline.
     """
 
-    def __init__(
-        self,
-        project_root: Path,
-        scope: InstallScope,
-        lockfile: LockFile | None,
-        *,
-        targets: Sequence[TargetProfile] = (),
-    ) -> None:
+    def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
         self.scope = scope
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
-        self.state_path = Path.home() / ".apm" / "deployment-receipts-v2" / f"{key}.json"
-        self.legacy_state_path = Path.home() / ".apm" / "deployment-receipts" / f"{key}.json"
+        self.state_path = Path.home() / ".apm" / "deployment-receipts" / f"{key}.json"
         self.identity_path = self.root / ".apm-local" / "installation"
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
-        self._recorded_targets: dict[str, TargetProfile] = {
-            target.name: target for target in targets
-        }
         self._dirty = False
-        self._migration_pending = False
-        self._legacy_snapshot: dict[str, str] = {}
         self._claims: dict[str, list[DeploymentRecord]] = {}
-        self._has_ownership_context = lockfile is not None
         if lockfile is not None:
             for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
                 self._claims.setdefault(
@@ -121,15 +111,12 @@ class DeploymentMaterializationSession:
         self._state_present = False
         self._load()
 
-    def _validate_paths(self, *, legacy: bool = False) -> None:
-        paths = [
+    def _validate_paths(self) -> None:
+        for base, path in (
             (Path.home(), self.state_path),
             (self.root, self.identity_path),
             (self.root, self.identity_path.parent / ".gitignore"),
-        ]
-        if legacy:
-            paths.append((Path.home(), self.legacy_state_path))
-        for base, path in paths:
+        ):
             ensure_path_within(path, base)
             if has_symlink_component(base, path, raise_on_error=True):
                 raise PathTraversalError(
@@ -142,37 +129,42 @@ class DeploymentMaterializationSession:
                     "Preserve this path and move it aside before retrying."
                 )
 
-    def _root_identity(self) -> dict[str, Any]:
-        metadata = self.root.stat()
-        if sys.platform == "darwin":
-            from apm_cli.utils.filesystem_identity import darwin_volume_uuid
+    def _root_stat(self) -> os.stat_result:
+        return self.root.stat()
 
-            # Device numbers identify a mount, not a persistent volume. Keep
-            # directory identity as well: a copied installation UUID alone is
-            # never authority to reuse a different directory's receipt.
-            return {
-                "kind": "darwin-volume",
-                "volume": darwin_volume_uuid(self.root),
-                "inode": metadata.st_ino,
-                "created": metadata.st_birthtime,
-            }
-        # Retain the strict existing rule on platforms without a supported
-        # persistent-volume implementation; never silently weaken it.
-        return {"kind": "stat", "device": metadata.st_dev, "inode": metadata.st_ino}
+    def _root_identity(self) -> list[int]:
+        metadata = self._root_stat()
+        return [metadata.st_dev, metadata.st_ino]
 
-    def _matches_root_identity(self, data: dict[str, Any]) -> bool:
-        if data["version"] == 1:
-            metadata = self.root.stat()
-            if (
-                "stable_root_identity" in data
-                and data["stable_root_identity"] != self._root_identity()
-            ):
-                return False
-            # A legacy receipt cannot prove which volume a changed device
-            # number referred to. Migrate only an exact legacy binding, and
-            # publish the new format at a live install's commit boundary.
-            return data["root_identity"] == [metadata.st_dev, metadata.st_ino]
-        return data["root_identity"] == self._root_identity()
+    def _root_birth_time(self) -> float | None:
+        """Return the root's creation time where ``stat`` reports one (macOS, BSD)."""
+        if not _ROOT_DEVICE_REBIND_SUPPORTED:
+            return None
+        return getattr(self._root_stat(), "st_birthtime", None)
+
+    def _root_device_changed_only(self, data: Mapping[str, Any]) -> bool:
+        """Accept the same root whose device number alone changed after a reboot or remount.
+
+        Path, scope and installation UUID are matched by the caller. The inode
+        must match too, and so must the recorded birth time whenever the receipt
+        carries one. A recreated root or a copied ``.apm-local`` still fails.
+        Receipts written before birth times were recorded bind on inode, path
+        and installation UUID alone, as on platforms without a birth time.
+        """
+        recorded = data["root_identity"]
+        current = self._root_identity()
+        if (
+            not _ROOT_DEVICE_REBIND_SUPPORTED
+            or not isinstance(recorded, list)
+            or len(recorded) != 2
+            or not all(type(value) is int for value in recorded)
+            or recorded[0] == current[0]
+            or recorded[1] != current[1]
+        ):
+            return False
+        if "root_birth_time" not in data:
+            return True
+        return data["root_birth_time"] == self._root_birth_time()
 
     def _load(self) -> None:
         self._validate_paths()
@@ -184,185 +176,55 @@ class DeploymentMaterializationSession:
             if uuid.UUID(hex=installation).hex != installation:
                 raise ValueError("invalid installation identity")
             self._installation = installation
-            if self._state_present:
-                data = self._read_state(self.state_path, version=2)
-                self._set_state(data)
-                snapshot = data.get("legacy_snapshot", {})
-                if not isinstance(snapshot, dict) or not all(
-                    isinstance(key, str) and isinstance(value, str)
-                    for key, value in snapshot.items()
+            if not self.state_path.exists():
+                return
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+            if (
+                data["version"] != 1
+                or data["root"] != self.root.as_posix()
+                or data["scope"] != self.scope.value
+                or data["installation"] != installation
+                or (
+                    data["root_identity"] != self._root_identity()
+                    and not self._root_device_changed_only(data)
+                )
+            ):
+                raise ValueError("installation binding does not match")
+            # A device-only change is rebound by the next writing session's flush.
+            rebind = self._root_identity() != data["root_identity"]
+            ledger = DeploymentLedgerCodec.from_rows(data["records"])
+            if len(ledger.records) != len(data["records"]):
+                raise ValueError("duplicate rendered-write records")
+            destinations = data["destinations"]
+            bindings = data["bindings"]
+            if not isinstance(destinations, dict) or set(destinations) != set(ledger.records):
+                raise ValueError("destination bindings do not match")
+            if not isinstance(bindings, dict) or set(bindings) != set(ledger.records):
+                raise ValueError("ownership bindings do not match")
+            for record in ledger.records.values():
+                if (
+                    record.locator.kind == LocatorKind.URI
+                    or record.locator.scope != self.scope.value
+                    or not _is_canonical_bundle_hash(record.content_hash)
+                    or not isinstance(destinations[record.locator.key], str)
+                    or not isinstance(bindings[record.locator.key], list)
+                    or len(bindings[record.locator.key]) != 2
+                    or not all(isinstance(value, str) for value in bindings[record.locator.key])
                 ):
-                    raise ValueError("invalid legacy receipt checkpoint")
-                self._legacy_snapshot = snapshot
-            if self.legacy_state_path.exists() or self.legacy_state_path.is_symlink():
-                self._validate_paths(legacy=True)
-                try:
-                    legacy = self._read_state(self.legacy_state_path, version=1)
-                except (ValueError, KeyError, TypeError, UnicodeError):
-                    if not self._state_present:
-                        raise
-                    # A valid stable receipt remains usable after remount,
-                    # even when the older device-based receipt has expired.
-                    return
-                if not self._state_present:
-                    self._set_state(legacy)
-                    self._legacy_snapshot = self._snapshot(legacy)
-                    self._migration_pending = True
-                elif self._has_ownership_context:
-                    # Cleanup-only retirement cannot validate older-writer
-                    # imports. Leave their checkpoint for an ownership-aware
-                    # session instead of consuming evidence it cannot admit.
-                    self._merge_legacy_writes(legacy)
+                    raise ValueError("invalid rendered-write record")
+            self._records = dict(ledger.records)
+            self._destinations = destinations
+            self._bindings = bindings
+            self._physical_keys = {path: key for key, path in destinations.items()}
+            if len(self._physical_keys) != len(destinations):
+                raise ValueError("ambiguous physical write receipts")
+            self._dirty = rebind
         except (ValueError, KeyError, TypeError, UnicodeError) as exc:
-            path = self.state_path if self._state_present else self.legacy_state_path
             raise ValueError(
-                f"Invalid local materialization evidence at {path}: {exc}. "
+                f"Invalid local materialization evidence at {self.state_path}: {exc}. "
                 "Preserve local skill edits, then remove the invalid receipt file and retry. "
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
-
-    def _read_state(self, path: Path, *, version: int) -> dict[str, Any]:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if (
-            data["version"] != version
-            or data["root"] != self.root.as_posix()
-            or data["scope"] != self.scope.value
-            or data["installation"] != self._installation
-            or not self._matches_root_identity(data)
-        ):
-            raise ValueError("installation binding does not match")
-        ledger = DeploymentLedgerCodec.from_rows(data["records"])
-        if len(ledger.records) != len(data["records"]):
-            raise ValueError("duplicate rendered-write records")
-        destinations = data["destinations"]
-        bindings = data["bindings"]
-        if not isinstance(destinations, dict) or set(destinations) != set(ledger.records):
-            raise ValueError("destination bindings do not match")
-        if not isinstance(bindings, dict) or set(bindings) != set(ledger.records):
-            raise ValueError("ownership bindings do not match")
-        for record in ledger.records.values():
-            if (
-                record.locator.kind == LocatorKind.URI
-                or record.locator.scope != self.scope.value
-                or not _is_canonical_bundle_hash(record.content_hash)
-                or not isinstance(destinations[record.locator.key], str)
-                or not isinstance(bindings[record.locator.key], list)
-                or len(bindings[record.locator.key]) != 2
-                or not all(isinstance(value, str) for value in bindings[record.locator.key])
-            ):
-                raise ValueError("invalid rendered-write record")
-        if len(set(destinations.values())) != len(destinations):
-            raise ValueError("ambiguous physical write receipts")
-        return data
-
-    def _set_state(self, data: dict[str, Any]) -> None:
-        self._records = dict(DeploymentLedgerCodec.from_rows(data["records"]).records)
-        self._destinations = dict(data["destinations"])
-        self._bindings = dict(data["bindings"])
-        self._physical_keys = {path: key for key, path in self._destinations.items()}
-
-    @staticmethod
-    def _snapshot(data: dict[str, Any]) -> dict[str, str]:
-        records = DeploymentLedgerCodec.from_rows(data["records"]).records
-        rows = DeploymentLedgerCodec.rows(DeploymentLedger(records))
-        return {
-            key: hashlib.sha256(
-                json.dumps(
-                    [row, data["destinations"][key], data["bindings"][key]], sort_keys=True
-                ).encode()
-            ).hexdigest()
-            for key, row in zip(sorted(records), rows, strict=True)
-        }
-
-    def _retire_legacy_deletions(self, snapshot: dict[str, str]) -> None:
-        """Revoke a deleted member even if its writer or rendered hash changed."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        # A different v2 hash cannot prove that its write happened after this
-        # deletion: an older uninstall may have deleted those newer bytes using
-        # the current lock. Revoke prior authority regardless of hash equality.
-        # Only a witnessed write after reconciliation can establish it again.
-        deleted_keys = self._legacy_snapshot.keys() - snapshot.keys()
-        if deleted_keys:
-            # Earlier v2 writers could add members absent from v1. A legacy
-            # uninstall can delete those through the lock without naming them
-            # in its receipt. Missing legacy coverage cannot preserve authority.
-            for current_key in self._records.keys() - snapshot.keys():
-                self._records.pop(current_key, None)
-                destination = self._destinations.pop(current_key, None)
-                self._bindings.pop(current_key, None)
-                if destination is not None:
-                    self._physical_keys.pop(destination, None)
-        for key in self._legacy_snapshot.keys() - snapshot.keys():
-            retired = {key}
-            target_name = key.split("|", 1)[0]
-            target = self._recorded_targets.get(target_name)
-            if target is None:
-                profile = KNOWN_TARGETS.get(target_name)
-                target = (
-                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
-                )
-            if target is not None:
-                # Canonical target aliases can share one physical directory.
-                # Changing the target name must not evade physical retirement.
-                for current_key, destination in self._destinations.items():
-                    locator = self._locator(Path(destination), [target])
-                    if locator is not None and locator.key == key:
-                        retired.add(current_key)
-            for retired_key in retired:
-                self._records.pop(retired_key, None)
-                destination = self._destinations.pop(retired_key, None)
-                self._bindings.pop(retired_key, None)
-                if destination is not None:
-                    self._physical_keys.pop(destination, None)
-
-    def _merge_legacy_writes(self, data: dict[str, Any]) -> None:
-        """Admit changed older-writer evidence, never an unchanged stale baseline."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-        from apm_cli.utils.content_hash import compute_file_hash
-
-        snapshot = self._snapshot(data)
-        if snapshot == self._legacy_snapshot:
-            return
-        self._retire_legacy_deletions(snapshot)
-        for key, record in DeploymentLedgerCodec.from_rows(data["records"]).records.items():
-            if snapshot[key] == self._legacy_snapshot.get(key):
-                continue
-            destination = data["destinations"][key]
-            path = Path(destination)
-            profile = KNOWN_TARGETS.get(record.locator.target)
-            target = self._recorded_targets.get(record.locator.target)
-            if target is None:
-                target = (
-                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
-                )
-            if target is None or not path.is_file() or path.is_symlink():
-                continue
-            previous = (
-                self._records.copy(),
-                self._destinations.copy(),
-                self._bindings.copy(),
-                self._physical_keys.copy(),
-            )
-            # Validate ownership and physical target through the same authority
-            # check used by the writer, then require actual rendered bytes.
-            physical = path.resolve().as_posix()
-            prior_key = self._physical_keys.get(physical)
-            if prior_key is not None and prior_key != key:
-                self._records.pop(prior_key, None)
-                self._destinations.pop(prior_key, None)
-                self._bindings.pop(prior_key, None)
-            self._records[key] = record
-            self._destinations[key] = destination
-            self._bindings[key] = data["bindings"][key]
-            self._physical_keys[physical] = key
-            if (
-                self.baseline(path, [target]) != record.content_hash
-                or compute_file_hash(path) != record.content_hash
-            ):
-                self._records, self._destinations, self._bindings, self._physical_keys = previous
-        self._legacy_snapshot = snapshot
-        self._migration_pending = True
 
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
         for target in targets:
@@ -447,7 +309,6 @@ class DeploymentMaterializationSession:
 
         if not written:
             return
-        self._recorded_targets.update((target.name, target) for target in targets)
         prepared: list[tuple[DeploymentRecord, str, str]] = []
         for path, content_hash in written.items():
             locator = self._locator(path, targets)
@@ -490,151 +351,16 @@ class DeploymentMaterializationSession:
         Keep that projection separate from the actual writer; never infer a
         writer or a baseline from the committed lock.
         """
-        # Cleanup may have retired evidence since integration captured this
-        # session, even when integration performed no new skill writes.
-        committed = type(self)(
-            self.root, self.scope, lockfile, targets=tuple(self._recorded_targets.values())
-        )
-        witnessed = set()
+        if not self._written:
+            return
+        committed = type(self)(self.root, self.scope, lockfile)
         for key, value in self._written.items():
             record = committed._records.get(key)
             if record is None or record != self._records.get(key):
                 continue
             committed._bindings[key] = [record.active_owner, committed._claim_signature(value)]
             committed._dirty = True
-            witnessed.add(key)
-        if committed._migration_pending:
-            committed._dirty = True
         committed.flush()
-        committed._recorded_targets.update(self._recorded_targets)
-        committed._refresh_legacy_writes(witnessed)
-        committed._publish_legacy_compatibility()
-
-    def _refresh_legacy_writes(self, witnessed: set[str]) -> None:
-        """Keep old-reader coverage current using committed actual writes only."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-        from apm_cli.utils.atomic_io import atomic_write_text
-
-        if not witnessed or not self.legacy_state_path.exists():
-            return
-        self._validate_paths(legacy=True)
-        proof = self.legacy_state_path.read_bytes()
-        try:
-            data = self._read_state(self.legacy_state_path, version=1)
-        except (ValueError, KeyError, TypeError, UnicodeError):
-            return
-        records = dict(DeploymentLedgerCodec.from_rows(data["records"]).records)
-        updated, retired = set(), set()
-        for key in witnessed:
-            record = self._records.get(key)
-            if record is None:
-                continue
-            profile = KNOWN_TARGETS.get(record.locator.target)
-            target = self._recorded_targets.get(record.locator.target)
-            if target is None:
-                target = (
-                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
-                )
-            destination = self._destinations[key]
-            if target is None or self.baseline(Path(destination), [target]) != record.content_hash:
-                continue
-            for old_key, old_destination in list(data["destinations"].items()):
-                if old_destination == destination and old_key != key:
-                    records.pop(old_key, None)
-                    data["destinations"].pop(old_key)
-                    data["bindings"].pop(old_key)
-                    retired.add(old_key)
-            records[key] = record
-            data["destinations"][key] = destination
-            data["bindings"][key] = self._bindings[key]
-            updated.add(key)
-        if not updated:
-            return
-        data["records"] = DeploymentLedgerCodec.rows(DeploymentLedger(records))
-        self._validate_paths(legacy=True)
-        if self.legacy_state_path.read_bytes() != proof:
-            raise ValueError("Legacy materialization evidence changed before write publication")
-        text = json.dumps(data, sort_keys=True, indent=2) + "\n"
-        if json.loads(proof) != data:
-            atomic_write_text(self.legacy_state_path, text, new_file_mode=0o600)
-        # Publish the receipt before advancing its checkpoint. A failed write
-        # must not make unchanged old evidence look like a new older-writer edit.
-        snapshot = self._snapshot(data)
-        checkpoint = self._legacy_snapshot.copy()
-        for key in retired:
-            self._legacy_snapshot.pop(key, None)
-        self._legacy_snapshot.update({key: snapshot[key] for key in updated})
-        if checkpoint != self._legacy_snapshot:
-            self._persist(self._records, self._destinations)
-
-    def _legacy_projection(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Project recorded rendered-write evidence, never hashes adopted from disk."""
-        metadata = self.root.stat()
-        return {
-            **{
-                key: data[key]
-                for key in ("root", "scope", "installation", "records", "destinations", "bindings")
-            },
-            "version": 1,
-            "root_identity": [metadata.st_dev, metadata.st_ino],
-            "stable_root_identity": data["root_identity"],
-        }
-
-    def _publish_legacy_compatibility(self) -> None:
-        """Create missing old-reader evidence only at the committed-claims boundary."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-        from apm_cli.utils.atomic_io import atomic_write_text
-
-        if (
-            not self._state_present
-            or not self._records
-            or self.legacy_state_path.exists()
-            or self.legacy_state_path.is_symlink()
-        ):
-            return
-        # A no-write install cannot use changed claims to promote old evidence.
-        # Preserve recorded hashes even for edited files: the old writer must
-        # compare those prior hashes, not adopt the user's current bytes.
-        for key, record in self._records.items():
-            profile = KNOWN_TARGETS.get(record.locator.target)
-            target = self._recorded_targets.get(record.locator.target)
-            if target is None:
-                target = (
-                    profile.for_scope(user_scope=self.scope.value == "user") if profile else None
-                )
-            if (
-                target is None
-                or self.baseline(Path(self._destinations[key]), [target]) != record.content_hash
-            ):
-                return
-        data = self._read_state(self.state_path, version=2)
-        if (
-            DeploymentLedgerCodec.from_rows(data["records"]).records != self._records
-            or data["destinations"] != self._destinations
-            or data["bindings"] != self._bindings
-        ):
-            raise ValueError("Materialization evidence changed before compatibility publication")
-        projection = self._legacy_projection(data)
-        snapshot = self._snapshot(projection)
-        if snapshot != self._legacy_snapshot:
-            # Repair pre-projection v2 receipts once; newly written receipts
-            # already contain this checkpoint, so repeat installs do not churn.
-            self._legacy_snapshot = snapshot
-            self._persist(self._records, self._destinations)
-        self._validate_paths(legacy=True)
-        self.legacy_state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._validate_paths(legacy=True)
-        try:
-            atomic_write_text(
-                self.legacy_state_path,
-                json.dumps(projection, sort_keys=True, indent=2) + "\n",
-                new_file_mode=0o600,
-                create_only=True,
-            )
-        except FileExistsError:
-            # Another writer won the create race. Its evidence is not ours to
-            # replace; the normal loader validates it on the next install.
-            return
 
     def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
         from apm_cli.utils.atomic_io import atomic_write_text
@@ -660,7 +386,7 @@ class DeploymentMaterializationSession:
         self.state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._validate_paths()
         data = {
-            "version": 2,
+            "version": 1,
             "root": self.root.as_posix(),
             "root_identity": self._root_identity(),
             "scope": self.scope.value,
@@ -668,12 +394,10 @@ class DeploymentMaterializationSession:
             "records": DeploymentLedgerCodec.rows(DeploymentLedger(records)),
             "destinations": destinations,
             "bindings": {key: self._bindings[key] for key in records},
-            "legacy_snapshot": self._legacy_snapshot,
         }
-        if not self.legacy_state_path.exists() and not self.legacy_state_path.is_symlink():
-            # Checkpoint the expected compatibility projection before it can
-            # appear, so its first observation is not mistaken for older writes.
-            data["legacy_snapshot"] = self._snapshot(self._legacy_projection(data))
+        birth_time = self._root_birth_time()
+        if birth_time is not None:
+            data["root_birth_time"] = birth_time
         atomic_write_text(
             self.state_path,
             json.dumps(data, sort_keys=True, indent=2) + "\n",
@@ -681,49 +405,6 @@ class DeploymentMaterializationSession:
             create_only=not self._state_present,
         )
         self._state_present = True
-        self._legacy_snapshot = data["legacy_snapshot"]
-
-    def _retire_legacy_members(self, removed: set[str]) -> bool:
-        """Subtract confirmed deletions from valid old-reader evidence only."""
-        from apm_cli.utils.atomic_io import atomic_write_text
-
-        self._validate_paths(legacy=True)
-        if not self.legacy_state_path.exists():
-            return False
-        proof = self.legacy_state_path.read_bytes()
-        try:
-            data = self._read_state(self.legacy_state_path, version=1)
-        except (ValueError, KeyError, TypeError, UnicodeError):
-            # Leave invalid evidence for explicit recovery instead of silently
-            # repairing or rebinding it. Stable evidence may still be retired.
-            return False
-        retired = {
-            key
-            for key, value in data["destinations"].items()
-            if value in removed
-            or any(parent.as_posix() in removed for parent in Path(value).parents)
-        }
-        if not retired:
-            return False
-        records = DeploymentLedgerCodec.from_rows(data["records"]).records
-        data["records"] = DeploymentLedgerCodec.rows(
-            DeploymentLedger({key: row for key, row in records.items() if key not in retired})
-        )
-        for field in ("destinations", "bindings"):
-            data[field] = {key: value for key, value in data[field].items() if key not in retired}
-        self._validate_paths(legacy=True)
-        if self.legacy_state_path.read_bytes() != proof:
-            raise ValueError("Legacy materialization evidence changed before retirement")
-        atomic_write_text(
-            self.legacy_state_path,
-            json.dumps(data, sort_keys=True, indent=2) + "\n",
-            new_file_mode=0o600,
-        )
-        # Do not consume unrelated pending older-writer updates while recording
-        # our own removals. They still need ownership-aware reconciliation.
-        for key in retired:
-            self._legacy_snapshot.pop(key, None)
-        return True
 
     def retire(self, deleted: Sequence[Path]) -> None:
         """Forget successfully removed physical outputs without granting cleanup authority."""
@@ -734,8 +415,7 @@ class DeploymentMaterializationSession:
             if value in removed
             or any(parent.as_posix() in removed for parent in Path(value).parents)
         }
-        legacy_changed = self._retire_legacy_members(removed)
-        if keys or legacy_changed:
+        if keys:
             records = {key: record for key, record in self._records.items() if key not in keys}
             destinations = {
                 key: value for key, value in self._destinations.items() if key not in keys

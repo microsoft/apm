@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -125,7 +126,6 @@ def test_external_user_receipt_uses_the_deployed_compatibility_claim(
             == content_hash
         )
     session.bind_committed_claims(lock)
-    assert session.legacy_state_path.exists()
     assert (
         DeploymentMaterializationSession(home, InstallScope.USER, lock).baseline(path, [target])
         == content_hash
@@ -253,320 +253,6 @@ def test_recreated_checkout_cannot_reuse_old_receipt(
             _session(root, lock)
     else:
         assert _session(root, lock).baseline(path, [TARGET]) is None
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin volume identity")
-@pytest.mark.parametrize("symlinked", [False, True])
-def test_darwin_receipt_survives_changed_device_number(tmp_path, monkeypatch, symlinked):
-    from types import SimpleNamespace
-
-    if symlinked:
-        real = tmp_path / "real"
-        real.mkdir()
-        alias = tmp_path / "alias"
-        alias.symlink_to(real, target_is_directory=True)
-        tmp_path = alias
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    content_hash = compute_file_hash(path)
-    session.record({path: content_hash}, [TARGET], "pkg")
-    session.flush()
-    original_stat = Path.stat
-    resolved_root = root.resolve()
-    changed = []
-
-    def changed_device(self, *args, **kwargs):
-        metadata = original_stat(self, *args, **kwargs)
-        if self == resolved_root:
-            changed.append(self)
-            return SimpleNamespace(
-                st_dev=metadata.st_dev + 100,
-                st_ino=metadata.st_ino,
-                st_birthtime=metadata.st_birthtime,
-                st_mode=metadata.st_mode,
-            )
-        return metadata
-
-    monkeypatch.setattr(Path, "stat", changed_device)
-    assert _session(root, lock).baseline(path, [TARGET]) == content_hash
-    assert changed, "The session must observe the simulated changed device"
-
-
-@pytest.mark.parametrize("field", ["volume", "inode", "created"])
-def test_persistent_receipt_rejects_different_directory_identity(tmp_path, monkeypatch, field):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    identity = {"kind": "darwin-volume", "volume": "volume-a", "inode": 42, "created": 123.5}
-    monkeypatch.setattr(
-        DeploymentMaterializationSession, "_root_identity", lambda self: identity.copy()
-    )
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    identity[field] = "different"
-    with pytest.raises(ValueError, match="installation binding does not match"):
-        _session(root, lock)
-
-
-@pytest.mark.parametrize("changed_device", [False, True])
-def test_legacy_receipt_migration_requires_exact_old_identity(
-    tmp_path, monkeypatch, changed_device
-):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    content_hash = compute_file_hash(path)
-    session.record({path: content_hash}, [TARGET], "pkg")
-    session.flush()
-    data = json.loads(session.state_path.read_text())
-    metadata = root.stat()
-    data.update(version=1, root_identity=[metadata.st_dev + int(changed_device), metadata.st_ino])
-    session.legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
-    session.legacy_state_path.write_text(json.dumps(data))
-    session.state_path.unlink()
-    before = session.legacy_state_path.read_bytes()
-    if changed_device:
-        with pytest.raises(ValueError, match="installation binding does not match"):
-            _session(root, lock)
-    else:
-        migrated = _session(root, lock)
-        assert migrated.baseline(path, [TARGET]) == content_hash
-        assert not migrated.state_path.exists()
-        migrated.flush()
-        assert not migrated.state_path.exists()
-        migrated.bind_committed_claims(lock)
-        assert json.loads(migrated.state_path.read_text())["version"] == 2
-        assert migrated.legacy_state_path.read_bytes() == before
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin volume identity")
-def test_volume_identity_failure_does_not_fall_back_to_device_number(tmp_path, monkeypatch):
-    from apm_cli.utils import filesystem_identity
-
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-
-    def unavailable(path):
-        raise OSError("volume identity unavailable")
-
-    monkeypatch.setattr(filesystem_identity, "darwin_volume_uuid", unavailable)
-    with pytest.raises(OSError, match="volume identity unavailable"):
-        _session(root, lock)
-
-
-def _move_to_legacy(session):
-    data = json.loads(session.state_path.read_text())
-    metadata = session.root.stat()
-    data.update(version=1, root_identity=[metadata.st_dev, metadata.st_ino])
-    data.pop("legacy_snapshot", None)
-    session.legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
-    session.legacy_state_path.write_text(json.dumps(data))
-    session.state_path.unlink()
-    return data
-
-
-def test_compatibility_receipt_is_committed_once_and_keeps_recorded_hashes(tmp_path, monkeypatch):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    original_hash = compute_file_hash(path)
-    session.record({path: original_hash}, [TARGET], "pkg")
-    session.flush()
-    assert not session.legacy_state_path.exists()
-    path.write_text("local edits\n")
-    session.bind_committed_claims(lock)
-    legacy = json.loads(session.legacy_state_path.read_text())
-    assert legacy["version"] == 1
-    assert legacy["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
-    assert legacy["stable_root_identity"] == session._root_identity()
-    assert legacy["records"][0]["content_hash"] == original_hash
-    assert compute_file_hash(path) != original_hash
-    proof = {
-        p: (p.read_bytes(), p.stat().st_mtime_ns)
-        for p in (session.state_path, session.legacy_state_path)
-    }
-    _session(root, lock).bind_committed_claims(lock)
-    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in proof} == proof
-
-
-@pytest.mark.parametrize("stale", [False, True])
-def test_compatibility_refresh_requires_witnessed_writes_and_valid_evidence(
-    tmp_path, monkeypatch, stale
-):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    if stale:
-        legacy = json.loads(session.legacy_state_path.read_text())
-        legacy["root_identity"][0] += 1
-        session.legacy_state_path.write_text(json.dumps(legacy))
-    proof = session.legacy_state_path.read_bytes()
-    path.write_text("new actual rendered write\n")
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    if stale:
-        assert session.legacy_state_path.read_bytes() == proof
-    else:
-        refreshed = json.loads(session.legacy_state_path.read_text())
-        assert refreshed["records"][0]["content_hash"] == compute_file_hash(path)
-        assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
-
-
-def test_compatibility_receipt_exclusive_create_preserves_a_racing_writer(tmp_path, monkeypatch):
-    from apm_cli.utils import atomic_io
-
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    proof = session.state_path.read_bytes()
-    write = atomic_io.atomic_write_text
-
-    def race(destination, text, **kwargs):
-        if destination == session.legacy_state_path:
-            assert kwargs["create_only"] is True
-            destination.write_bytes(b"another writer's evidence\n")
-            raise FileExistsError(str(destination))
-        return write(destination, text, **kwargs)
-
-    monkeypatch.setattr(atomic_io, "atomic_write_text", race)
-    session.bind_committed_claims(lock)
-    assert session.legacy_state_path.read_bytes() == b"another writer's evidence\n"
-    assert session.state_path.read_bytes() == proof
-
-
-def test_failed_checkpoint_repair_cannot_publish_compatibility_receipt(tmp_path, monkeypatch):
-    from apm_cli.utils import atomic_io
-
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    old = json.loads(session.state_path.read_text())
-    old.pop("legacy_snapshot")
-    session.state_path.write_text(json.dumps(old))
-    proof = session.state_path.read_bytes()
-    write = atomic_io.atomic_write_text
-
-    def refuse(destination, text, **kwargs):
-        if destination == session.state_path:
-            raise OSError("checkpoint failure")
-        return write(destination, text, **kwargs)
-
-    monkeypatch.setattr(atomic_io, "atomic_write_text", refuse)
-    with pytest.raises(OSError, match="checkpoint failure"):
-        _session(root, lock).bind_committed_claims(lock)
-    assert not session.legacy_state_path.exists()
-    assert session.state_path.read_bytes() == proof
-
-
-def test_pre_projection_v2_receipt_is_repaired_once_without_skill_writes(tmp_path, monkeypatch):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    data = json.loads(session.state_path.read_text())
-    data.pop("legacy_snapshot")
-    session.state_path.write_text(json.dumps(data))
-    skill_proof = (path.read_bytes(), path.stat().st_mtime_ns)
-    _session(root, lock).bind_committed_claims(lock)
-    assert session.legacy_state_path.exists()
-    proof = {
-        p: (p.read_bytes(), p.stat().st_mtime_ns)
-        for p in (session.state_path, session.legacy_state_path)
-    }
-    _session(root, lock).bind_committed_claims(lock)
-    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in proof} == proof
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == skill_proof
-
-
-def test_compatibility_fallback_checks_stable_identity_without_v2(tmp_path, monkeypatch):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    content_hash = compute_file_hash(path)
-    session.record({path: content_hash}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    session.state_path.unlink()
-    assert _session(root, lock).baseline(path, [TARGET]) == content_hash
-    legacy = json.loads(session.legacy_state_path.read_text())
-    legacy["stable_root_identity"] = {"kind": "foreign-root"}
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    with pytest.raises(ValueError, match="installation binding does not match"):
-        _session(root, lock)
-
-
-def test_legacy_changes_cannot_adopt_an_edit_equal_to_an_older_version(tmp_path, monkeypatch):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    asset = path.with_name("asset.md")
-    asset.write_text("old asset\n")
-    locator = DeploymentLedgerCodec.locator_for_path(
-        asset, project_root=root, target=TARGET, scope=InstallScope.PROJECT
-    )
-    ledger = DeploymentLedgerCodec.from_lockfile(lock)
-    ledger.records[locator.key] = DeploymentRecord(
-        locator, ("pkg",), "pkg", compute_file_hash(asset)
-    )
-    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
-    session = _session(root, lock)
-    old_bytes = path.read_bytes()
-    session.record(
-        {path: compute_file_hash(path), asset: compute_file_hash(asset)}, [TARGET], "pkg"
-    )
-    session.flush()
-    legacy = _move_to_legacy(session)
-    _session(root, lock).bind_committed_claims(lock)
-    path.write_text("new rendered\n")
-    new_hash = compute_file_hash(path)
-    session = _session(root, lock)
-    session.record({path: new_hash}, [TARGET], "pkg")
-    session.flush()
-    # A real older-writer change to another member must not revive this
-    # unchanged older baseline when the user restores the old skill bytes.
-    path.write_bytes(old_bytes)
-    asset.write_text("new asset\n")
-    for row in legacy["records"]:
-        if row["value"].endswith("asset.md"):
-            row["content_hash"] = compute_file_hash(asset)
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    reloaded = _session(root, lock)
-    assert reloaded.baseline(path, [TARGET]) == new_hash
-    assert reloaded.baseline(asset, [TARGET]) == compute_file_hash(asset)
-    reloaded.bind_committed_claims(lock)
-    assert _session(root, lock).baseline(path, [TARGET]) == new_hash
-
-
-@pytest.mark.parametrize("damage", ["owner", "destination", "content", "device"])
-def test_returning_from_legacy_does_not_admit_unverified_changes(tmp_path, monkeypatch, damage):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    content_hash = compute_file_hash(path)
-    session.record({path: content_hash}, [TARGET], "pkg")
-    session.flush()
-    legacy = _move_to_legacy(session)
-    _session(root, lock).bind_committed_claims(lock)
-    if damage == "owner":
-        legacy["records"][0]["active_owner"] = "foreign"
-        legacy["records"][0]["owners"] = ["foreign"]
-    elif damage == "destination":
-        foreign = root / "foreign.md"
-        foreign.write_bytes(path.read_bytes())
-        key = next(iter(legacy["destinations"]))
-        legacy["destinations"][key] = str(foreign)
-    elif damage == "device":
-        legacy["root_identity"][0] += 1
-    else:
-        legacy["records"][0]["content_hash"] = "sha256:" + "e" * 64
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    proof = session.legacy_state_path.read_bytes()
-    reloaded = _session(root, lock)
-    assert reloaded.baseline(path, [TARGET]) == content_hash
-    reloaded.bind_committed_claims(lock)
-    assert _session(root, lock).baseline(path, [TARGET]) == content_hash
-    assert session.legacy_state_path.read_bytes() == proof
 
 
 def test_atomic_failure_cannot_publish_new_receipt(
@@ -833,7 +519,6 @@ def test_changed_canonical_claims_cannot_rebind_without_actual_writes(
     new_session.bind_committed_claims(lock)
     assert session.state_path.read_bytes() == before
     assert _session(root, lock).baseline(path, [TARGET]) is None
-    assert not session.legacy_state_path.exists()
 
 
 @pytest.mark.parametrize("binding", ["identity", "state", "ignore"])
@@ -976,339 +661,166 @@ def test_identical_unowned_members_do_not_create_local_authority(
     assert not session.state_path.exists()
 
 
-def _two_member_receipt(tmp_path, monkeypatch):
+_LINUX_STYLE = None
+_MACOS_STYLE = 1767225600.123456
+_PLATFORM_STYLES = pytest.mark.parametrize(
+    "birth_time", [_LINUX_STYLE, _MACOS_STYLE], ids=["linux-stat", "macos-stat"]
+)
+
+
+def _root_stat(dev: int, ino: int, birth_time: float | None) -> SimpleNamespace:
+    """Model ``os.stat``: Linux omits ``st_birthtime``; macOS reports it."""
+    values: dict[str, float] = {"st_dev": dev, "st_ino": ino}
+    if birth_time is not None:
+        values["st_birthtime"] = birth_time
+    return SimpleNamespace(**values)
+
+
+@pytest.fixture
+def simulated_root_stat(monkeypatch: pytest.MonkeyPatch) -> dict[str, SimpleNamespace]:
+    """Drive the root's reported stat; every other path keeps the real filesystem."""
+    from apm_cli.core import deployment_ledger
+
+    current: dict[str, SimpleNamespace] = {}
+    monkeypatch.setattr(deployment_ledger, "_ROOT_DEVICE_REBIND_SUPPORTED", True)
+    monkeypatch.setattr(
+        DeploymentMaterializationSession, "_root_stat", lambda self: current["stat"]
+    )
+    return current
+
+
+def _recorded_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: InstallScope
+) -> tuple[Path, Path, LockFile, DeploymentMaterializationSession]:
     root, path, lock = _fixture(tmp_path, monkeypatch)
-    asset = path.with_name("asset.md")
-    asset.write_text("retired asset\n")
-    locator = DeploymentLedgerCodec.locator_for_path(
-        asset, project_root=root, target=TARGET, scope=InstallScope.PROJECT
-    )
-    ledger = DeploymentLedgerCodec.from_lockfile(lock)
-    ledger.records[locator.key] = DeploymentRecord(
-        locator, ("pkg",), "pkg", compute_file_hash(asset)
-    )
-    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
-    session = _session(root, lock)
-    session.record({p: compute_file_hash(p) for p in (path, asset)}, [TARGET], "pkg")
+    session = DeploymentMaterializationSession(root, scope, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
     session.flush()
-    session.bind_committed_claims(lock)
-    return root, path, asset, lock, session
+    return root, path, lock, session
 
 
-def test_claim_free_retirement_preserves_unconsumed_legacy_update(tmp_path, monkeypatch):
-    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
-    checkpoint = json.loads(session.state_path.read_text())["legacy_snapshot"]
-    path.write_text("legitimate older-writer update\n")
-    updated_hash = compute_file_hash(path)
-    legacy = json.loads(session.legacy_state_path.read_text())
-    for row in legacy["records"]:
-        if row["value"].endswith("SKILL.md"):
-            row["content_hash"] = updated_hash
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    legacy_proof = session.legacy_state_path.read_bytes()
-    asset.unlink()
-    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
-    assert json.loads(session.state_path.read_text())["legacy_snapshot"] == {
-        key: value for key, value in checkpoint.items() if not key.endswith("asset.md")
-    }
-    retired_legacy = json.loads(session.legacy_state_path.read_text())
-    assert retired_legacy["records"] == [
-        row for row in json.loads(legacy_proof)["records"] if row["value"].endswith("SKILL.md")
-    ]
-    legacy_proof = session.legacy_state_path.read_bytes()
-    for _ in range(2):
-        reloaded = _session(root, lock)
-        assert reloaded.baseline(path, [TARGET]) == updated_hash
-        reloaded.bind_committed_claims(lock)
-    assert session.legacy_state_path.read_bytes() == legacy_proof
+@_PLATFORM_STYLES
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_device_only_change_rebinds_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+    birth_time: float | None,
+    scope: InstallScope,
+) -> None:
+    simulated_root_stat["stat"] = _root_stat(56, 257, birth_time)
+    root, path, lock, session = _recorded_session(tmp_path, monkeypatch, scope)
+    recorded = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert recorded["root_identity"] == [56, 257]
+    assert recorded.get("root_birth_time") == birth_time
+    old_hash = compute_file_hash(path)
+
+    simulated_root_stat["stat"] = _root_stat(30, 257, birth_time)
+    rebound = DeploymentMaterializationSession(root, scope, lock)
+    assert rebound.baseline(path, [TARGET]) == old_hash
+    assert json.loads(rebound.state_path.read_text(encoding="utf-8")) == recorded
+    rebound.flush()
+    data = json.loads(rebound.state_path.read_text(encoding="utf-8"))
+    assert data == {**recorded, "root_identity": [30, 257]}
+
+    proof = rebound.state_path.read_bytes()
+    settled = DeploymentMaterializationSession(root, scope, lock)
+    settled.flush()
+    assert settled.state_path.read_bytes() == proof
+    assert settled.baseline(path, [TARGET]) == old_hash
 
 
-@pytest.mark.parametrize("retire_all", [False, True])
-def test_no_write_compatibility_publication_reloads_retired_state(
-    tmp_path, monkeypatch, retire_all
-):
-    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
-    session.legacy_state_path.unlink()
-    captured = _session(root, lock)
-    removed = [path, asset] if retire_all else [asset]
-    for member in removed:
-        member.unlink()
-    DeploymentMaterializationSession.retire_removed(root, removed, user_scope=False)
-    ledger = DeploymentLedgerCodec.from_lockfile(lock)
-    ledger = DeploymentLedger(
-        {
-            key: row
-            for key, row in ledger.records.items()
-            if not any(row.locator.value.endswith(member.name) for member in removed)
-        }
-    )
-    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
-    captured.bind_committed_claims(lock)
-    if retire_all:
-        assert not session.legacy_state_path.exists()
-    else:
-        legacy = json.loads(session.legacy_state_path.read_text())
-        assert len(legacy["records"]) == 1
-        assert legacy["records"][0]["content_hash"] == compute_file_hash(path)
+@_PLATFORM_STYLES
+@pytest.mark.parametrize("change", ["inode", "installation", "path", "birth-time"])
+def test_device_change_with_other_identity_drift_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+    birth_time: float | None,
+    change: str,
+) -> None:
+    if change == "birth-time" and birth_time is None:
+        pytest.skip("Linux-style stat reports no birth time")
+    simulated_root_stat["stat"] = _root_stat(56, 257, birth_time)
+    root, _path, lock, session = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    ino = 258 if change == "inode" else 257
+    birth = birth_time + 1 if change == "birth-time" else birth_time
+    simulated_root_stat["stat"] = _root_stat(30, ino, birth)
+    if change in {"installation", "path"}:
+        data = json.loads(session.state_path.read_text(encoding="utf-8"))
+        if change == "installation":
+            data["installation"] = "0" * 32
+        else:
+            data["root"] = (tmp_path / "elsewhere").as_posix()
+        session.state_path.write_text(json.dumps(data), encoding="utf-8")
     proof = session.state_path.read_bytes()
-    legacy_proof = session.legacy_state_path.read_bytes() if not retire_all else None
-    _session(root, lock).bind_committed_claims(lock)
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
     assert session.state_path.read_bytes() == proof
-    if legacy_proof is not None:
-        assert session.legacy_state_path.read_bytes() == legacy_proof
 
 
-@pytest.mark.parametrize("newer_v2", [False, True])
-def test_legacy_deletion_revokes_even_differing_v2_baseline(tmp_path, monkeypatch, newer_v2):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    old_bytes = path.read_bytes()
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    expected = None
-    if newer_v2:
-        path.write_text("independently newer v2 write\n")
-        newer_hash = compute_file_hash(path)
-        session = _session(root, lock)
-        session.record({path: newer_hash}, [TARGET], "pkg")
-        session.flush()
-    # An older executable deletes the member and retires its legacy row.
-    path.unlink()
-    legacy = json.loads(session.legacy_state_path.read_text())
-    legacy.update(records=[], destinations={}, bindings={})
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    # A branch restores the same claims and the user recreates the former bytes.
-    path.write_bytes(old_bytes)
-    for _ in range(2):
-        reloaded = _session(root, lock)
-        assert reloaded.baseline(path, [TARGET]) == expected
-        reloaded.bind_committed_claims(lock)
-    assert path.read_bytes() == old_bytes
+def test_recorded_birth_time_is_required_when_the_platform_stops_reporting_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+) -> None:
+    simulated_root_stat["stat"] = _root_stat(56, 257, _MACOS_STYLE)
+    root, _path, lock, _ = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    simulated_root_stat["stat"] = _root_stat(30, 257, None)
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
 
 
-def test_witnessed_write_after_legacy_retirement_can_establish_new_authority(tmp_path, monkeypatch):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    legacy = json.loads(session.legacy_state_path.read_text())
-    legacy.update(records=[], destinations={}, bindings={})
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    path.unlink()
-    retired = _session(root, lock)
-    assert retired.baseline(path, [TARGET]) is None
-    retired.bind_committed_claims(lock)
-    # A real write after observing retirement has unambiguous ordering. It
-    # establishes new evidence without reviving any pre-retirement baseline.
-    path.write_text("fresh witnessed write\n")
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
-
-
-@pytest.mark.parametrize("first,second", [("codex", "agent-skills"), ("agent-skills", "codex")])
-def test_legacy_deletion_revokes_same_physical_member_after_target_handoff(
-    tmp_path, monkeypatch, first, second
-):
-    old_target, new_target = KNOWN_TARGETS[first], KNOWN_TARGETS[second]
-    root, path, lock = _fixture(tmp_path, monkeypatch, target=old_target)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [old_target], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    locator = DeploymentLedgerCodec.locator_for_path(
-        path, project_root=root, target=new_target, scope=InstallScope.PROJECT
+@_PLATFORM_STYLES
+def test_recreated_checkout_with_copied_identity_and_new_device_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+    birth_time: float | None,
+) -> None:
+    simulated_root_stat["stat"] = _root_stat(56, 257, birth_time)
+    root, path, lock, _ = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    root.rename(tmp_path / "old-consumer")
+    path.parent.mkdir(parents=True)
+    path.write_text("rendered old\n", encoding="utf-8")
+    identity = root / ".apm-local/installation"
+    identity.parent.mkdir()
+    identity.write_bytes((tmp_path / "old-consumer/.apm-local/installation").read_bytes())
+    # A recreated directory has a new inode; on macOS even a reused inode has a new birth time.
+    recreated = (
+        _root_stat(30, 258, None) if birth_time is None else _root_stat(30, 257, birth_time + 60)
     )
-    path.write_text("new target's witnessed write\n")
-    content_hash = compute_file_hash(path)
-    DeploymentLedgerCodec.apply_to_lockfile(
-        DeploymentLedger({locator.key: DeploymentRecord(locator, ("pkg",), "pkg", content_hash)}),
-        lock,
-        write_legacy_views=False,
-    )
-    session = DeploymentMaterializationSession(
-        root, InstallScope.PROJECT, lock, targets=[new_target]
-    )
-    session.record({path: content_hash}, [new_target], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    assert _session(root, lock).baseline(path, [new_target]) == content_hash
-    legacy = json.loads(session.legacy_state_path.read_text())
-    legacy.update(records=[], destinations={}, bindings={})
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    path.unlink()
-    path.write_text("new target's witnessed write\n")
-    for _ in range(2):
-        reloaded = DeploymentMaterializationSession(
-            root, InstallScope.PROJECT, lock, targets=[new_target]
-        )
-        assert reloaded.baseline(path, [new_target]) is None
-        reloaded.bind_committed_claims(lock)
+    simulated_root_stat["stat"] = recreated
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
 
 
-def test_confirmed_retirement_removes_only_matching_legacy_evidence(tmp_path, monkeypatch):
-    root, path, asset, _lock, session = _two_member_receipt(tmp_path, monkeypatch)
-    before = json.loads(session.legacy_state_path.read_text())
-    survivor = next(row for row in before["records"] if row["value"].endswith("SKILL.md"))
-    asset.unlink()
-    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
-    after = json.loads(session.legacy_state_path.read_text())
-    assert after["records"] == [survivor]
-    assert len(after["destinations"]) == len(after["bindings"]) == 1
-    for field in ("root", "root_identity", "stable_root_identity", "scope", "installation"):
-        assert after[field] == before[field]
-    proof = session.legacy_state_path.read_bytes(), session.legacy_state_path.stat().st_mtime_ns
-    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
-    assert (
-        session.legacy_state_path.read_bytes(),
-        session.legacy_state_path.stat().st_mtime_ns,
-    ) == proof
-    assert path.is_file()
+def test_windows_root_identity_is_not_rebound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+) -> None:
+    from apm_cli.core import deployment_ledger
+
+    monkeypatch.setattr(deployment_ledger, "_ROOT_DEVICE_REBIND_SUPPORTED", False)
+    simulated_root_stat["stat"] = _root_stat(56, 257, _MACOS_STYLE)
+    root, _path, lock, session = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    assert "root_birth_time" not in json.loads(session.state_path.read_text(encoding="utf-8"))
+    simulated_root_stat["stat"] = _root_stat(30, 257, _MACOS_STYLE)
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
 
 
-@pytest.mark.parametrize("damage", ["corrupt", "identity", "device"])
-def test_retirement_preserves_invalid_legacy_receipt(tmp_path, monkeypatch, damage):
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    data = json.loads(session.legacy_state_path.read_text())
-    if damage == "identity":
-        data["installation"] = "foreign"
-    elif damage == "device":
-        data["root_identity"][0] += 1
-    session.legacy_state_path.write_text("{" if damage == "corrupt" else json.dumps(data))
-    proof = session.legacy_state_path.read_bytes()
-    path.unlink()
-    DeploymentMaterializationSession.retire_removed(root, [path], user_scope=False)
-    assert session.legacy_state_path.read_bytes() == proof
-    assert json.loads(session.state_path.read_text())["records"] == []
-
-
-@pytest.mark.parametrize("failed_version", [1, 2])
-def test_retirement_write_failure_keeps_old_reader_safe_or_reports_failure(
-    tmp_path, monkeypatch, failed_version
-):
-    from apm_cli.utils import atomic_io
-
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    old_v1, old_v2 = session.legacy_state_path.read_bytes(), session.state_path.read_bytes()
-    original = atomic_io.atomic_write_text
-    failed_path = session.legacy_state_path if failed_version == 1 else session.state_path
-
-    def fail(destination, text, **kwargs):
-        if destination == failed_path:
-            raise OSError("retirement persistence failed")
-        return original(destination, text, **kwargs)
-
-    monkeypatch.setattr(atomic_io, "atomic_write_text", fail)
-    path.unlink()
-    with pytest.raises(OSError, match="retirement persistence failed"):
-        DeploymentMaterializationSession.retire_removed(root, [path], user_scope=False)
-    assert session.state_path.read_bytes() == old_v2
-    if failed_version == 1:
-        assert session.legacy_state_path.read_bytes() == old_v1
-    else:
-        assert json.loads(session.legacy_state_path.read_text())["records"] == []
-        # A failed v2 flush cannot restore authority already removed from v1.
-        path.write_text("rendered old\n")
-        assert _session(root, lock).baseline(path, [TARGET]) is None
-
-
-def test_retirement_removes_legacy_only_members_without_creating_claims(tmp_path, monkeypatch):
-    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
-    stable = json.loads(session.state_path.read_text())
-    for field in ("destinations", "bindings", "legacy_snapshot"):
-        stable[field] = {
-            key: value for key, value in stable[field].items() if not key.endswith("asset.md")
-        }
-    stable["records"] = [row for row in stable["records"] if not row["value"].endswith("asset.md")]
-    session.state_path.write_text(json.dumps(stable))
-    asset.unlink()
-    DeploymentMaterializationSession.retire_removed(root, [asset], user_scope=False)
-    legacy = json.loads(session.legacy_state_path.read_text())
-    assert len(legacy["records"]) == 1
-    assert legacy["records"][0]["value"].endswith("SKILL.md")
-    assert json.loads(session.state_path.read_text())["records"] == stable["records"]
-    assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
-
-
-def test_legacy_deletion_revokes_uncovered_members_but_keeps_covered_survivors(
-    tmp_path, monkeypatch
-):
-    root, path, asset, lock, session = _two_member_receipt(tmp_path, monkeypatch)
-    added = path.with_name("added.md")
-    added.write_text("v2-only prior write\n")
-    locator = DeploymentLedgerCodec.locator_for_path(
-        added, project_root=root, target=TARGET, scope=InstallScope.PROJECT
-    )
-    ledger = DeploymentLedgerCodec.from_lockfile(lock)
-    ledger.records[locator.key] = DeploymentRecord(
-        locator, ("pkg",), "pkg", compute_file_hash(added)
-    )
-    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
-    session = _session(root, lock)
-    session.record({added: compute_file_hash(added)}, [TARGET], "pkg")
-    session.flush()  # Model older v2 evidence predating compatibility refresh.
-    legacy = json.loads(session.legacy_state_path.read_text())
-    retired = {key for key in legacy["destinations"] if key.endswith("asset.md")}
-    legacy["records"] = [row for row in legacy["records"] if not row["value"].endswith("asset.md")]
-    for field in ("destinations", "bindings"):
-        legacy[field] = {key: value for key, value in legacy[field].items() if key not in retired}
-    session.legacy_state_path.write_text(json.dumps(legacy))
-    asset.unlink()
-    for _ in range(2):
-        reloaded = _session(root, lock)
-        assert reloaded.baseline(added, [TARGET]) is None
-        assert reloaded.baseline(path, [TARGET]) == compute_file_hash(path)
-        reloaded.bind_committed_claims(lock)
-
-
-@pytest.mark.parametrize("failed_version", [1, 2])
-def test_failed_legacy_refresh_cannot_revive_unchanged_older_evidence(
-    tmp_path, monkeypatch, failed_version
-):
-    from apm_cli.utils import atomic_io
-
-    root, path, lock = _fixture(tmp_path, monkeypatch)
-    old_bytes = path.read_bytes()
-    session = _session(root, lock)
-    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
-    session.flush()
-    session.bind_committed_claims(lock)
-    proof = session.legacy_state_path.read_bytes()
-    old_checkpoint = json.loads(session.state_path.read_text())["legacy_snapshot"]
-    path.write_text("new witnessed bytes\n")
-    expected = compute_file_hash(path)
-    session = _session(root, lock)
-    session.record({path: expected}, [TARGET], "pkg")
-    session.flush()
-    write = atomic_io.atomic_write_text
-
-    def fail(destination, text, **kwargs):
-        if destination == session.legacy_state_path and failed_version == 1:
-            raise OSError("refresh failed")
-        if (
-            destination == session.state_path
-            and failed_version == 2
-            and json.loads(text)["legacy_snapshot"] != old_checkpoint
-        ):
-            raise OSError("refresh failed")
-        return write(destination, text, **kwargs)
-
-    monkeypatch.setattr(atomic_io, "atomic_write_text", fail)
-    with pytest.raises(OSError, match="refresh failed"):
-        session.bind_committed_claims(lock)
-    if failed_version == 1:
-        assert session.legacy_state_path.read_bytes() == proof
-    path.write_bytes(old_bytes)
-    assert _session(root, lock).baseline(path, [TARGET]) == expected
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows root identity is not rebound")
+def test_native_receipt_with_drifted_device_number_is_rebound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, path, lock, session = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    actual = data["root_identity"]
+    data["root_identity"] = [actual[0] + 1, actual[1]]
+    session.state_path.write_text(json.dumps(data), encoding="utf-8")
+    rebound = _session(root, lock)
+    assert rebound.baseline(path, [TARGET]) == compute_file_hash(path)
+    rebound.flush()
+    assert json.loads(rebound.state_path.read_text(encoding="utf-8"))["root_identity"] == actual
