@@ -786,6 +786,51 @@ class TestCodexInstallUninstallCycle:
         assert any(p.startswith(".codex/agents/") for p in deployed)
         assert any(p.endswith(".toml") for p in deployed)
 
+    def test_user_scope_codex_home_routes_agents_hooks_not_skills(self, monkeypatch):
+        """CODEX_HOME moves user-scope agents + hooks; skills stay in ~/.agents (#3483)."""
+        import json
+
+        from apm_cli.integration.hook_integrator import HookIntegrator
+
+        home = self.project_root
+        _set_home(monkeypatch, home)
+        codex_home = home / ".config" / "codex"
+        codex_home.mkdir(parents=True)
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+        target = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        assert target is not None
+
+        pkg_info = _make_pkg(home, instructions=False, agents=True, skills=True)
+        hooks_dir = pkg_info.install_path / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "echo hi"}]}}),
+            encoding="utf-8",
+        )
+
+        agent_integrator = AgentIntegrator()
+        agent_result = agent_integrator.integrate_agents_for_target(target, pkg_info, home)
+        hook_result = HookIntegrator().integrate_hooks_for_target(
+            target, pkg_info, home, user_scope=True
+        )
+        skill_result = SkillIntegrator().integrate_package_skill(pkg_info, home, targets=[target])
+
+        agents = _posix_relpaths(home, agent_result.target_paths)
+        assert agents and all(p.startswith(".config/codex/agents/") for p in agents)
+        assert hook_result.files_integrated > 0
+        assert (codex_home / "hooks.json").is_file()
+        skills = _posix_relpaths(home, skill_result.target_paths)
+        assert skills and all(p.startswith(".agents/skills/") for p in skills)
+        assert not (home / ".codex").exists()
+
+        sync = agent_integrator.sync_for_target(
+            target, pkg_info.package, home, managed_files=agents
+        )
+        assert sync["errors"] == 0
+        assert sync["files_removed"] == len(agents)
+        for p in agents:
+            assert not (home / p).exists()
+
 
 # ---------------------------------------------------------------------------
 # Skill integration (cross-target)

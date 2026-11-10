@@ -18,7 +18,6 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,24 +53,18 @@ set.  Adding a new rule format means: add it here, set ``output_compare=True``
 on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 """
 
+_USER_HOME_ENV_OVERRIDES: dict[str, tuple[str, str | None]] = {
+    "claude": ("CLAUDE_CONFIG_DIR", None),
+    "hermes": ("HERMES_HOME", None),
+    "codex": ("CODEX_HOME", "Codex CLI"),
+}
+"""User-scope root overrides honored by :meth:`TargetProfile.for_scope`.
 
-def _codex_home() -> Path:
-    """Return the Codex CLI user config root.
-
-    ``$CODEX_HOME`` wins when set (Codex CLI's own override), otherwise the
-    default ``~/.codex``. A relative ``CODEX_HOME`` cannot locate the directory
-    reliably and is rejected, matching the Codex MCP adapter.
-    """
-    raw = os.environ.get("CODEX_HOME", "").strip()
-    if raw:
-        path = Path(raw).expanduser()
-        if not path.is_absolute():
-            raise PathTraversalError(
-                "CODEX_HOME is set to a non-absolute path; cannot locate the "
-                "Codex CLI configuration directory."
-            )
-        return path
-    return Path.home() / ".codex"
+Maps target name -> (environment variable, tool label).  A non-``None`` tool
+label means a relative value is rejected with :class:`PathTraversalError`
+instead of being resolved against the working directory (Codex rejects a
+relative ``CODEX_HOME`` the same way in its MCP adapter).
+"""
 
 
 @dataclass(frozen=True)
@@ -492,25 +485,32 @@ class TargetProfile:
         if self.name == "copilot":
             generated_files = ()
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
-        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
-        # `apm install -g` lands where the tool reads.
-        if self.name in ("claude", "hermes"):
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
+        # honors HERMES_HOME (default ~/.hermes) and Codex honors CODEX_HOME
+        # (default ~/.codex); mirror that at user scope so `apm install -g`
+        # and `apm compile --global` land where the tool reads.
+        home_override = _USER_HOME_ENV_OVERRIDES.get(self.name)
+        if home_override is not None:
             import os
-            from pathlib import Path
 
-            env_var = "CLAUDE_CONFIG_DIR" if self.name == "claude" else "HERMES_HOME"
+            env_var, absolute_required_for = home_override
             env = os.environ.get(env_var, "").strip()
             if env:
+                expanded = Path(env).expanduser()
+                if absolute_required_for and not expanded.is_absolute():
+                    raise PathTraversalError(
+                        f"{env_var} is set to a non-absolute path; cannot locate the "
+                        f"{absolute_required_for} configuration directory."
+                    )
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = Path(env).expanduser().resolve(strict=False)
+                abs_path = expanded.resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
+                    # Fallback: when the home override points outside $HOME we
                     # store an absolute path. ``pathlib.Path / <absolute>`` is
                     # ``<absolute>`` so deploy + cleanup write to the right
                     # place. The lockfile path translator treats an absolute
@@ -677,11 +677,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
-    # Instructions are compile-only (AGENTS.md) -- not installed.
+    # Instructions are compile-only (AGENTS.md) -- not installed.  At user
+    # scope the root honors CODEX_HOME (default ~/.codex) via for_scope().
     "codex": TargetProfile(
         capability=TARGET_CAPABILITIES["codex"],
         root_dir=".codex",
-        user_root_resolver=_codex_home,
         primitives={
             "agents": PrimitiveMapping(
                 "agents", ".toml", "codex_agent", prompt_fields=("developer_instructions",)

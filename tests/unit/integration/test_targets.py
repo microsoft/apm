@@ -565,3 +565,88 @@ class TestHermesTarget:
 
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "custom"))
         assert resolve_hermes_root() == tmp_path / "custom"
+
+
+class TestCodexHomeUserScope:
+    """Codex user-scope root honours CODEX_HOME like the MCP adapter (issue #3483)."""
+
+    @staticmethod
+    def _home(monkeypatch, tmp_path: Path) -> Path:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        return home
+
+    @staticmethod
+    def _mcp_codex_dir() -> Path:
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        return CodexClientAdapter(registry_url="https://registry.invalid", user_scope=True)._get_codex_dir()
+
+    def test_codex_home_under_home_is_home_relative(self, monkeypatch, tmp_path):
+        home = self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", str(home / ".config" / "codex"))
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert profile is not None
+        assert profile.root_dir == ".config/codex"
+        assert profile.resolved_deploy_root is None
+        assert home / profile.root_dir == self._mcp_codex_dir()
+
+    def test_codex_home_outside_home_is_absolute(self, monkeypatch, tmp_path):
+        home = self._home(monkeypatch, tmp_path)
+        codex_home = (tmp_path / "elsewhere" / "codex").resolve()
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert profile is not None
+        assert Path(profile.root_dir) == codex_home
+        assert home / profile.root_dir == self._mcp_codex_dir().resolve()
+
+    @pytest.mark.parametrize("value", [None, "", "   "])
+    def test_unset_or_blank_codex_home_defaults_to_dot_codex(self, monkeypatch, tmp_path, value):
+        home = self._home(monkeypatch, tmp_path)
+        if value is None:
+            monkeypatch.delenv("CODEX_HOME", raising=False)
+        else:
+            monkeypatch.setenv("CODEX_HOME", value)
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert profile is not None
+        assert profile.root_dir == ".codex"
+        assert home / profile.root_dir == self._mcp_codex_dir()
+
+    def test_relative_codex_home_is_rejected_like_mcp_adapter(self, monkeypatch, tmp_path):
+        self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", "relative/codex")
+
+        with pytest.raises(PathTraversalError, match="CODEX_HOME is set to a non-absolute path"):
+            KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        with pytest.raises(PathTraversalError, match="CODEX_HOME is set to a non-absolute path"):
+            self._mcp_codex_dir()
+
+    def test_project_scope_ignores_codex_home(self, monkeypatch, tmp_path):
+        self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "custom-codex"))
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=False)
+
+        assert profile is KNOWN_TARGETS["codex"]
+        assert profile.root_dir == ".codex"
+
+    def test_codex_home_keeps_codex_a_static_root_target(self, monkeypatch, tmp_path):
+        """CODEX_HOME must not turn codex into a dynamic-root (URI locator) target."""
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        home = self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", str(home / ".config" / "codex"))
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert KNOWN_TARGETS["codex"].user_root_resolver is None
+        assert profile is not None
+        assert profile.skills_rel_root == ".agents/skills"
+        assert BaseIntegrator.validate_deploy_path(".codex/agents/a.toml", tmp_path)
