@@ -8,7 +8,6 @@ from pathlib import Path
 
 from apm_cli.core.deployment_state import MaterializationResult
 
-
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
