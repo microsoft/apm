@@ -117,12 +117,27 @@ def _make_plugin_bundle(
     return bundle
 
 
-def test_detect_local_bundle_skips_source_package_with_apm_yml(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "lockfile",
+    (
+        None,
+        {
+            "lockfile_version": "1",
+            "dependencies": [{"repo_url": "owner/dep", "resolved_commit": "abc123"}],
+        },
+    ),
+    ids=("no-lockfile", "lockfile-without-pack"),
+)
+def test_detect_local_bundle_skips_source_package_with_apm_yml(
+    tmp_path: Path, lockfile: dict | None
+) -> None:
     """A source package with apm.yml and plugin.json is a dependency, not a bundle."""
     package = tmp_path / "demo-pkg"
     package.mkdir()
     (package / "apm.yml").write_text("name: demo-pkg\n", encoding="utf-8")
     (package / "plugin.json").write_text(json.dumps({"id": "demo-pkg"}), encoding="utf-8")
+    if lockfile is not None:
+        (package / "apm.lock.yaml").write_text(yaml.safe_dump(lockfile), encoding="utf-8")
 
     assert detect_local_bundle(package) is None
 
