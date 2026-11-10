@@ -1645,9 +1645,9 @@ class TestUncachedFallbackLineEndings:
             )
 
         checkout_argv = checkout_run.call_args.args[0]
-        assert "-c" in checkout_argv
-        assert "core.autocrlf=false" in checkout_argv
-        assert checkout_argv.index("core.autocrlf=false") < checkout_argv.index("checkout")
+        checkout_pin = checkout_argv.index("core.autocrlf=false")
+        assert checkout_argv[checkout_pin - 1] == "-c"
+        assert checkout_pin < checkout_argv.index("checkout")
 
     def test_locked_sha_checks_out_from_a_crlf_host(self, tmp_path, monkeypatch) -> None:
         """End-to-end reproduction: clone under a CRLF host, then check out an older SHA."""
@@ -1701,7 +1701,7 @@ class TestUncachedFallbackLineEndings:
         isolated = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(empty_config)}
 
         target = tmp_path / "wt"
-        clone_git_worktree(f"file://{src.resolve()}", target, env=isolated)
+        clone_git_worktree(src.resolve().as_uri(), target, env=isolated)
 
         assert tracked.read_bytes().replace(b"\r\n", b"\n") == b"a\nb\nc\n"
         assert (target / "f.txt").read_bytes() == b"a\nb\nc\n", (
