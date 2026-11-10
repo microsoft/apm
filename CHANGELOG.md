@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Codex stdio MCP connections written from `apm.yml` forward a `${VAR}` value declared under the same variable name through `env_vars` instead of resolving it into `config.toml`, so the secret never reaches a committed file. Other values keep resolving at install time. (#3393)
+- Codex project-scope stdio MCP `env` values declared as `KEY: ${KEY}` or `KEY: ${env:KEY}` are written as `env_vars` in `.codex/config.toml` instead of resolved secrets, with a names-only warning for other references -- by @abhishekacharya200 (#3406)
 
 ## [0.35.0] - 2026-10-22
 

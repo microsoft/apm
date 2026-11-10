@@ -470,3 +470,35 @@ def test_codex_entry_with_manual_edit_stays_a_conflict(
 ) -> None:
     monkeypatch.setenv("MY_TOKEN", "resolved-value")
     assert _compare_codex(tmp_path, "edited-by-hand") is NativeMcpConnectionState.CONFLICT
+
+
+def test_codex_user_scope_entry_never_takes_the_legacy_upgrade_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "resolved-value")
+    client = CodexClientAdapter(project_root=tmp_path, user_scope=True)
+    requested = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_FORWARDED_STDIO))
+    native = deepcopy(client.render_server_config(requested))
+    assert "env_vars" not in native
+    state = compare_native_mcp_connection(
+        client,
+        "managed",
+        requested_info=requested,
+        stored_config=_FORWARDED_STDIO,
+        managed=True,
+        existing_configs={"managed": native},
+    )
+    assert state is NativeMcpConnectionState.MATCHING_MANAGED
+
+
+def test_codex_expanded_env_names_lists_forwarded_names_stored_as_values(
+    tmp_path: Path,
+) -> None:
+    client = CodexClientAdapter(project_root=tmp_path)
+    requested = {"env_vars": ["A", "B"], "env": {}}
+    assert client.expanded_env_names({"env": {"A": "x", "C": "y"}}, requested) == ["A"]
+    assert client.expanded_env_names({"command": "x"}, requested) == []
+    assert client.expanded_env_names(None, requested) == []
+    # A stored reference never held a secret, so it needs no rotation note.
+    stored_refs = {"env": {"A": "${A}", "B": "${env:B}"}}
+    assert client.expanded_env_names(stored_refs, requested) == []

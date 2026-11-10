@@ -970,3 +970,80 @@ class TestForwardedStdioEnv:
         assert server["env_vars"] == ["FIGMA_API_KEY"]
         assert "FIGMA_API_KEY" not in server.get("env", {})
         assert "example-token" not in content
+
+
+class TestForwardedStdioEnvScope:
+    """User scope keeps resolving values; unforwardable references warn by name."""
+
+    def test_user_scope_resolves_value_and_has_no_env_vars(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(_raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}"))
+        assert "env_vars" not in cfg
+        assert cfg["env"] == {"FIGMA_API_KEY": "example-token"}
+
+    def test_user_scope_env_prefixed_reference_resolves(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(
+                _raw_stdio_server(FIGMA_API_KEY="${env:FIGMA_API_KEY}")
+            )
+        assert "env_vars" not in cfg
+        assert cfg["env"] == {"FIGMA_API_KEY": "example-token"}
+
+    def test_user_scope_never_matches_legacy_baseline(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        expected = {"command": "npx", "env_vars": ["TOKEN"], "env": {}}
+        native = {"command": "npx", "env": {"TOKEN": "${TOKEN}"}}
+        assert adapter.matches_legacy_managed_server_config(native, expected) is False
+
+    @pytest.mark.parametrize("user_scope", [False, True])
+    def test_mismatched_and_embedded_references_resolve(
+        self, tmp_path: Path, user_scope: bool
+    ) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=user_scope)
+        server = _raw_stdio_server(TOKEN="${OTHER}", AUTH="Bearer ${OTHER}")
+        with patch.dict(os.environ, {"OTHER": "example-token"}):
+            cfg = adapter._format_server_config(server)
+        assert cfg["env"] == {"TOKEN": "example-token", "AUTH": "Bearer example-token"}
+        assert "env_vars" not in cfg
+
+    def test_project_scope_warns_with_names_only(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server = _raw_stdio_server(TOKEN="${OTHER}", AUTH="Bearer <OTHER>", PLAIN="x")
+        with (
+            patch.dict(os.environ, {"OTHER": "example-token"}),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            adapter._format_server_config(server)
+        assert warning.call_count == 1
+        message = warning.call_args.args[0]
+        assert "TOKEN" in message
+        assert "AUTH" in message
+        assert "PLAIN" not in message
+        assert "example-token" not in message
+        assert "KEY: ${KEY}" in message
+
+    def test_user_scope_does_not_emit_the_forwarding_warning(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path, user_scope=True)
+        with (
+            patch.dict(os.environ, {"OTHER": "example-token"}),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            adapter._format_server_config(_raw_stdio_server(TOKEN="${OTHER}"))
+        warning.assert_not_called()
+
+    def test_baseline_rendering_does_not_warn(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with (
+            patch.dict(os.environ, {"OTHER": "example-token"}),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            adapter.render_server_config(_raw_stdio_server(TOKEN="${OTHER}"))
+        warning.assert_not_called()
+
+    def test_forwarded_reference_does_not_warn(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        with patch("apm_cli.adapters.client.codex._rich_warning") as warning:
+            adapter._format_server_config(_raw_stdio_server(TOKEN="${TOKEN}", B="${env:B}"))
+        warning.assert_not_called()

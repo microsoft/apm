@@ -134,6 +134,24 @@ never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
 
+For a self-defined Codex stdio connection at project scope (`.codex/config.toml`),
+an `env` value written as exactly `KEY: ${KEY}` or `KEY: ${env:KEY}` under the
+same key becomes `env_vars = ["KEY"]`. Codex reads those variables from the
+environment that launches it, so APM never resolves, prompts for, or writes the
+value, whether or not `KEY` is set during install. Any other reference, such as
+`TOKEN: ${OTHER}` or `AUTH: Bearer ${TOKEN}`, is still resolved at install time
+and written to `.codex/config.toml`; APM warns with the key names only and
+suggests declaring `KEY: ${KEY}` to forward instead. User scope (`-g`) is
+unchanged: values are resolved and written as before.
+
+When a reinstall finds a value APM wrote earlier for a key that is now
+forwarded, and the entry still matches its recorded baseline, APM replaces it
+with `env_vars` and warns. If the entry was edited or cannot be verified, APM
+keeps it and exits `1` with the same
+[manual reconciliation](#resolve-a-connection-name-conflict) steps. In both
+cases, if `.codex/config.toml` was ever shared or committed, rotate the
+credential because Git history still holds it.
+
 Claude Code updates self-defined connections only when the native entry matches
 its recorded APM baseline. Updates remove previously managed fields omitted
 from the new declaration, including `env`, while preserving runtime-owned

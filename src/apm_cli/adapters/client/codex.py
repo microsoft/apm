@@ -18,7 +18,7 @@ from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
-from .base import _ENV_VAR_RE, MCPClientAdapter
+from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
 
 _log = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 config paths instead of project-local paths.
         """
         super().__init__(project_root=project_root, user_scope=user_scope)
+        self._rendering_baseline = False
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
@@ -226,6 +227,8 @@ class CodexClientAdapter(MCPClientAdapter):
         reference, so anything else is a manual edit and stays a conflict.
         """
         names = expected.get("env_vars")
+        if self.user_scope:
+            return False
         native_env = native.get("env") if isinstance(native, dict) else None
         if not names or not isinstance(native_env, dict) or "env_vars" in native:
             return False
@@ -238,6 +241,28 @@ class CodexClientAdapter(MCPClientAdapter):
         legacy = {key: value for key, value in expected.items() if key != "env_vars"}
         legacy["env"] = legacy_env
         return self.matches_managed_server_config(native, legacy)
+
+    def render_server_config(self, server_info: dict, **kwargs) -> dict:
+        """Render a baseline without repeating the install-time write warnings."""
+        self._rendering_baseline = True
+        try:
+            return super().render_server_config(server_info, **kwargs)
+        finally:
+            self._rendering_baseline = False
+
+    def expanded_env_names(self, native: object, requested: dict) -> list[str]:
+        """Names the requested entry forwards that the native entry stores as ``env`` values."""
+        native_env = native.get("env") if isinstance(native, dict) else None
+        if not isinstance(native_env, dict):
+            return []
+        names = []
+        for name in requested.get("env_vars") or []:
+            value = native_env.get(name)
+            # A stored reference such as ``${VAR}`` never held a secret.
+            if value is None or (isinstance(value, str) and _ENV_VAR_RE.fullmatch(value)):
+                continue
+            names.append(name)
+        return names
 
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
@@ -394,7 +419,11 @@ class CodexClientAdapter(MCPClientAdapter):
             resolved_env_for_args: dict = {}
             written_env: dict = {}
             if raw.get("env"):
-                literal_env, forwarded_env = self._split_forwarded_stdio_env(raw["env"])
+                if self.user_scope:
+                    literal_env = raw["env"]
+                else:
+                    literal_env, forwarded_env = self._split_forwarded_stdio_env(raw["env"])
+                    self._warn_unforwardable_env(literal_env, server_info.get("name", ""))
                 written_env = self._resolve_environment_variables(
                     literal_env, env_overrides=env_overrides
                 )
@@ -695,6 +724,24 @@ class CodexClientAdapter(MCPClientAdapter):
                 processed.append(processed_value)
 
         return processed
+
+    def _warn_unforwardable_env(self, literal_env: dict, server_name: str) -> None:
+        """Name the env keys whose references Codex cannot forward; never print values."""
+        if self._rendering_baseline:
+            return
+        keys = [
+            name
+            for name, value in literal_env.items()
+            if isinstance(value, str) and _ENV_PLACEHOLDER_RE.search(value)
+        ]
+        if not keys:
+            return
+        _rich_warning(
+            f"Codex cannot forward env {', '.join(keys)} for server '{server_name}' by "
+            "reference, so APM resolved them at install time and wrote the values to "
+            ".codex/config.toml. Declare each as KEY: ${KEY} to forward it instead.",
+            symbol="warning",
+        )
 
     @staticmethod
     def _split_forwarded_stdio_env(raw_env: dict) -> tuple[dict, list[str]]:
