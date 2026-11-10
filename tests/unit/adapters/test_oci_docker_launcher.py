@@ -24,6 +24,7 @@ from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+from apm_cli.registry.client import SimpleRegistryClient
 
 pytestmark = pytest.mark.unit
 
@@ -676,6 +677,108 @@ class TestOciLauncherAcrossTargets(unittest.TestCase):
                         config["args"],
                         ["run", "-i", "--rm", "--network", "none", OCI_IMAGE],
                     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #3404: the reporter's raw server.json, through the registry normalizer
+# ---------------------------------------------------------------------------
+
+ISSUE_3404_IMAGE = "docker.io/example/demo:1.0.0"
+
+_ALL_ADAPTERS = (
+    ("copilot", _make_copilot),
+    ("codex", _make_codex),
+    ("gemini", _make_gemini),
+    ("vscode", _make_vscode),
+)
+
+# Adapters that inject environment variables as ``docker run -e`` flags.
+_ENV_FLAG_ADAPTERS = _ALL_ADAPTERS[:3]
+
+
+def _issue_3404_server(runtime_arguments: list, *, with_env: bool = False) -> dict:
+    """Return the issue's v0.1 server.json, normalized as the registry client does."""
+    package = {
+        "registryType": "oci",
+        "identifier": ISSUE_3404_IMAGE,
+        "transport": {"type": "stdio"},
+        "runtimeArguments": runtime_arguments,
+        "packageArguments": [{"type": "named", "name": "--definition-snapshot"}],
+    }
+    if with_env:
+        package["environmentVariables"] = [{"name": "API_KEY", "isRequired": True}]
+    return SimpleRegistryClient._normalize_v0_1_server(
+        {"name": "io.github.example/demo", "version": "1.0.0", "packages": [package]}
+    )
+
+
+class TestIssue3404OptionsOnlyRuntimeArguments(unittest.TestCase):
+    """Options-only runtimeArguments gain ``run -i --rm``; other shapes are unchanged."""
+
+    def _render_args(self, make_adapter, server, **kwargs) -> list:
+        return make_adapter().render_server_config(server, **kwargs)["args"]
+
+    def test_issue_fixture_renders_docker_run_on_every_adapter(self):
+        server = _issue_3404_server([{"type": "named", "name": "--network", "value": "none"}])
+        for name, make_adapter in _ALL_ADAPTERS:
+            with self.subTest(adapter=name):
+                self.assertEqual(
+                    self._render_args(make_adapter, server),
+                    [
+                        "run",
+                        "-i",
+                        "--rm",
+                        "--network",
+                        "none",
+                        ISSUE_3404_IMAGE,
+                        "--definition-snapshot",
+                    ],
+                )
+
+    def test_existing_runtime_argument_shapes_render_unchanged(self):
+        """Explicit ``run``, explicit ``run -i --rm`` and empty arguments keep today's argv."""
+        tail = [ISSUE_3404_IMAGE, "--definition-snapshot"]
+        cases = {
+            "explicit-run": (
+                [{"type": "positional", "value": "run"}],
+                {
+                    "copilot": ["run", "-i", "--rm", *tail],
+                    "codex": ["run", *tail],
+                    "gemini": ["run", "-i", "--rm", *tail],
+                    "vscode": ["run", "-i", "--rm", *tail],
+                },
+            ),
+            "explicit-run-i-rm": (
+                [{"type": "positional", "value": value} for value in ("run", "-i", "--rm")],
+                {name: ["run", "-i", "--rm", *tail] for name, _ in _ALL_ADAPTERS},
+            ),
+            "empty": (
+                [],
+                {name: ["run", "-i", "--rm", *tail] for name, _ in _ALL_ADAPTERS},
+            ),
+        }
+        for case, (runtime_arguments, expected) in cases.items():
+            server = _issue_3404_server(runtime_arguments)
+            for name, make_adapter in _ALL_ADAPTERS:
+                with self.subTest(case=case, adapter=name):
+                    args = self._render_args(make_adapter, server)
+                    self.assertEqual(args, expected[name])
+                    for operand in ("run", "-i", "--rm"):
+                        self.assertLessEqual(args.count(operand), 1)
+
+    def test_injected_env_flags_precede_the_image_for_options_only_arguments(self):
+        server = _issue_3404_server(
+            [{"type": "named", "name": "--network", "value": "none"}], with_env=True
+        )
+        for name, make_adapter in _ENV_FLAG_ADAPTERS:
+            with self.subTest(adapter=name):
+                args = self._render_args(make_adapter, server, env_overrides={"API_KEY": "secret"})
+                image_at = args.index(ISSUE_3404_IMAGE)
+                self.assertEqual(args[0], "run")
+                self.assertIn("-e", args)
+                self.assertLess(args.index("-e"), image_at, "env flags must precede the image")
+                self.assertLess(args.index("--network"), image_at)
+                self.assertEqual(args[image_at + 1 :], ["--definition-snapshot"])
 
 
 if __name__ == "__main__":
