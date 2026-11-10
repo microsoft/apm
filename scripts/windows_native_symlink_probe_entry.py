@@ -245,9 +245,7 @@ def main() -> int:
         (scratch / "native-proof.json").write_text(
             json.dumps(proof, indent=2, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n"
         )
-        _rich_info(
-            "Native diagnostic passed; the unpinned mutation failed and restoration passed"
-        )
+        _rich_info("Native diagnostic passed; the unpinned mutation failed and restoration passed")
         return 0
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, ET.ParseError) as error:
         _rich_error(f"Native Windows proof failed: {error}")
