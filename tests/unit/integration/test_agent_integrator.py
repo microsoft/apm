@@ -1671,51 +1671,75 @@ class TestCodexAgentIntegration:
 
         assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
 
-    def test_codex_agent_drops_claude_model_alias(self):
-        """A Claude alias must not be copied into the Codex TOML (issue #3477)."""
-        source = self.root / "claude-model.agent.md"
+    def _compile_codex_model(self, model: str, *, extra: str = ""):
+        source = self.root / "shared.agent.md"
         source.write_text(
-            "---\nname: claude-model\ndescription: Agent\nmodel: sonnet\n---\nReview.\n",
+            f"---\nname: shared\ndescription: Agent\nmodel: {model}\n{extra}---\nReview.\n",
             encoding="utf-8",
         )
-        target = self.root / ".codex" / "agents" / "claude-model.toml"
+        target = self.root / ".codex" / "agents" / "shared.toml"
         target.parent.mkdir(parents=True, exist_ok=True)
         diagnostics = DiagnosticCollector()
-
         AgentIntegrator._write_codex_agent(
             source,
             target,
             diagnostics=diagnostics,
             package_name="test-pkg",
         )
-
-        parsed = tomllib.loads(target.read_text(encoding="utf-8"))
-        assert "model" not in parsed
         warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+        return target.read_text(encoding="utf-8"), warnings
+
+    @pytest.mark.parametrize(
+        "model",
+        ["opus", "sonnet", "haiku", "inherit", "claude-sonnet-4-5", "Sonnet", "Claude-Opus-4"],
+    )
+    def test_codex_agent_keeps_claude_model_verbatim_and_warns(self, model):
+        """A Claude model is preserved verbatim (req-tg-015) and warned about (#3477)."""
+        import toml
+
+        rendered, warnings = self._compile_codex_model(model)
+
+        expected = toml.dumps(
+            {
+                "name": "shared",
+                "description": "Agent",
+                "model": model,
+                "developer_instructions": "Review.",
+            }
+        )
+        assert rendered == expected
+        assert tomllib.loads(rendered)["model"] == model
         assert len(warnings) == 1
+        assert "shared.agent.md" in warnings[0].message
+        assert "'model'" in warnings[0].message
         assert "Claude model" in warnings[0].message
-        assert "codex:" in warnings[0].detail
+        assert "kept as written" in warnings[0].message
 
-    def test_codex_agent_keeps_codex_model(self):
-        """A Codex model id is a native field and must be preserved."""
-        source = self.root / "codex-model.agent.md"
-        source.write_text(
-            "---\nname: codex-model\ndescription: Agent\nmodel: gpt-5-codex\n---\nReview.\n",
-            encoding="utf-8",
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-5-codex", "gpt-5.6-sol", "o3", "claude", "sonnet-like", "my-claude-proxy"],
+    )
+    def test_codex_agent_non_claude_model_does_not_warn(self, model):
+        """Other model strings are preserved and produce no Claude-model warning."""
+        rendered, warnings = self._compile_codex_model(model)
+
+        assert tomllib.loads(rendered)["model"] == model
+        assert warnings == []
+
+    def test_codex_claude_model_warning_is_names_only(self):
+        """The warning never echoes the model value or other frontmatter values."""
+        rendered, warnings = self._compile_codex_model(
+            "claude-secret-model-xyz",
+            extra="model_reasoning_effort: effort-secret-value\n",
         )
-        target = self.root / ".codex" / "agents" / "codex-model.toml"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        diagnostics = DiagnosticCollector()
 
-        AgentIntegrator._write_codex_agent(
-            source,
-            target,
-            diagnostics=diagnostics,
-            package_name="test-pkg",
-        )
-
-        assert 'model = "gpt-5-codex"' in target.read_text(encoding="utf-8")
-        assert diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
+        assert tomllib.loads(rendered)["model"] == "claude-secret-model-xyz"
+        assert tomllib.loads(rendered)["model_reasoning_effort"] == "effort-secret-value"
+        assert len(warnings) == 1
+        text = f"{warnings[0].message} {warnings[0].detail}"
+        for value in ("claude-secret-model-xyz", "secret", "Agent", "Review."):
+            assert value not in text
+        assert "codex:" not in text
 
     def test_codex_agent_user_invocable_false_emits_lossy_compilation_warning(self, capsys):
         """Codex cannot encode programmatic-only, so the drop must be announced."""

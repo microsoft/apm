@@ -601,7 +601,10 @@ Review the requested change.
 
 Absent settings stay absent. APM does not translate model names, choose
 defaults, or validate model availability or supported effort values.
-Non-string values are dropped with a warning. Other frontmatter,
+Non-string values are dropped with a warning. A Claude model alias
+(`opus`, `sonnet`, `haiku`, `inherit`) or `claude-*` id is kept as
+written, with a warning naming the agent, because Codex does not
+recognize it. Other frontmatter,
 including other native Codex settings and a `codex:` block, is dropped
 with a warning; APM provides no arbitrary or namespaced passthrough.
 Remove unnecessary fields or do not rely on their settings in the
