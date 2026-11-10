@@ -117,7 +117,8 @@ for the full required-vs-optional runtime config rule.
 
 MCP Registry v0.1 container packages use `registryType: oci`. APM
 selects Docker automatically, keeps Docker run options before the image,
-and places package arguments after the image. Copilot, Codex, Gemini,
+and places package arguments after the image. When `runtimeArguments`
+list only Docker options, APM adds `run -i --rm` ahead of them. Copilot, Codex, Gemini,
 and related adapters prefer packages in `npm`, OCI, then PyPI order.
 VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
 available when the harness starts the server; no per-target launcher

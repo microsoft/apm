@@ -698,7 +698,8 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 For a v0.1 package with `registryType: oci`, install generates a `docker`
 launcher automatically. Docker run options stay before the image and
-package arguments stay after it. Docker must be available when the
+package arguments stay after it. Options-only `runtimeArguments` (no
+leading `run`) gain `run -i --rm` ahead of them. Docker must be available when the
 harness starts the server; no manual launcher override is required.
 
 For VS Code and Copilot-family adapters, non-container install preserves
