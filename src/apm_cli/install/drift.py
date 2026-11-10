@@ -581,7 +581,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         from apm_cli.models.apm_package import APMPackage
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
-        declared_transports = DeclaredTransportIndex()
+        declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
         apm_yml = project_root / "apm.yml"
         if apm_yml.exists():
             manifest = APMPackage.from_apm_yml(apm_yml)
@@ -654,10 +654,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             declared_transports=declared_transports,
                         )
                         if declared_transports is not None:
-                            declared_transports.record_package(
-                                install_path,
-                                declared_transports.apply(lock_dep, lock_dep.to_dependency_ref()),
-                            )
+                            declared_transports.record_package(install_path, lock_dep)
                         if lock_dep.is_local_source:
                             install_path = _normalize_legacy_local_plugin_for_replay(
                                 lock_dep,

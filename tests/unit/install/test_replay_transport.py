@@ -90,35 +90,85 @@ def test_replacement_rows_keep_their_projected_source() -> None:
     assert index.apply(lock_dep, dep_ref) is dep_ref
 
 
-def test_transitive_declaration_comes_from_materialized_parent(tmp_path: Path) -> None:
-    parent_root = tmp_path / "parent"
-    parent_root.mkdir()
+def _write_manifest(root: Path, apm: list[object]) -> None:
+    root.mkdir(parents=True, exist_ok=True)
     dump_yaml(
-        {
-            "name": "parent",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": [
-                    "git@github.com:acme/child.git",
-                    {"git": "parent", "path": "packages/sibling"},
-                ]
-            },
-        },
-        parent_root / "apm.yml",
+        {"name": root.name, "version": "1.0.0", "dependencies": {"apm": apm}},
+        root / "apm.yml",
     )
-    index = DeclaredTransportIndex()
+
+
+def _materialize(
+    index: DeclaredTransportIndex, modules: Path, lock_dep: LockedDependency, apm: list[object]
+) -> None:
+    package_root = lock_dep.to_dependency_ref().get_install_path(modules)
+    _write_manifest(package_root, apm)
+    index.record_package(package_root, lock_dep)
+
+
+def test_transitive_declaration_comes_from_materialized_parent(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    index = DeclaredTransportIndex(modules_dir=modules)
     index.record([DependencyReference.parse("git@github.com:acme/parent.git")])
-    parent_lock = _locked("acme/parent")
-    index.record_package(parent_root, _apply(index, parent_lock))
+    _materialize(
+        index,
+        modules,
+        _locked("acme/parent"),
+        ["git@github.com:acme/child.git", {"git": "parent", "path": "packages/sibling"}],
+    )
 
     assert _apply(index, _locked("acme/child", depth=2)).explicit_scheme == "ssh"
     sibling = _locked("acme/parent", depth=2, is_virtual=True, virtual_path="packages/sibling")
     assert _apply(index, sibling).explicit_scheme == "ssh"
 
 
+def test_shared_child_follows_install_admission_order_not_lock_order(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    index = DeclaredTransportIndex(modules_dir=modules)
+    index.record(
+        [DependencyReference.parse("acme/z-parent"), DependencyReference.parse("acme/a-parent")]
+    )
+    # Replay walks the lock in (depth, repo_url) order: a-parent first.
+    _materialize(index, modules, _locked("acme/a-parent"), ["https://github.com/acme/child.git"])
+    _materialize(index, modules, _locked("acme/z-parent"), ["git@github.com:acme/child.git"])
+
+    assert _apply(index, _locked("acme/child", depth=2)).explicit_scheme == "ssh"
+
+
+def test_remote_relative_path_child_inherits_parent_ssh(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    index = DeclaredTransportIndex(modules_dir=modules)
+    index.record(
+        [
+            DependencyReference.parse_from_dict(
+                {"git": "ssh://deploy@github.com/acme/mono.git", "path": "packages/parent"}
+            )
+        ]
+    )
+    parent = _locked("acme/mono", is_virtual=True, virtual_path="packages/parent")
+    _materialize(index, modules, parent, [{"path": "../shared"}])
+
+    shared = _locked("acme/mono", depth=2, is_virtual=True, virtual_path="packages/shared")
+    replayed = _apply(index, shared)
+
+    assert (replayed.explicit_scheme, replayed.ssh_user) == ("ssh", "deploy")
+
+
+def test_root_shorthand_keeps_default_transport_over_later_ssh(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    index = DeclaredTransportIndex(modules_dir=modules)
+    index.record(
+        [DependencyReference.parse("acme/a-parent"), DependencyReference.parse("acme/z-shared")]
+    )
+    _materialize(index, modules, _locked("acme/a-parent"), ["git@github.com:acme/z-shared.git#v1"])
+
+    assert _apply(index, _locked("acme/z-shared")).explicit_scheme is None
+
+
 def test_package_without_manifest_records_nothing(tmp_path: Path) -> None:
-    index = DeclaredTransportIndex()
-    index.record_package(tmp_path, DependencyReference.parse("acme/parent"))
+    index = DeclaredTransportIndex(modules_dir=tmp_path)
+    index.record([DependencyReference.parse("acme/parent")])
+    index.record_package(tmp_path / "missing", _locked("acme/parent"))
 
     assert _apply(index, _locked("acme/child", depth=2)).explicit_scheme is None
 

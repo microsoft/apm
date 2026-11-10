@@ -33,6 +33,9 @@ _SKILL_TEXT = "---\nname: ssh-replay\ndescription: SSH replay fixture\n---\nHell
 _CHILD_SKILL_TEXT = (
     "---\nname: ssh-child\ndescription: SSH transitive fixture\n---\nChild over SSH.\n"
 )
+_SIBLING_SKILL_TEXT = (
+    "---\nname: ssh-sibling\ndescription: SSH relative-path fixture\n---\nSibling over SSH.\n"
+)
 
 
 def _write_ssh_shim(helper: Path, *, log: Path, origin: Path, git: str) -> None:
@@ -82,7 +85,11 @@ def test_cold_audit_ci_replays_scp_dependency_over_ssh(
     packages.add_skill(child, "ssh-child", _CHILD_SKILL_TEXT)
     # Transitive child inherits the parent's declared SSH transport.
     manifest = load_yaml(package.manifest_path)
-    manifest["dependencies"] = {"apm": [{"git": "parent", "path": "packages/ssh-child"}]}
+    sibling = packages.create("ssh-sibling")
+    packages.add_skill(sibling, "ssh-sibling", _SIBLING_SKILL_TEXT)
+    manifest["dependencies"] = {
+        "apm": [{"git": "parent", "path": "packages/ssh-child"}, {"path": "../ssh-sibling"}]
+    }
     dump_yaml(manifest, package.manifest_path)
     commit = repositories.commit(repository, message="Seed SSH replay fixture")
 
@@ -138,10 +145,14 @@ def test_cold_audit_ci_replays_scp_dependency_over_ssh(
     assert (project / ".claude" / "skills" / "ssh-child" / "SKILL.md").read_text(
         encoding="utf-8"
     ) == _CHILD_SKILL_TEXT
+    assert (project / ".claude" / "skills" / "ssh-sibling" / "SKILL.md").read_text(
+        encoding="utf-8"
+    ) == _SIBLING_SKILL_TEXT
     locked = load_yaml(project / "apm.lock.yaml")["dependencies"]
     assert sorted(entry.get("virtual_path") for entry in locked) == [
         "packages/ssh-child",
         "packages/ssh-pkg",
+        "packages/ssh-sibling",
     ]
     install_events = len(_ssh_events(ssh_log))
     assert install_events > 0
