@@ -364,6 +364,70 @@ def _record_managed_server(
         managed_target_servers.setdefault(runtime, set()).add(server_name)
 
 
+# Runtimes that always keyed self-defined servers by their full declared name,
+# so a short-name entry there can never be a truncated write by older APM.
+_DECLARED_KEY_RUNTIMES = frozenset({"vscode"})
+
+
+def _reconcile_legacy_truncated_key(
+    dep_name: str,
+    runtimes: list[str],
+    *,
+    previously_owned: dict[str, set[str]],
+    claimed_keys: builtins.set,
+    project_root,
+    user_scope: bool,
+    logger,
+    fail_on_write_error: bool = False,
+) -> None:
+    """Replace or flag the pre-fix truncated config key of a self-defined server.
+
+    Older releases wrote ``com.example/srv`` under its final segment (``srv``).
+    Now that the declared name is the key, the short entry is removed only when
+    the ownership ledger proves APM wrote *dep_name* to that runtime; otherwise
+    it is left in place and named (never its contents) so the user can decide.
+    """
+    from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    legacy_key = MCPClientAdapter._determine_config_key(dep_name, None)
+    if legacy_key == dep_name or legacy_key in claimed_keys:
+        return
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    for rt in runtimes:
+        if rt in _DECLARED_KEY_RUNTIMES:
+            continue
+        try:
+            client = ClientFactory.create_client(
+                rt, project_root=project_root, user_scope=user_scope
+            )
+            existing = MCPConflictDetector(client).get_existing_server_configs()
+        except Exception:
+            continue
+        if legacy_key not in existing:
+            continue
+        if dep_name in previously_owned.get(rt, builtins.set()):
+            MCPIntegrator.remove_stale(
+                {legacy_key},
+                runtime=rt,
+                project_root=project_root,
+                user_scope=user_scope,
+                logger=logger,
+                scope=scope,
+                fail_on_write_error=fail_on_write_error,
+            )
+            logger.progress(f"Replaced truncated MCP key '{legacy_key}' with '{dep_name}' for {rt}")
+        else:
+            logger.warning(
+                f"Left existing MCP server '{legacy_key}' in {rt} config: APM has no "
+                f"record of writing it for '{dep_name}'. Remove it manually if it is "
+                f"an outdated copy of '{dep_name}'."
+            )
+
+
 def _raise_strict_config_failures(
     failed_installations: list[str],
     *,
@@ -930,17 +994,25 @@ def _install_self_defined_deps(
     logger,
     managed_target_servers: dict[str, set[str]] | None,
     fail_on_write_error: bool = False,
+    registry_dep_names: list[str] | None = None,
 ) -> int:
     """Install self-defined (``registry: false``) MCP deps for all target runtimes.
 
     Mutates ``servers_to_update`` and ``successful_updates`` in-place.
     Returns the number of servers newly configured or updated.
     """
+    from apm_cli.adapters.client.base import MCPClientAdapter
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     configured_count = 0
     failed_installations: list[str] = []
     self_defined_names = [dep.name for dep in self_defined_deps]
+    previously_owned = {
+        rt: builtins.set(names) for rt, names in (managed_target_servers or {}).items()
+    }
+    claimed_keys = builtins.set(self_defined_names) | {
+        MCPClientAdapter._determine_config_key(name, None) for name in registry_dep_names or ()
+    }
     self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
         self_defined_names,
         target_runtimes,
@@ -1025,6 +1097,17 @@ def _install_self_defined_deps(
                 _record_managed_server(managed_target_servers, rt, dep.name)
             else:
                 failed_runtimes.append(rt)
+
+        _reconcile_legacy_truncated_key(
+            dep.name,
+            successful_runtimes,
+            previously_owned=previously_owned,
+            claimed_keys=claimed_keys,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            fail_on_write_error=fail_on_write_error,
+        )
 
         if successful_runtimes:
             if console:
@@ -1319,6 +1402,7 @@ def run_mcp_install(  # noqa: PLR0913
             logger=logger,
             managed_target_servers=managed_target_servers,
             fail_on_write_error=fail_on_write_error,
+            registry_dep_names=registry_dep_names,
         )
 
     # Close the panel
