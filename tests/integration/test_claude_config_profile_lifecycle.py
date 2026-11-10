@@ -168,24 +168,49 @@ def test_claude_profile_cleanup_refuses_unsafe_paths_without_changing_state(
 
 
 def _skills(root: Path) -> set[str]:
-    """Return the names of skills deployed under one Claude profile root."""
+    """Return the names of skills deployed under one profile root."""
     return {path.parent.name for path in (root / "skills").glob("*/SKILL.md")}
 
 
+def _lock_skills(lock_path: Path, home: Path, root: Path) -> set[str]:
+    """Return the skill names whose lockfile rows lie under one profile root."""
+    resolved = root.resolve()
+    try:
+        prefix = resolved.relative_to(home.resolve()).as_posix()
+    except ValueError:
+        prefix = resolved.as_posix()
+    prefix = f"{prefix}/skills/"
+    lock = load_yaml(lock_path) or {}
+    rows = {
+        row
+        for dependency in lock.get("dependencies", [])
+        for row in dependency.get("deployed_files", [])
+    }
+    return {row[len(prefix) :].split("/", 1)[0] for row in rows if row.startswith(prefix)}
+
+
 @pytest.mark.parametrize("location", ["home", "outside-home"])
-def test_claude_profile_install_keeps_files_deployed_to_other_profiles(
-    tmp_path: Path, location: str
+@pytest.mark.parametrize(
+    ("target", "env_var", "default_dir"),
+    [("claude", "CLAUDE_CONFIG_DIR", ".claude"), ("hermes", "HERMES_HOME", ".hermes")],
+)
+def test_profile_install_keeps_files_deployed_to_other_profiles(
+    tmp_path: Path, location: str, target: str, env_var: str, default_dir: str
 ) -> None:
-    """A -> B -> A -> B keeps both profiles; stale cleanup stays in the selected one (#3423)."""
+    """default -> B -> default -> B keeps both profiles' files and lock rows (#3423).
+
+    Stale cleanup stays inside the selected root; without the variable the
+    default root behaves as before.
+    """
     isolated, cwd, runner = _scenario(tmp_path)
     dump_yaml({"name": "skills-home", "version": "0.1.0"}, isolated.config_root / "apm.yml")
     factory = LocalPackageFactory(isolated.package_root)
-    package = factory.create("profile-skills", targets=("claude",))
+    package = factory.create("profile-skills", targets=(target,))
     factory.add_skill(package, "keep", "---\nname: keep\ndescription: Kept.\n---\nKeep.\n")
     renamed = factory.add_skill(
         package, "renamed", "---\nname: renamed\ndescription: Removed.\n---\nRemoved.\n"
     )
-    default = isolated.home / ".claude"
+    default = isolated.home / default_dir
     profile_b = (isolated.home if location == "home" else isolated.root) / "profiles" / "b"
     lock_path = isolated.config_root / "apm.lock.yaml"
     all_skills = {"keep", "renamed"}
@@ -193,36 +218,40 @@ def test_claude_profile_install_keeps_files_deployed_to_other_profiles(
     def install(root: Path) -> None:
         """Install the local package into the profile rooted at *root*."""
         result = runner.run(
-            ("install", "--global", str(package.root), "--target", "claude", "--no-policy"),
-            scenario_id="claude-profile-files",
+            ("install", "--global", str(package.root), "--target", target, "--no-policy"),
+            scenario_id=f"{target}-profile-files",
             cwd=cwd,
             env={
                 **isolated.subprocess_env(),
-                "CLAUDE_CONFIG_DIR": "" if root == default else str(root),
+                env_var: "" if root == default else str(root),
             },
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
+    def assert_state(default_skills: set[str], profile_b_skills: set[str]) -> None:
+        """Assert deployed files and lockfile rows of both profiles."""
+        assert _skills(default) == default_skills
+        assert _skills(profile_b) == profile_b_skills
+        assert _lock_skills(lock_path, isolated.home, default) == default_skills
+        assert _lock_skills(lock_path, isolated.home, profile_b) == profile_b_skills
+
     install(default)
     assert _skills(default) == all_skills
+    assert _lock_skills(lock_path, isolated.home, default) == all_skills
     for root in (profile_b, default, profile_b):
         install(root)
-        assert _skills(default) == all_skills
-        assert _skills(profile_b) == all_skills
+        assert_state(all_skills, all_skills)
 
     lock_before = lock_path.read_bytes()
     install(profile_b)
     assert lock_path.read_bytes() == lock_before
-    assert _skills(default) == all_skills
-    assert _skills(profile_b) == all_skills
+    assert_state(all_skills, all_skills)
 
     # A skill dropped from the package is removed only from the selected
     # profile; the other profile is cleaned when it is installed into.
     renamed.unlink()
     renamed.parent.rmdir()
     install(profile_b)
-    assert _skills(profile_b) == {"keep"}
-    assert _skills(default) == all_skills
+    assert_state(all_skills, {"keep"})
     install(default)
-    assert _skills(default) == {"keep"}
-    assert _skills(profile_b) == {"keep"}
+    assert_state({"keep"}, {"keep"})
