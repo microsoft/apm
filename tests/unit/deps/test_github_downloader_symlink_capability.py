@@ -66,7 +66,13 @@ def test_whole_repo_cache_capability_error_is_not_retried_by_clone(
 
     with ExitStack() as stack:
         _no_artifactory(stack, downloader)
-        clone = stack.enter_context(patch.object(downloader, "_clone_with_fallback"))
+        clone = stack.enter_context(
+            patch.object(
+                downloader,
+                "_clone_with_fallback",
+                side_effect=[GitSymlinkCapabilityError("owner/repo"), MagicMock()],
+            )
+        )
         with pytest.raises(GitSymlinkCapabilityError, match="owner/repo"):
             downloader.download_package(dep, tmp_path / "out")
 
@@ -89,7 +95,13 @@ def test_subdirectory_cache_capability_error_is_not_retried_by_clone(
     with ExitStack() as stack:
         _no_artifactory(stack, downloader)
         sparse = stack.enter_context(patch.object(downloader, "_try_sparse_checkout"))
-        clone = stack.enter_context(patch.object(downloader, "_clone_with_fallback"))
+        clone = stack.enter_context(
+            patch.object(
+                downloader,
+                "_clone_with_fallback",
+                side_effect=[GitSymlinkCapabilityError("owner/repo"), MagicMock()],
+            )
+        )
         with pytest.raises(GitSymlinkCapabilityError, match="owner/repo"):
             downloader.download_subdirectory_package(dep, tmp_path / "out")
 
@@ -159,10 +171,10 @@ def test_sparse_checkout_link_failure_escapes_instead_of_reclone(
         downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/demo", "main")
 
 
-def test_commit_clone_skips_default_branch_checkout(
+def test_commit_clone_retries_without_default_branch_checkout(
     downloader: GitHubPackageDownloader, tmp_path: Path
 ) -> None:
-    """Only the pinned commit is materialized, so an unrelated HEAD link cannot fail."""
+    """A link at the default-branch HEAD retries with only the pinned commit materialized."""
     dep = DependencyReference(repo_url="owner/repo", reference=_SHA)
     resolved = ResolvedReference(
         original_ref=_SHA, ref_name=_SHA, ref_type=GitReferenceType.COMMIT, resolved_commit=_SHA
@@ -174,7 +186,13 @@ def test_commit_clone_skips_default_branch_checkout(
         stack.enter_context(
             patch.object(downloader, "resolve_git_reference", return_value=resolved)
         )
-        clone = stack.enter_context(patch.object(downloader, "_clone_with_fallback"))
+        clone = stack.enter_context(
+            patch.object(
+                downloader,
+                "_clone_with_fallback",
+                side_effect=[GitSymlinkCapabilityError("owner/repo"), MagicMock()],
+            )
+        )
         checkout = stack.enter_context(
             patch("apm_cli.deps.github_downloader.checkout_git_worktree")
         )
@@ -186,5 +204,7 @@ def test_commit_clone_skips_default_branch_checkout(
         stack.enter_context(patch("apm_cli.deps.package_validator.stamp_plugin_version"))
         downloader.download_package(dep, tmp_path / "pkg")
 
-    assert clone.call_args.kwargs.get("no_checkout") is True
+    assert clone.call_count == 2
+    assert "no_checkout" not in clone.call_args_list[0].kwargs
+    assert clone.call_args_list[1].kwargs.get("no_checkout") is True
     assert checkout.call_args.args[1] == _SHA

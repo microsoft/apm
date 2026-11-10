@@ -1944,16 +1944,19 @@ class GitHubPackageDownloader:
                     if progress_task_id and progress_obj
                     else None
                 )
-                self._clone_with_fallback(
-                    dep_ref.repo_url,
-                    target_path,
-                    progress_reporter=progress_reporter,
-                    dep_ref=dep_ref,
-                    verbose_callback=verbose_callback,
-                    # Only the pinned commit is materialized, so a default-branch
-                    # link cannot fail a package that has none.
-                    no_checkout=True,
-                )
+                clone_options = {
+                    "progress_reporter": progress_reporter,
+                    "dep_ref": dep_ref,
+                    "verbose_callback": verbose_callback,
+                }
+                try:
+                    self._clone_with_fallback(dep_ref.repo_url, target_path, **clone_options)
+                except GitSymlinkCapabilityError:
+                    # A link at the default-branch HEAD must not fail a pinned
+                    # commit without links; the checkout below classifies it.
+                    self._clone_with_fallback(
+                        dep_ref.repo_url, target_path, no_checkout=True, **clone_options
+                    )
                 checkout_git_worktree(
                     target_path,
                     resolved_ref.resolved_commit,
