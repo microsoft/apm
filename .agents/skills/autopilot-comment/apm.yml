@@ -2,7 +2,7 @@ name: autopilot-comment
 version: 0.1.0
 description: Sole GitHub comment writer for microsoft/apm autopilot skills. Assembles public vs debug body and appends the AI disclaimer.
 author: Microsoft
-license: MIT
+license: Apache-2.0
 type: skill
 
 dependencies:
