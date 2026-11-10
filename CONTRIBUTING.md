@@ -132,8 +132,9 @@ authors to expose confidential evidence.
 4. In the PR template, link the canonical issue and human approval comment,
    or state the standing-preapproval case. Explain the change, evidence,
    and any remaining limitations.
-5. Use `Fixes #N` only when the PR completes that issue. For partial work,
-   reference the issue without closing it and describe what remains.
+5. Use `Fixes #N` or `Closes #N` only when the PR completes that issue, so
+   GitHub closes it on merge. For partial work, use `Refs #N` (no closing
+   keyword) and describe what remains.
 
 Maintain the same issue reference on stacked PRs, or link a bounded child
 issue for each layer. Scope approval and PR review are separate decisions.

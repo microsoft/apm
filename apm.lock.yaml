@@ -305,12 +305,12 @@ dependencies:
   - .agents/skills/pr-description-skill/evals/triggers.json
   - .agents/skills/pr-description-skill/scripts/run_evals.py
   deployed_file_hashes:
-    .agents/skills/pr-description-skill/SKILL.md: sha256:d07254e9d0b95ea52d1a81d3262ca42da8c4c51d801eac4f11b6bc454cfb01a0
+    .agents/skills/pr-description-skill/SKILL.md: sha256:1f1fabe1108416adc67cb02e9120270d998cccea5673b6919e258ebaf763cdb7
     .agents/skills/pr-description-skill/apm.yml: sha256:1e157404d5437d7a355f596a04266585c2e9b36cd8149becf53b616ef47b78fb
     .agents/skills/pr-description-skill/assets/mermaid-conventions.md: sha256:3d9c7adf95d40db00833ec087d699a7d04b3d799e9b9d07271cf2ae7d51524ca
-    .agents/skills/pr-description-skill/assets/pr-body-template.md: sha256:aaeb885fbfa87364724f575eb150c9c39dc3cb60ab0459972e76185df9c98f97
+    .agents/skills/pr-description-skill/assets/pr-body-template.md: sha256:ca5337e8e1742a71687d679cc46661bde02f4457d838216a2c79ddc98c9fa11a
     .agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md: sha256:bbb386b6f48974bbb78a380fd4674ed7a3a81810a6c2136e30c80158153596ae
-    .agents/skills/pr-description-skill/assets/section-rubric.md: sha256:f07fbbc5c741c4fd30f32edec985d8301d20e3deebb1761dd92b04da51c5e42d
+    .agents/skills/pr-description-skill/assets/section-rubric.md: sha256:1cea0225b947291403ac3cc85aad97477d846fe99aacb72da927bdd4a2a8ec61
     .agents/skills/pr-description-skill/evals/.gitignore: sha256:dc810cf3561d22d2d47b89fd0697de46aff0068819b3514577842cb2a2a1c332
     .agents/skills/pr-description-skill/evals/README.md: sha256:92b4529515917d25cbf5e597d1d46751e602dd4eb80be20a97ac81597f410cd0
     .agents/skills/pr-description-skill/evals/content/auth-refactor.json: sha256:86791ada2f4983fde709237eaae9ef9c5a0f87a28f14e8b0f26b4b7e5b0e73c9
@@ -328,7 +328,7 @@ dependencies:
     .agents/skills/pr-description-skill/scripts/run_evals.py: sha256:a1792f8cb95b4fb37a4133af079908e2a3b5643c1a81d97e4dcda399bac069a2
   source: local
   local_path: ../../pr-description-skill
-  content_hash: sha256:b62310720d5db28975e7cdfe99205be45c77b7b41ddf373c2e3dc338f4355f95
+  content_hash: sha256:56763a75133c044d65132a38269f00cbf775a73791a7fc529a3bddb413bcb06c
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/pr-description-skill
   declared_license: MIT
@@ -1088,7 +1088,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:d07254e9d0b95ea52d1a81d3262ca42da8c4c51d801eac4f11b6bc454cfb01a0
+  content_hash: sha256:1f1fabe1108416adc67cb02e9120270d998cccea5673b6919e258ebaf763cdb7
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/apm.yml
@@ -1115,7 +1115,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:aaeb885fbfa87364724f575eb150c9c39dc3cb60ab0459972e76185df9c98f97
+  content_hash: sha256:ca5337e8e1742a71687d679cc46661bde02f4457d838216a2c79ddc98c9fa11a
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md
@@ -1133,7 +1133,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:f07fbbc5c741c4fd30f32edec985d8301d20e3deebb1761dd92b04da51c5e42d
+  content_hash: sha256:1cea0225b947291403ac3cc85aad97477d846fe99aacb72da927bdd4a2a8ec61
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/evals/.gitignore

@@ -120,6 +120,16 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "core/deployment_ledger.py",
+            "or recorded[1] != current[1]",
+            "or False",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'return data["root_birth_time"] == self._root_birth_time()',
+            "return True",
+        ),
+        (
+            "core/deployment_ledger.py",
             "record.active_owner not in self._valid_owners",
             "False",
         ),

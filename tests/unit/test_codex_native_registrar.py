@@ -16,6 +16,7 @@ from apm_cli.codex_plugins.registrar import (
     _preflight,
     _Record,
     _write_records,
+    is_codex_source_pin,
     marketplace_name,
     synchronize_codex_plugins,
     verify_codex_source_identity,
@@ -332,3 +333,29 @@ def test_source_identity_records_are_cached_only_for_one_operation(tmp_path, mon
     )
     assert deployment.plugin.dependency_key in verify_codex_source_identity(modules, **identity)
     assert reader.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("a" * 40, True),
+        ("a" * 64, True),
+        ("a" * 7, False),
+        ("A" * 40, False),
+        ("main", False),
+        ("cached", False),
+        (None, False),
+    ],
+)
+def test_source_pin_predicate_is_shared_by_ledger_and_identity_checks(
+    tmp_path: Path, value: object, expected: bool
+) -> None:
+    assert is_codex_source_pin(value) is expected
+    if isinstance(value, str) and not expected:
+        with pytest.raises(CodexNativeError, match="Invalid original Codex source pin"):
+            verify_codex_source_identity(
+                tmp_path / "modules",
+                dependency_key="owner/repo",
+                source_hash="sha256:" + "0" * 64,
+                source_commit=value,
+            )

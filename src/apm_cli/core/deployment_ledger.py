@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
 import uuid
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -51,6 +53,9 @@ UNATTRIBUTED_TARGET = "legacy"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
 _SHA256_PREFIX = "sha256:"
 _LOWER_HEX = frozenset("0123456789abcdef")
+# Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
+# after a reboot or remount. Windows root identity is intentionally unchanged.
+_ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
 
 
 @dataclass(frozen=True)
@@ -124,9 +129,42 @@ class DeploymentMaterializationSession:
                     "Preserve this path and move it aside before retrying."
                 )
 
+    def _root_stat(self) -> os.stat_result:
+        return self.root.stat()
+
     def _root_identity(self) -> list[int]:
-        metadata = self.root.stat()
+        metadata = self._root_stat()
         return [metadata.st_dev, metadata.st_ino]
+
+    def _root_birth_time(self) -> float | None:
+        """Return the root's creation time where ``stat`` reports one (macOS, BSD)."""
+        if not _ROOT_DEVICE_REBIND_SUPPORTED:
+            return None
+        return getattr(self._root_stat(), "st_birthtime", None)
+
+    def _root_device_changed_only(self, data: Mapping[str, Any]) -> bool:
+        """Accept the same root whose device number alone changed after a reboot or remount.
+
+        Path, scope and installation UUID are matched by the caller. The inode
+        must match too, and so must the recorded birth time whenever the receipt
+        carries one. A recreated root or a copied ``.apm-local`` still fails.
+        Receipts written before birth times were recorded bind on inode, path
+        and installation UUID alone, as on platforms without a birth time.
+        """
+        recorded = data["root_identity"]
+        current = self._root_identity()
+        if (
+            not _ROOT_DEVICE_REBIND_SUPPORTED
+            or not isinstance(recorded, list)
+            or len(recorded) != 2
+            or not all(type(value) is int for value in recorded)
+            or recorded[0] == current[0]
+            or recorded[1] != current[1]
+        ):
+            return False
+        if "root_birth_time" not in data:
+            return True
+        return data["root_birth_time"] == self._root_birth_time()
 
     def _load(self) -> None:
         self._validate_paths()
@@ -146,9 +184,14 @@ class DeploymentMaterializationSession:
                 or data["root"] != self.root.as_posix()
                 or data["scope"] != self.scope.value
                 or data["installation"] != installation
-                or data["root_identity"] != self._root_identity()
+                or (
+                    data["root_identity"] != self._root_identity()
+                    and not self._root_device_changed_only(data)
+                )
             ):
                 raise ValueError("installation binding does not match")
+            # A device-only change is rebound by the next writing session's flush.
+            rebind = self._root_identity() != data["root_identity"]
             ledger = DeploymentLedgerCodec.from_rows(data["records"])
             if len(ledger.records) != len(data["records"]):
                 raise ValueError("duplicate rendered-write records")
@@ -175,6 +218,7 @@ class DeploymentMaterializationSession:
             self._physical_keys = {path: key for key, path in destinations.items()}
             if len(self._physical_keys) != len(destinations):
                 raise ValueError("ambiguous physical write receipts")
+            self._dirty = rebind
         except (ValueError, KeyError, TypeError, UnicodeError) as exc:
             raise ValueError(
                 f"Invalid local materialization evidence at {self.state_path}: {exc}. "
@@ -351,6 +395,9 @@ class DeploymentMaterializationSession:
             "destinations": destinations,
             "bindings": {key: self._bindings[key] for key in records},
         }
+        birth_time = self._root_birth_time()
+        if birth_time is not None:
+            data["root_birth_time"] = birth_time
         atomic_write_text(
             self.state_path,
             json.dumps(data, sort_keys=True, indent=2) + "\n",
