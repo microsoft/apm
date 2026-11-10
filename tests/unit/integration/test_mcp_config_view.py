@@ -1388,3 +1388,127 @@ def test_manifestless_native_plugin_requires_matching_locked_type(
     assert view.dependencies == ()
     assert not (package_dir / "apm.yml").exists()
     assert before == {path: path.read_bytes() for path in package_dir.rglob("*") if path.is_file()}
+
+
+def _write_local_claude_plugin(directory: Path, *, synthesized_mcp: list | None) -> Path:
+    """Write a manifestless Claude plugin and, optionally, its synthesized copy."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "plugin.json").write_text(json.dumps({"name": "plug"}), encoding="utf-8")
+    (directory / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"demo": {"type": "http", "url": "https://example.com/mcp"}}}),
+        encoding="utf-8",
+    )
+    modules = directory.parent / "apm_modules"
+    if synthesized_mcp is not None:
+        _write_manifest(modules / "_local" / directory.name, name="plug", mcp=synthesized_mcp)
+    return modules
+
+
+def _local_plugin_lock(local_path: str) -> LockFile:
+    """Lock one direct local Claude plugin dependency."""
+    return _lock(
+        LockedDependency(
+            repo_url="_local/plug",
+            name="plug",
+            source="local",
+            local_path=local_path,
+            package_type="marketplace_plugin",
+            depth=1,
+        )
+    )
+
+
+_DEMO_HTTP = {
+    "name": "demo",
+    "registry": False,
+    "transport": "http",
+    "url": "https://example.com/mcp",
+}
+
+
+def test_local_claude_plugin_mcp_uses_synthesized_manifest(tmp_path: Path) -> None:
+    """A manifestless local plugin's MCP comes from apm_modules/_local (#3498)."""
+    root = _write_manifest(tmp_path, name="consumer")
+    modules = _write_local_claude_plugin(tmp_path / "plug", synthesized_mcp=[_DEMO_HTTP])
+
+    view = _derive(root, _local_plugin_lock("./plug"), modules)
+
+    assert view.problems == ()
+    assert view.provenance == {"demo": "plug"}
+    assert view.configs["demo"]["url"] == "https://example.com/mcp"
+
+
+def test_local_claude_plugin_without_synthesized_manifest_warns(tmp_path: Path) -> None:
+    """Uncollectable local plugin MCP is reported instead of silently dropped."""
+    root = _write_manifest(tmp_path, name="consumer")
+    modules = _write_local_claude_plugin(tmp_path / "plug", synthesized_mcp=None)
+    logger = _RecordingLogger()
+
+    view = CurrentMcpConfigView.derive(
+        root,
+        _local_plugin_lock("./plug"),
+        modules,
+        trust_transitive_self_defined=True,
+        logger=logger,
+    )
+
+    assert view.configs == {}
+    assert [problem.package_key for problem in view.problems] == ["./plug"]
+    assert view.problems[0].manifest_path.parent == (modules / "_local" / "plug").resolve()
+    assert len(logger.warning_messages) == 1
+    assert "local plugin 'plug'" in logger.warning_messages[0]
+    assert "not collected" in logger.warning_messages[0]
+
+
+def test_local_package_own_manifest_wins_over_modules_copy(tmp_path: Path) -> None:
+    """A local source with its own apm.yml keeps reading that current manifest."""
+    root = _write_manifest(tmp_path, name="consumer")
+    modules = _write_local_claude_plugin(
+        tmp_path / "plug", synthesized_mcp=[_self_defined("stale", "old")]
+    )
+    _write_manifest(tmp_path / "plug", name="plug", mcp=[_self_defined("current", "new")])
+
+    view = _derive(root, _local_plugin_lock("./plug"), modules)
+
+    assert list(view.configs) == ["current"]
+    assert view.problems == ()
+
+
+def test_local_codex_compatibility_plugin_is_not_redirected(tmp_path: Path) -> None:
+    """Codex compatibility plugins keep their native, manifest-waived contract."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "plug"
+    (source / ".codex-plugin").mkdir(parents=True)
+    (source / ".codex-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "plug"}), encoding="utf-8"
+    )
+    _write_manifest(tmp_path / "apm_modules" / "_local" / "plug", name="plug", mcp=[_DEMO_HTTP])
+
+    view = _derive(root, _local_plugin_lock("./plug"), tmp_path / "apm_modules")
+
+    assert view.configs == {}
+    assert view.problems == ()
+
+
+def test_local_plugin_with_authored_manifest_keeps_reading_it(tmp_path: Path) -> None:
+    """An authored source apm.yml stays authoritative even beside plugin.json."""
+    root = _write_manifest(tmp_path, name="consumer")
+    modules = _write_local_claude_plugin(tmp_path / "plug", synthesized_mcp=[_DEMO_HTTP])
+    _write_manifest(tmp_path / "plug", name="plug")
+
+    view = _derive(root, _local_plugin_lock("./plug"), modules)
+
+    assert view.configs == {}
+    assert view.problems == ()
+
+
+def test_local_plugin_redirect_requires_matching_lock_type(tmp_path: Path) -> None:
+    """The installed shape and locked package type must agree before redirecting."""
+    root = _write_manifest(tmp_path, name="consumer")
+    modules = _write_local_claude_plugin(tmp_path / "plug", synthesized_mcp=[_DEMO_HTTP])
+    lockfile = _local_plugin_lock("./plug")
+    lockfile.dependencies["./plug"].package_type = "skill_bundle"
+
+    view = _derive(root, lockfile, modules)
+
+    assert view.configs == {}
