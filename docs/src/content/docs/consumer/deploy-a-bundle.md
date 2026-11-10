@@ -71,6 +71,8 @@ Steps APM runs:
 
 1. **Detect.** Path exists and contains `plugin.json` at the bundle root
    (zip archives and legacy tarballs are extracted to a temp directory first).
+   A directory that also has an `apm.yml` is a bundle only when its
+   `apm.lock.yaml` carries the `pack:` manifest written by `apm pack`.
 2. **Apply cached policy.** Resolve the actual targets, then apply any cached
    org policy to bundle MCP, LSP, canvas, and target rules before files are
    written. Bundle install never fetches policy from the network. `--no-policy`
@@ -149,8 +151,10 @@ Two ways forward:
   in a future release; prefer repacking when you can.
 
 A plain directory without `plugin.json` is not treated as a bundle at all.
-APM falls through to the dependency resolver and treats the path as a
-local-path dependency -- a different flow covered in [Install packages](../install-packages/).
+Neither is a source package with `apm.yml` and a root `plugin.json` but no
+`pack:` manifest in `apm.lock.yaml`. APM falls through to the dependency
+resolver and treats the path as a local-path dependency -- a different flow
+covered in [Install packages](../install-packages/).
 
 ## What to read next
 
