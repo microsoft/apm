@@ -19,6 +19,15 @@ from apm_cli.core.lifecycle_scripts import parse_apm_yml_lifecycle, parse_script
 _DEFAULTS = {"command": 30, "http": 10}
 
 
+@pytest.fixture(autouse=True)
+def _reset_warn_once():
+    from apm_cli.core import lifecycle_scripts as ls
+
+    ls._invalid_timeout_warned.clear()
+    yield
+    ls._invalid_timeout_warned.clear()
+
+
 def _entry_yaml(script_type: str, key: str, value: object) -> str:
     target = (
         "      bash: echo hi\n" if script_type == "command" else "      url: https://x.test/h\n"
@@ -125,3 +134,68 @@ def test_policy_json_non_positive_timeout_warns_once(tmp_path):
     assert len(messages) == 2
     assert "pre-install[0]" in messages[0]
     assert "pre-install[1]" in messages[1]
+
+
+@pytest.fixture
+def isolated_tiers(tmp_path, monkeypatch):
+    """Project-only discovery: no policy dir, no user apm.yml, no org policy."""
+    from apm_cli.core import lifecycle_scripts as ls
+
+    monkeypatch.setattr(ls, "_get_policy_scripts_dir", lambda: tmp_path / "no-policy")
+    monkeypatch.setattr(ls, "_get_user_apm_yml", lambda: tmp_path / "no-user" / "apm.yml")
+    monkeypatch.setattr(
+        "apm_cli.policy.discovery.discover_policy_with_chain", lambda *_a, **_k: None
+    )
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: t\n"
+        "version: 0.0.1\n"
+        "lifecycle:\n"
+        "  pre-update:\n"
+        "    - type: command\n"
+        "      bash: echo hi\n"
+        "      timeoutSec: 0\n",
+        encoding="utf-8",
+    )
+    return project
+
+
+class _Pkg:
+    def __init__(self, path: Path) -> None:
+        self.package_path = path
+
+    def get_apm_dependencies(self) -> list:
+        return []
+
+
+def test_update_pre_and_post_events_warn_once(isolated_tiers):
+    from apm_cli.commands.update import _fire_update_scripts
+
+    with patch("apm_cli.utils.console._rich_warning") as warn:
+        for event in ("pre-update", "post-update"):
+            _fire_update_scripts(
+                event, apm_package=_Pkg(isolated_tiers), scope="project", logger=None, verbose=False
+            )
+
+    messages = [c.args[0] for c in warn.call_args_list if "must be positive" in c.args[0]]
+    assert len(messages) == 1
+
+
+def test_uninstall_pre_and_post_events_warn_once(isolated_tiers):
+    from apm_cli.commands.uninstall.cli import _fire_uninstall_scripts
+
+    with patch("apm_cli.utils.console._rich_warning") as warn:
+        for event in ("pre-uninstall", "post-uninstall"):
+            _fire_uninstall_scripts(
+                event,
+                packages=[],
+                scope="project",
+                manifest_path=isolated_tiers / "apm.yml",
+                logger=None,
+                verbose=False,
+                deploy_root=isolated_tiers,
+            )
+
+    messages = [c.args[0] for c in warn.call_args_list if "must be positive" in c.args[0]]
+    assert len(messages) == 1

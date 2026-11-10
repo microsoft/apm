@@ -189,6 +189,9 @@ def _parse_allowed_env_vars(raw: object) -> list[str] | None:
     return names or None
 
 
+_invalid_timeout_warned: set[tuple[str, str, int, str]] = set()
+
+
 def _resolve_timeout(
     raw: dict, script_type: str, event_name: str, index: int, path: Path
 ) -> object:
@@ -196,6 +199,8 @@ def _resolve_timeout(
 
     A non-positive numeric timeout is invalid under either spelling: it is
     dropped to None (the per-type default) with one warning naming the script.
+    Commands that rediscover scripts per event (update, uninstall) reparse the
+    same entry, so the warning is emitted once per process (one CLI command).
     """
 
     def _is_number(v: object) -> bool:
@@ -205,14 +210,17 @@ def _resolve_timeout(
     if not (_is_number(value) or value):
         key, value = "timeout", raw.get("timeout")
     if _is_number(value) and value <= 0:
-        from apm_cli.utils.console import _rich_warning
+        warn_key = (str(path), event_name, index, key)
+        if warn_key not in _invalid_timeout_warned:
+            _invalid_timeout_warned.add(warn_key)
+            from apm_cli.utils.console import _rich_warning
 
-        _rich_warning(
-            f"Lifecycle script {event_name}[{index}] ({script_type}) in {path}: "
-            f"{key} must be positive; using the default of "
-            f"{_default_timeout(script_type)}s.",
-            symbol="warning",
-        )
+            _rich_warning(
+                f"Lifecycle script {event_name}[{index}] ({script_type}) in {path}: "
+                f"{key} must be positive; using the default of "
+                f"{_default_timeout(script_type)}s.",
+                symbol="warning",
+            )
         return None
     return value
 
