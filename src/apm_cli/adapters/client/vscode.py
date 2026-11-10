@@ -820,11 +820,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
         ``CopilotClientAdapter._process_arguments``.
 
         ``package_arguments`` are the container's own argv and follow the image
-        per ``docker run [OPTIONS] IMAGE [ARG...]``.
+        per ``docker run [OPTIONS] IMAGE [ARG...]``. Options-only
+        ``runtime_arguments`` (no leading ``run``, as in the MCP Registry OCI
+        examples) gain ``run -i --rm`` ahead of the options (#3404).
 
         Returns ``None`` -- leaving the caller on its previous synthesized
         launcher -- when the registry arguments cannot form a usable command:
-        no ``run`` verb, or a placeholder in a required entry that this
+        a non-``run`` subcommand, or a placeholder in a required entry that this
         install could not resolve. Emitting a half-substituted mount path
         would be worse than the image-only command that shipped before. An
         *optional* entry whose placeholder is unresolved is dropped on its
