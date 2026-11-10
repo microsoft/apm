@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP servers declared by a Claude plugin installed from a local path (`.mcp.json` or `plugin.json` `mcpServers`) now deploy to the selected targets like the same plugin installed from git, with the same policy, lockfile ownership and uninstall cleanup; APM warns instead of silently dropping them when the plugin's synthesized manifest is missing. (#3540)
 - `apm install` and `apm install -g` no longer fail with "installation binding does not match" after a reboot or remount changes only the root's device number on Linux (btrfs subvolumes) and macOS; the receipt is rebound when inode, path, installation identity and recorded creation time still match, and recreated roots stay rejected. -- by @TyceHerrman (#3439)
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
 
