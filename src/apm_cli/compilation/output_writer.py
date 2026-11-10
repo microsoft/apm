@@ -84,7 +84,6 @@ class CompiledOutputWriter:
         validate-then-write batch.
         """
         prepared, verdict = self.prepare(outputs)
-        new_file_mode = umask_file_mode()
         for path, final in prepared.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             preserve = (
@@ -95,7 +94,7 @@ class CompiledOutputWriter:
             atomic_write_text(
                 path,
                 final,
-                new_file_mode=new_file_mode,
+                new_file_mode=umask_file_mode(path),
                 normalize_line_endings=not preserve,
             )
         return verdict

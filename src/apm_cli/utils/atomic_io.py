@@ -13,26 +13,36 @@ backward compatibility with existing tests) and
 
 import contextlib
 import os
+import secrets
 import stat
 import tempfile
-import threading
 from pathlib import Path
 
-_UMASK_PROBE_LOCK = threading.Lock()
 
-
-def umask_file_mode() -> int:
-    """Return the mode a plain ``open()`` would give a new file under the umask.
+def umask_file_mode(path: Path) -> int | None:
+    """Return the mode a plain ``open()`` would give ``path`` if created now.
 
     Shared, committed artifacts pass this as ``new_file_mode`` so they do not
-    inherit ``mkstemp``'s owner-only 0600. The umask can only be read by
-    setting it; the transient probe value is owner-only so a file created
-    concurrently by another thread is never more permissive than intended.
+    inherit ``mkstemp``'s owner-only 0600. The mode is observed from a
+    short-lived probe file in ``path.parent`` rather than by reading the
+    umask, because reading it requires changing the process-wide umask, which
+    unrelated concurrent file or directory creation would observe. Returns
+    ``None`` when ``path`` already exists (its mode is preserved anyway) or
+    where ``os.fchmod`` is unavailable, e.g. Windows.
     """
-    with _UMASK_PROBE_LOCK:
-        current = os.umask(0o077)
-        os.umask(current)
-    return 0o666 & ~current
+    if not hasattr(os, "fchmod") or path.exists():
+        return None
+    probe = path.parent / f".apm-mode-probe-{secrets.token_hex(8)}"
+    try:
+        fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    except OSError:
+        return None
+    try:
+        return stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(probe)
 
 
 def _replace_atomic_file(source: str, destination: Path) -> None:

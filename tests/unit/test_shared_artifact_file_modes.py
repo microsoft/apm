@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import stat
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from apm_cli.compilation.output_writer import CompiledOutputWriter
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils import atomic_io
 from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
+
+pytestmark = pytest.mark.windows_compat
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not enforced")
 
@@ -88,9 +91,48 @@ def test_explicit_secret_mode_is_not_widened_by_umask(umask_022, tmp_path: Path)
 
 
 @posix_only
-def test_umask_file_mode_restores_the_process_umask(umask_022) -> None:
-    assert umask_file_mode() == 0o644
-    assert os.umask(0o022) == 0o022
+def test_umask_file_mode_never_changes_the_process_umask(
+    umask_022, monkeypatch, tmp_path: Path
+) -> None:
+    """Concurrent creations elsewhere must never observe a transient umask."""
+
+    def _forbidden(_mask: int) -> int:
+        raise AssertionError("umask_file_mode must not change the process umask")
+
+    monkeypatch.setattr(atomic_io.os, "umask", _forbidden)
+    assert umask_file_mode(tmp_path / "apm.lock.yaml") == 0o644
+
+
+@posix_only
+def test_concurrent_directory_creation_keeps_umask_mode(umask_022, tmp_path: Path) -> None:
+    stop = threading.Event()
+
+    def _probe() -> None:
+        while not stop.is_set():
+            umask_file_mode(tmp_path / "AGENTS.md")
+
+    worker = threading.Thread(target=_probe)
+    worker.start()
+    try:
+        for index in range(200):
+            created = tmp_path / f"dir-{index}"
+            created.mkdir()
+            assert _mode(created) == 0o755
+    finally:
+        stop.set()
+        worker.join()
+
+
+def test_umask_file_mode_leaves_no_probe_behind(tmp_path: Path) -> None:
+    umask_file_mode(tmp_path / "AGENTS.md")
+    assert list(tmp_path.iterdir()) == []
+
+
+@posix_only
+def test_umask_file_mode_skips_existing_targets(tmp_path: Path) -> None:
+    target = tmp_path / "apm.lock.yaml"
+    target.write_text("old\n", encoding="utf-8")
+    assert umask_file_mode(target) is None
 
 
 @pytest.mark.parametrize(("name", "writer"), SHARED_WRITERS)
@@ -102,3 +144,13 @@ def test_shared_artifact_write_succeeds_without_fchmod(
     target = tmp_path / name
     writer(target)
     assert target.is_file()
+    assert umask_file_mode(tmp_path / "new.md") is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows behaviour")
+@pytest.mark.parametrize(("name", "writer"), SHARED_WRITERS)
+def test_shared_artifact_write_on_native_windows(tmp_path: Path, name, writer) -> None:
+    target = tmp_path / name
+    writer(target)
+    assert target.is_file()
+    assert umask_file_mode(tmp_path / "new.md") is None

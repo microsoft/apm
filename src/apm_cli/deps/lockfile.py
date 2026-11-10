@@ -1321,7 +1321,7 @@ class LockFile:
             self.generated_at = None
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
-        atomic_write_text(path, serialized, new_file_mode=umask_file_mode())
+        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
