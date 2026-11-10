@@ -48,8 +48,9 @@ def match_version(spec: str, version: str) -> bool:
     return satisfies_range(v, spec)
 
 
-def _range_mentions_prerelease(spec: str) -> bool:
-    """Return whether *spec* itself names a pre-release version."""
+def _prerelease_tuples(spec: str) -> set[tuple[int, int, int]]:
+    """Return the ``(major, minor, patch)`` tuples of pre-release comparators in *spec*."""
+    tuples: set[tuple[int, int, int]] = set()
     for part in spec.split():
         candidate = part
         for op in _RANGE_OPERATORS:
@@ -60,32 +61,38 @@ def _range_mentions_prerelease(spec: str) -> bool:
             continue
         version = parse_semver(candidate)
         if version is not None and version.is_prerelease:
-            return True
-    return False
+            tuples.add((version.major, version.minor, version.patch))
+    return tuples
 
 
 def pick_best(spec: str, versions: list[str], *, include_prerelease: bool = False) -> str | None:
     """Return the highest *version* in *versions* that satisfies *spec*.
 
     Pre-release versions are discarded unless *include_prerelease* is set or
-    *spec* names a pre-release (OpenAPM v0.1 §7.3.1), matching the git and
-    marketplace resolvers.
+    *spec* names a pre-release comparator on the same ``major.minor.patch``
+    tuple as the candidate (OpenAPM v0.1 section 7.3.1), matching the git and
+    marketplace resolvers. Candidates with equal precedence (differing only
+    in build metadata) are ordered by the full version string (req-rs-014).
 
     Returns ``None`` if no version matches or the spec is invalid.
     """
     if not is_semver_range(spec):
         return None
-    allow_prerelease = include_prerelease or _range_mentions_prerelease(spec)
+    allowed_tuples = _prerelease_tuples(spec)
     candidates: list[tuple[SemVer, str]] = []
     for raw in versions:
         v = parse_semver(raw)
         if v is None:
             continue
-        if v.is_prerelease and not allow_prerelease:
+        if (
+            v.is_prerelease
+            and not include_prerelease
+            and (v.major, v.minor, v.patch) not in allowed_tuples
+        ):
             continue
         if satisfies_range(v, spec):
             candidates.append((v, raw))
     if not candidates:
         return None
-    candidates.sort(key=lambda pair: pair[0])
+    candidates.sort()
     return candidates[-1][1]

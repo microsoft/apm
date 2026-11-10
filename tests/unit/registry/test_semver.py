@@ -7,6 +7,9 @@ used by the resolver to pick the best published version.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from apm_cli.deps.registry.semver import (
@@ -162,7 +165,7 @@ class TestPickBest:
 
 
 class TestPickBestPrereleasePolicy:
-    """OpenAPM v0.1 §7.3.1: stable ranges must not select pre-releases."""
+    """OpenAPM v0.1 section 7.3.1: stable ranges must not select pre-releases."""
 
     def test_stable_range_skips_prerelease_above_it(self):
         assert pick_best("^1.2.3", ["1.2.3", "1.3.0-beta.1"]) == "1.2.3"
@@ -173,11 +176,53 @@ class TestPickBestPrereleasePolicy:
     def test_tilde_range_skips_alpha(self):
         assert pick_best("~1.2.0", ["1.2.4", "1.2.5-alpha.1"]) == "1.2.4"
 
-    def test_prerelease_range_may_select_prerelease(self):
+    def test_same_tuple_prerelease_range_selects_prerelease(self):
+        assert pick_best(">=1.3.0-beta.1 <2.0.0", ["1.2.9", "1.3.0-beta.2"]) == "1.3.0-beta.2"
+
+    def test_prerelease_range_prefers_release_on_same_tuple(self):
         assert pick_best(">=1.3.0-beta.1 <2.0.0", ["1.3.0", "1.3.0-beta.2"]) == "1.3.0"
+
+    def test_prerelease_range_rejects_other_tuple_prerelease(self):
+        versions = ["1.2.0-beta", "1.5.0-beta"]
+        assert pick_best(">=1.2.0-alpha <2.0.0", versions) == "1.2.0-beta"
+
+    def test_prerelease_range_with_only_other_tuple_prerelease_matches_nothing(self):
+        assert pick_best(">=1.2.0-alpha <2.0.0", ["1.5.0-beta"]) is None
 
     def test_include_prerelease_opts_in(self):
         assert (
             pick_best("^1.2.3", ["1.2.3", "1.3.0-beta.1"], include_prerelease=True)
             == "1.3.0-beta.1"
         )
+
+
+_SEMVER_DIALECT = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "spec-conformance"
+    / "resolution"
+    / "semver-dialect.json"
+)
+
+
+def _dialect_cases_without_optin() -> list[dict]:
+    cases = json.loads(_SEMVER_DIALECT.read_text(encoding="utf-8"))["cases"]
+    return [
+        case for case in cases if not case["prerelease_optin"] and is_semver_range(case["range"])
+    ]
+
+
+class TestPickBestSemverDialectOracle:
+    """The registry picker agrees with the spec conformance oracle."""
+
+    @pytest.mark.parametrize("case", _dialect_cases_without_optin(), ids=lambda case: case["id"])
+    def test_matches_oracle(self, case):
+        assert pick_best(case["range"], case["tags"]) == case["expected"]
+
+    def test_oracle_prerelease_cases_are_exercised(self):
+        ids = {case["id"] for case in _dialect_cases_without_optin()}
+        assert {
+            "prerelease-excluded-default",
+            "prerelease-in-range-allows-same-tuple",
+            "build-metadata-tiebreak-ascii-highest",
+        } <= ids
