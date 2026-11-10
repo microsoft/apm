@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install DIR` installs a source package with `apm.yml` and a root `plugin.json` as a local dependency, matching `apm install DIR DIR`, instead of copying it as a legacy bundle; only directories whose `apm.lock.yaml` carries the `apm pack` manifest, and legacy bundles without `apm.yml`, take the local-bundle path. -- by @xubenqiang (#3447)
+- `apm install` and `apm install -g` no longer fail with "installation binding does not match" after a reboot or remount changes only the root's device number on Linux (btrfs subvolumes) and macOS; the receipt is rebound when inode, path, installation identity and recorded creation time still match, and recreated roots stay rejected. -- by @TyceHerrman (#3439)
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
 
 ## [0.35.0] - 2026-10-22
