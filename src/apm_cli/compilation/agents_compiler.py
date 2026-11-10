@@ -5,7 +5,6 @@ full content assembly. This keeps repeated compiles byte-identical when source
 primitives & constitution are unchanged.
 """
 
-import hashlib
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -25,6 +24,7 @@ from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
+from .build_id import has_valid_build_id, stabilize_build_id
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
@@ -37,7 +37,12 @@ from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .managed_section import ManagedSectionError
-from .root_context_protection import hand_authored_root_context_blocks_write
+from .root_context_protection import (
+    _build_expected_rule_filenames,
+    _get_deployed_instruction_filenames,
+    _instruction_rule_filename,
+    hand_authored_root_context_blocks_write,
+)
 from .template_builder import (
     TemplateData,
     build_conditional_sections,
@@ -95,44 +100,6 @@ def _detect_deployed_instructions(
     if expected_filenames is not None:
         return any((rules_dir / name).is_file() for name in expected_filenames)
     return any(rules_dir.glob("*.md"))
-
-
-def _build_expected_rule_filenames(
-    target_key: str,
-    primitives: PrimitiveCollection,
-) -> set[str]:
-    """Return the set of expected rule filenames for *target_key* given *primitives*.
-
-    Shared by the Antigravity/Copilot (_compile_distributed) and Claude
-    (_compile_claude_md) dedup paths so the filename-building policy stays in
-    one place (R0801 guard).
-
-    Args:
-        target_key: Canonical KNOWN_TARGETS key (e.g. "claude", "copilot",
-            "antigravity").
-        primitives: Compiled agent primitives whose instructions drive the
-            expected filenames.
-
-    Returns:
-        A set of expected rule filenames (stem + target extension), or an empty
-        set if the target profile is unknown or lacks an ``instructions``
-        primitive mapping.
-    """
-    # Late import avoids a circular dependency: integration.targets imports
-    # integration helpers that eventually reach the compilation package.
-    from ..integration.targets import KNOWN_TARGETS
-
-    expected: set[str] = set()
-    target_profile = KNOWN_TARGETS.get(target_key)
-    if target_profile and "instructions" in target_profile.primitives:
-        mapping = target_profile.primitives["instructions"]
-        extension = mapping.extension
-        for instr in primitives.instructions:
-            stem = instr.file_path.name
-            if stem.endswith(".instructions.md"):
-                stem = stem[: -len(".instructions.md")]
-            expected.add(f"{stem}{extension}")
-    return expected
 
 
 # Compiler families allowed inside a multi-target frozenset (built by
@@ -1522,8 +1489,7 @@ class AgentsCompiler:
         routing_target = "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
         output_path = self.base_dir / ".github" / "copilot-instructions.md"
         if not should_compile_copilot_instructions_md(routing_target):
-            if not config.dry_run:
-                self._cleanup_copilot_root_instructions(output_path, result)
+            self._cleanup_copilot_root_instructions(output_path, result, dry_run=config.dry_run)
             result.stats.setdefault("copilot_root_instructions_generated", 0)
             result.stats.setdefault("copilot_root_instructions_written", 0)
             result.stats.setdefault("copilot_root_instructions_unchanged", 0)
@@ -1535,9 +1501,37 @@ class AgentsCompiler:
             [instruction for instruction in primitives.instructions if not instruction.apply_to],
             key=lambda instruction: portable_relpath(instruction.file_path, self.base_dir),
         )
+        if global_instructions and not config.no_dedup:
+            rules_dir = self.base_dir / ".github" / "instructions"
+            expected_filenames = _build_expected_rule_filenames(
+                "copilot",
+                primitives,
+                instructions=global_instructions,
+            )
+            deployed_filenames = _get_deployed_instruction_filenames(
+                rules_dir,
+                self.base_dir,
+                lambda msg: self._log("warning", msg),
+                expected_filenames=expected_filenames,
+            )
+            if deployed_filenames:
+                remaining_instructions = [
+                    instruction
+                    for instruction in global_instructions
+                    if _instruction_rule_filename("copilot", instruction) not in deployed_filenames
+                ]
+                omitted_count = len(global_instructions) - len(remaining_instructions)
+                if omitted_count:
+                    self._log(
+                        "progress",
+                        f"Omitting {omitted_count} global instruction(s) already deployed "
+                        "to .github/instructions/ from copilot-instructions.md",
+                        symbol="info",
+                    )
+                global_instructions = remaining_instructions
+
         if not global_instructions:
-            if not config.dry_run:
-                self._cleanup_copilot_root_instructions(output_path, result)
+            self._cleanup_copilot_root_instructions(output_path, result, dry_run=config.dry_run)
             result.stats.setdefault("copilot_root_instructions_generated", 0)
             result.stats.setdefault("copilot_root_instructions_written", 0)
             result.stats.setdefault("copilot_root_instructions_unchanged", 0)
@@ -1566,7 +1560,10 @@ class AgentsCompiler:
             result.success = False
             return result
 
-        if existing is not None and AGENTS_MD_GENERATED_MARKER not in existing:
+        if existing is not None and not has_generated_marker_header(
+            existing,
+            (AGENTS_MD_GENERATED_MARKER,),
+        ):
             rel_path = portable_relpath(output_path, self.base_dir)
             result.warnings.append(
                 f"Skipped {rel_path}: hand-authored file will not be overwritten. "
@@ -1660,37 +1657,57 @@ class AgentsCompiler:
 
     def _finalize_build_id(self, content: str) -> str:
         """Replace the build-id placeholder with a deterministic content hash."""
-        lines = content.splitlines()
-        try:
-            idx = lines.index(BUILD_ID_PLACEHOLDER)
-        except ValueError:
-            return content
-
-        hash_input_lines = [line for i, line in enumerate(lines) if i != idx]
-        build_id = hashlib.sha256("\n".join(hash_input_lines).encode("utf-8")).hexdigest()[:12]
-        lines[idx] = f"<!-- Build ID: {build_id} -->"
-        return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+        return stabilize_build_id(content)
 
     def _cleanup_copilot_root_instructions(
         self,
         output_path: Path,
         result: CompilationResult,
+        *,
+        dry_run: bool = False,
     ) -> CompilationResult:
         """Remove stale generated Copilot root instructions when no longer applicable."""
+        if output_path.is_symlink():
+            result.warnings.append(
+                f"Retained {portable_relpath(output_path, self.base_dir)}: "
+                "symbolic links are not removed during Copilot instruction cleanup."
+            )
+            result.stats.setdefault("copilot_root_instructions_removed", 0)
+            return result
+
         if not output_path.exists():
             result.stats.setdefault("copilot_root_instructions_removed", 0)
             return result
 
         try:
             existing = output_path.read_text(encoding="utf-8")
-            if AGENTS_MD_GENERATED_MARKER not in existing:
+            if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
+                result.stats.setdefault("copilot_root_instructions_removed", 0)
+                return result
+            if not has_valid_build_id(existing):
+                result.warnings.append(
+                    f"Retained {portable_relpath(output_path, self.base_dir)}: "
+                    "the generated marker is present, but the Build ID does not match "
+                    "the current content. Review it and delete or rename it manually "
+                    "if duplicate context is unwanted."
+                )
+                result.stats.setdefault("copilot_root_instructions_removed", 0)
+                return result
+
+            ensure_path_within(output_path, self.base_dir)
+            if dry_run:
+                result.warnings.append(
+                    f"[dry-run] would remove stale "
+                    f"{portable_relpath(output_path, self.base_dir)} -- "
+                    "generated Copilot instructions are no longer required."
+                )
                 result.stats.setdefault("copilot_root_instructions_removed", 0)
                 return result
 
             output_path.unlink()
             result.stats["copilot_root_instructions_removed"] = 1
             return result
-        except OSError as exc:
+        except (OSError, PathTraversalError) as exc:
             message = f"Failed to remove stale {output_path}: {exc}"
             self.errors.append(message)
             result.errors.append(message)

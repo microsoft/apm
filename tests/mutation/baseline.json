@@ -79,15 +79,15 @@
     },
     "update-plan": {
       "accepted_survivors": [
-        "apm_cli.install.plan.build_update_plan__mutmut_121",
-        "apm_cli.install.plan.build_update_plan__mutmut_149",
-        "apm_cli.install.plan.build_update_plan__mutmut_170",
-        "apm_cli.install.plan.build_update_plan__mutmut_178",
-        "apm_cli.install.plan.build_update_plan__mutmut_180",
-        "apm_cli.install.plan.build_update_plan__mutmut_181",
-        "apm_cli.install.plan.build_update_plan__mutmut_26",
-        "apm_cli.install.plan.build_update_plan__mutmut_45",
-        "apm_cli.install.plan.build_update_plan__mutmut_97"
+        "apm_cli.install.plan.build_update_plan__mutmut_114",
+        "apm_cli.install.plan.build_update_plan__mutmut_140",
+        "apm_cli.install.plan.build_update_plan__mutmut_168",
+        "apm_cli.install.plan.build_update_plan__mutmut_189",
+        "apm_cli.install.plan.build_update_plan__mutmut_197",
+        "apm_cli.install.plan.build_update_plan__mutmut_199",
+        "apm_cli.install.plan.build_update_plan__mutmut_200",
+        "apm_cli.install.plan.build_update_plan__mutmut_33",
+        "apm_cli.install.plan.build_update_plan__mutmut_53"
       ],
       "functions": [
         "build_update_plan"

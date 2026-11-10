@@ -79,7 +79,11 @@ def test_receipt_precedence_with_actual_stale_bare_reference(
     dependency = DependencyReference.parse("owner/repo#main")
     url = dependency.to_github_url()
     bare = cache._db_root / cache_shard_key(url)
-    shutil.copytree(repository.origin, bare)
+    # Pushes can start background auto-maintenance in the origin; skip its
+    # transient lock and temp files so the snapshot copy cannot race them.
+    shutil.copytree(
+        repository.origin, bare, ignore=shutil.ignore_patterns("*.lock", "tmp_*", "gc.pid")
+    )
     payload.write_text("current\n", encoding="ascii")
     current_commit = repositories.commit(repository, message="Current observation")
     assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha

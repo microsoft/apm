@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from collections.abc import Iterable
+from dataclasses import replace
 
 import click
 
@@ -57,6 +58,8 @@ def _strip_v(ref: str) -> str:
 
 def _package_basename(dep: LockedDependency, dep_ref: DependencyReference | None = None) -> str:
     """Return the display name used in ``{name}`` tag patterns."""
+    if dep.replacement is not None:
+        return revision_pin_package_name(dep_ref or dependency_ref_from_locked(dep))
     if dep.marketplace_plugin_name:
         return dep.marketplace_plugin_name
     # For virtual subdirectory packages, derive the name from the virtual path
@@ -262,6 +265,23 @@ def _check_revision_pin_ref(
 
 
 def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
+    """Compare selected bytes while keeping original ownership in the result."""
+    if dep.replacement is not None and dep.is_local_source:
+        return OutdatedRow(
+            package=dep.get_unique_key(),
+            current="local",
+            latest="-",
+            status="not-comparable",
+            source=f"replacement: {dep.to_dependency_ref().local_path}",
+        )
+    row = _check_selected_dep(dep, downloader, verbose, registry_ctx)
+    if dep.replacement is not None:
+        source = dependency_ref_from_locked(dep).to_display_reference()
+        return replace(row, source=f"replacement: {source} ({row.source})")
+    return row
+
+
+def _check_selected_dep(dep, downloader, verbose, registry_ctx=None):
     """Check a single dependency against remote refs.
 
     Returns an ``OutdatedRow`` instance.
@@ -274,7 +294,7 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
         return check_registry_locked_dep(dep, registry_ctx, verbose=verbose)
 
     # Try marketplace-based check first for marketplace-sourced deps
-    marketplace_result = _check_marketplace_ref(dep, verbose)
+    marketplace_result = _check_marketplace_ref(dep, verbose) if dep.replacement is None else None
     if marketplace_result is not None:
         return marketplace_result
 
@@ -544,7 +564,14 @@ def outdated(global_, verbose, parallel_checks):
     has_unknown = any(row.status == "unknown" for row in rows)
     has_outside_constraint = any(row.outside_constraint for row in rows)
 
-    if not has_outdated and not has_unknown and not has_outside_constraint:
+    has_replacements = any(dep.replacement is not None for dep in checkable)
+    for dep in checkable:
+        if dep.replacement is not None:
+            logger.verbose_detail(
+                f"Replacement: {dep.get_unique_key()} "
+                f"-> {dependency_ref_from_locked(dep).to_display_reference()}"
+            )
+    if not has_outdated and not has_unknown and not has_outside_constraint and not has_replacements:
         logger.success("All dependencies are up-to-date")
         return
 
@@ -555,6 +582,7 @@ def outdated(global_, verbose, parallel_checks):
     ]
     # Render the table
     try:
+        from rich.box import ASCII
         from rich.table import Table
 
         from ._helpers import _get_console
@@ -567,19 +595,26 @@ def outdated(global_, verbose, parallel_checks):
             title="Dependency Status",
             show_header=True,
             header_style="bold cyan",
+            box=ASCII,
         )
-        table.add_column("Package", style="white", min_width=20)
-        table.add_column("Current", style="white", min_width=10)
+        table.add_column(
+            "Package",
+            style="white",
+            min_width=20,
+            overflow="fold" if has_replacements else "ellipsis",
+        )
+        table.add_column("Current", style="white", min_width=1 if has_replacements else 10)
         if show_wanted:
-            table.add_column("Wanted", style="white", min_width=10)
-        table.add_column("Latest", style="white", min_width=10)
-        table.add_column("Status", min_width=12)
-        table.add_column("Source", style="dim", min_width=20, no_wrap=True)
+            table.add_column("Wanted", style="white", min_width=1 if has_replacements else 10)
+        table.add_column("Latest", style="white", min_width=1 if has_replacements else 10)
+        table.add_column("Status", min_width=14 if has_replacements else 12)
+        table.add_column("Source", style="dim", min_width=20, overflow="fold")
 
         status_styles = {
             "up-to-date": "green",
             "outdated": "yellow",
             "unknown": "dim",
+            "not-comparable": "dim",
         }
 
         for row, source in zip(rows, sources, strict=True):
@@ -627,6 +662,8 @@ def outdated(global_, verbose, parallel_checks):
         )
     elif has_unknown:
         logger.progress("Some dependencies could not be checked")
+    if any(row.status == "not-comparable" for row in rows):
+        logger.progress("Local replacement sources are not remotely comparable")
     if has_outside_constraint:
         logger.progress(
             "Registry Latest is published; Wanted respects the manifest constraint. "

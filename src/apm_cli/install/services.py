@@ -1,19 +1,10 @@
-"""Package integration services.
+"""Coordinate primitive integration and source-backed completion receipts.
 
-The two functions in this module own the *integration template* for a single
-package -- looping over the resolved targets, dispatching primitives to their
-integrators, accumulating counters, and recording deployed file paths.
-
-Moved here from ``apm_cli.commands.install`` so that the install engine
-package owns its own integration logic.  ``commands/install`` keeps thin
-underscore-prefixed re-exports for backward compatibility with existing
-``@patch`` sites and direct imports.
-
-Design notes
-------------
-``integrate_local_content()`` calls ``integrate_package_primitives()`` via a
-bare-name lookup so that ``@patch`` of either symbol on this module's
-namespace intercepts both call paths consistently.
+The install engine owns target dispatch, counters and deployed paths.
+``commands/install`` retains compatibility re-exports. Local content calls
+``integrate_package_primitives`` by name so patches in this module intercept
+both package and local integration.
+Authorization preparation is shared through ``deployment_plan``.
 """
 
 from __future__ import annotations
@@ -27,20 +18,16 @@ from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundar
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
-from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
-from .exec_gate import check_executable_approval
-from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
-from .exec_gate import resolve_bin_skip as _resolve_bin_skip
+from .deployed_paths import skill_summary_paths as _skill_summary_paths
+from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
+from .exec_gate import plugin_bin_deployable, resolve_bin_skip
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
-from .target_filter import (
-    log_package_target_restriction as _log_package_target_restriction,
-)
-from .target_filter import resolve_effective_package_targets
+from .project_package import build_project_local_package_info
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -204,6 +191,12 @@ def _warn_target_reconcile_failure(
     )
 
 
+def _targets_explicitly_requested(ctx: InstallContext | None) -> bool:
+    """Return True only when the active targets came from ``--target``."""
+    decision = getattr(ctx, "target_decision", None)
+    return getattr(decision, "source", None) == "--target flag"
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -225,6 +218,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     dep_target_subset: list[str] | None = None,
     trust_bin: bool | None = None,
     bin_skip_reason_override: str | None = None,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -291,17 +285,28 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     # SECURITY: package intent may only narrow the consumer-authorized active
     # target set. It never activates a target or expands dependency reach.
-    target_selection = resolve_effective_package_targets(
-        targets,
-        dep_target_subset,
+    deployment_plan = deployment_plan or prepare_package_deployment(
         package_info,
-        diagnostics,
-        package_name,
+        project_root,
+        targets=targets,
+        dep_target_subset=dep_target_subset,
+        diagnostics=diagnostics,
+        package_name=package_name,
+        logger=logger,
+        scope=scope,
+        skill_subset=skill_subset,
+        ctx=ctx,
+        policy=policy,
+        is_first_party=is_first_party,
+        allow_executables=allow_executables,
+        trust_bin=trust_bin,
+        bin_skip_reason_override=bin_skip_reason_override,
+        read_only=scratch_root is not None,
     )
+    target_selection = deployment_plan.target_selection
     targets = list(target_selection.targets)
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
     dep_targets_active = target_selection.consumer_restriction_active
-    _log_package_target_restriction(logger, target_selection)
 
     reconcile_package_targets = getattr(
         integrators.hook,
@@ -329,38 +334,18 @@ def integrate_package_primitives(  # noqa: PLR0913
         _mcp_approved,
         _canvas_approved,
         _lsp_approved,
-    ) = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
-    import sys
-
-    _skip_bin, _bin_skip_reason_override = _resolve_bin_skip(
-        _bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
-    )
-    _bin_skip_reason_override = (
-        bin_skip_reason_override
-        if _skip_bin and bin_skip_reason_override is not None
-        else _bin_skip_reason_override
-    )
-    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    ) = deployment_plan.approvals
+    _skip_bin = deployment_plan.skip_bin
+    _bin_skip_reason_override = deployment_plan.bin_skip_reason
+    from apm_cli.codex_plugins.admission import finalize_codex_native
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
-    source_plan = DeployableSourcePlan.create(
-        package_info,
-        targets,
-        skill_subset=skill_subset,
-        hooks_approved=_hooks_approved,
-        canvas_approved=_canvas_approved or is_first_party,
-        skip_bin=_skip_bin,
-        diagnostics=diagnostics,
-        package_name=package_name,
-        plugin_bin_deployable=_plugin_bin_deployable(
-            package_info,
-            targets,
-            project_root=project_root,
-            scope=scope,
-            policy=policy,
-            skip_bin=_skip_bin,
-        ),
-    )
+    codex_native = deployment_plan.codex_native
+    # Compatibility-only Codex data is opaque to every loose target adapter.
+    projection_targets = deployment_plan.projection_targets
+    source_plan = deployment_plan.source_plan
+    if source_plan is None:
+        raise RuntimeError("Selected targets require an authorized source plan")
     if not _pre_deploy_security_scan(
         source_plan,
         diagnostics,
@@ -398,14 +383,7 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
-    warn_unsupported_primitives(
-        package_info,
-        package_name,
-        targets,
-        ctx,
-        diagnostics,
-        logger,
-    )
+    warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
 
     def _log_integration(msg):
         if logger:
@@ -423,12 +401,22 @@ def integrate_package_primitives(  # noqa: PLR0913
         "skills": integrators.skill,
     }
 
+    preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
+    if _hooks_approved and callable(preflight_hooks) and codex_native is None:
+        preflight_hooks(
+            package_info,
+            project_root,
+            source_plan,
+            user_scope=scope is InstallScope.USER,
+            retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
+        )
+
     # Validate every converted instruction target before any primitive kind can
     # write. A rejected instruction must not leave prompts, agents, commands,
     # or identity-target instructions from the same package active.
     if integrators.instruction is not None:
         integrators.instruction.preflight_instructions_for_targets(
-            targets,
+            projection_targets,
             package_info,
             project_root,
             source_plan,
@@ -437,6 +425,14 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+
+    if codex_native is not None:
+        _rc = (
+            reconcile_package_targets(package_info, project_root, targets)
+            if callable(reconcile_package_targets)
+            else None
+        )
+        return finalize_codex_native(result, codex_native, source_plan, _rc, ctx, scratch_root)
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
@@ -482,6 +478,8 @@ def integrate_package_primitives(  # noqa: PLR0913
         _agg_hook_payloads: list = []
         _label = _prim_name
         for _target in targets:
+            if _target not in projection_targets:
+                continue
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:
                 continue
@@ -500,6 +498,11 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
+                # Mirror retiring_targets (#3129) so a fallback preflight isn't
+                # misflagged as an import-coexistence conflict on retirement.
+                _call_kwargs["retiring_targets"] = frozenset(
+                    t.name for t in target_selection.excluded_targets
+                )
             # Canvas integration: always pass is_first_party.  Approval
             # is enforced by the gate above (canvas already skipped if
             # not approved and not is_first_party), so here we always
@@ -607,7 +610,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         diagnostics=diagnostics,
         managed_files=managed_files,
         force=force,
-        targets=targets,
+        targets=projection_targets,
         skill_subset=skill_subset,
         scope=scope,
         policy=policy,
@@ -616,35 +619,9 @@ def integrate_package_primitives(  # noqa: PLR0913
         trust_bin=trust_bin,
         source_plan=source_plan,
     )
-    _skill_target_dirs: set = builtins.set()
-    for tp in skill_result.target_paths:
-        try:
-            rel = tp.relative_to(project_root)
-            if rel.parts:
-                _skill_target_dirs.add(rel.parts[0])
-        except ValueError:
-            from apm_cli.integration.targets import target_name_for_locator
-
-            owner = next(
-                (
-                    target
-                    for target in targets
-                    if target.managed_deploy_root is not None
-                    and tp.is_relative_to(target.managed_deploy_root)
-                ),
-                None,
-            )
-            locator_name = target_name_for_locator(_deployed_path_entry(tp, project_root, targets))
-            _skill_target_dirs.add(
-                owner.name
-                if owner is not None
-                else locator_name
-                if locator_name is not None
-                else "external"
-            )
-    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
-    if not _skill_target_paths:
-        _skill_target_paths = ["skills/"]
+    _skill_target_paths = _skill_summary_paths(
+        skill_result.target_paths, project_root, targets
+    ) or ["skills/"]
     _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
@@ -670,13 +647,23 @@ def integrate_package_primitives(  # noqa: PLR0913
         log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
-        # #1716: also record the bundle's contained files so per-file
-        # content hashes cover SKILL.md / assets / scripts. The directory
-        # entry above is retained (cleanup's directory-rejection gate and
-        # the manifest dir-exclusion contract depend on it); the file
-        # entries give ``content-integrity`` its per-file coverage so skill
-        # drift is caught under ``apm audit --ci --no-drift``.
-        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
+    deployed.extend(
+        _deployed_path_entry(path, project_root, targets) for path in skill_result.deployed_files
+    )
+    if source_plan.skill_discovery_complete is True and skill_result.complete is True:
+        from apm_cli.core.deployment_state import CompletedReintegration
+
+        result["completed_reintegration"] = CompletedReintegration(
+            owner=package_name,
+            targets=frozenset(
+                target.name for target in projection_targets if target.supports("skills")
+            ),
+            current_values=frozenset(deployed),
+            skill_values=frozenset(
+                _deployed_path_entry(path, project_root, targets)
+                for path in skill_result.deployed_files
+            ),
+        )
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep
@@ -691,7 +678,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     return result
 
 
-def integrate_local_content(
+def integrate_local_content(  # noqa: PLR0913
     project_root: Path,
     *,
     targets: Any,
@@ -708,6 +695,7 @@ def integrate_local_content(
     scope: InstallScope | None = None,
     source_root: Path | None = None,
     ctx: InstallContext | None = None,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -733,22 +721,11 @@ def integrate_local_content(
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
-    from ..models.apm_package import APMPackage, PackageInfo, PackageType
 
     if source_root is None:
         source_root = project_root
 
-    local_pkg = APMPackage(
-        name="_local",
-        version="0.0.0",
-        package_path=source_root,
-        source="local",
-    )
-    local_info = PackageInfo(
-        package=local_pkg,
-        install_path=source_root,
-        package_type=PackageType.APM_PACKAGE,
-    )
+    local_info = build_project_local_package_info(source_root)
 
     return integrate_package_primitives(
         local_info,
@@ -771,6 +748,7 @@ def integrate_local_content(
         scope=scope,
         ctx=ctx,
         is_first_party=True,
+        deployment_plan=deployment_plan,
     )
 
 
@@ -778,6 +756,8 @@ def integrate_local_content(
 # imports/patches in tests and elsewhere that use the old names.
 _integrate_package_primitives = integrate_package_primitives
 _integrate_local_content = integrate_local_content
+_resolve_bin_skip = resolve_bin_skip
+_plugin_bin_deployable = plugin_bin_deployable
 
 
 # ---------------------------------------------------------------------------

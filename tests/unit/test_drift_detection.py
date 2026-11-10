@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, call, patch  # noqa: F401
 
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import (
     build_download_ref,
     detect_config_drift,
@@ -22,34 +23,15 @@ from apm_cli.drift import (
 from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
-# Helpers: minimal LockedDependency stub
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class _LockedDep:
-    """Minimal stand-in for LockedDependency to keep tests self-contained."""
+class _LockedDep(LockedDependency):
+    """Use the lockfile source contract with a convenient default identity."""
 
     repo_url: str = "owner/repo"
-    resolved_ref: str | None = None
-    resolved_commit: str | None = None
-    constraint: str | None = None
-    host: str | None = None
-    host_type: str | None = None
-    registry_prefix: str | None = None
-    virtual_path: str | None = None
-    source: str | None = None
-    local_path: str | None = None
-    is_insecure: bool = False
-    allow_insecure: bool = False
-    deployed_files: list[str] = field(default_factory=list)
-
-    def get_unique_key(self) -> str:
-        if self.source == "local" and self.local_path:
-            return self.local_path
-        if self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
 
 
 @dataclass

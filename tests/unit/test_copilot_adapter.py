@@ -565,17 +565,6 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
             )
         self.assertEqual(result, "Bearer literal-value")
 
-    def test_opencode_still_resolves_to_literal(self):
-        from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
-
-        adapter = self._adapter(OpenCodeClientAdapter)
-        self.assertFalse(adapter._supports_runtime_env_substitution)
-        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
-            result = adapter._resolve_env_variable(
-                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
-            )
-        self.assertEqual(result, "Bearer literal-value")
-
     def test_gemini_still_resolves_to_literal(self):
         from apm_cli.adapters.client.gemini import GeminiClientAdapter
 

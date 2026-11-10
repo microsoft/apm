@@ -49,6 +49,7 @@ def _make_dep(
     dep.marketplace_plugin_name = marketplace_plugin_name
     dep.is_virtual = False
     dep.virtual_path = None
+    dep.replacement = None
     return dep
 
 

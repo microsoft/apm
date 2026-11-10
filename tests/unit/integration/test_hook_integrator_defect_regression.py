@@ -28,12 +28,12 @@ def _package_info(package_path: Path, name: str = "superpowers") -> PackageInfo:
     )
 
 
-def _session_start_hook(command: str = "echo hook") -> dict:
+def _session_start_hook(command: str = "echo hook", *, matcher: str = "startup") -> dict:
     return {
         "hooks": {
             "SessionStart": [
                 {
-                    "matcher": "startup",
+                    "matcher": matcher,
                     "hooks": [{"type": "command", "command": command}],
                 }
             ]
@@ -42,13 +42,13 @@ def _session_start_hook(command: str = "echo hook") -> dict:
 
 
 def _owned_hook_commands(path: Path) -> list[str]:
-    """Return commands from the nested hook fixture shape."""
+    """Return commands from either native handler layout."""
     document = json.loads(path.read_text(encoding="utf-8"))
     return [
         handler["command"]
         for entries in document.get("hooks", {}).values()
         for entry in entries
-        for handler in entry.get("hooks", [])
+        for handler in entry.get("hooks", [entry])
     ]
 
 
@@ -563,7 +563,7 @@ def test_package_target_cleanup_uses_canonical_owner_not_shared_leaf(
         hooks_dir = install_path / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "hooks.json").write_text(
-            json.dumps(_session_start_hook(command)),
+            json.dumps(_session_start_hook(command, matcher="")),
             encoding="utf-8",
         )
         dependency = DependencyReference.parse(f"{owner}/hooks")
@@ -620,7 +620,7 @@ def test_transitive_local_hook_markers_include_anchored_parent_identity(
         hooks_dir = install_path / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "hooks.json").write_text(
-            json.dumps(_session_start_hook(command)),
+            json.dumps(_session_start_hook(command, matcher="")),
             encoding="utf-8",
         )
         package = PackageInfo(
@@ -751,7 +751,7 @@ def test_unambiguous_legacy_leaf_marker_migrates_to_canonical_owner(
     install_path = project / "apm_modules" / "org-a" / "hooks"
     hooks_dir = install_path / ".apm" / "hooks"
     hooks_dir.mkdir(parents=True)
-    hook = _session_start_hook("echo alpha")
+    hook = _session_start_hook("echo alpha", matcher="")
     (hooks_dir / "hooks.json").write_text(json.dumps(hook), encoding="utf-8")
     legacy_entry = _session_start_hook("echo legacy")["hooks"]["SessionStart"][0]
     (cursor / "hooks.json").write_text(

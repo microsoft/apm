@@ -422,6 +422,9 @@ class GitReferenceResolver:
         if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
             return ref.lower()
 
+        if initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh":
+            return None
+
         try:
             if len(repository_path_segments(dep_ref.repo_url)) < 2:
                 return None

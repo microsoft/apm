@@ -137,6 +137,10 @@ def _dep_display_name(dep: LockedDependency) -> str:
         or dep.resolved_ref
         or "latest"
     )
+    if dep.replacement is not None:
+        return (
+            f"{key}@{version} -> {dep.to_dependency_ref().source_reference.to_display_reference()}"
+        )
     return f"{key}@{version}"
 
 
@@ -300,7 +304,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
                 # Local slots and explicit aliases retain their logical lockfile identity.
-                if dep.source == "local" or dep.alias is not None:
+                if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
                     dep_key = (
@@ -315,6 +319,11 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[dep_key] = _deps_list_source_label(
                         dep.host,
                         lockfile_source=dep.source,
+                    )
+                if dep.replacement is not None:
+                    selected = dep.to_dependency_ref()
+                    declared_sources[dep_key] = _deps_list_source_label(
+                        selected.host, is_local=selected.is_local, lockfile_source=selected.source
                     )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
@@ -744,9 +753,24 @@ def _build_dep_tree(apm_dir):
                 lockfile_deps = lockfile.get_package_dependencies()
                 if lockfile_deps:
                     result["source"] = "lockfile"
+                    if lockfile.replacements is not None:
+                        result["direct"] = [dep for dep in lockfile_deps if None in dep.parent_keys]
+                        children_map: dict[str, list[LockedDependency]] = {}
+                        unresolved_by_key: dict[str, LockedDependency] = {}
+                        for dep in lockfile_deps:
+                            for parent in dep.parent_keys:
+                                if parent is None:
+                                    continue
+                                if parent not in lockfile.dependencies:
+                                    unresolved_by_key[dep.get_unique_key()] = dep
+                                    continue
+                                children_map.setdefault(parent, []).append(dep)
+                        result["children_map"] = children_map
+                        result["unresolved"] = list(unresolved_by_key.values())
+                        return result
                     result["direct"] = [d for d in lockfile_deps if d.depth <= 1]
                     transitive = [d for d in lockfile_deps if d.depth > 1]
-                    children_map: dict[str, list[LockedDependency]] = {}
+                    children_map = {}
                     unresolved = []
                     parents_by_unique_key: dict[tuple[int, str], list[LockedDependency]] = {}
                     parents_by_repo_url: dict[tuple[int, str], list[LockedDependency]] = {}

@@ -22,6 +22,10 @@ from ..constants import (
     SKILL_MD_FILENAME,
 )
 from ..core import project_name as _project_name
+from ..models.dependency.materialization import (
+    CachedMaterializationPathReader,
+    find_case_equivalent_materialization_path,
+)
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
@@ -30,7 +34,8 @@ from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.git_env import get_git_executable
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
-from ..version import get_build_sha, get_version
+from ..version import get_version
+from ..version_output import print_version  # noqa: F401 -- compatibility re-export
 from .deps._utils import _scan_installed_packages
 
 # Thin compatibility aliases only; core/project_name.py remains the AC18 owner.
@@ -139,16 +144,39 @@ def _lazy_confirm():
 # ------------------------------------------------------------------
 
 
-def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path) -> set:
+def _build_expected_install_paths(
+    declared_deps, lockfile, apm_modules_dir: Path, *, preserve_installed_case: bool = False
+) -> set:
     """Build expected package paths under *apm_modules_dir*.
 
     Combines direct deps (from ``apm.yml``) with transitive deps
     (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
-    consistency with how packages are actually installed.
+    consistency with how packages are actually installed. Prune opts into
+    recognizing existing case-equivalent paths without renaming them.
     """
+    reader = CachedMaterializationPathReader()
+
+    def expected_path(dependency):
+        desired = dependency.get_install_path(apm_modules_dir)
+        if (
+            preserve_installed_case
+            and dependency.alias is None
+            and dependency.has_case_insensitive_repo_identity
+        ):
+            existing = find_case_equivalent_materialization_path(
+                desired,
+                apm_modules_dir,
+                dependency=dependency,
+                reader=reader,
+                match_complete_path=True,
+            )
+            if existing is not None:
+                return existing
+        return desired
+
     expected = set()
     for dep in declared_deps:
-        install_path = dep.get_install_path(apm_modules_dir)
+        install_path = expected_path(dep)
         try:
             relative_path = install_path.relative_to(apm_modules_dir)
             expected.add(relative_path.as_posix())
@@ -159,7 +187,7 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
         for dep in lockfile.get_package_dependencies():
             if dep.depth is not None and dep.depth > 1:
                 dep_ref = dep.to_dependency_ref()
-                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path = expected_path(dep_ref)
                 try:
                     relative_path = install_path.relative_to(apm_modules_dir)
                     expected.add(relative_path.as_posix())
@@ -427,50 +455,6 @@ def resolve_requested_packages(
             seen.add(canonical)
             resolved.append(canonical)
     return resolved
-
-
-def print_version(ctx, param, value):
-    """Print version and exit."""
-    if not value or ctx.resilient_parsing:
-        return
-
-    version_str = get_version()
-    sha = get_build_sha()
-    if sha:
-        version_str += f" ({sha})"
-
-    console = _get_console()
-    if console:
-        try:
-            console.print(
-                f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
-            )
-        except Exception:
-            click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
-    else:
-        # Graceful fallback when Rich isn't available (e.g., stripped automation environment)
-        click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
-
-    # Gated verbose-version output (experimental flag)
-    try:
-        from ..core.experimental import is_enabled
-
-        if is_enabled("verbose_version"):
-            import platform
-            import sys
-
-            python_ver = platform.python_version()
-            plat = f"{sys.platform}-{platform.machine()}"
-            install_path = str(Path(__file__).resolve().parent.parent)
-
-            _rich_echo(f"  {'Python:':<14}{python_ver}", color="dim")
-            _rich_echo(f"  {'Platform:':<14}{plat}", color="dim")
-            _rich_echo(f"  {'Install path:':<14}{install_path}", color="dim")
-    except Exception:
-        # Never let experimental flag logic break --version
-        pass
-
-    ctx.exit()
 
 
 def _check_and_notify_updates():

@@ -163,7 +163,8 @@ def _new_scenario(
     # Frozen binaries cannot import the Python fixture's network guard.
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         environment[key] = "http://127.0.0.1:9"
-    environment.update(NO_PROXY="", no_proxy="", APM_NO_CACHE="1")
+    # Keep verbose provenance visible instead of cropping it at the runner's width.
+    environment.update(NO_PROXY="", no_proxy="", APM_NO_CACHE="1", COLUMNS="160")
     packages = LocalPackageFactory(isolated.package_root / "packages")
     consumers = LocalPackageFactory(isolated.work_root)
     repositories = LocalGitRepositoryFactory(
@@ -345,6 +346,7 @@ def test_custom_pattern_closes_install_update_outdated_lifecycle(
         "tag-pattern-custom-install-replay",
     )
     assert replay.stdout or replay.stderr
+    assert _locked_dependency(consumer)["resolved_at"] == first_lock["resolved_at"]
     _assert_same_state(first_snapshot, _snapshot(consumer))
 
     repository_skill = scenario.package_repository.worktree / "skills" / _PACKAGE / "SKILL.md"

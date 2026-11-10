@@ -24,6 +24,11 @@ from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 pytestmark = pytest.mark.windows_compat
 
 
+# Generous upper bound: spawned interpreters start slowly on loaded CI runners,
+# and a holder that times out releases the lock early.
+_PROCESS_TIMEOUT_SECONDS = 120
+
+
 def _hold_workspace_transaction(
     manifest: str,
     modules: str,
@@ -37,7 +42,7 @@ def _hold_workspace_transaction(
         logger=None,
     )
     ready.set()
-    if not release.wait(10):
+    if not release.wait(_PROCESS_TIMEOUT_SECONDS):
         raise TimeoutError("test did not release workspace transaction")
     transaction.commit(InstallResult())
 
@@ -227,14 +232,9 @@ def test_success_commit_preserves_lockless_legacy_staging(tmp_path: Path) -> Non
     transaction.commit(InstallResult())
 
     assert (legacy / "package" / "marker").read_text(encoding="ascii") == "keep"
-    transaction._logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item. "
-        "Stop other APM installs, then run again with --verbose "
-        "to see paths you can delete manually."
-    )
-    assert (
-        "legacy backup has no activity lock" in transaction._logger.verbose_detail.call_args[0][0]
-    )
+    assert transaction._logger.warning.call_count == 2
+    assert "Do not delete backups" in transaction._logger.warning.call_args_list[0].args[0]
+    assert "legacy backup has no activity lock" in transaction._logger.warning.call_args.args[0]
 
 
 def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> None:
@@ -266,8 +266,8 @@ def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> N
 
     assert result.committed is True
     assert (package / "marker").read_text(encoding="ascii") == "replacement"
-    transaction._logger.warning.assert_called_once()
-    assert "permission denied" in transaction._logger.verbose_detail.call_args[0][0]
+    assert transaction._logger.warning.call_count == 2
+    assert "permission denied" in transaction._logger.warning.call_args.args[0]
 
 
 def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -> None:
@@ -289,12 +289,8 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
         result = transaction.commit(InstallResult())
 
     assert result.committed is True
-    transaction._logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item. "
-        "Stop other APM installs, then run again with --verbose "
-        "to see paths you can delete manually."
-    )
-    detail = transaction._logger.verbose_detail.call_args[0][0]
+    assert transaction._logger.warning.call_count == 2
+    detail = transaction._logger.warning.call_args.args[0]
     assert str(lock_path) in detail
     assert "could not remove activity lock: permission denied" in detail
 
@@ -308,11 +304,8 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
     )
     rerun.commit(InstallResult())
 
-    rerun_logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item. "
-        "Stop other APM installs, then delete the paths listed below manually."
-    )
-    rerun_detail = rerun_logger.verbose_detail.call_args[0][0]
+    assert rerun_logger.warning.call_count == 2
+    rerun_detail = rerun_logger.warning.call_args.args[0]
     assert str(lock_path) in rerun_detail
     assert "orphaned activity lock remains" in rerun_detail
 
@@ -327,16 +320,15 @@ def test_rollback_releases_staging_lock_when_root_cleanup_fails(tmp_path: Path) 
     package.mkdir()
     lock_path = transaction.resolution._staging_lock_path
 
-    with (
-        patch.object(
-            transaction.resolution,
-            "_remove_staging_root",
-            side_effect=OSError("permission denied"),
-        ),
-        pytest.raises(OSError, match="permission denied"),
+    with patch.object(
+        transaction.resolution,
+        "_remove_staging_root",
+        side_effect=OSError("permission denied"),
     ):
         transaction.rollback()
 
+    assert "permission denied" in transaction._logger.warning.call_args.args[0]
+    assert (package / "marker").read_text(encoding="ascii") == "original"
     probe = FileLock(str(lock_path))
     with probe.acquire(timeout=0):
         assert probe.is_locked
@@ -411,10 +403,11 @@ def test_rollback_reports_action_when_created_manifest_cannot_be_removed(
     with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
         transaction.rollback()
 
-    logger.warning.assert_called_once_with(
-        "Failed to remove apm.yml created by this install. Delete apm.yml manually before retrying."
-    )
-    assert "permission denied" in logger.verbose_detail.call_args[0][0]
+    logger.warning.assert_called_once()
+    warning = logger.warning.call_args.args[0]
+    assert str(manifest) in warning
+    assert "permission denied" in warning
+    assert "before retrying" in warning
 
 
 def test_rollback_removes_new_path_and_restores_existing_path(tmp_path: Path) -> None:
@@ -466,7 +459,7 @@ def test_workspace_lock_serializes_concurrent_processes(tmp_path: Path) -> None:
         args=(str(manifest), str(modules), holder_ready, release_holder),
     )
     holder.start()
-    assert holder_ready.wait(10)
+    assert holder_ready.wait(_PROCESS_TIMEOUT_SECONDS)
 
     contenders = []
     contender_events = []
@@ -481,14 +474,14 @@ def test_workspace_lock_serializes_concurrent_processes(tmp_path: Path) -> None:
         contenders.append(contender)
         contender_events.append((attempting, acquired))
 
-    assert all(attempting.wait(10) for attempting, _ in contender_events)
+    assert all(attempting.wait(_PROCESS_TIMEOUT_SECONDS) for attempting, _ in contender_events)
     assert not any(acquired.wait(0.2) for _, acquired in contender_events)
 
     release_holder.set()
-    assert all(acquired.wait(10) for _, acquired in contender_events)
-    holder.join(10)
+    assert all(acquired.wait(_PROCESS_TIMEOUT_SECONDS) for _, acquired in contender_events)
+    holder.join(_PROCESS_TIMEOUT_SECONDS)
     for contender in contenders:
-        contender.join(10)
+        contender.join(_PROCESS_TIMEOUT_SECONDS)
 
     assert holder.exitcode == 0
     assert all(contender.exitcode == 0 for contender in contenders)

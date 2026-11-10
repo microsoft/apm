@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec, DeploymentMaterializationSession
+from apm_cli.core.deployment_state import (
+    DeploymentLedger,
+    DeploymentLocator,
+    DeploymentRecord,
+    LocatorKind,
+)
+from apm_cli.core.scope import InstallScope
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.manifest_reconcile import union_preserving
 from apm_cli.install.phases import cleanup
 from apm_cli.install.sources import Materialization
 from apm_cli.install.template import run_integration_template
 from apm_cli.integration.cleanup import CleanupResult
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.component
 
 
 def _make_ctx(
@@ -31,18 +49,37 @@ def _make_ctx(
     ctx.orphan_cleanup_retained = {}
     ctx.package_cleanup_retained = {}
     ctx.project_root = project_root or Path("/fake/project")
-    ctx.targets = []
+    ctx.targets = [KNOWN_TARGETS["copilot"]]
+    ctx.scope = InstallScope.PROJECT
+    ctx.apm_package = None
     ctx.diagnostics = MagicMock()
     ctx.diagnostics.count_for_package.return_value = 0
     ctx.logger = MagicMock()
     return ctx
 
 
-def _make_lockfile(deps: dict) -> MagicMock:
+def _make_lockfile(deps: dict, *, target: str | None = None) -> MagicMock:
     """Build a minimal lockfile mock with the given {key: dep_mock} dict."""
     lf = MagicMock()
     lf.dependencies = deps
     lf.get_dependency.side_effect = lambda key: deps.get(key)
+    lf.deployment_ledger = None
+    lf._deployments_present = target is not None
+    lf.local_deployed_files = []
+    lf.local_deployed_file_hashes = {}
+    lf.mcp_target_servers = {}
+    lf.lsp_target_servers = {}
+    if target is not None:
+        records = {}
+        for owner, dep in deps.items():
+            for path in dep.deployed_files:
+                locator = DeploymentLocator(
+                    LocatorKind.PROJECT_RELATIVE, target, path, runtime=None, scope="project"
+                )
+                records[locator.key] = DeploymentRecord(
+                    locator, (owner,), owner, dep.deployed_file_hashes.get(path)
+                )
+        lf.deployment_ledger = DeploymentLedger(records)
     return lf
 
 
@@ -51,6 +88,138 @@ def _make_orphan_dep(deployed_files: list[str], file_hashes: dict | None = None)
     dep.deployed_files = deployed_files
     dep.deployed_file_hashes = file_hashes or {}
     return dep
+
+
+@pytest.mark.parametrize("mode", ["complete", "later-error", "retirement-error"])
+def test_receipt_retirement_is_batched_and_preserves_unremoved_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    home, root = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    root.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    lock = LockFile()
+    records = {}
+    members: dict[str, list[Path]] = {}
+    for owner in ("a", "b", "c"):
+        paths = [root / f".agents/skills/{owner}/{name}" for name in ("SKILL.md", "asset.md")]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"managed content\n")
+        hashes = {path.relative_to(root).as_posix(): compute_file_hash(path) for path in paths}
+        lock.dependencies[owner] = LockedDependency(
+            repo_url=owner, deployed_files=list(hashes), deployed_file_hashes=hashes
+        )
+        for value, content_hash in hashes.items():
+            locator = DeploymentLocator(
+                LocatorKind.PROJECT_RELATIVE, "copilot", value, runtime=None, scope="project"
+            )
+            records[locator.key] = DeploymentRecord(locator, (owner,), owner, content_hash)
+        members[owner] = paths
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records), lock, write_legacy_views=False
+    )
+    session = DeploymentMaterializationSession(root, InstallScope.PROJECT, lock)
+    for owner, paths in members.items():
+        session.record(
+            {path: compute_file_hash(path) for path in paths}, [KNOWN_TARGETS["copilot"]], owner
+        )
+    session.flush()
+    receipt_before = session.state_path.read_bytes()
+    members["a"][1].unlink()
+    members["b"][0].write_bytes(b"user edit\n")
+    unlink = Path.unlink
+
+    def refuse_one(path: Path, *args, **kwargs) -> None:
+        if path == members["c"][0]:
+            raise PermissionError("injected deletion refusal")
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", refuse_one)
+    current = {}
+    for owner in ("b", "c"):
+        path = root / f".agents/skills/{owner}/current.md"
+        path.write_bytes(b"newly integrated\n")
+        current[owner] = [path.relative_to(root).as_posix()]
+    ctx = _make_ctx(
+        existing_lockfile=lock,
+        intended_dep_keys={"b", "c"},
+        package_deployed_files=current,
+        project_root=root,
+    )
+    ctx.diagnostics = DiagnosticCollector()
+    remove = cleanup.remove_stale_deployed_files
+
+    def remove_or_abort(*args, **kwargs):
+        if mode == "later-error" and kwargs["dep_key"] == "b":
+            raise RuntimeError("injected later package failure")
+        return remove(*args, **kwargs)
+
+    persist_receipt = DeploymentMaterializationSession._persist
+
+    def persist_or_refuse(
+        session: DeploymentMaterializationSession,
+        records: dict[str, DeploymentRecord],
+        destinations: dict[str, str],
+    ) -> None:
+        if mode == "retirement-error":
+            raise OSError("injected receipt retirement failure")
+        persist_receipt(session, records, destinations)
+
+    monkeypatch.setattr(cleanup, "remove_stale_deployed_files", remove_or_abort)
+    with (
+        patch.object(
+            DeploymentMaterializationSession,
+            "_load",
+            autospec=True,
+            side_effect=DeploymentMaterializationSession._load,
+        ) as load,
+        patch.object(
+            DeploymentMaterializationSession,
+            "_persist",
+            autospec=True,
+            side_effect=persist_or_refuse,
+        ) as persist,
+    ):
+        if mode == "later-error":
+            with pytest.raises(RuntimeError, match="injected later package failure"):
+                cleanup.run(ctx)
+        elif mode == "retirement-error":
+            with pytest.raises(OSError, match="injected receipt retirement failure"):
+                cleanup.run(ctx)
+        else:
+            cleanup.run(ctx)
+        assert load.call_count == 1
+        assert persist.call_count == 1
+    assert members["b"][0].read_bytes() == b"user edit\n"
+    assert members["c"][0].read_bytes() == b"managed content\n"
+    if mode == "retirement-error":
+        assert session.state_path.read_bytes() == receipt_before
+        assert not members["a"][0].exists()
+        return
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    expected = (
+        {*members["b"], *members["c"]}
+        if mode == "later-error"
+        else {members["b"][0], members["c"][0]}
+    )
+    assert {Path(path) for path in data["destinations"].values()} == expected
+    if mode == "complete":
+        for owner in ("b", "c"):
+            assert ctx.package_deployed_files[owner] == [
+                f".agents/skills/{owner}/current.md",
+                members[owner][0].relative_to(root).as_posix(),
+            ]
+
+
+def test_empty_receipt_retirement_does_not_load_or_publish(tmp_path: Path) -> None:
+    with (
+        patch.object(DeploymentMaterializationSession, "_load") as load,
+        patch.object(DeploymentMaterializationSession, "_persist") as persist,
+    ):
+        cleanup.run(_make_ctx(project_root=tmp_path))
+    load.assert_not_called()
+    persist.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +234,84 @@ class TestNoExistingLockfile:
         cleanup.run(ctx)
         ctx.logger.orphan_cleanup.assert_not_called()
         ctx.logger.stale_cleanup.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["legacy", "unprocessed", "no-target", "edited", "unlink-failed", "last-claim", "no-hash"],
+)
+def test_real_cleanup_preserves_survivors_and_refusals_in_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """Physical deletion and canonical/compatibility retention use the same provenance."""
+    owner = "owner/package"
+    path = ".agents/skills/shared/extra.md"
+    deployed = tmp_path / path
+    deployed.parent.mkdir(parents=True)
+    deployed.write_text("previous source\n", encoding="utf-8")
+    saved_hash = compute_file_hash(deployed)
+    hashes = {} if case == "no-hash" else {path: saved_hash}
+    dependency = LockedDependency(
+        repo_url=owner, deployed_files=[path], deployed_file_hashes=hashes
+    )
+    target = {"legacy": "legacy", "unprocessed": "codex"}.get(case, "copilot")
+    locator = DeploymentLocator(
+        LocatorKind.PROJECT_RELATIVE, target, path, runtime=None, scope="project"
+    )
+    ledger = DeploymentLedger(
+        {locator.key: DeploymentRecord(locator, (owner,), owner, hashes.get(path))}
+    )
+    previous = LockFile(
+        dependencies={owner: dependency}, deployment_ledger=ledger, _deployments_present=True
+    )
+    ctx = _make_ctx(
+        existing_lockfile=previous,
+        intended_dep_keys={owner},
+        package_deployed_files={owner: []},
+        project_root=tmp_path,
+    )
+    ctx.diagnostics = DiagnosticCollector()
+    if case == "no-target":
+        ctx.targets = []
+    if case == "edited":
+        deployed.write_text("personal edits\n", encoding="utf-8")
+    if case == "unlink-failed":
+        original_unlink = Path.unlink
+
+        def refuse_owned_file(candidate: Path, missing_ok: bool = False) -> None:
+            if candidate == deployed:
+                raise PermissionError("injected unlink refusal")
+            original_unlink(candidate, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", refuse_owned_file)
+    expected_bytes = deployed.read_bytes()
+    cleanup.run(ctx)
+
+    retained = case not in {"last-claim", "no-hash"}
+    assert deployed.exists() is retained
+    if retained:
+        assert deployed.read_bytes() == expected_bytes
+    refused = case in {"edited", "unlink-failed"}
+    assert ctx.package_deployed_files[owner] == ([path] if refused else [])
+    assert ctx.package_cleanup_retained == ({owner: hashes} if refused else {})
+    files, final_hashes, final_ledger = union_preserving(
+        ctx.package_deployed_files[owner],
+        {},
+        [path],
+        hashes,
+        ctx.targets,
+        prior_ledger=ledger,
+        cleanup_retained_hashes=ctx.package_cleanup_retained.get(owner),
+        owner=owner,
+        include_ledger=True,
+    )
+    assert files == ([path] if retained else [])
+    assert final_hashes == (hashes if retained else {})
+    assert dict(final_ledger.records) == (dict(ledger.records) if retained else {})
+    final = LockFile(dependencies={owner: LockedDependency(repo_url=owner)})
+    DeploymentLedgerCodec.apply_to_lockfile(final_ledger, final)
+    assert final.dependencies[owner].deployed_files == files
+    assert final.dependencies[owner].deployed_file_hashes == final_hashes
 
 
 # ---------------------------------------------------------------------------
@@ -456,11 +703,12 @@ class TestStaleCleanupNoStaleFiles:
 
 class TestStaleCleanupFullRun:
     def test_stale_files_removed_and_logger_called(self, tmp_path):
-        prev_dep = _make_orphan_dep(["old.md", "new.md"], file_hashes={"old.md": "abc"})
+        old, new = ".github/agents/old.md", ".github/agents/new.md"
+        prev_dep = _make_orphan_dep([old, new], file_hashes={old: "abc"})
         lf = _make_lockfile({"my-pkg": prev_dep})
         lf.get_dependency.return_value = prev_dep
 
-        new_deployed = ["new.md"]
+        new_deployed = [new]
         ctx = _make_ctx(
             existing_lockfile=lf,
             intended_dep_keys={"my-pkg"},  # not an orphan
@@ -470,12 +718,12 @@ class TestStaleCleanupFullRun:
 
         mock_result = MagicMock()
         mock_result.failed = []
-        mock_result.deleted = ["old.md"]
+        mock_result.deleted = [old]
         mock_result.deleted_targets = []
         mock_result.skipped_user_edit = []
 
         with (
-            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=["old.md"]),
+            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=[old]),
             patch(
                 "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
                 return_value=mock_result,
@@ -488,7 +736,8 @@ class TestStaleCleanupFullRun:
 
     def test_stale_failed_paths_reinserted_into_deployed(self, tmp_path):
         """Files that failed deletion are re-added to new_deployed."""
-        prev_dep = _make_orphan_dep(["old.md"])
+        old = ".github/agents/old.md"
+        prev_dep = _make_orphan_dep([old])
         lf = _make_lockfile({"pkg": prev_dep})
         lf.get_dependency.return_value = prev_dep
 
@@ -501,14 +750,14 @@ class TestStaleCleanupFullRun:
         )
 
         mock_result = MagicMock()
-        mock_result.failed = ["old.md"]
-        mock_result.retained = ["old.md"]
+        mock_result.failed = [old]
+        mock_result.retained = [old]
         mock_result.deleted = []
         mock_result.deleted_targets = []
         mock_result.skipped_user_edit = []
 
         with (
-            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=["old.md"]),
+            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=[old]),
             patch(
                 "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
                 return_value=mock_result,
@@ -518,7 +767,7 @@ class TestStaleCleanupFullRun:
             cleanup.run(ctx)
 
         # failed paths must be re-inserted for retry
-        assert "old.md" in new_deployed
+        assert old in new_deployed
 
     def test_stale_user_edited_and_unmanaged_paths_remain_tracked(self, tmp_path):
         """Cleanup refusals retain their existing ownership rows for later review."""
@@ -528,7 +777,7 @@ class TestStaleCleanupFullRun:
             [user_edited, unmanaged],
             file_hashes={user_edited: "sha256:original"},
         )
-        lf = _make_lockfile({"pkg": prev_dep})
+        lf = _make_lockfile({"pkg": prev_dep}, target="copilot")
         lf.get_dependency.return_value = prev_dep
         new_deployed: list[str] = []
         ctx = _make_ctx(
@@ -563,7 +812,8 @@ class TestStaleCleanupFullRun:
         }
 
     def test_stale_cleanup_empty_parents_called(self, tmp_path):
-        prev_dep = _make_orphan_dep(["dir/old.md"])
+        old = ".github/agents/old.md"
+        prev_dep = _make_orphan_dep([old])
         lf = _make_lockfile({"pkg": prev_dep})
         lf.get_dependency.return_value = prev_dep
 
@@ -574,15 +824,15 @@ class TestStaleCleanupFullRun:
             project_root=tmp_path,
         )
 
-        fake_target = tmp_path / "dir"
+        fake_target = tmp_path / old
         mock_result = MagicMock()
         mock_result.failed = []
-        mock_result.deleted = ["dir/old.md"]
+        mock_result.deleted = [old]
         mock_result.deleted_targets = [fake_target]
         mock_result.skipped_user_edit = []
 
         with (
-            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=["dir/old.md"]),
+            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=[old]),
             patch(
                 "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
                 return_value=mock_result,
@@ -596,7 +846,8 @@ class TestStaleCleanupFullRun:
         mock_cep.assert_called_once_with([fake_target], tmp_path)
 
     def test_stale_cleanup_logs_skipped_user_edit(self, tmp_path):
-        prev_dep = _make_orphan_dep(["hand-edited.md"])
+        edited = ".github/agents/hand-edited.md"
+        prev_dep = _make_orphan_dep([edited])
         lf = _make_lockfile({"pkg": prev_dep})
         lf.get_dependency.return_value = prev_dep
 
@@ -611,12 +862,10 @@ class TestStaleCleanupFullRun:
         mock_result.failed = []
         mock_result.deleted = []
         mock_result.deleted_targets = []
-        mock_result.skipped_user_edit = ["hand-edited.md"]
+        mock_result.skipped_user_edit = [edited]
 
         with (
-            patch(
-                "apm_cli.install.phases.cleanup.detect_stale_files", return_value=["hand-edited.md"]
-            ),
+            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=[edited]),
             patch(
                 "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
                 return_value=mock_result,
@@ -625,10 +874,11 @@ class TestStaleCleanupFullRun:
         ):
             cleanup.run(ctx)
 
-        ctx.logger.cleanup_skipped_user_edit.assert_called_once_with("hand-edited.md", "pkg")
+        ctx.logger.cleanup_skipped_user_edit.assert_called_once_with(edited, "pkg")
 
     def test_stale_cleanup_no_logger_no_crash(self, tmp_path):
-        prev_dep = _make_orphan_dep(["old.md"])
+        old = ".github/agents/old.md"
+        prev_dep = _make_orphan_dep([old])
         lf = _make_lockfile({"pkg": prev_dep})
         lf.get_dependency.return_value = prev_dep
 
@@ -642,12 +892,12 @@ class TestStaleCleanupFullRun:
 
         mock_result = MagicMock()
         mock_result.failed = []
-        mock_result.deleted = ["old.md"]
+        mock_result.deleted = [old]
         mock_result.deleted_targets = []
         mock_result.skipped_user_edit = []
 
         with (
-            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=["old.md"]),
+            patch("apm_cli.install.phases.cleanup.detect_stale_files", return_value=[old]),
             patch(
                 "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
                 return_value=mock_result,
@@ -713,7 +963,8 @@ class TestCrossPackageProtection:
         assert ".github/agents/only-a.md" in stale_passed
         assert ".github/agents/shared.md" not in stale_passed
         ctx.logger.verbose_detail.assert_called_once_with(
-            "Kept stale file .github/agents/shared.md for pkg-a; still deployed by another package"
+            "Kept stale file .github/agents/shared.md for pkg-a; "
+            "still in use by another package or target"
         )
 
     def test_file_removed_when_no_other_package_claims_it(self, tmp_path):

@@ -8,6 +8,7 @@ from typing import Any
 
 import click
 
+from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...install.locking import serialized_lifecycle
@@ -68,6 +69,29 @@ def _collect_deployed_cleanup_state(
 
     snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
     return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+
+
+def _persist_uninstall_lockfile(
+    lockfile,
+    lockfile_path,
+    logger: CommandLogger,
+    integration_cleanup: IntegrationCleanupOutcome,
+) -> None:
+    """Bind actual survivor writes only after final lock persistence succeeds."""
+    from .lockfile_state import lockfile_has_persisted_state
+
+    try:
+        if lockfile_has_persisted_state(lockfile):
+            lockfile.write(lockfile_path)
+        else:
+            lockfile_path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning(
+            "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+        )
+    else:
+        if integration_cleanup.materialization_session is not None:
+            integration_cleanup.materialization_session.bind_committed_claims(lockfile)
 
 
 def _sync_integrations_for_manifest(
@@ -187,11 +211,18 @@ def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], lo
 
 def _report_package_removal_failure(
     logger: CommandLogger,
-    error: OSError | PathTraversalError | LocalSurvivorRefreshError,
+    error: OSError | PathTraversalError | LocalSurvivorRefreshError | CodexNativeError,
     *,
     user_scope: bool,
 ) -> None:
     """Explain recoverable metadata without promising filesystem rollback."""
+    if isinstance(error, CodexNativeError):
+        logger.error(
+            f"Codex native removal incomplete: {error} "
+            "APM package files, declarations, and lockfile ownership were retained. "
+            "Resolve the native error and retry the same uninstall command."
+        )
+        return
     recovery = "apm install --global" if user_scope else "apm install"
     failure = (
         "shared-slot refresh failed"
@@ -438,6 +469,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # rather than claiming that already-deleted files were rolled back.
         refreshed_survivor_keys = builtins.set()
         try:
+            from ...codex_plugins.registrar import remove_codex_plugins
+
+            remove_codex_plugins(
+                modules_dir=modules_dir,
+                dependency_keys=removed_keys | builtins.set(projected_orphans),
+                cwd=manifest_path.parent,
+                scope=scope,
+            )
             removed_from_modules = _remove_packages_from_disk(
                 packages_to_remove,
                 modules_dir,
@@ -448,7 +487,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
-        except (OSError, PathTraversalError, LocalSurvivorRefreshError) as exc:
+        except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
             sys.exit(1)
         removed_from_modules += orphan_removed
@@ -663,17 +702,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         lockfile_updated = lsp_lock_updated or lockfile_updated
 
         if lockfile and lockfile_updated and lockfile_ready and mcp_cleanup_error is None:
-            try:
-                from .lockfile_state import lockfile_has_persisted_state
-
-                if lockfile_has_persisted_state(lockfile):
-                    lockfile.write(lockfile_path)
-                else:
-                    lockfile_path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                )
+            _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
 
         # Rebuild the APM-owned Copilot plugin registration from the surviving
         # locked state: only APM's own rows disappear, user bytes never do.

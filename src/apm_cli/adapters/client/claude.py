@@ -26,7 +26,7 @@ from pathlib import Path
 
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
-from ...utils.path_security import PathTraversalError
+from ...utils.path_security import PathTraversalError, validate_path_segments
 from .copilot import CopilotClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -82,6 +82,51 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         if isinstance(config, dict) and "command" in config:
             config["command"] = self._rewrite_self_defined_skill_command(config["command"])
         return config
+
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
+        """Compare against the normalized shape actually written to Claude."""
+        return self._normalize_mcp_entry_for_claude_code(
+            super().render_server_config(
+                server_info, env_overrides=env_overrides, runtime_vars=runtime_vars
+            )
+        )
+
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """OAuth metadata is runtime-owned, not part of an APM connection declaration."""
+        if not isinstance(native, dict):
+            return False
+        return self.managed_server_config(native) == expected
+
+    def managed_server_config(self, native: dict) -> dict:
+        """Exclude only the runtime-owned OAuth account from write fingerprints."""
+        return {key: value for key, value in native.items() if key != "oauthAccount"}
+
+    def project_managed_server_config(
+        self, native: object, *, baseline: dict, requested: dict
+    ) -> object:
+        """Exclude a valid native-only cwd from managed reconciliation, never cleanup."""
+        if (
+            not isinstance(native, dict)
+            or native.get("type") != "stdio"
+            or baseline.get("type") != "stdio"
+            or "cwd" in baseline
+            or "cwd" in requested
+        ):
+            return native
+        cwd = native.get("cwd")
+        if not isinstance(cwd, str) or not cwd.strip() or "\x00" in cwd:
+            return native
+        try:
+            validate_path_segments(cwd, context="MCP cwd", allow_current_dir=True)
+        except PathTraversalError:
+            return native
+        return {key: value for key, value in native.items() if key != "cwd"}
 
     @classmethod
     def _is_remote_mcp_entry(cls, entry: dict) -> bool:
@@ -148,7 +193,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         }
 
     @classmethod
-    def _merge_mcp_server_dicts(cls, existing_servers: dict, config_updates: dict) -> None:
+    def _merge_mcp_server_dicts(
+        cls, existing_servers: dict, config_updates: dict, managed_fields: set[str] | None = None
+    ) -> None:
         """Merge *config_updates* into *existing_servers* in place.
 
         Per-server entries are shallow-merged: ``{**old, **new}`` so keys present
@@ -164,15 +211,23 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 continue
             prev = existing_servers.get(name)
             if isinstance(prev, dict):
+                if managed_fields:
+                    prev = {
+                        key: value
+                        for key, value in prev.items()
+                        if key not in managed_fields or key in new_cfg
+                    }
                 merged = {**cls._retained_previous_entry(prev, new_cfg), **new_cfg}
                 existing_servers[name] = merged
             else:
                 existing_servers[name] = dict(new_cfg)
 
-    def _merge_and_normalize_updates(self, data: dict, config_updates: dict) -> None:
+    def _merge_and_normalize_updates(
+        self, data: dict, config_updates: dict, managed_fields: set[str] | None = None
+    ) -> None:
         if "mcpServers" not in data:
             data["mcpServers"] = {}
-        self._merge_mcp_server_dicts(data["mcpServers"], config_updates)
+        self._merge_mcp_server_dicts(data["mcpServers"], config_updates, managed_fields)
         for name in config_updates:
             ent = data["mcpServers"].get(name)
             if isinstance(ent, dict):
@@ -184,7 +239,12 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _project_mcp_path(self) -> Path:
         return self.project_root / ".mcp.json"
 
-    def _user_claude_json_path(self) -> Path:
+    @classmethod
+    def resolve_user_claude_unresolved_path(cls) -> Path:
+        """Return the un-normalized path for user-scope Claude Code config.
+
+        Used for symlink pre-checks before canonical resolution.
+        """
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
         if config_dir:
             config_path = Path(config_dir).expanduser()
@@ -193,8 +253,21 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
                     "config; set an absolute path or unset it to use ~/.claude.json."
                 )
-            return config_path.resolve(strict=False) / ".claude.json"
+            return config_path / ".claude.json"
         return Path.home() / ".claude.json"
+
+    @classmethod
+    def resolve_user_claude_json_path(cls, unresolved_path: Path | None = None) -> Path:
+        """Resolve the selected destination, optionally reusing a checked path."""
+        path = (
+            unresolved_path
+            if unresolved_path is not None
+            else cls.resolve_user_claude_unresolved_path()
+        )
+        return path.parent.resolve(strict=False) / path.name
+
+    def _user_claude_json_path(self) -> Path:
+        return self.resolve_user_claude_json_path()
 
     def _should_write_project(self) -> bool:
         return (self.project_root / ".claude").is_dir()
@@ -216,9 +289,11 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         except (json.JSONDecodeError, OSError):
             return {"mcpServers": {}}
 
-    def update_config(self, config_updates, enabled=True):
+    def update_config(
+        self, config_updates, enabled=True, *, managed_fields: set[str] | None = None
+    ):
         if self._is_user_scope():
-            return self._merge_user_mcp(config_updates)
+            return self._merge_user_mcp(config_updates, managed_fields=managed_fields)
         if not self._should_write_project():
             _rich_warning(
                 f"Skipped Claude Code project MCP -- .claude/ not found in {self.project_root}"
@@ -236,13 +311,13 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     data = {}
             else:
                 data = {}
-            self._merge_and_normalize_updates(data, config_updates)
+            self._merge_and_normalize_updates(data, config_updates, managed_fields)
             path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
             return True
         except OSError:
             return False
 
-    def _merge_user_mcp(self, config_updates) -> bool:
+    def _merge_user_mcp(self, config_updates, *, managed_fields: set[str] | None = None) -> bool:
         path = self._user_claude_json_path()
         try:
             if path.is_file():
@@ -255,7 +330,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     data = {}
             else:
                 data = {}
-            self._merge_and_normalize_updates(data, config_updates)
+            self._merge_and_normalize_updates(data, config_updates, managed_fields)
             payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(path, payload, new_file_mode=0o600)
@@ -272,6 +347,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         env_overrides=None,
         server_info_cache=None,
         runtime_vars=None,
+        managed_fields: set[str] | None = None,
     ):
         if not server_url:
             _rich_error("server_url cannot be empty")
@@ -296,10 +372,16 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            ok = self.update_config({config_key: server_config})
+            from apm_cli.install.mcp.ownership import mcp_native_hash
+
+            fingerprint = mcp_native_hash(
+                self.managed_server_config(self._normalize_mcp_entry_for_claude_code(server_config))
+            )
+            ok = self.update_config({config_key: server_config}, managed_fields=managed_fields)
             if not ok:
                 _rich_error(f"Failed to write MCP config for '{config_key}' to Claude Code")
                 return False
+            self.written_mcp_hashes[server_url] = fingerprint
 
             _rich_success(f"Successfully configured MCP server '{config_key}' for Claude Code")
             return True

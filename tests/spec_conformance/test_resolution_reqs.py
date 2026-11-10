@@ -20,7 +20,11 @@ from pathlib import Path
 import pytest
 
 from apm_cli.cache.url_normalize import normalize_repo_url
-from apm_cli.deps.git_remote_ops import RemoteRefParseError, validate_ls_remote_tag_output
+from apm_cli.deps.git_remote_ops import (
+    RemoteRefParseError,
+    parse_ls_remote_output,
+    validate_ls_remote_tag_output,
+)
 from apm_cli.deps.plugin_parser import _map_plugin_artifacts
 from apm_cli.deps.revision_pins import (
     RevisionPinResolutionError,
@@ -60,7 +64,9 @@ from tests.unit.adopt.test_native_skill_collision import (
 from tests.unit.deps.test_immutable_requirement_conflicts import (
     test_conflicting_commit_requirements_fail_with_both_chains as _run_immutable_chain_contract,
 )
+from tests.unit.install.test_dry_run_graph import _preview
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
+from tests.utils.local_package import LocalPackageFactory
 
 # --- req-rs-001..014 ---------------------------------------------------
 
@@ -72,6 +78,25 @@ def test_resolver_walks_dependency_graph_deterministically():
         "declaration order",
         "Intersection-pick",
     )
+
+
+@pytest.mark.req("req-rs-001")
+def test_offline_preview_preserves_breadth_first_declaration_order(tmp_path: Path) -> None:
+    """The preview consumer preserves the existing resolution traversal contract."""
+    factory = LocalPackageFactory(tmp_path)
+    factory.create("left-child")
+    factory.create("right-child")
+    factory.create("left", dependencies=("../left-child",))
+    factory.create("right", dependencies=("../right-child",))
+    consumer = factory.create("consumer", dependencies=("../left", "../right"))
+    plan = _preview(consumer.root)
+    assert not plan.dependency_preview_errors
+    assert [dependency.local_path for dependency in plan.selected_apm_dependencies] == [
+        "../left",
+        "../right",
+        "../left-child",
+        "../right-child",
+    ]
 
 
 @pytest.mark.req("req-rs-001")
@@ -118,6 +143,33 @@ def test_resolver_emits_lockfile_after_successful_resolution():
         "MUST emit",
         "apm.lock.yaml",
     )
+
+
+@pytest.mark.req("req-rs-002")
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize("peeled_first", [False, True])
+def test_peeled_tag_identity_survives_shared_parser(peeled_first: bool) -> None:
+    """Both record orders preserve the peeled commit and annotated-only selection."""
+    tag_lines = [
+        f"{'a' * 40}\trefs/tags/v1.0.0",
+        f"{'b' * 40}\trefs/tags/v1.0.0^{{}}",
+    ]
+    if peeled_first:
+        tag_lines.reverse()
+    output = "\n".join(
+        [*tag_lines, f"{'c' * 40}\trefs/tags/v2.0.0", f"{'d' * 40}\trefs/heads/v3.0.0"]
+    )
+    refs = parse_ls_remote_output(output)
+
+    candidate = find_latest_annotated_tag(refs, package_name="tagged-package")
+
+    assert candidate.tag == "v1.0.0"
+    assert candidate.commit_sha == "b" * 40
+    assert {ref.name: ref.annotated for ref in refs} == {
+        "v1.0.0": True,
+        "v2.0.0": False,
+        "v3.0.0": False,
+    }
 
 
 @pytest.mark.req("req-rs-003")

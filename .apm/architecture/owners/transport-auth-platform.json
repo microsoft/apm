@@ -2,12 +2,21 @@
   "version": 1,
   "owners": [
     {
+      "id": "https-trust-policy",
+      "decision": "Package HTTPS trust precedence, additive CA validation and publication",
+      "owner": "core/tls_trust.py (configure_tls_trust, explicit_ca_bundle_path)",
+      "selectors": ["src/apm_cli/core/tls_trust.py", "src/apm_cli/core/script_executors.py"],
+      "guards": ["transport-platform-tls-trust-injection"]
+    },
+    {
       "id": "git-transport-selection",
       "decision": "Initial Git scheme, ordered protocol attempts, and GitLab sparse-fetch plan consumption",
       "owner": "deps/transport_selection.py (initial_transport_scheme, TransportSelector); deps/download_strategies.py (DownloadDelegate.download_gitlab_file)",
       "selectors": [
         "src/apm_cli/deps/transport_selection.py",
+        "src/apm_cli/deps/git_reference_resolver.py",
         "src/apm_cli/deps/download_strategies.py",
+        "src/apm_cli/install/validation.py",
         "src/apm_cli/marketplace/resolver.py",
         "src/apm_cli/marketplace/version_resolver.py"
       ],
@@ -149,6 +158,13 @@
       "owner": "deps/revision_pins.py (RevisionPinResolutionResult)",
       "selectors": ["src/apm_cli/deps/revision_pins.py"],
       "guards": ["transport-platform-revision-pin-outcome"]
+    },
+    {
+      "id": "ls-remote-tag-commits",
+      "decision": "Which commit a git ls-remote tag record names: an annotated or signed tag resolves to its peeled ^{} commit, for dependency refs and marketplace source pins alike",
+      "owner": "deps/git_remote_ops.py (tag_commit_shas); consumers: parse_ls_remote_output and marketplace/ref_resolver.py",
+      "selectors": ["src/apm_cli/deps/git_remote_ops.py", "src/apm_cli/marketplace/ref_resolver.py"],
+      "guards": ["transport-platform-ls-remote-tag-commits"]
     },
     {
       "id": "git-semver-preflight-resolution",

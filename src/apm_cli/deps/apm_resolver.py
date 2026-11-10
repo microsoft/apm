@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
+from ..models.dependency.replacement import build_replacement_index
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
@@ -107,6 +108,8 @@ class APMDependencyResolver:
         cache_validation_callback: Callable[[Path, str], Path | None] | None = None,
         reference_resolver: ReferenceResolver | None = None,
         frozen: bool = False,
+        update_keys: set[str] | None = None,
+        read_only: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -130,6 +133,8 @@ class APMDependencyResolver:
                 install path already exists, at any depth -- see that
                 method's docstring for why this can't be scoped to direct
                 deps only.
+            update_keys: Shared selected-package keys for scoped updates.
+                Selected descendants are added before download callbacks run.
             existing_lockfile: Existing resolved dependency state used by the
                 canonical ref-drift owner to decide whether a plain install
                 must re-enter the download callback.
@@ -137,7 +142,23 @@ class APMDependencyResolver:
                 candidate only after this resolver validates it.
             cache_validation_callback: Optional read-only admission check for reused
                 bytes, after the fetch decision and before package normalization.
+            read_only: Preview using local sources and unchanged installed packages.
+                Never fetch, activate, or materialize metadata; unknown subtrees
+                are reported as resolution errors rather than treated as leaves.
         """
+        if read_only and any(
+            callback is not None
+            for callback in (
+                download_callback,
+                activation_callback,
+                cache_validation_callback,
+                reference_resolver,
+            )
+        ):
+            raise ValueError(
+                "Read-only resolution cannot use fetching or materialization callbacks"
+            )
+        self._read_only = read_only
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
@@ -145,6 +166,8 @@ class APMDependencyResolver:
         self._activation_callback = activation_callback
         self._cache_validation_callback = cache_validation_callback
         self._update_refs = update_refs
+        self._update_keys = update_keys
+        self._scoped_rechecked: set[str] = set()
         self._existing_lockfile = existing_lockfile
         self._reference_resolver = reference_resolver
         self._frozen = frozen
@@ -274,6 +297,7 @@ class APMDependencyResolver:
                 root_package = APMPackage.from_apm_yml(
                     apm_yml_path,
                     source_path=project_root.resolve(),
+                    create_config=not self._read_only,
                 )
             except (ValueError, FileNotFoundError) as e:
                 # Create error graph
@@ -369,8 +393,10 @@ class APMDependencyResolver:
             child_dep,
             repo_url=parent_dep.repo_url,
             host=parent_dep.host,
+            host_type=parent_dep.host_type,
             port=parent_dep.port,
             explicit_scheme=parent_dep.explicit_scheme,
+            ssh_user=parent_dep.ssh_user,
             ado_organization=parent_dep.ado_organization,
             ado_project=parent_dep.ado_project,
             ado_repo=parent_dep.ado_repo,
@@ -548,6 +574,8 @@ class APMDependencyResolver:
             MarketplaceFetchError: Network/auth error fetching marketplace data.
             ValueError: Invalid marketplace or plugin configuration.
         """
+        if self._read_only:
+            raise ValueError("Marketplace lookup is not available in an offline dependency preview")
         from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 
         resolution = resolve_marketplace_plugin(
@@ -653,6 +681,7 @@ class APMDependencyResolver:
                     source_path=self._project_root.resolve()
                     if self._project_root is not None
                     else root_apm_yml.parent.resolve(),
+                    create_config=not self._read_only,
                 )
             except (ValueError, FileNotFoundError) as e:
                 _logger.warning("Failed to parse root apm.yml: %s", e)
@@ -662,6 +691,9 @@ class APMDependencyResolver:
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
+        self.replacement_index = build_replacement_index(root_package.replace_rules or [])
+        consumer_root = root_package.source_path or root_apm_yml.parent
+        modules_dir = self._apm_modules_dir or root_apm_yml.parent / "apm_modules"
         requirements = ImmutableRequirements(
             root_package.name,
             self._reference_resolver,
@@ -696,6 +728,13 @@ class APMDependencyResolver:
                     dep_ref = resolved
                 else:
                     continue
+            dep_ref = self.replacement_index.bind(
+                dep_ref,
+                consumer_root=consumer_root,
+                modules_dir=modules_dir,
+                parent=None,
+                is_dev=False,
+            )
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_resolution_key())
 
@@ -714,6 +753,13 @@ class APMDependencyResolver:
                     dep_ref = resolved
                 else:
                     continue
+            dep_ref = self.replacement_index.bind(
+                dep_ref,
+                consumer_root=consumer_root,
+                modules_dir=modules_dir,
+                parent=None,
+                is_dev=True,
+            )
             key = dep_ref.get_resolution_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
@@ -751,12 +797,17 @@ class APMDependencyResolver:
                 tuple[DependencyNode, DependencyReference, DependencyNode | None, bool]
             ]
             work_items = []
+            scheduled_nodes: set[str] = set()
             for dep_ref, depth, parent_node, is_dev in level_items:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
 
                 # Check maximum depth to prevent infinite recursion
                 if depth > self.max_depth:
+                    if self._read_only:
+                        tree.resolution_errors.append(
+                            f"Dependency preview depth limit reached: {dep_ref.to_display_reference()}"
+                        )
                     continue
 
                 # Check if we already processed this dependency at this level or higher
@@ -771,6 +822,14 @@ class APMDependencyResolver:
                         child is not existing_node for child in parent_node.children
                     ):
                         parent_node.children.append(existing_node)
+                    if (
+                        self._update_keys is not None
+                        and dep_ref.get_unique_key() in self._update_keys
+                        and dep_ref.get_unique_key() not in self._scoped_rechecked
+                        and existing_node.get_id() not in scheduled_nodes
+                    ):
+                        work_items.append((existing_node, dep_ref, parent_node, is_dev))
+                        scheduled_nodes.add(existing_node.get_id())
                     continue
 
                 # Create a new node for this dependency
@@ -796,6 +855,7 @@ class APMDependencyResolver:
                     parent_node.children.append(node)
 
                 work_items.append((node, dep_ref, parent_node, is_dev))
+                scheduled_nodes.add(node.get_id())
 
             winner_candidates.extend(item[0] for item in work_items)
             for node, _, _, _ in work_items:
@@ -837,6 +897,18 @@ class APMDependencyResolver:
 
             # --- Phase C (main thread): integrate results, enqueue sub-deps ---
             for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
+                if dep_ref.replacement is not None and loaded_package is None:
+                    detail = str(exc) if exc is not None else "selected source could not be loaded"
+                    tree.resolution_errors.append(
+                        f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
+                    )
+                    continue
+                if self._read_only and (exc is not None or loaded_package is None):
+                    tree.resolution_errors.append(
+                        f"{dep_ref.to_display_reference()}: "
+                        f"{exc or 'package metadata is not available locally'}"
+                    )
+                    continue
                 if exc is not None:
                     if isinstance(exc, MarketplaceManifestMaterializationError):
                         message = f"Marketplace package materialization failed: {exc}"
@@ -875,6 +947,10 @@ class APMDependencyResolver:
                             sub_dep,
                         )
                         if sub_dep is None:
+                            if self._read_only:
+                                tree.resolution_errors.append(
+                                    f"Unverifiable dependency of {node.dependency_ref.to_display_reference()}"
+                                )
                             continue
                         if (
                             sub_dep.is_local
@@ -915,10 +991,22 @@ class APMDependencyResolver:
                                 sub_dep = resolved
                             else:
                                 continue
+                        sub_dep = self.replacement_index.bind(
+                            sub_dep,
+                            consumer_root=consumer_root,
+                            modules_dir=modules_dir,
+                            parent=node.dependency_ref.get_unique_key(),
+                            is_dev=is_dev,
+                        )
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
+                        if (
+                            self._update_keys is not None
+                            and node.dependency_ref.get_unique_key() in self._update_keys
+                        ):
+                            self._update_keys.add(sub_dep.get_unique_key())
                         queue_key = sub_dep.get_resolution_key()
-                        if queue_key not in queued_keys:
+                        if sub_dep.replacement is not None or queue_key not in queued_keys:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
                             queued_keys.add(queue_key)
 
@@ -1045,6 +1133,9 @@ class APMDependencyResolver:
         loop-iteration variable.
         """
         node, dep_ref, parent_node, _is_dev = item
+        if self._update_keys is not None and dep_ref.get_unique_key() in self._update_keys:
+            with self._download_lock:
+                self._scoped_rechecked.add(dep_ref.get_unique_key())
         # Compute breadcrumb chain from this node's ancestry so download
         # errors can report "root > mid > failing-dep" context.
         parent_chain = node.get_ancestor_chain()
@@ -1071,6 +1162,10 @@ class APMDependencyResolver:
             return (item, loaded, None)
         except (ValueError, FileNotFoundError) as exc:
             return (item, None, exc)
+        except OSError as exc:
+            if self._read_only:
+                return (item, None, exc)
+            raise
 
     def _should_force_recheck(self, dep_ref: DependencyReference) -> bool:
         """Delegate existing-path recheck policy to the canonical drift owner."""
@@ -1085,6 +1180,12 @@ class APMDependencyResolver:
             dep_ref,
             locked_dep,
             update_refs=self._update_refs,
+            update_keys=self._update_keys,
+            package_path=(
+                dep_ref.get_install_path(self._apm_modules_dir)
+                if self._apm_modules_dir is not None
+                else None
+            ),
         )
 
     def _try_load_dependency_package(
@@ -1128,7 +1229,12 @@ class APMDependencyResolver:
         # paths into remote virtual deps before they reach this loader. Anything
         # still local here lacks trusted parent repo coordinates, so refuse it
         # before the download callback can copy from the consumer filesystem.
-        if dep_ref.is_local and dep_ref.local_path and self._is_remote_parent(parent_pkg):
+        if (
+            dep_ref.replacement is None
+            and dep_ref.is_local
+            and dep_ref.local_path
+            and self._is_remote_parent(parent_pkg)
+        ):
             self._reject_remote_parent_local_path(
                 dep_ref,
                 parent_pkg,
@@ -1138,6 +1244,20 @@ class APMDependencyResolver:
 
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
+
+        if self._read_only:
+            if dep_ref.is_local and dep_ref.local_path:
+                if self._project_root is None:
+                    raise ValueError("Read-only resolution requires a project root")
+                if dep_ref.replacement is not None:
+                    install_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
+                else:
+                    base = self._effective_base_dir(parent_pkg, self._project_root)
+                    install_path = (base / Path(dep_ref.local_path).expanduser()).resolve()
+            elif self._update_refs or self._should_force_recheck(dep_ref):
+                raise ValueError("Package metadata requires fetching; preview is offline")
+            if not install_path.exists():
+                return None
 
         downloaded_candidate: Path | None = None
         had_existing_install = install_path.exists()
@@ -1229,18 +1349,24 @@ class APMDependencyResolver:
         ):
             self._cache_validation_callback(install_path, dep_ref.get_unique_key())
 
-        materialize_marketplace_manifest(dep_ref, install_path)
+        if not self._read_only:
+            materialize_marketplace_manifest(dep_ref, install_path)
 
         # Native Agent Plugins must retain their projected compatibility package
         # so recursive resolution can see APM-only dependencies without requiring
         # or synthesizing an apm.yml compatibility manifest.
-        dep_source_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
+        dep_source_path = (
+            install_path.resolve()
+            if self._read_only and dep_ref.is_local
+            else self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
+        )
         native_detection = route_agent_plugin_package(install_path)
         if native_detection is not None:
             validation = validate_apm_package(
                 install_path,
                 source_path=dep_source_path,
                 agent_plugin_detection=native_detection,
+                read_only=self._read_only,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1265,10 +1391,15 @@ class APMDependencyResolver:
             )
 
         package_type, _ = detect_package_type(install_path)
-        if package_type in (PackageType.MARKETPLACE_PLUGIN, PackageType.SKILL_BUNDLE):
+        if package_type in (
+            PackageType.MARKETPLACE_PLUGIN,
+            PackageType.SKILL_BUNDLE,
+            PackageType.HOOK_PACKAGE,
+        ):
             validation = validate_apm_package(
                 install_path,
                 source_path=dep_source_path,
+                read_only=self._read_only,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1281,7 +1412,7 @@ class APMDependencyResolver:
                 self._raise_downloaded_package_error(
                     downloaded_candidate,
                     dep_ref,
-                    f"Marketplace Plugin validation produced no package metadata: {install_path}",
+                    f"Package validation produced no package metadata: {install_path}",
                     had_existing_install,
                 )
             if not validation.package.source:
@@ -1325,7 +1456,11 @@ class APMDependencyResolver:
         # is the *original* user source; for remote deps it is the clone in
         # apm_modules.
         try:
-            package = APMPackage.from_apm_yml(apm_yml_path, source_path=dep_source_path)
+            package = APMPackage.from_apm_yml(
+                apm_yml_path,
+                source_path=dep_source_path,
+                create_config=not self._read_only,
+            )
         except FileNotFoundError:
             self._raise_downloaded_package_error(
                 downloaded_candidate,
@@ -1367,7 +1502,8 @@ class APMDependencyResolver:
             raise DownloadedPackageError(
                 f"Failed to activate downloaded dependency "
                 f"'{package.name}': {exc}. "
-                f"{self._replacement_failure_hint(had_existing_install)}"
+                "The candidate was not activated; inspect the failure and any "
+                "reported recovery paths before retrying."
             ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
@@ -1486,6 +1622,8 @@ class APMDependencyResolver:
         the materialized package location; repository-relative expansion derives
         separate source-coordinate anchors.
         """
+        if dep_ref.replacement is not None and dep_ref.is_local:
+            return dep_ref.replacement.local_source_path()
         if dep_ref.is_local and dep_ref.local_path:
             local = Path(dep_ref.local_path).expanduser()
             if not local.is_absolute() and parent_pkg is not None and parent_pkg.source_path:
@@ -1504,7 +1642,12 @@ class APMDependencyResolver:
         are reduced to one winner before worker dispatch.
         """
         base = dep_ref.get_unique_key()
-        if dep_ref.is_local and parent_pkg is not None and parent_pkg.source_path:
+        if (
+            dep_ref.replacement is None
+            and dep_ref.is_local
+            and parent_pkg is not None
+            and parent_pkg.source_path
+        ):
             return f"{base}@{parent_pkg.source_path}"
         return base
 

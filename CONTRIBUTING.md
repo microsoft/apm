@@ -7,7 +7,8 @@ reviews, and code are all valuable contributions. Please follow our
 **Start with an issue, not an implementation.** For substantive changes, wait
 for a responsible human maintainer to approve the scope before coding for
 inclusion in APM. This avoids work the project cannot support or accept.
-[GOVERNANCE.md](GOVERNANCE.md) names the maintainers and their decision areas.
+[GOVERNANCE.md](GOVERNANCE.md) defines maintainer roles and approval remits;
+[MAINTAINERS.md](MAINTAINERS.md) lists public names, GitHub IDs, and affiliations.
 
 ## Find work or propose an idea
 
@@ -195,6 +196,23 @@ See the [experimental flag recipe](docs/src/content/docs/contributing/developmen
 See the [normative requirement workflow](docs/src/content/docs/contributing/development-guide.md#adding-or-changing-a-normative-requirement-openapm-v01)
 for the coupled specification, manifest, test, and conformance-statement edits.
 
+## Contributors
+
+APM is built by contributors from many organizations and independent
+developers. See the [full contributor list](https://github.com/microsoft/apm/graphs/contributors).
+
+Maintainers' work on APM is supported by their employers. Project
+decisions are made in the interest of APM and its users, independent
+of any single employer's commercial priorities. Maintainers disclose
+conflicts of interest when they arise.
+
 ## License
 
-Contributions are licensed under the project's [MIT License](LICENSE).
+Contributions use the license for the material being contributed:
+[Apache License 2.0](LICENSE) for software, bundled agent primitives, code
+examples and the software-facing OpenAPM specification;
+[CC-BY-4.0](LICENSE-DOCS) for general documentation.
+[LICENSING.md](LICENSING.md) defines the scope and exclusions.
+Third-party material retains its applicable license and notices.
+Previously published MIT releases remain available under their original terms;
+the historical MIT notice is retained in [NOTICE](NOTICE).

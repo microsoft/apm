@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+SCHEDULED_DECIDED_LABELS = frozenset({"status/accepted", "status/declined"})
+SCHEDULED_SWEEP_CAP = 5
+
 
 def plan_batch(data: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
     """Select from accumulated oldest-first pages and plan only permitted labels.
@@ -20,6 +23,10 @@ def plan_batch(data: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]
     mode = data["mode"]
     if mode not in {"sweep", "label-event", "dispatch"}:
         raise ValueError("mode must be sweep, label-event, or dispatch")
+    scheduled = data.get("scheduled_sweep", False)
+    if type(scheduled) is not bool or (scheduled and mode != "sweep"):
+        raise ValueError("scheduled_sweep must be a boolean used only in sweep mode")
+    cap = SCHEDULED_SWEEP_CAP if scheduled else 10
     processing = contract["processing"]
     marker = processing["active_write_reviewed"]
     repository_labels = set(data["repository_labels"])
@@ -44,6 +51,14 @@ def plan_batch(data: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]
         existing = set(issue["labels"])
         if issue["eligible"] is not True or (mode == "sweep" and existing & completed):
             continue
+        if scheduled:
+            if existing & SCHEDULED_DECIDED_LABELS:
+                continue
+            # Exclusions above precede this check: skipped records have no scope evidence.
+            if type(issue.get("has_scope_record")) is not bool:
+                raise ValueError(f"Scheduled issue #{number} needs complete scope evidence")
+            if issue["has_scope_record"]:
+                continue
         author = issue["author"]
         if mode == "sweep" and per_author.get(author, 0) >= 2:
             continue
@@ -66,11 +81,11 @@ def plan_batch(data: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]
             }
         )
         per_author[author] = per_author.get(author, 0) + 1
-        if len(selected) == 10:
+        if len(selected) == cap:
             break
     return {
         "selected": selected,
-        "batch_full": len(selected) == 10,
+        "batch_full": len(selected) == cap,
         "implementation_authorized": False,
     }
 

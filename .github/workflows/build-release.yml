@@ -142,7 +142,7 @@ jobs:
           uv run pwsh scripts/windows/sign-binary.ps1
 
       - name: Upload binary as workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.binary_name }}
           path: |
@@ -174,7 +174,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -225,7 +225,7 @@ jobs:
             -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: apm-darwin-x86_64
           path: |
@@ -253,7 +253,10 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 30
+        # Run 39834866538 timed out at 30m with workers still passing at 91%.
+        # 30 / 0.91 projects roughly 33m; 60m adds setup/tail headroom,
+        # not a completion guarantee. Keep selection and failure gates intact.
+        timeout-minutes: 60
 
       # PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only)
       - name: Prepare isolated release-validation environment
@@ -301,7 +304,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -347,7 +350,7 @@ jobs:
             -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: apm-darwin-arm64
           path: |
@@ -376,7 +379,9 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 60
+        # Run 39784442659 reached 77% at 60 minutes with all workers progressing.
+        # Allow setup/tail headroom beyond the roughly 78-minute linear estimate.
+        timeout-minutes: 120
 
       # PHASE 3: RELEASE VALIDATION
       - name: Prepare isolated release-validation environment
@@ -441,7 +446,7 @@ jobs:
 
       - name: Download APM binary from build artifacts
         continue-on-error: ${{ github.event_name == 'schedule' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ matrix.binary_name }}
           path: ./
@@ -460,7 +465,7 @@ jobs:
 
       - name: Set up Node.js
         if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -500,7 +505,9 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 60
+        # Linux x64 reached only 78% in 60 minutes in run 39819494530.
+        # Keep the proven ARM bound; allow x64 setup and full-corpus tail headroom.
+        timeout-minutes: ${{ matrix.arch == 'x86_64' && 120 || 60 }}
 
       - name: Run integration tests (Windows)
         if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
@@ -545,7 +552,7 @@ jobs:
 
     steps:
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -556,7 +563,7 @@ jobs:
 
       - name: Download APM binary from build artifacts
         continue-on-error: ${{ github.event_name == 'schedule' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ matrix.binary_name }}
           path: ${{ matrix.platform == 'windows' && 'D:\apm-isolated-test' || '/tmp/apm-isolated-test/' }}
@@ -685,7 +692,7 @@ jobs:
 
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ./dist
 
@@ -867,7 +874,7 @@ jobs:
         run: uv build --no-build-isolation --no-sources
 
       - name: Upload Python distributions
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pypi-distributions
           path: |
@@ -889,7 +896,7 @@ jobs:
 
     steps:
       - name: Download Python distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: pypi-distributions
           path: dist

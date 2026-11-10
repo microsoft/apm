@@ -3,6 +3,9 @@
 import errno
 import os
 import re
+import shutil
+import stat
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -247,6 +250,131 @@ class BaseIntegrator:
         if managed_files is None:
             return None
         return {p.replace("\\", "/") for p in managed_files}
+
+    @staticmethod
+    def walk_source_tree(source: Path) -> Iterator[tuple[str, list[str], list[str]]]:
+        """Enumerate an expected source tree without silently losing unreadable members."""
+
+        def fail(error: OSError) -> None:
+            raise OSError(
+                f"Cannot enumerate source {source}: {error}. "
+                "Restore readable source files and retry installation."
+            ) from error
+
+        try:
+            if not stat.S_ISDIR(source.stat().st_mode):
+                raise NotADirectoryError(f"{source} is not a directory")
+        except OSError as error:
+            fail(error)
+        yield from os.walk(source, followlinks=False, onerror=fail)
+
+    def copy_directory_files(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        ignore: Callable[[str, list[str]], list[str]],
+        path_entry: Callable[[Path], str],
+        is_managed: Callable[[str], bool],
+        recorded_hashes: Mapping[str, str],
+        write_allowed: Callable[[str], bool] | None = None,
+        on_member_skipped: Callable[[Path], None] | None = None,
+        baseline_hash: Callable[[Path], str | None] | None = None,
+        on_member_written: Callable[[Path], None] | None = None,
+        requires_write: Callable[[Path], bool] | None = None,
+        unchanged: bool = False,
+        force: bool = False,
+        diagnostics=None,
+    ) -> list[Path]:
+        """Copy admitted members through the shared skill containment boundary.
+
+        Skill copies route here for symlink and destination-containment checks,
+        without deleting or inventorying destination siblings.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        copied: list[Path] = []
+        destination_existed = destination.exists()
+        for directory, directories, filenames in self.walk_source_tree(source):
+            ignored = set(ignore(directory, [*directories, *filenames]))
+            directories[:] = sorted(name for name in directories if name not in ignored)
+            for name in sorted(filenames):
+                if name in ignored:
+                    continue
+                source_file = Path(directory) / name
+                target_file = destination / source_file.relative_to(source)
+                if has_symlink_component(destination.parent, target_file, raise_on_error=True):
+                    raise PathTraversalError(
+                        f"Skill destination {target_file} contains a symlink -- refusing to deploy"
+                    )
+                ensure_path_within(target_file, destination)
+                entry = path_entry(target_file)
+                if write_allowed is not None and not write_allowed(entry):
+                    if on_member_skipped is not None:
+                        on_member_skipped(target_file)
+                    continue
+                if target_file.exists() and not target_file.is_file():
+                    raise IsADirectoryError(
+                        f"Cannot deploy {entry}: destination is not a regular file. "
+                        "Move the blocking directory before reinstalling."
+                    )
+                if (
+                    unchanged
+                    and self.is_content_identical_to_source(target_file, source_file)
+                    and not (requires_write is not None and requires_write(target_file))
+                ):
+                    copied.append(target_file)
+                    continue
+                if self.check_collision(
+                    target_file,
+                    entry,
+                    {entry} if is_managed(entry) else set(),
+                    force,
+                    diagnostics=diagnostics,
+                ):
+                    if on_member_skipped is not None:
+                        on_member_skipped(target_file)
+                    continue
+                expected = (
+                    baseline_hash(target_file)
+                    if baseline_hash is not None
+                    else recorded_hashes.get(entry)
+                )
+                if (
+                    not force
+                    and target_file.is_file()
+                    and (
+                        (baseline_hash is not None and expected is None)
+                        or (expected is not None and compute_file_hash(target_file) != expected)
+                    )
+                ):
+                    reason = (
+                        "no trustworthy local deployment baseline"
+                        if expected is None
+                        else "modified since deployment"
+                    )
+                    message = (
+                        f"Skipped {entry}: {reason}. "
+                        "Preserve your changes before reinstalling with --force."
+                    )
+                    if diagnostics is not None:
+                        diagnostics.warn(message)
+                    else:
+                        _rich_warning(message)
+                    if on_member_skipped is not None:
+                        on_member_skipped(target_file)
+                    continue
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.copy2(source_file, target_file)
+                except OSError:
+                    if not destination_existed:
+                        self.cleanup_empty_parents([target_file], destination.parent)
+                    raise
+                copied.append(target_file)
+                if on_member_written is not None:
+                    on_member_written(target_file)
+        return copied
 
     @staticmethod
     def is_content_identical_to_source(

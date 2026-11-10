@@ -605,9 +605,7 @@ class TestIsRemoteParent:
 
 class TestComputeDepSourcePath:
     def test_local_absolute_dep_returns_resolved_local(self, tmp_path: Path) -> None:
-        ref = MagicMock()
-        ref.is_local = True
-        ref.local_path = str(tmp_path)
+        ref = DependencyReference.parse(str(tmp_path))
         result = APMDependencyResolver._compute_dep_source_path(ref, None, tmp_path)
         assert result == tmp_path.resolve()
 
@@ -616,9 +614,9 @@ class TestComputeDepSourcePath:
         parent_source.mkdir()
         parent = MagicMock()
         parent.source_path = parent_source
-        ref = MagicMock()
-        ref.is_local = True
-        ref.local_path = "sibling"
+        ref = DependencyReference(
+            repo_url="_local/sibling", source="local", is_local=True, local_path="sibling"
+        )
         result = APMDependencyResolver._compute_dep_source_path(ref, parent, tmp_path)
         assert result == (parent_source / "sibling").resolve()
 
@@ -649,9 +647,7 @@ class TestDownloadDedupKey:
         assert APMDependencyResolver._download_dedup_key(ref, None) == "../lib"
 
     def test_local_with_parent_includes_source_path(self, tmp_path: Path) -> None:
-        ref = MagicMock()
-        ref.is_local = True
-        ref.get_unique_key.return_value = "../lib"
+        ref = DependencyReference.parse("../lib")
         parent = MagicMock()
         parent.source_path = tmp_path
         key = APMDependencyResolver._download_dedup_key(ref, parent)
@@ -819,13 +815,7 @@ class TestTryLoadDependencyPackage:
         mods = tmp_path / "apm_modules"
         mods.mkdir()
 
-        ref = MagicMock()
-        ref.is_local = True
-        ref.local_path = "../something"
-        ref.repo_url = "_local/something"
-        ref.get_install_path.return_value = mods / "_local" / "something"
-        ref.get_unique_key.return_value = "../something"
-        ref.get_display_name.return_value = "../something"
+        ref = DependencyReference.parse("../something")
 
         remote_parent = MagicMock()
         remote_parent.source = "https://github.com/org/repo"
@@ -874,11 +864,14 @@ class TestShouldForceRecheck:
     the callback on a plain install."""
 
     def _dep(self, *, is_local=False, artifactory_prefix=None, ref_kind="semver"):
-        ref = MagicMock()
-        ref.is_local = is_local
-        ref.artifactory_prefix = artifactory_prefix
-        ref.ref_kind = ref_kind
-        return ref
+        return DependencyReference(
+            repo_url="org/pkg",
+            is_local=is_local,
+            source="local" if is_local else None,
+            local_path="./pkg" if is_local else None,
+            reference={"semver": "^1.0.0", "literal": "stable", None: None}[ref_kind],
+            artifactory_prefix=artifactory_prefix,
+        )
 
     def test_true_without_lock_provenance_on_plain_install(self) -> None:
         resolver = APMDependencyResolver(update_refs=False)

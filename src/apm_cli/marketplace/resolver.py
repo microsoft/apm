@@ -35,6 +35,7 @@ from urllib.parse import quote, urlparse
 from ..deps.transport_selection import initial_transport_scheme
 from ..models.dependency.host_virtual import dependency_repository_owner
 from ..models.dependency.reference import DependencyReference
+from ..models.validation import InvalidVirtualPackageExtensionError
 from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
@@ -112,6 +113,10 @@ class MarketplacePluginResolution:
     cross_repo_misconfig_risk: CrossRepoMisconfigRisk | None = None
     source_url: str = ""
     source_digest: str = ""
+    constraint: str | None = None
+    resolved_tag: str | None = None
+    resolved_version: str | None = None
+    resolved_at: str | None = None
 
     def __iter__(self) -> Iterator[str | MarketplacePlugin]:
         yield self.canonical
@@ -127,6 +132,14 @@ class MarketplacePluginResolution:
             data["source_url"] = self.source_url
         if self.source_digest:
             data["source_digest"] = self.source_digest
+        if self.constraint:
+            data["constraint"] = self.constraint
+        if self.resolved_tag:
+            data["resolved_tag"] = self.resolved_tag
+        if self.resolved_version:
+            data["resolved_version"] = self.resolved_version
+        if self.resolved_at:
+            data["resolved_at"] = self.resolved_at
         return data
 
 
@@ -975,15 +988,20 @@ def resolve_marketplace_plugin(
             plugin_root=manifest.plugin_root,
         )
 
-    if (
-        dep_ref is None
-        and _source_needs_explicit_git_path(source)
-        and _is_in_marketplace_source(plugin, source)
-    ):
+    if dep_ref is None and _is_in_marketplace_source(plugin, source):
         in_repo_path, path_ref = _extract_in_repo_path_and_ref(
             plugin, plugin_root=manifest.plugin_root
         )
-        if in_repo_path:
+        needs_explicit_path = _source_needs_explicit_git_path(source)
+        if in_repo_path and not needs_explicit_path:
+            try:
+                DependencyReference.parse(canonical)
+            except InvalidVirtualPackageExtensionError:
+                # The catalog already identifies the repository and path. A
+                # dotted bundle directory need not fit shorthand's file-name
+                # heuristic; the normal downloader still validates its content.
+                needs_explicit_path = True
+        if in_repo_path and needs_explicit_path:
             # Fall back to the marketplace's registered ref when the plugin
             # source itself declares no ref and no version_spec overrides it.
             # "main" / "HEAD" are excluded because they represent the default
@@ -1057,12 +1075,17 @@ def resolve_marketplace_plugin(
     # (for plain tags/branches/SHAs like v2.0.0). Tags live on the package
     # repository; when that differs from the marketplace catalog, query the
     # package remote instead of ``source.owner/source.repo``.
+    resolved_constraint: str | None = None
+    resolved_tag_name: str | None = None
+    resolved_version: str | None = None
+    resolved_at: str | None = None
     if version_spec:
         from .version_resolver import is_version_constraint
 
         base = canonical.split("#", 1)[0]
         resolved_override = version_spec
         if is_version_constraint(version_spec):
+            from ..deps.git_semver_resolver import utc_now_iso
             from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
             lookup = _package_version_remote(
@@ -1120,6 +1143,16 @@ def resolve_marketplace_plugin(
                 **version_auth,
             )
             resolved_override = tag_name
+            resolved_constraint = version_spec
+            resolved_tag_name = tag_name
+            resolved_at = utc_now_iso()
+            from .tag_pattern import build_tag_regex
+
+            tag_match = build_tag_regex(
+                effective_tag_pattern.replace("{name}", plugin_name)
+            ).fullmatch(tag_name)
+            if tag_match is not None:
+                resolved_version = tag_match.group("version")
             logger.debug(
                 "Version constraint '%s' for %s@%s resolved with pattern '%s' to tag '%s'",
                 version_spec,
@@ -1201,4 +1234,8 @@ def resolve_marketplace_plugin(
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
         source_url=manifest.source_url,
         source_digest=manifest.source_digest,
+        constraint=resolved_constraint,
+        resolved_tag=resolved_tag_name,
+        resolved_version=resolved_version,
+        resolved_at=resolved_at,
     )

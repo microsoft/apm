@@ -26,7 +26,7 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GITLAB_TOKEN` | GitLab fallback token. | unset | |
 | `GITLAB_HOST` | Single self-managed GitLab hostname (e.g. `gitlab.example.com`). | unset | Recognised as GitLab-class for transport / auth. |
 | `APM_GITLAB_HOSTS` | Comma-separated list of additional GitLab hostnames to classify as GitLab-class. | unset | Use when you operate multiple GitLab instances. |
-| `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`; Azure DevOps Server is PAT-only. |
+| `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`, then path-scoped `git credential fill`. Azure DevOps Server uses the PAT then fill; it does not use `az`. |
 | `ADO_HOST` | Single on-prem Azure DevOps Server FQDN (e.g. `ado.company.com`). Registers the host as ADO-class for auth and API routing. | unset | Hostname only: no scheme, port, or path. Takes precedence over an overlapping `GITHUB_HOST`. |
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, all classified as ADO-class. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
 | `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Also used by the registry-proxy resolver. |
@@ -44,13 +44,18 @@ Controls how APM clones packages and enumerates refs on Git hosts. These setting
 
 ## TLS trust
 
-APM verifies HTTPS against the operating-system trust store by default. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
+APM verifies package-management HTTPS against the operating-system trust store by default, with bundled `certifi` as the Requests fallback. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for the full troubleshooting flow.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `REQUESTS_CA_BUNDLE` | PEM bundle for APM's Python HTTP requests. | unset | Explicit override; wins over OS trust-store injection. Use for a per-shell corporate CA bundle. |
-| `CURL_CA_BUNDLE` | PEM bundle fallback honoured by `requests`. | unset | Explicit override; wins over OS trust-store injection when `REQUESTS_CA_BUNDLE` is unset. |
-| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS trust-store injection. | unset | Escape hatch that restores the legacy bundled-`certifi` verification path. |
+| `REQUESTS_CA_BUNDLE` | PEM bundle replacing APM's normal Requests trust. | unset | Wins over `CURL_CA_BUNDLE`, additive trust, and OS injection. |
+| `CURL_CA_BUNDLE` | Replacement PEM bundle honored by Requests. | unset | Used when `REQUESTS_CA_BUNDLE` is unset; suppresses additive trust and OS injection. |
+| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS/additive trust. | unset | Restores bundled `certifi` unless an explicit Requests/curl replacement is set. |
+| `APM_EXTRA_CA_BUNDLE` | Certificate-only PEM bundle added to APM package-management HTTPS. | unset | Retains OS roots, or `certifi` roots on Requests fallback. Invalid selected input fails closed: it must be a readable, non-empty regular file, no larger than 8 MiB, containing ASCII PEM certificates and no private keys. |
+
+Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
+
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage).
 
 ## Registry (MCP and proxy)
 
@@ -87,7 +92,7 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
-| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are written to `$CLAUDE_CONFIG_DIR/.claude.json`; when unset or blank, APM uses `~/.claude.json`. |
+| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
 
 ## Policy
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tests.integration import test_audit_primitive_contract as audit_contract
@@ -493,6 +495,152 @@ def test_policy_require_hashes_parses_and_is_specified():
 
 
 @pytest.mark.req("req-pl-014")
+@pytest.mark.parametrize("fail_on_drift", [False, True])
+def test_project_self_replay_preserves_governed_drift(
+    audit_project: Path, monkeypatch: pytest.MonkeyPatch, fail_on_drift: bool
+) -> None:
+    """The mixed source layout must not masquerade as governed deployment drift."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    (audit_project / "apm.yml").write_text(
+        "name: self-replay\nversion: 1.0.0\ntarget: copilot\nincludes: auto\n",
+        encoding="ascii",
+    )
+    source = audit_contract._write(
+        audit_project,
+        ".apm/instructions/project.instructions.md",
+        '---\napplyTo: "**"\n---\nOriginal project instruction.\n',
+    )
+    audit_contract._write(
+        audit_project,
+        "skills/hello/SKILL.md",
+        "---\nname: hello\ndescription: Product content.\n---\nHello.\n",
+    )
+    runner = CliRunner()
+    installed = runner.invoke(cli, ["install", "--no-policy", "--parallel-downloads", "0"])
+    assert installed.exit_code == 0, installed.output
+    deployed = audit_project / ".github/instructions/project.instructions.md"
+    assert deployed.read_bytes() == source.read_bytes()
+    assert not (audit_project / ".agents/skills/hello/SKILL.md").exists()
+
+    policy, _ = load_policy(fixture_path("policy", "security-integrity.yml"))
+    policy = replace(
+        policy,
+        security=replace(
+            policy.security,
+            audit=replace(policy.security.audit, fail_on_drift=fail_on_drift),
+        ),
+    )
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    # Supply the remote-policy boundary only; installation and drift replay remain real.
+    monkeypatch.setattr(
+        discovery,
+        "discover_policy_with_chain",
+        lambda project_root: SimpleNamespace(policy=policy),
+    )
+    before_clean = ArtifactSnapshot.capture(audit_project)
+    clean = runner.invoke(cli, ["audit"])
+    assert clean.exit_code == 0, clean.output
+    assert "No drift detected" in clean.output
+    assert_unchanged(before_clean, ArtifactSnapshot.capture(audit_project))
+
+    source.write_text(source.read_text(encoding="ascii") + "Changed source.\n", encoding="ascii")
+    before_drift = ArtifactSnapshot.capture(audit_project)
+    drifted = runner.invoke(cli, ["audit"])
+    assert drifted.exit_code == int(fail_on_drift), drifted.output
+    assert "Drift detected: 1 file(s)" in drifted.output
+    assert "modified (1):" in drifted.output
+    assert "    - .github/instructions/project.instructions.md" in drifted.output
+    assert_unchanged(before_drift, ArtifactSnapshot.capture(audit_project))
+
+
+@pytest.mark.req("req-pl-014")
+@pytest.mark.parametrize("fail_on_drift", [False, True])
+def test_hook_sidecar_comparison_preserves_governed_drift_exit(
+    audit_project: Path, monkeypatch: pytest.MonkeyPatch, fail_on_drift: bool
+) -> None:
+    """Sidecar normalization must preserve req-pl-014's governed drift exit."""
+    import json
+    from types import SimpleNamespace
+
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+    from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+    audit_contract._write(
+        audit_project,
+        ".apm/instructions/rules.instructions.md",
+        '---\napplyTo: "**"\n---\nBe brief.\n',
+    )
+    user_hook = {"hooks": [{"type": "command", "command": "echo user"}]}
+    audit_contract._write(
+        audit_project,
+        ".claude/settings.json",
+        json.dumps({"hooks": {"SessionStart": [user_hook]}}),
+    )
+    audit_contract._write(
+        audit_project,
+        ".apm/hooks/events.json",
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo tool"}]}
+                    ],
+                    "SessionStart": [{"hooks": [{"type": "command", "command": "echo start"}]}],
+                }
+            }
+        ),
+    )
+    runner = CliRunner()
+    install = runner.invoke(cli, ["install", "--no-policy", "--parallel-downloads", "0"])
+    assert install.exit_code == 0, install.output
+    sidecar = audit_project / ".claude/apm-hooks.json"
+    entries = json.loads(sidecar.read_text(encoding="utf-8"))
+    reordered = {event: entries[event] for event in ("SessionStart", "PreToolUse")}
+    sidecar.write_text(json.dumps(reordered, indent=4), encoding="utf-8")
+
+    policy_path = audit_project.parent / "governed-sidecar.yml"
+    policy_path.write_text(
+        "name: sidecar-drift\nsecurity:\n  audit:\n"
+        f"    fail_on_drift: {str(fail_on_drift).lower()}\n",
+        encoding="ascii",
+    )
+    policy, _ = load_policy(policy_path)
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    monkeypatch.setattr(
+        discovery, "discover_policy_with_chain", lambda project_root: SimpleNamespace(policy=policy)
+    )
+    before = ArtifactSnapshot.capture(audit_project)
+    clean = runner.invoke(cli, ["audit"])
+    assert clean.exit_code == 0, clean.output
+    assert "No drift detected" in clean.output
+    assert_unchanged(before, ArtifactSnapshot.capture(audit_project))
+
+    reordered["PreToolUse"][0]["hooks"][0]["command"] = "echo changed"
+    sidecar.write_text(json.dumps(reordered), encoding="utf-8")
+    before = ArtifactSnapshot.capture(audit_project)
+    drifted = runner.invoke(cli, ["audit"])
+    assert drifted.exit_code == int(fail_on_drift), drifted.output
+    assert "modified" in drifted.output
+    assert ".claude/apm-hooks.json" in drifted.output
+    assert_unchanged(before, ArtifactSnapshot.capture(audit_project))
+    settings = json.loads((audit_project / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert user_hook in settings["hooks"]["SessionStart"]
+
+
+@pytest.mark.req("req-pl-014")
 def test_policy_fail_on_drift_parses_and_is_specified():
     """req-pl-014: security.audit.fail_on_drift non-zero audit exit.
 
@@ -637,3 +785,102 @@ def test_ado_policy_coordinate_fallback_is_404_only():
 
 
 _ = waive  # keep import for any future structural waiver
+
+
+def _req_pl_021_project(root):
+    (root / "apm.yml").write_text(
+        "name: req-pl-021\nversion: 1.0.0\npolicy:\n  fetch_failure_default: warn\n",
+        encoding="utf-8",
+    )
+    (root / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: []\n")
+
+
+@pytest.mark.req("req-pl-021")
+@pytest.mark.parametrize("case", ["missing-file", "malformed", "unreachable"])
+def test_explicit_policy_ref_that_cannot_load_fails_closed(tmp_path, monkeypatch, case):
+    from unittest.mock import patch
+
+    import requests
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+
+    monkeypatch.chdir(tmp_path)
+    _req_pl_021_project(tmp_path)
+    ref = {
+        "missing-file": "./missing-policy.yml",
+        "malformed": "bad-policy.yml",
+        "unreachable": "https://policy.invalid/apm-policy.yml",
+    }[case]
+    (tmp_path / "bad-policy.yml").write_text("enforcement: bogus\n", encoding="utf-8")
+
+    with (
+        patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=requests.exceptions.ConnectionError(),
+        ),
+        patch("apm_cli.policy.discovery._fetch_github_contents") as remote,
+    ):
+        result = CliRunner().invoke(
+            audit, ["--ci", "--no-drift", "--no-cache", "--policy", ref], catch_exceptions=False
+        )
+
+    assert result.exit_code != 0, result.output
+    assert "could not be loaded" in result.stderr
+    assert "enforcement skipped" not in result.stderr
+    remote.assert_not_called()
+
+
+@pytest.mark.req("req-pl-021")
+def test_explicit_policy_ref_served_from_stale_cache_counts_as_resolved(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+    from apm_cli.policy.discovery import PolicyFetchResult
+    from apm_cli.policy.schema import ApmPolicy
+
+    monkeypatch.chdir(tmp_path)
+    _req_pl_021_project(tmp_path)
+    stale = PolicyFetchResult(
+        policy=ApmPolicy(enforcement="block"),
+        source="url:https://policy.invalid/apm-policy.yml",
+        cached=True,
+        cache_stale=True,
+        fetch_error="Connection error",
+        outcome="cached_stale",
+    )
+
+    with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=stale):
+        result = CliRunner().invoke(
+            audit,
+            ["--ci", "--no-drift", "--policy", "https://policy.invalid/apm-policy.yml"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "could not be loaded" not in result.stderr
+
+
+@pytest.mark.req("req-pl-021")
+def test_explicit_policy_ref_under_operator_disable_is_disclosed(tmp_path, monkeypatch):
+    import json
+
+    from click.testing import CliRunner
+
+    from apm_cli.commands.audit import audit
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APM_POLICY_DISABLE", "1")
+    _req_pl_021_project(tmp_path)
+    (tmp_path / "policy.yml").write_text("name: p\nversion: '1.0'\nenforcement: block\n")
+
+    result = CliRunner().invoke(
+        audit,
+        ["--ci", "--no-drift", "--policy", "policy.yml", "-f", "json"],
+        catch_exceptions=False,
+    )
+
+    assert "--policy policy.yml ignored" in result.stderr
+    assert json.loads(result.stdout)["policy"]["enforced"] is False

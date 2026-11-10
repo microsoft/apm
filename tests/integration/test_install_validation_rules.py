@@ -138,7 +138,7 @@ class TestLocalPathFailureReason:
         dep_ref.is_local = True
         dep_ref.local_path = str(tmp_path / "nonexistent")
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "path does not exist"
+        assert "path does not exist" in reason
 
     def test_returns_not_directory_for_file(self, tmp_path):
         f = tmp_path / "file.txt"
@@ -147,7 +147,7 @@ class TestLocalPathFailureReason:
         dep_ref.is_local = True
         dep_ref.local_path = str(f)
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "path is not a directory"
+        assert "Unsupported single-file dependency" in reason
 
     def test_returns_no_markers_for_empty_dir(self, tmp_path):
         empty = tmp_path / "empty"

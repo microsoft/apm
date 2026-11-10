@@ -67,6 +67,17 @@ class LockfileBuilder:
 
     # -- public API -----------------------------------------------------
 
+    def save_replacement_intent(self) -> None:
+        """Save metadata-only intent, retaining every existing deployment receipt."""
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        if not self.ctx.lockfile_only and not self._replacement_table_changed():
+            return
+        existing = self.ctx.existing_lockfile
+        lockfile = copy.deepcopy(existing) if existing is not None else LockFile()
+        self._attach_replacement_table(lockfile)
+        self._write_if_changed(lockfile, get_lockfile_path(self.ctx.apm_dir), LockFile)
+
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
         # Self-heal cache pin markers for remote deps recorded in the
@@ -97,6 +108,7 @@ class LockfileBuilder:
             not self.ctx.installed_packages
             and not self.ctx.lockfile_only
             and not self._has_orphan_lockfile_entries()
+            and not self._replacement_table_changed()
         ):
             # Even with nothing newly installed, a pre-existing
             # lockfile may need its cache pin markers refreshed --
@@ -155,6 +167,7 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            self._attach_replacement_table(lockfile)
             # Restore local compatibility state first so the canonical ledger is
             # complete when MCP target rows are projected into it.
             self._preserve_existing_local_state(lockfile)
@@ -183,6 +196,23 @@ class LockfileBuilder:
             self._handle_failure(e)
 
     # -- private helpers (verbatim from original inline block) ----------
+
+    def _replacement_table_changed(self) -> bool:
+        """Keep dormant rule changes out of the no-packages early return."""
+        from apm_cli.install.plan import lockfile_satisfies_replacements
+
+        rules = getattr(getattr(self.ctx, "apm_package", None), "replace_rules", None)
+        satisfied, _ = lockfile_satisfies_replacements(self.ctx.existing_lockfile, rules)
+        return not satisfied
+
+    def _attach_replacement_table(self, lockfile: LockFile) -> None:
+        """Persist all root rules, including unused and explicitly empty tables."""
+        from apm_cli.models.dependency.replacement import replacement_rule_to_dict
+
+        rules = getattr(getattr(self.ctx, "apm_package", None), "replace_rules", None)
+        lockfile.replacements = (
+            None if rules is None else [replacement_rule_to_dict(rule) for rule in rules]
+        )
 
     def _has_orphan_lockfile_entries(self) -> bool:
         """True when the existing lockfile records apm deps no longer intended.
@@ -255,7 +285,13 @@ class LockfileBuilder:
         # not removed, so a "Repaired inactive-target entries" report would be
         # misleading.
         lockfile_only = getattr(self.ctx, "lockfile_only", False)
+        completed_reintegrations = (
+            {}
+            if lockfile_only or getattr(self.ctx, "frozen", False)
+            else getattr(self.ctx, "package_completed_reintegrations", {})
+        )
         canonical_records = {}
+        authoritative_empty = False
         ghost_count = 0
         for dep_key in lockfile.dependencies:
             claim = package_claims[dep_key]
@@ -267,6 +303,7 @@ class LockfileBuilder:
             )
             prior_files = list(claim.prior_files)
             prior_hashes = claim.prior_hashes
+            completed = completed_reintegrations.get(dep_key)
 
             def _log_ghost_drop(path: str, package_key: str = dep_key) -> None:
                 nonlocal ghost_count
@@ -296,13 +333,16 @@ class LockfileBuilder:
                 include_ledger=True,
                 apply_disk_deletion=not lockfile_only,
                 user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
+                completed_reintegration=completed,
             )
-            if not files:
+            if not files and completed is None:
                 # Nothing this install governs and nothing to carry forward;
                 # leave deployed_files untouched so the whole-dep
                 # _merge_existing path can preserve it intact.
                 continue
             canonical_records.update(ledger.records)
+            authoritative_empty |= completed is not None and not files
+        if canonical_records or authoritative_empty:
             from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
             DeploymentLedgerCodec.apply_to_lockfile(
@@ -392,17 +432,63 @@ class LockfileBuilder:
                     dep.marketplace_plugin_name = previous.marketplace_plugin_name
                     dep.source_url = previous.source_url
                     dep.source_digest = previous.source_digest
+                    if (
+                        previous.constraint
+                        and previous.resolved_tag
+                        and previous.resolved_ref == dep.resolved_ref
+                        and previous.resolved_commit == dep.resolved_commit
+                        and not dep.constraint
+                    ):
+                        dep.constraint = previous.constraint
+                        dep.resolved_tag = previous.resolved_tag
+                        dep.version = previous.version
+                        dep.resolved_at = previous.resolved_at
 
         # Fresh discovery replaces the entire snapshot, including absent fields.
         if self.ctx.marketplace_provenance:
             for dep_key, prov in self.ctx.marketplace_provenance.items():
                 if dep_key in lockfile.dependencies:
-                    lockfile.dependencies[dep_key].discovered_via = prov.get("discovered_via")
-                    lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get(
-                        "marketplace_plugin_name"
-                    )
-                    lockfile.dependencies[dep_key].source_url = prov.get("source_url")
-                    lockfile.dependencies[dep_key].source_digest = prov.get("source_digest")
+                    dep = lockfile.dependencies[dep_key]
+                    dep.discovered_via = prov.get("discovered_via")
+                    dep.marketplace_plugin_name = prov.get("marketplace_plugin_name")
+                    dep.source_url = prov.get("source_url")
+                    dep.source_digest = prov.get("source_digest")
+                    if prov.get("constraint"):
+                        dep.constraint = prov.get("constraint")
+                    if prov.get("resolved_tag"):
+                        dep.resolved_tag = prov.get("resolved_tag")
+                    if prov.get("resolved_version"):
+                        dep.version = prov["resolved_version"]
+                    if prov.get("resolved_at"):
+                        dep.resolved_at = prov["resolved_at"]
+                        previous = (
+                            self.ctx.existing_lockfile.dependencies.get(dep_key)
+                            if self.ctx.existing_lockfile
+                            else None
+                        )
+                        if (
+                            previous is not None
+                            and previous.resolved_at
+                            and dep.resolved_commit
+                            and all(
+                                getattr(previous, field) == getattr(dep, field)
+                                for field in (
+                                    "port",
+                                    "source",
+                                    "host_type",
+                                    "resolved_commit",
+                                    "resolved_ref",
+                                    "constraint",
+                                    "resolved_tag",
+                                    "version",
+                                    "discovered_via",
+                                    "marketplace_plugin_name",
+                                    "source_url",
+                                    "source_digest",
+                                )
+                            )
+                        ):
+                            dep.resolved_at = previous.resolved_at
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         # Partial operations merge untouched dependencies and their canonical
@@ -460,6 +546,7 @@ class LockfileBuilder:
             # these carried-forward fields against the current manifest.
             lockfile.mcp_servers = list(self.ctx.existing_lockfile.mcp_servers)
             lockfile.mcp_configs = copy.deepcopy(self.ctx.existing_lockfile.mcp_configs)
+            lockfile.mcp_omissions = copy.deepcopy(self.ctx.existing_lockfile.mcp_omissions)
             lockfile.mcp_config_provenance = copy.deepcopy(
                 self.ctx.existing_lockfile.mcp_config_provenance
             )
@@ -473,6 +560,9 @@ class LockfileBuilder:
                 DeploymentLedgerCodec.replace_mcp_target_servers(
                     lockfile,
                     copy.deepcopy(target_servers),
+                    native_hashes=DeploymentLedgerCodec.mcp_native_hashes(
+                        self.ctx.existing_lockfile
+                    ),
                 )
             if self.ctx.logger:
                 server_count = len(lockfile.mcp_servers)
@@ -523,6 +613,8 @@ class LockfileBuilder:
                 ".",
                 list(self.ctx.existing_lockfile.local_deployed_files),
                 copy.deepcopy(self.ctx.existing_lockfile.local_deployed_file_hashes),
+                provenance=DeploymentLedgerCodec.from_lockfile(self.ctx.existing_lockfile),
+                current_targets=self.ctx.targets or (),
             )
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(
@@ -563,6 +655,7 @@ class LockfileBuilder:
         else:
             lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
             if self.ctx.logger:
+                self.ctx.logger.record_lockfile_write()
                 self.ctx.logger.verbose_detail(
                     f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies"
                 )

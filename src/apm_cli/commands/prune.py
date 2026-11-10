@@ -18,6 +18,7 @@ from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
 from ..models.apm_package import APMPackage
+from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
     _build_expected_install_paths,
@@ -115,8 +116,11 @@ def prune(ctx, dry_run):
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
             expected_installed = _build_expected_install_paths(
-                declared_deps, lockfile, apm_modules_dir
+                declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
+        except MaterializationPathCollisionError as e:
+            logger.error(str(e))
+            sys.exit(1)
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)

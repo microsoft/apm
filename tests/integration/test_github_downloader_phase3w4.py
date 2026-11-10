@@ -281,48 +281,20 @@ class TestDownloadVirtualFilePackage:
         return dep_ref
 
     def test_frontmatter_description_extracted(self, tmp_path):
-        """Lines 902-912: description extracted from YAML frontmatter."""
-        self._make_dep_ref(
-            virtual_path="owner/repo/.instructions.md",
-            repo_url="owner/repo",
-        )
+        """The real materializer persists the frontmatter description."""
+        from apm_cli.deps.virtual_file import materialize_virtual_file_package
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.models.dependency import DependencyReference
 
+        dep_ref = DependencyReference.parse("owner/repo/.instructions.md")
         file_content = b"---\ndescription: 'My custom description'\n---\n# Instructions\n"
-        tmp_path / "pkg"
-
-        # Mock the HTTP download of the file
-        dl = _make_downloader()
-        dl._strategies.download_file = MagicMock(return_value=file_content)
-
-        with (
-            patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
-            patch("apm_cli.deps.github_downloader.APMPackage") as mock_pkg_cls,
-            patch(
-                "apm_cli.deps.github_downloader.yaml_to_str",
-                return_value="name: owner-repo\n",
-            ),
-        ):
-            mock_result = MagicMock()
-            mock_result.is_valid = True
-            mock_result.package = MagicMock()
-            mock_result.package_type = MagicMock()
-            mock_validate.return_value = mock_result
-            mock_pkg_cls.return_value = MagicMock()
-
-            # Just test the parsing logic directly
-            content_str = file_content.decode("utf-8")
-            description = "Virtual package containing .instructions.md"
-
-            if content_str.startswith("---\n"):
-                end_idx = content_str.find("\n---\n", 4)
-                if end_idx > 0:
-                    front = content_str[4:end_idx]
-                    for line in front.split("\n"):
-                        if line.startswith("description:"):
-                            description = line.split(":", 1)[1].strip().strip("\"'")
-                            break
-
-            assert description == "My custom description"
+        target = tmp_path / "pkg"
+        package = materialize_virtual_file_package(
+            dep_ref, target, ".instructions.md", file_content
+        )
+        assert package.description == "My custom description"
+        assert APMPackage.from_apm_yml(target / "apm.yml").description == package.description
+        assert (target / ".apm/instructions/.instructions.md").read_bytes() == file_content
 
     def test_frontmatter_parse_failure_uses_default(self, tmp_path):
         """Line 913-915: binary/invalid content falls back to default description."""

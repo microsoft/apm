@@ -73,6 +73,7 @@ class TestRunInstallPipelineShortCircuit:
         pkg.get_apm_dependencies.return_value = deps or []
         pkg.get_dev_apm_dependencies.return_value = dev_deps or []
         pkg.get_mcp_dependencies.return_value = []
+        pkg.replace_rules = None
         return pkg
 
     def test_no_deps_no_local_returns_install_result(self, tmp_path):

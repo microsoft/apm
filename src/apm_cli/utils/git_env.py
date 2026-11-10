@@ -985,6 +985,15 @@ def _merge_parent_git_config_snapshot(
     )
 
 
+def _symlink_entry_wins(current: GitConfigEntry | None, candidate: GitConfigEntry) -> bool:
+    """Decide whether ``candidate`` should replace the retained core.symlinks entry.
+
+    Command-scope intent always wins over any other scope; otherwise the
+    last entry seen wins, matching Git's own scope-precedence ordering.
+    """
+    return current is None or current.scope != "command" or candidate.scope == "command"
+
+
 def _materialize_git_config_snapshot(
     env: dict[str, str],
     snapshot: _GitConfigSnapshot,
@@ -1005,8 +1014,15 @@ def _materialize_git_config_snapshot(
         else None
     )
     retained: list[tuple[str, str]] = []
+    symlinks: GitConfigEntry | None = None
     for entry in snapshot.entries:
         normalized = entry.key.lower()
+        if normalized == "core.symlinks":
+            # Parent command entries can precede child file entries after
+            # merging. Keep command intent above Git init's capability result.
+            if _symlink_entry_wins(symlinks, entry):
+                symlinks = entry
+            continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
         if normalized == "include.path" or (
@@ -1029,6 +1045,9 @@ def _materialize_git_config_snapshot(
             if auth_fence.suppress_helpers and _is_credential_helper_key(normalized):
                 continue
         retained.append((entry.key, entry.value))
+
+    if symlinks is not None:
+        retained.append(("core.symlinks", symlinks.value))
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:
@@ -1481,12 +1500,13 @@ def git_resolve_commit(
     ref: str,
     *,
     env: dict[str, object] | None = None,
+    bare: bool = False,
 ) -> str:
-    """Resolve a ref to a commit in an explicitly located worktree."""
+    """Resolve a ref in a worktree or an explicitly selected bare repository."""
     result = subprocess.run(
         [
             get_git_executable(),
-            "-C",
+            "--git-dir" if bare else "-C",
             str(worktree),
             "rev-parse",
             "--verify",

@@ -14,6 +14,7 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -186,9 +187,9 @@ def test_plan_reports_rejected_links_without_traversing_them(
         install_path=source,
         package_type=PackageType.APM_PACKAGE,
     )
-    import os
-
-    with patch("apm_cli.install.deployable_source_plan.os.walk", wraps=os.walk) as walk:
+    with patch.object(
+        BaseIntegrator, "walk_source_tree", wraps=BaseIntegrator.walk_source_tree
+    ) as walk:
         plan = DeployableSourcePlan.create(
             package,
             [KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]],

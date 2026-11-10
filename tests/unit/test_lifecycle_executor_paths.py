@@ -251,6 +251,44 @@ class TestGuardedSession:
             assert se._get_guarded_session() is None
 
 
+@pytest.mark.parametrize("builder_name", ["_build_guarded_session", "_build_capturing_session"])
+@pytest.mark.parametrize("env_var", ["REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"])
+def test_hardened_sessions_honor_explicit_ca_bundle_with_trust_env_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    builder_name: str,
+    env_var: str,
+) -> None:
+    """Lifecycle direct/proxy sessions retain explicit replacement trust."""
+    selected = tmp_path / f"{env_var.lower()}.pem"
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+    monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+    monkeypatch.setenv(env_var, str(selected))
+
+    session = getattr(se, builder_name)()
+    settings = session.merge_environment_settings(
+        "https://example.com/hook", proxies={}, stream=None, verify=None, cert=None
+    )
+
+    assert session.trust_env is False
+    assert settings["verify"] == str(selected)
+
+
+@pytest.mark.parametrize("builder_name", ["_build_guarded_session", "_build_capturing_session"])
+def test_hardened_sessions_prefer_requests_ca_bundle(
+    monkeypatch: pytest.MonkeyPatch, builder_name: str
+) -> None:
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/trust/requests.pem")
+    monkeypatch.setenv("CURL_CA_BUNDLE", "/trust/curl.pem")
+
+    session = getattr(se, builder_name)()
+    settings = session.merge_environment_settings(
+        "https://example.com/hook", proxies={}, stream=None, verify=None, cert=None
+    )
+
+    assert settings["verify"] == "/trust/requests.pem"
+
+
 class TestConnectLayerHost:
     def test_plain_url_host(self) -> None:
         assert se._connect_layer_host("https://example.com/path") == "example.com"

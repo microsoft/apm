@@ -48,14 +48,63 @@ class TestParseLsRemoteOutput:
         refs = _parse_ls_remote_output(output)
         assert len(refs) == 3
 
-    def test_peeled_tag_skipped(self) -> None:
+    def test_annotated_tag_takes_peeled_commit_sha(self) -> None:
+        # Tag object first, then the commit it points to (#3048).
         output = (
             "aaaa23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0\n"
             "bbbb23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0^{}\n"
         )
         refs = _parse_ls_remote_output(output)
+        assert refs == [
+            RemoteRef(
+                name="refs/tags/v1.0.0",
+                sha="bbbb23456789abcdef1234567890abcdef123456",
+                peeled_sha="bbbb23456789abcdef1234567890abcdef123456",
+            )
+        ]
+
+    def test_peeled_line_before_tag_line(self) -> None:
+        output = (
+            "bbbb23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0^{}\n"
+            "aaaa23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0\n"
+        )
+        refs = _parse_ls_remote_output(output)
+        assert refs == [
+            RemoteRef(
+                name="refs/tags/v1.0.0",
+                sha="bbbb23456789abcdef1234567890abcdef123456",
+                peeled_sha="bbbb23456789abcdef1234567890abcdef123456",
+            )
+        ]
+
+    def test_only_annotated_tags_change(self) -> None:
+        output = (
+            "1111111111111111111111111111111111111111\trefs/heads/main\n"
+            "2222222222222222222222222222222222222222\trefs/tags/v1.0.0\n"
+            "3333333333333333333333333333333333333333\trefs/tags/v2.0.0\n"
+            "4444444444444444444444444444444444444444\trefs/tags/v2.0.0^{}\n"
+        )
+        refs = _parse_ls_remote_output(output)
+        assert refs == [
+            RemoteRef(name="refs/heads/main", sha="1" * 40),
+            RemoteRef(name="refs/tags/v1.0.0", sha="2" * 40),
+            RemoteRef(name="refs/tags/v2.0.0", sha="4" * 40, peeled_sha="4" * 40),
+        ]
+
+    def test_peeled_line_without_tag_line_adds_nothing(self) -> None:
+        output = "bbbb23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0^{}\n"
+        assert _parse_ls_remote_output(output) == []
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_peeled_tag_retained_with_corrected_source_sha(self, reverse: bool) -> None:
+        output = f"{'a' * 40}\trefs/tags/v1.0.0\n{'b' * 40}\trefs/tags/v1.0.0^{{}}\n"
+        if reverse:
+            output = "\n".join(reversed(output.splitlines()))
+        refs = _parse_ls_remote_output(output)
         assert len(refs) == 1
         assert refs[0].name == "refs/tags/v1.0.0"
+        assert refs[0].sha == "b" * 40
+        assert refs[0].peeled_sha == "b" * 40
 
     def test_invalid_sha_skipped(self) -> None:
         output = "not-a-sha\trefs/tags/v1.0.0\n"

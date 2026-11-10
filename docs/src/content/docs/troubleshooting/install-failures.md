@@ -68,7 +68,7 @@ If you operate multiple GitLab instances, list them in `APM_GITLAB_HOSTS` (comma
 Azure DevOps Services hosts (`dev.azure.com` and `*.visualstudio.com`) use:
 
 ```text
-ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   none
+ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   git credential fill
 ```
 
 ```bash
@@ -85,10 +85,10 @@ az login
 apm install
 ```
 
-Azure DevOps Server is PAT-only:
+Azure DevOps Server uses PAT then git credential fill:
 
 ```text
-ADO_APM_PAT   ->   none
+ADO_APM_PAT   ->   git credential fill
 ```
 
 ```bash
@@ -100,8 +100,9 @@ Use `APM_ADO_HOSTS` for multiple Server instances. A configured ADO host wins
 when `GITHUB_HOST` names the same host. Host variables accept FQDNs only,
 without a scheme, port, or path; put a non-default HTTPS port in the
 dependency URL. Use a root-hosted collection path. APM rejects `/tfs/`
-prefixes. If the PAT is rejected, rotate it -- Azure CLI bearer auth does
-not apply to Server.
+prefixes. If the PAT is rejected, APM retries path-scoped `git credential fill`
+(Git Credential Manager). Azure CLI bearer auth does not apply to Server.
+If fill also fails, rotate the PAT or store a repository credential in GCM.
 
 ### Test your token
 
@@ -139,7 +140,7 @@ For end-to-end auth setup see [Authentication](../../getting-started/authenticat
 [!] TLS verification failed
 ```
 
-APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell override, set `REQUESTS_CA_BUNDLE` to a readable PEM bundle. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
+APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell additive setting that retains public trust, set `APM_EXTRA_CA_BUNDLE` to a readable PEM bundle. Use `REQUESTS_CA_BUNDLE` only when you intend to replace the complete Requests trust set. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
 
 ### Timeouts and proxies
 
@@ -175,6 +176,22 @@ apm install
 
 This re-resolves and rewrites `apm.lock.yaml`. Commit the result.
 
+### Merge conflict markers in the lockfile
+
+After a git merge that touched `apm.lock.yaml`, the file may still contain `<<<<<<<` / `>>>>>>>` markers. Commands that require the lockfile then report `apm.lock.yaml contains unresolved git merge conflict markers` instead of a YAML scanner error.
+
+Resolve the conflict in the named file, or restore a known-good lockfile.
+Review the repaired file against the merged `apm.yml`, then retry your original
+command with the same options, including `--global`, `--frozen`, or `--dry-run`.
+This applies even when the markers were copied or committed and no Git merge
+is in progress.
+
+APM leaves the conflicted bytes untouched; it does not discard or regenerate
+the file. Choosing one side during manual repair retains only that side's
+records. Changed or missing dependencies may resolve again on a later install,
+so review the resulting pins before committing. Preview, best-effort readers,
+and lockfiles invalid for other reasons keep their existing behavior.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
@@ -194,6 +211,14 @@ apm audit --ci
 ```
 
 A non-zero exit means the working tree has diverged from `apm.lock.yaml` -- either re-run `apm install` to restore parity, or commit the new lockfile if the drift was intentional.
+
+A fresh project clone can run `apm audit --ci` without `apm_modules/` when its
+manifest, lockfile, and local dependency sources are available. Replay stays
+in scratch space; missing or modified managed files still fail their checks.
+Windows long and native 8.3 paths to the same project are equivalent. A
+missing sibling local source is not a global installation: restore that
+source at its declared path. The `apm install --global` recovery instruction
+applies when auditing the actual user metadata workspace with missing modules.
 
 For the full flag list see [`apm install`](../../reference/cli/install/).
 
@@ -241,7 +266,7 @@ See [`apm cache`](../../reference/cli/cache/) for the full subcommand reference.
 
 ## 5. Partial install recovery
 
-`apm install` is designed to be re-run safely. If a previous invocation died mid-flight (Ctrl-C, OOM, network drop), just run it again:
+`apm install` is designed to be re-run safely. If a previous invocation died mid-flight (Ctrl-C, OOM, network drop), run it again unless it reported incomplete recovery; in that case, inspect the retained paths as described below first:
 
 ```bash
 apm install
@@ -266,13 +291,42 @@ apm install --refresh --force
 
 `--force` overwrites locally-authored files on collision **and** bypasses the security scan's critical-finding block -- use it only after you've inspected the diff. See [`apm install`](../../reference/cli/install/#policy-and-trust).
 
-To wipe everything and start clean:
+To wipe everything and start clean, first save any user changes and recovery
+backups you need. Do not use this reset when APM reports an incomplete rollback:
 
 ```bash
 rm -rf apm_modules/
 apm cache clean
 apm install
 ```
+
+### Windows file locks and incomplete recovery
+
+`WinError 5` (access denied) or `WinError 32` (sharing violation) during
+activation does not mean the destination parent is missing. APM downloads and
+validates a candidate before replacing the installed package. If activation
+fails, it attempts to restore the prior package and manifest without changing
+the locked dependency pins.
+
+Close editors, terminals, or other programs holding the named paths, then retry
+the same command. Do not elevate APM, change ACLs, disable security controls, or
+use `--force` to bypass an OS denial. A persistent denial still fails.
+
+If restoration or cleanup also fails, APM reports those errors and retained
+recovery paths alongside the original failure. The prior package may be in
+`.apm-resolution-staging/<session>/backups/`, **not active at its usual path**.
+Recovery of overlapping parent and child packages is deferred after an
+obstruction so their backups remain recoverable; unrelated packages can still
+be restored.
+Preserve that directory, inspect its contents, and recover needed prior data
+before retrying. Do not delete the entire staging directory: unknown, legacy,
+active, and prior-backup roots can belong to another install or contain the
+only recoverable copy. Include the original and recovery errors when reporting
+an unresolved failure.
+
+Cleanup after a committed install is different: a warning about committed
+staging leaves the validated new package active; it does not roll back to a
+partially deleted backup.
 
 ## 6. Verbose diagnostics
 

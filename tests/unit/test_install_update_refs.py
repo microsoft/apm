@@ -11,15 +11,15 @@ Covers two code paths fixed in issue #548:
    short-circuit the download.  Only lockfile_match (SHA comparison) may skip.
 """
 
-from types import SimpleNamespace
-
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import should_force_ref_recheck
 from apm_cli.install.phases._skip_logic import (
     _compute_skip_download,
     _should_use_locked_ref,
 )
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # Both helpers are imported directly from the production module so that any
@@ -395,12 +395,15 @@ def _recheck_dep(
     is_local: bool,
     artifactory_prefix: str | None,
     ref_kind: str | None,
-) -> SimpleNamespace:
-    """Build the minimal dependency shape consumed by the canonical owner."""
-    return SimpleNamespace(
+) -> DependencyReference:
+    """Build a real reference for the canonical source/ref owner."""
+    return DependencyReference(
+        repo_url="org/pkg",
         is_local=is_local,
+        source="local" if is_local else None,
+        local_path="./pkg" if is_local else None,
+        reference="^1.0.0" if ref_kind == "semver" else "stable",
         artifactory_prefix=artifactory_prefix,
-        ref_kind=ref_kind,
     )
 
 
@@ -468,7 +471,7 @@ class TestForceRefRecheck:
                     artifactory_prefix=None,
                     ref_kind="literal",
                 ),
-                SimpleNamespace(),
+                LockedDependency(repo_url="org/pkg", resolved_ref="stable"),
                 update_refs=True,
             )
             is False

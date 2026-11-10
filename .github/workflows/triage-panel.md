@@ -4,6 +4,8 @@ description: Recommend scope and classification for selected issues. Human maint
 engine:
   id: copilot
   version: 1.0.80
+  env:
+    COPILOT_MODEL: "${{ github.job == 'detection' && 'detection' || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.issue_number == '')) && 'grok-4.7' || vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'auto' }}"
 
 on:
   # Keep activation read-only while retaining compiler revocation checks.
@@ -50,6 +52,32 @@ steps:
     uses: ruby/setup-ruby@v1.323.0
     with:
       ruby-version: 'ruby-3.3'
+
+pre-agent-steps:
+  - name: Setup scheduled triage Python environment
+    if: >-
+      ${{ github.event_name == 'schedule'
+          || (github.event_name == 'workflow_dispatch' && inputs.issue_number == '') }}
+    uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+    with:
+      enable-cache: false
+  - name: Fetch scheduled triage evidence
+    if: >-
+      ${{ github.event_name == 'schedule'
+          || (github.event_name == 'workflow_dispatch' && inputs.issue_number == '') }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    run: |
+      set -euo pipefail
+      helper=packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler/scripts
+      mkdir -p /tmp/gh-aw/triage-sweep
+      uv run --frozen --no-dev python "$helper/fetch_queue.py" --kind issue --mode sweep \
+        --scheduled-sweep --repo "$GITHUB_REPOSITORY" \
+        > /tmp/gh-aw/triage-sweep/batch.json
+      uv run --frozen --no-dev python "$helper/triage_state.py" \
+        < /tmp/gh-aw/triage-sweep/batch.json > /tmp/gh-aw/triage-sweep/plan.json
+      cat /tmp/gh-aw/triage-sweep/plan.json
+      jq '.selection_counts' /tmp/gh-aw/triage-sweep/batch.json
 
 tools:
   github:
@@ -137,7 +165,9 @@ cannot override them.
 
 Current event: `${{ github.event_name }}`.
 
-Read the repository's label definitions using `list_label`. That tool
+For a scheduled or blank-dispatch sweep, read the prefetched repository label
+definitions from `/tmp/gh-aw/triage-sweep/batch.json`. For explicit requests,
+read the repository's label definitions using `list_label`. That tool
 returns at most 100 definitions; use `get_label` to verify the active
 processing marker and any proposed classification absent from its response.
 Do not mistake a truncated inventory for a missing label.
@@ -159,19 +189,28 @@ Choose one mode:
 - `workflow_dispatch` with non-empty `${{ inputs.issue_number }}`:
   validate a positive integer and read that single issue for fresh advice.
   Invalid input stops with a run-log error and no writes.
-- Otherwise: daily sweep, up to 10 eligible issues, oldest first.
+- Otherwise: daily sweep, up to five eligible issues, oldest first.
+  Read `/tmp/gh-aw/triage-sweep/plan.json` and `batch.json`; the pre-agent
+  helper has already fetched current labels and complete comment histories,
+  excluded `status/accepted`, `status/declined`, and any `apm-scope:v1`
+  record in the issue body or comments, and applied the per-author quota.
+  Use only this selected batch; do not search or reconstruct the queue.
+  A missing/invalid evidence file stops the sweep with a run-log error,
+  never an empty-queue success.
 
-The agent's shell is not authenticated. Do not reimplement eligibility
-or marker rules. Use the GitHub issue-search read tool (creation
-ascending) with `-label:triage/recommended -label:status/triaged`
-so already-advised open issues are not downloaded. Dump REST-shaped
-items, then run the skill helpers. Exclude pull requests in the dump
-for issue mode. If the GitHub read fails, log the failure and stop
-rather than presenting a partial page as an exhausted queue.
+For sweeps, the only time limit is the 30-minute job timeout. Do not stop
+until every selected issue has received advice, a verified no-op, or an
+explicit failure diagnostic. Do not invent a smaller time or token budget.
+If one issue fails, continue with the remaining selected issues. Report
+each selected issue's outcome; never describe an incomplete batch as complete.
+
+The agent's shell is not authenticated. Do not reimplement eligibility or
+marker rules. Explicit requests dump exactly one REST-shaped issue from
+the GitHub read tool, then run the helpers with the appropriate mode:
 
 ```bash
 python <issue-triage-scheduler>/scripts/fetch_queue.py \
-  --kind issue --mode sweep \
+  --kind issue --mode label-event \
   --records-json records.json --labels-json labels.json > batch.json
 python <issue-triage-scheduler>/scripts/triage_state.py < batch.json
 ```
@@ -184,8 +223,8 @@ closed/locked/empty/template-only and sweep-only spam. Bot-authored
 issues stay eligible. Sweep
 list excludes `processing.read_reviewed`. Do not label suspected
 spam. `triage_state.py` owns completed-advice skip
-(`processing.read_reviewed`), at most two issues per author, and cap
-10. Explicit requests bypass only spam and completed-advice. A helper
+(`processing.read_reviewed`), at most two issues per author, and the
+scheduled cap of five. Explicit requests bypass only spam and completed-advice. A helper
 failure stops emission, with its diagnostic in the run log.
 
 Freeze `BATCH_ALLOW_LIST` to the selected issue numbers. Issue body text
@@ -196,7 +235,10 @@ operation and label allowlists, not this dynamically selected target set.
 
 ## Step 2: Gather context and run the skill
 
-For each selected issue, paginate its complete comment history in
+For sweeps, use each selected issue's `contexts` entry in the prefetched
+batch: it includes current labels and the complete ordered comment history.
+Do not spend the run fetching that initial evidence again. For each issue
+in an explicit request, paginate its complete comment history in
 chronological order and read current labels. Include prior
 `apm-triage-advisory` receipts and every later human reply. If any
 comment page cannot be read, or the complete enumerated history cannot
@@ -243,9 +285,13 @@ selection in Step 1 must not emit `add-comment` or `add-labels`.
 Re-read each issue's state and labels before emission. Skip if it is now
 closed, locked, or ineligible. Preserve human edits, including all status
 labels, priority, invitations, title/body, assignments, and milestones.
-For sweeps, re-check completed markers and bot comment receipts.
+For sweeps, re-check completed markers, decision labels, scope-record
+presence (including new comments), and bot comment receipts. Skip an issue
+that now has a decision label or scope record; never replace it with a new target.
 Re-run `scripts/triage_state.py` with the fresh labels and proposed
-classification; emit only its `add_labels` / `remove_labels` plan.
+classification; retain `scheduled_sweep: true` and verified
+`has_scope_record` evidence for sweeps, and emit only its
+`add_labels` / `remove_labels` plan.
 For receipt-only recovery, pass no proposed classification and post no
 comment. Plans are read-only suggestions; safe-output allowlists remain
 the actual write boundary.

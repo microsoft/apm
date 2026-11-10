@@ -185,113 +185,64 @@ def resolve_package_query(lockfile: LockFile, query: str) -> LockedDependency:
 
 
 def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
-    """Walk the single ``resolved_by`` chain from *target* back to a root.
+    """Explain original incoming requirements, never substitute source refs.
 
-    :class:`LockedDependency.resolved_by` records exactly one parent
-    today, so a target produces ONE chain per lockfile record (any
-    "diamond" fan-in is collapsed by the resolver). Returns a
-    :class:`WhyResult` whose ``paths`` is a tuple of one or more
-    :class:`WhyPath` instances ordered deterministically by their
-    stringified chain. The iterative worklist generalises to N paths
-    without API change if ``resolved_by`` ever becomes multi-valued
-    (see #1488 and the constraint-field follow-on).
-
-    When *target* is itself a direct dependency, the result contains one
-    trivial path with ``parent_key=None``.
-
-    Cycles in the lockfile graph (which would indicate a resolver bug,
-    not user data, but we defend regardless) are broken by a
-    per-traversal visited set: each ``repo_url`` appears at most once
-    in a single chain. A defensive ``max_paths`` cap also bounds
-    worklist growth in the future multi-parent case.
+    Replacement-aware locks record exact parent keys and every incoming
+    replacement request. Legacy locks retain their single repo-url parent.
+    Cycles terminate at the repeated owner; at most 256 paths are expanded.
     """
-    target_key = target.repo_url
-    target_constraint = _dep_constraint(target)
+    from .lockfile import lockfile_parent_identity
 
-    # Direct dependency: single trivial path.
-    if target.resolved_by is None:
-        return WhyResult(
-            target=target,
-            is_direct=True,
-            paths=(
-                WhyPath(
-                    chain=(
-                        WhyEdge(
-                            parent_key=None,
-                            child_key=target_key,
-                            constraint=target_constraint,
-                        ),
-                    )
-                ),
-            ),
+    def key_for(dep: LockedDependency) -> str:
+        return lockfile_parent_identity(dep, lockfile.replacements)
+
+    def incoming(dep: LockedDependency) -> tuple[WhyEdge, ...]:
+        key = key_for(dep)
+        if dep.replacement is not None:
+            return tuple(
+                WhyEdge(parent_key=request.parent, child_key=key, constraint=request.ref)
+                for request in dep.replacement.requests
+            )
+        return (
+            WhyEdge(parent_key=dep.resolved_by, child_key=key, constraint=_dep_constraint(dep)),
         )
 
-    # Build a lookup: repo_url -> dep. The lockfile may legitimately host
-    # multiple deps with the same repo_url under different virtual_path keys;
-    # for parent-chain walking we key on repo_url and pick the canonical
-    # (non-virtual, lowest-depth) record where ambiguous.
-    by_url: dict[str, LockedDependency] = {}
+    by_key: dict[str, LockedDependency] = {}
     for dep in lockfile.get_all_dependencies():
         if not _is_project_dep(dep):
             continue
-        existing = by_url.get(dep.repo_url)
+        key = key_for(dep)
+        existing = by_key.get(key)
         if (
             existing is None
             or (existing.is_virtual and not dep.is_virtual)
             or dep.depth < existing.depth
         ):
-            by_url[dep.repo_url] = dep
+            by_key[key] = dep
 
-    # Walk parents iteratively. Each entry in the worklist is
-    # (current_dep, chain_so_far_root_first, visited_set).
+    target_key = key_for(target)
+    target_edges = incoming(target)
     paths: list[WhyPath] = []
-    initial_edge = WhyEdge(
-        parent_key=target.resolved_by,
-        child_key=target_key,
-        constraint=target_constraint,
-    )
-    worklist: list[tuple[LockedDependency, tuple[WhyEdge, ...], frozenset[str]]] = [
-        (target, (initial_edge,), frozenset({target_key}))
+    worklist: list[tuple[tuple[WhyEdge, ...], frozenset[str]]] = [
+        ((edge,), frozenset({target_key})) for edge in target_edges
     ]
-
-    # Bound traversal depth as a defensive ceiling against pathological data.
-    max_depth = max(64, len(by_url) + 1)
-    # Bound the total number of paths returned (defensive against the
-    # future multi-parent case where a malformed lockfile could produce
-    # factorial fan-in). Today resolved_by is single-valued so this cap
-    # is unreachable; it matters once #1488's resolver lands.
     max_paths = 256
-
+    max_depth = max(64, len(by_key) + 1)
     while worklist:
         if len(paths) >= max_paths:
             break
-        current, chain, visited = worklist.pop()
-        if len(chain) > max_depth:
-            # Stop extending this chain; record what we have.
+        chain, visited = worklist.pop()
+        parent_key = chain[0].parent_key
+        parent = by_key.get(parent_key) if parent_key is not None else None
+        if parent is None or parent_key in visited or len(chain) > max_depth:
             paths.append(WhyPath(chain=chain))
             continue
-        parent_url = current.resolved_by
-        if parent_url is None:
-            paths.append(WhyPath(chain=chain))
-            continue
-        parent = by_url.get(parent_url)
-        if parent is None:
-            # Parent missing from lockfile (corrupt or partial data). Treat
-            # the current step as a root and stop extending.
-            paths.append(WhyPath(chain=chain))
-            continue
-        if parent.repo_url in visited:
-            # Cycle detected; record the chain up to the cycle boundary.
-            paths.append(WhyPath(chain=chain))
-            continue
-        new_edge = WhyEdge(
-            parent_key=parent.resolved_by,
-            child_key=parent.repo_url,
-            constraint=_dep_constraint(parent),
-        )
-        new_chain = (new_edge, *chain)
-        worklist.append((parent, new_chain, visited | {parent.repo_url}))
+        for edge in incoming(parent):
+            worklist.append(((edge, *chain), visited | {parent_key}))
 
-    # Deterministic ordering: by the rendered chain string.
     paths.sort(key=lambda p: tuple((e.parent_key or "", e.child_key) for e in p.chain))
-    return WhyResult(target=target, is_direct=False, paths=tuple(paths))
+    return WhyResult(
+        target=target,
+        is_direct=any(edge.parent_key is None for edge in target_edges),
+        paths=tuple(paths),
+    )

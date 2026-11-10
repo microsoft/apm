@@ -17,6 +17,7 @@ class InstallationSummary:
         self.installed = []
         self.skipped = []
         self.failed = []
+        self.native_hashes: dict[str, str] = {}
 
     def add_installed(self, server_ref: str):
         """Add a server to the installed list."""
@@ -91,6 +92,7 @@ class SafeMCPInstaller:
         server_info_cache: dict[str, Any] = None,  # noqa: RUF013
         runtime_vars: dict[str, str] = None,  # noqa: RUF013
         replace_existing: bool = False,
+        managed_fields: set[str] | None = None,
     ) -> InstallationSummary:
         """Install MCP servers with conflict detection.
 
@@ -127,11 +129,17 @@ class SafeMCPInstaller:
                     kwargs["runtime_vars"] = runtime_vars
                 if server_ref.startswith("@") and server_ref.count("/") == 1:
                     kwargs["server_name"] = server_ref
+                if self.runtime == "claude" and replace_existing and managed_fields:
+                    kwargs["managed_fields"] = managed_fields
 
                 result = self.adapter.configure_mcp_server(server_ref, **kwargs)
 
                 if result:
                     summary.add_installed(server_ref)
+                    if server_ref in self.adapter.written_mcp_hashes:
+                        summary.native_hashes[server_ref] = self.adapter.written_mcp_hashes[
+                            server_ref
+                        ]
                     self._log_success(server_ref)
                 else:
                     summary.add_failed(server_ref, "configuration failed")

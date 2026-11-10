@@ -28,10 +28,11 @@ see [Primitive types](../primitive-types/).
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
+| kiro            | `.kiro/`               |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 | hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
+| grok-bot        | `agent-data/` (`~/agent-data/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
@@ -97,10 +98,10 @@ user-scope `mcp.json`. That global signal does not auto-select file-primitive
 deployment. When `intellij` is selected explicitly, package file primitives use
 the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
-`agent-skills` and `hermes` are canonical target keys; `antigravity` and
-`hermes` are explicit-only for auto-detection. All are available with `--target` and can be listed in a
-project's `apm.yml` `targets:` field so contributors running plain `apm
-install` pick them up automatically.
+`agent-skills`, `antigravity`, `hermes` and `grok-bot` are stable explicit-only
+targets: never auto-detected and excluded from `all`. Select them with
+`--target` or list them in a project's `apm.yml` `targets:` field so
+contributors running plain `apm install` pick them up automatically.
 
 `copilot-cowork`, `copilot-app`, `grok-cloud`, and `openclaw` are
 experimental targets that require `apm experimental enable <name>` before use.
@@ -242,11 +243,11 @@ Windsurf / Cascade.
 
 ## kiro
 
-Kiro IDE/CLI v3 unified agent harness.
+Kiro IDE and CLI V3 target layout.
 
 - **Detection.** `.kiro/` directory.
 - **Deploy directory.** `.kiro/` (project and user scope).
-- **Supported primitives.** agents, instructions, skills, hooks, mcp.
+- **Supported primitives.** agents, instructions, prompts, skills, hooks, mcp.
 - **File conventions.**
   - agents: `.kiro/agents/<relative-stem>.md` -- identity derives from the
     relative path. Only `description`, `model`, and `tools` frontmatter are
@@ -260,10 +261,27 @@ Kiro IDE/CLI v3 unified agent harness.
     (accessed 2026-08-03).
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
+  - prompts: `.kiro/prompts/<name>.md` (project) or `~/.kiro/prompts/<name>.md` (user).
+    Qualified against Kiro CLI 2.33.0's V3 prompt loader, not the IDE.
+    APM converts `<name>.prompt.md` into body-only Markdown: the filename
+    supplies the slash-command name, and YAML frontmatter is removed.
+    Native arguments `${1}` through `${10}`, `$ARGUMENTS`, and `${@}` are
+    preserved. `${input:name}` is not translated; APM warns so authors can
+    replace it. Tool/model frontmatter is not an execution control in Kiro
+    prompts; APM warns when dropping these or other unsupported fields.
+    Workflow-only prompts are excluded. Relative body links are resolved
+    using the source package, as for other prompt targets.
   - hooks: one JSON file per hook action under `.kiro/hooks/`
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
 - **Scope.** Covers the documented Kiro IDE and CLI v3 layout (unified harness). Ref: [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/) (accessed 2026-08-03).
+- **Prompt precedence.** In the qualified CLI loader, project prompts take
+  precedence over same-name user prompts; file prompts take precedence over
+  same-name MCP prompts. APM does not change native precedence or trust.
+  Local user-authored files are preserved unless `--force` is requested;
+  uninstall removes only APM-owned prompts. Edited managed prompts are
+  retained, and uninstall fails until those edits are resolved. This does not establish IDE
+  prompt parity or authenticated model execution.
 
 ## intellij
 
@@ -308,6 +326,35 @@ Hermes Agent.
   - mcp: `$HERMES_HOME/config.yaml` under the `mcp_servers:` block
   - compiled instructions: `AGENTS.md`
 - **Compile behavior.** `apm compile --target hermes` emits `AGENTS.md`.
+
+## grok-bot
+
+Grok Bot agent skills deployment.
+
+- **Detection.** Never auto-detected. Select with `--target grok-bot` or list
+  it in `apm.yml`.
+- **Deploy directory.** `agent-data/` at project scope; `~/agent-data/` at
+  user scope (`--global`).
+- **Supported primitives.** skills only.
+- **Package `targets:`.** Packages that declare `agent-skills` are also accepted by
+  `grok-bot`. With an explicit `--target`, the install fails only when no
+  dependency has a compatible target, or when a package named on the command
+  line and its whole subtree have none; other filtered dependencies warn.
+- **File conventions.** `agent-data/workflows/<name>/SKILL.md` (project) or
+  `~/agent-data/workflows/<name>/SKILL.md` (user).
+- **Recommended install.** For a live Grok Bot, use
+  `apm install --target grok-bot --global`. Grok Bot reads skills from
+  `~/agent-data/workflows/`; a project-scope install only lands in
+  `./agent-data/workflows/` under the current folder.
+- **Use case.** Deploys skill packages so Grok Bot reads them directly from
+  `agent-data/workflows/` without a manual copy or symlink from
+  `.agents/skills/` or `apm_modules`.
+- **Commit posture.** `agent-data/` is a project-visible directory like
+  `.claude/` or `.cursor/`, not a cache -- commit it (or `.gitignore` it
+  deliberately) the same way you would any other target's deploy root.
+- **Security model.** Skill deployment reuses the same `BaseIntegrator`
+  collision- and path-containment checks as `hermes` and `agent-skills`;
+  deployed files cannot escape the `agent-data/workflows/` subtree.
 
 ## grok-build
 

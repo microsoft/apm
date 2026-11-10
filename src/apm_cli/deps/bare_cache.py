@@ -147,8 +147,8 @@ def bare_clone_with_fallback(
         Bitbucket Server reject this).
       - Tier 1 (symbolic / default branch): ``git clone --bare
         --depth=1 [--branch <ref>] <url>``.
-      - Tier 2 (both): full ``git clone --bare <url>``, validate via
-        ``git rev-parse --verify <sha>^{commit}`` for SHA refs.
+      - Tier 2 (both): full ``git clone --bare <url>``, verify the
+        requested SHA or symbolic ref and point HEAD at that commit.
       - Tier 3: re-raise.
 
     After every successful tier, ``git update-ref HEAD <ref>`` is
@@ -303,6 +303,16 @@ def bare_clone_with_fallback(
                 timeout=600,
             )
             _scrub_bare_remote_url(target, git_exe, env)
+            if ref:
+                from ..utils.git_env import git_resolve_commit
+
+                selected_sha = git_resolve_commit(target, ref, env=env, bare=True)
+                subprocess.run(
+                    [git_exe, "--git-dir", str(target), "update-ref", "HEAD", selected_sha],
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                )
             return
 
     execute_transport_plan(

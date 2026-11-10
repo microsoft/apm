@@ -18,6 +18,9 @@ This adds one entry under `dependencies.mcp:` in `apm.yml`. APM then attempts
 runtime-specific MCP config writes for targets that pass selection, scope, and
 adapter prerequisites.
 
+Registry metadata prefetches use up to four concurrent lookups while preserving
+the order of the requested server references.
+
 ## The `mcp:` section in apm.yml
 
 The two sections have different propagation rules. In the root project,
@@ -131,16 +134,18 @@ never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
 
-Claude Code is the one target whose entries are merged key by key rather
-than replaced, so keys APM does not manage (a hand-authored OAuth block, for
-example) survive a reinstall. The keys describing a transport are not among
-them: an entry is rewritten to carry only the transport its declaration names,
-so redeclaring a server from `http` to `stdio` drops the previous `url` and
-`headers` instead of leaving both transports on one entry. This cleanup also
-repairs older mixed entries, but only when APM writes that server. An unchanged
-self-defined declaration with matching lock state can skip the write; repeating
-that install does not automatically repair a mixed entry. Rewriting an unchanged,
-valid entry preserves its field order.
+Claude Code updates self-defined connections only when the native entry matches
+its recorded APM baseline. Updates remove previously managed fields omitted
+from the new declaration, including `env`, while preserving runtime-owned
+`oauthAccount` metadata. Switching from `http` to `stdio` removes `url` and
+`headers`. Modified or unverifiable entries require
+[manual reconciliation](#resolve-a-connection-name-conflict); matching entries
+remain byte-identical.
+
+Managed Claude stdio updates retain a valid native-only `cwd` when both
+declarations omit it; switching to HTTP removes incompatible stdio fields.
+This exception permits updates, not foreign adoption or cleanup. Edits to a
+declared `cwd` or other managed fields still require reconciliation.
 
 For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
@@ -156,22 +161,74 @@ unresolved required entries fail closed.
 | GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
-| Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
+| Cursor | `.cursor/mcp.json` (project, only if `.cursor/` exists) or `~/.cursor/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
-| OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
+| OpenCode | `opencode.json` (project, only if `.opencode/` exists) or `~/.config/opencode/opencode.json` (`-g`) | both | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
+
+Export referenced variables in the environment that launches OpenCode. APM writes
+runtime references rather than their resolved values; authored static values remain
+literal. See [OpenCode variable handling](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for supported fields, registry overlays, and syntax, and
+[Repairing existing credentials](#repairing-existing-credentials) for older configs.
 
 For OpenCode, set the top-level `enabled` field on an MCP dependency to pass a
 value unchanged into that server's `opencode.json` entry. If omitted, APM keeps
 the existing `true` default. APM does not validate or coerce explicit values;
 OpenCode interprets them. Other targets ignore this OpenCode-only field.
 Reinstall applies changes to `enabled`, including its JSON type; removing
-the field restores `true`. OpenCode remains project-only.
+the field restores `true`.
+
+Global Cursor and OpenCode installs preserve your personal servers, including
+ones that share a name with a package-declared server. Reinstalling and
+pruning change only the entries APM wrote for that target. If you move a direct
+`--mcp` server to a different `--target`, APM writes the new target and then
+removes the entry from the old one; if that removal fails, the server stays in
+both targets and retrying the same install removes the old entry.
+
+If a user config is unreadable, contains JSONC, has a non-object server map, or
+uses a symlink below the home directory, APM warns and fails without rewriting
+it, even on a no-op reinstall. Fix the reported config and rerun the original
+command with `--global` and the same `--target` selection. A home-directory
+alias itself remains supported.
+
+## Resolve a connection name conflict
+
+For self-defined Claude and Codex connections, a normal package update or root
+override updates an unchanged managed connection. A differing native entry
+is preserved, the affected target is named, and install exits `1`.
+Successful writes, including registry entries written before a later
+self-defined conflict, remain recorded. This is not a whole-command rollback.
+
+If Claude has a personal `notes` connection and a package requests a different
+`notes` connection for Claude and Codex, APM preserves the personal connection
+even if Codex succeeds. Choose which connection to keep:
+
+1. To keep both, rename your personal connection in the affected runtime's
+   native config, leaving unrelated settings intact.
+2. To replace the personal connection, remove only that native entry yourself.
+3. Rerun the original install command with the same scope and targets, such as
+   `apm install --global --target claude,codex`.
+
+An identical foreign connection stays byte-identical and unowned: APM revokes
+any stale ownership claim without attempting target retirement.
+Registry conflicts do not prevent nonconflicting self-defined updates; the
+command still exits `1` and retains ownership of its successful writes.
+`--force` grants no takeover permission; `--frozen` does not turn a conflicting
+connection into a successful install or repair lock intent. Prune, target
+narrowing, and uninstall likewise preserve entries that differ from a
+trustworthy [managed baseline or receipt](../../reference/lockfile-spec/#canonical-deployment-rows).
+If an older ownership record cannot be verified, rename or remove only the
+affected native entry, then retry. Deleting the lockfile never authorizes
+adoption of existing native entries; do not reset it or the entire native config.
+
+These operations change connection settings, not notes or other data stored
+by the MCP service.
 
 ## How `targets:` gates which configs get written
 
@@ -213,16 +270,9 @@ the gate took effect:
 ```
 
 On reinstall, removing a previously configured target also removes the
-APM-managed server entries from that target's native config. User-authored
-servers and unrelated JSON or TOML settings remain unchanged.
-
-This single rule replaces two older ones that used to coexist:
-
-- A "directory opt-in" carve-out for Cursor / Gemini / OpenCode -- now
-  redundant, because `targets:` (or auto-detection) drives the gate
-  for those runtimes too.
-- The pre-#1335 silent skip path, which dropped non-listed runtimes
-  without telling you.
+verified APM-managed entries from that target's native config. Cleanup checks
+the exact native key: retiring `@company/notes` does not touch personal `notes`.
+User-authored servers and unrelated JSON or TOML settings remain unchanged.
 
 A malformed `targets:` field (both `target:` and `targets:` set,
 `targets: []`, or an unknown target name) fails closed before machine discovery:
@@ -241,10 +291,11 @@ user-scope MCP config (for example, Copilot CLI to
 `$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
 `~/.copilot/mcp-config.json`; Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
-non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
+non-whitespace absolute path (both for installation and stale server cleanup). Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or
-`~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`,
+`~/.codex/config.toml` otherwise, Cursor to `~/.cursor/mcp.json`, OpenCode to
+`~/.config/opencode/opencode.json`, Gemini CLI to `~/.gemini/settings.json`,
 Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
 `$HERMES_HOME/config.yaml` whenever selected explicitly (or
 `~/.hermes/config.yaml` when unset or blank), Windsurf to
@@ -254,13 +305,16 @@ When the user-scope manifest declares a `targets:` field (or the CLI passes
 `--target`), only the matching runtimes receive the config write. When no CLI
 target, user-scope manifest target, or saved `apm config target` restricts
 targets, all detected user-scope-capable runtimes are configured.
-Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped with a warning
+The workspace-only VS Code target is skipped with a warning
 when a mixed target set also contains a global-capable runtime. If none of the
 selected targets supports user scope, the command exits `2` before changing the
 user manifest, lockfile, or runtime configuration. The direct command creates
 or updates `~/.apm/apm.yml`; it does not fall back to the current project's
 manifest. With `--dry-run`, it previews the user-scope entry and runtime
 targets without creating that manifest, lockfile, or runtime configuration.
+APM leaves an existing Cursor or OpenCode config untouched and reports that
+target as failed when it cannot parse the file as JSON (for example, OpenCode
+JSONC comments) or when its user-scope path runs through a symlink.
 
 ## stdio vs HTTP servers
 
@@ -287,6 +341,31 @@ apm install --target codex --mcp local-dev --url http://localhost:3000/mcp
 
 This writes the endpoint to the Codex MCP configuration.
 
+Codex's [native configuration schema](https://developers.openai.com/codex/config-schema.json)
+does not accept an MCP `id` setting. After upgrading APM, repair older generated
+entries with:
+
+```sh
+apm install --only mcp --target codex
+```
+
+Add `--global` for user-scope configuration. APM repairs only entries that
+match a trustworthy saved configuration, including the historical empty
+`id = ""` spelling of self-defined connections. A recorded owner name alone
+does not verify an entry with a nonempty registry ID, old header spelling,
+or other native edits. Such entries stay untouched and an unresolved
+self-defined connection conflict makes the install incomplete.
+
+If Codex still reports an unsupported `id` on an entry you have verified,
+back up `.codex/config.toml` (or the user-scope file) and remove only that
+entry's `id = ...` setting. Keep generated comments such as
+`# apm-registry-id: "registry-uuid"`: APM uses them to prevent duplicate
+registry installs. Regeneration may expand inline TOML tables while retaining
+their values and comments; it does not change Codex's project trust settings.
+If the connection still conflicts, follow
+[native conflict recovery](#resolve-a-connection-name-conflict) rather than
+retrying with `--force`.
+
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive
 combinations (`--url` plus stdio command, `--header` without `--url`,
@@ -296,9 +375,10 @@ etc.) are rejected with exit code 2.
 
 For Cursor, env-var references are written using Cursor's native
 `${env:NAME}` syntax, so referenced secret values are resolved by Cursor
-when it starts the MCP server and are not written into the project-local
-`.cursor/mcp.json`. Explicit static values in `mcp.env` remain static and
-are written as authored; keep secrets out of those values.
+when it starts the MCP server and are not written into the Cursor config for
+the install scope (`.cursor/mcp.json` for a project, `~/.cursor/mcp.json`
+with `-g`). Explicit static values in `mcp.env` remain static and are written
+as authored; keep secrets out of those values.
 
 APM translates supported environment-variable references using each
 target's native syntax. It also injects one specific GitHub credential
@@ -357,7 +437,7 @@ For other authenticated remote servers, set headers explicitly with
 
 ## Updating and replacing a server
 
-Re-run `apm install --mcp NAME ...` against an existing entry:
+Re-run `apm install --mcp NAME ...` against an existing declaration in `apm.yml`:
 
 | Situation | Behaviour |
 |---|---|
@@ -367,6 +447,9 @@ Re-run `apm install --mcp NAME ...` against an existing entry:
 | Existing `NAME`, different config, CI | Refuses with exit 2. Re-run with `--force`. |
 
 Use `--dry-run` to preview the manifest change without writing.
+`--force` permits replacing that declaration, not taking over a conflicting
+native connection. Follow
+[native conflict recovery](#resolve-a-connection-name-conflict) for the latter.
 
 ### Repairing existing credentials
 
@@ -375,11 +458,14 @@ reference. Otherwise regenerating the entry writes that static value again.
 Follow the target's [interpolation rules](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
 when making variables available and editing its config.
 
-For Cursor, replace only the affected header or `env` values in
-`.cursor/mcp.json` with `${env:NAME}` references. Preserve the authorization
-scheme, for example `Bearer ${env:GITHUB_TOKEN}`, and make the variable
-available to Cursor. Keep all other fields and servers, and inspect the diff.
-An ordinary reinstall of the same declaration does not perform this repair.
+For Cursor, open the config for the scope you installed into (`.cursor/mcp.json`
+for a project, `~/.cursor/mcp.json` with `-g`; see
+[What `apm install` writes to disk](#what-apm-install-writes-to-disk)). Replace
+only the affected header or `env` values with `${env:NAME}` references.
+Preserve the authorization scheme, for example `Bearer ${env:GITHUB_TOKEN}`,
+and make the variable available to Cursor. Keep all other fields and servers,
+and inspect the diff. An ordinary reinstall of the same declaration does not
+perform this repair.
 
 If you instead regenerate an entry, save its custom fields first, remove only
 that server entry, reinstall, and restore those fields without restoring the

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.32.0"
+version = "0.35.0"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -60,7 +60,10 @@ build = [
 ]
 
 [project.scripts]
-apm = "apm_cli.cli:main"
+apm = "apm_cli.entrypoint:main"
+
+[tool.setuptools]
+license-files = ["LICENSE", "LICENSE-DOCS", "LICENSING.md", "NOTICE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -212,6 +215,7 @@ markers = [
     "requires_ado_bearer: requires az CLI logged in + APM_TEST_ADO_BEARER=1",
     "requires_network_integration: requires APM_RUN_INTEGRATION_TESTS=1",
     "requires_windows: requires a Windows host",
+    "requires_windows_native_standard_user: requires the disposable Windows runner's verified non-admin token and symlink denial",
     "requires_apm_binary: requires built apm binary on PATH (or APM_BINARY_PATH)",
     "requires_runtime_codex: requires codex runtime installed",
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",

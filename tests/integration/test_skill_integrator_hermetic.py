@@ -132,6 +132,7 @@ class TestCopySkillToTarget:
         target.supports.return_value = True
         target.primitives = {"skills": MagicMock(deploy_root=None)}
         target.root_dir = Path(".github")
+        target.skills_rel_root = ".github/skills"
         target.auto_create = True
 
         with patch(
@@ -178,6 +179,7 @@ class TestCopySkillToTarget:
         target.supports.return_value = True
         target.primitives = {"skills": MagicMock(deploy_root=None)}
         target.root_dir = Path(".missing-dir")
+        target.skills_rel_root = ".missing-dir/skills"
         target.auto_create = False
 
         with patch("apm_cli.integration.skill_integrator.should_install_skill", return_value=True):
@@ -204,6 +206,7 @@ class TestCopySkillToTarget:
             t.supports.return_value = True
             t.primitives = {"skills": MagicMock(deploy_root=None)}
             t.root_dir = Path(".github")
+            t.skills_rel_root = ".github/skills"
             t.auto_create = True
             return t
 
@@ -487,27 +490,35 @@ class TestPromoteSubSkills:
         )
         logger.warning.assert_called()
 
-    def test_warn_overwrite_importerror_path(self, tmp_path):
-        """Lines 643-644: ImportError path when no diagnostics and no logger."""
+    @pytest.mark.parametrize("newline", [None, "\n", "\r\n"], ids=["native", "lf", "crlf"])
+    def test_warn_overwrite_console_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], newline: str | None
+    ) -> None:
+        """Without a logger or diagnostics, the console reports the overwrite."""
         sub = self._make_sub_skills_dir(tmp_path, ["shared-skill"])
+        source = sub / "shared-skill" / "SKILL.md"
+        if newline is not None:
+            source.write_bytes(f"# shared-skill{newline}".encode("ascii"))
+        source_bytes = source.read_bytes()
         target_root = tmp_path / "target"
         target_root.mkdir()
         target_skill = target_root / "shared-skill"
         target_skill.mkdir()
         (target_skill / "SKILL.md").write_text("# from other package\n")
 
-        with patch(
-            "apm_cli.utils.console._rich_warning",
-            side_effect=ImportError,
-        ):
-            # Should not raise -- ImportError is caught internally
-            count, _ = SkillIntegrator._promote_sub_skills(
-                sub,
-                target_root,
-                "parent-pkg",
-                warn=True,
-            )
+        count, promoted = SkillIntegrator._promote_sub_skills(
+            sub,
+            target_root,
+            "parent-pkg",
+            warn=True,
+        )
         assert count == 1
+        assert promoted == [target_skill]
+        assert (target_skill / "SKILL.md").read_bytes() == source_bytes
+        assert source.read_bytes() == source_bytes
+        output = capsys.readouterr()
+        assert "shared-skill" in output.out + output.err
+        assert "parent-pkg" in output.out + output.err
 
     def test_project_root_provided_computes_rel_prefix(self, tmp_path):
         """Lines 567-572: project_root provided -- uses relative path prefix."""
@@ -569,8 +580,10 @@ class TestIntegrateSkillNameNormalization:
         fake_target.supports.return_value = True
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.resolved_deploy_root = None
         fake_target.auto_create = True
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.skills_deploy_path.side_effect = lambda root: root / ".github" / "skills"
 
         with (
@@ -608,8 +621,10 @@ class TestIntegrateSkillNameNormalization:
         fake_target.supports.return_value = True
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.resolved_deploy_root = None
         fake_target.auto_create = True
+        fake_target.skills_rel_root = ".github/skills"
         fake_target.skills_deploy_path.side_effect = lambda root: root / ".github" / "skills"
 
         with (
@@ -661,6 +676,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -685,6 +701,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -710,6 +727,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -738,6 +756,7 @@ class TestSyncIntegration:
         fake_target.user_root_resolver = None
         fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
         fake_target.root_dir = Path(".github")
+        fake_target.skills_rel_root = ".github/skills"
 
         stats = integrator.sync_integration(
             apm_pkg,

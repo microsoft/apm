@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-from collections.abc import MutableSequence, MutableSet
+from collections.abc import Callable, MutableSequence, MutableSet
 from pathlib import Path
 
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.primitives.models import Instruction, PrimitiveCollection
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -30,6 +31,70 @@ _ROOT_CONTEXT_BY_COMPILE_FAMILY = {
     "gemini": ("GEMINI.md", (GEMINI_MD_GENERATED_MARKER,)),
     "vscode": ("AGENTS.md", _AGENTS_ROOT_GENERATED_MARKERS),
 }
+
+
+def _get_deployed_instruction_filenames(
+    rules_dir: Path,
+    base_dir: Path,
+    warn_fn: Callable[[str], None],
+    expected_filenames: set[str] | None = None,
+) -> set[str]:
+    """Return safely contained deployed rule names from a target rules directory."""
+    if not rules_dir.is_dir():
+        return set()
+    try:
+        ensure_path_within(rules_dir, base_dir)
+    except PathTraversalError:
+        warn_fn(f"{rules_dir} is a symlink outside the project root -- ignoring")
+        return set()
+    candidates = (
+        (rules_dir / name for name in expected_filenames)
+        if expected_filenames is not None
+        else rules_dir.glob("*.md")
+    )
+    deployed: set[str] = set()
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            ensure_path_within(candidate, base_dir)
+        except PathTraversalError:
+            warn_fn(f"{candidate} is a symlink outside the project root -- ignoring")
+            continue
+        deployed.add(candidate.name)
+    return deployed
+
+
+def _instruction_rule_filename(target_key: str, instruction: Instruction) -> str | None:
+    """Return the target-native filename for one instruction, when supported."""
+    target_profile = KNOWN_TARGETS.get(target_key)
+    if not target_profile or "instructions" not in target_profile.primitives:
+        return None
+    stem = instruction.file_path.name
+    if stem.endswith(".instructions.md"):
+        stem = stem[: -len(".instructions.md")]
+    return f"{stem}{target_profile.primitives['instructions'].extension}"
+
+
+def _build_expected_rule_filenames(
+    target_key: str,
+    primitives: PrimitiveCollection,
+    instructions: list[Instruction] | None = None,
+) -> set[str]:
+    """Return the native rule filenames used to decide root-context coverage.
+
+    Args:
+        target_key: Canonical target profile key.
+        primitives: Collection whose instructions supply expected filenames.
+        instructions: Optional subset replacing primitives.instructions when
+            only selected instructions contribute expected filenames.
+    """
+    source_instructions = primitives.instructions if instructions is None else instructions
+    return {
+        filename
+        for instruction in source_instructions
+        if (filename := _instruction_rule_filename(target_key, instruction)) is not None
+    }
 
 
 def root_context_filename(compile_family: str | None) -> str | None:

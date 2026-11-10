@@ -46,6 +46,10 @@ from scripts.architecture_linter.checks.install_lsp_plugin import (
     check_lsp_lifecycle,
     check_lsp_target_contract,
 )
+from scripts.architecture_linter.checks.install_manifest_snapshot import (
+    GUARD_MANIFEST_SNAPSHOT,
+    check_manifest_snapshot,
+)
 from scripts.architecture_linter.checks.install_package_target_authorization import (
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
@@ -63,6 +67,20 @@ from scripts.architecture_linter.checks.install_request_and_source import (
     check_request_defaults,
     check_source_plan,
 )
+from scripts.architecture_linter.checks.install_single_file import (
+    GUARD as _GUARD_SINGLE_FILE,
+)
+from scripts.architecture_linter.checks.install_single_file import (
+    check_single_file_materialization,
+)
+from scripts.architecture_linter.checks.install_skill_preflight import (
+    GUARD_SKILL_PREFLIGHT,
+    check_skill_preflight,
+)
+from scripts.architecture_linter.checks.install_skills_root_derivation import (
+    _GUARD_SKILLS_ROOT,
+    check_skills_root_derivation,
+)
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
     _GUARD_ORPHAN_SELECTION,
@@ -76,6 +94,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        _GUARD_SINGLE_FILE,
+        "Local and remote single-file dependencies share package materialization and admission.",
+        check_single_file_materialization,
+    ),
     _rule(
         _GUARD_ORPHAN_SELECTION,
         "Prune and orphan warnings share declaration-aware package selection.",
@@ -93,7 +116,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         _GUARD_MCP_OWNERSHIP,
-        "Legacy MCP runtime ownership-key migration stays owned by install/mcp/ownership.py.",
+        "Native MCP baselines, safe removal and legacy migration share install/mcp/ownership.py.",
         check_mcp_ownership_migration,
     ),
     _rule(
@@ -122,6 +145,11 @@ RULES: tuple[Rule, ...] = (
         check_frozen,
     ),
     _rule(
+        GUARD_MANIFEST_SNAPSHOT,
+        "Acquired-manifest metadata and version authority route through their snapshot owners.",
+        check_manifest_snapshot,
+    ),
+    _rule(
         _GUARD_DRY_RUN_PLAN,
         "Prospective dry-run state and selection stay owned by ProspectiveInstallPlan.",
         check_prospective_dry_run_plan,
@@ -130,6 +158,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_SOURCE_PLAN,
         "Authorized deployable source paths come from install/deployable_source_plan.py.",
         check_source_plan,
+    ),
+    _rule(
+        GUARD_SKILL_PREFLIGHT,
+        "The complete selected skill plan is checked before native deployment.",
+        check_skill_preflight,
     ),
     _rule(
         _GUARD_PRIMITIVE_CLASSIFICATION,
@@ -185,6 +218,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_UNINSTALL_SELECTION,
         "Dependency CLI parsing + uninstall selection route through dependency/selection.py.",
         check_uninstall_selection,
+    ),
+    _rule(
+        _GUARD_SKILLS_ROOT,
+        "Skills roots come from TargetProfile.skills_rel_root, not open-coded <root>/skills.",
+        check_skills_root_derivation,
     ),
     *EXTRA_RULES,
 )

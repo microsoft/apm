@@ -1,5 +1,6 @@
 """Base adapter interface for MCP clients."""
 
+import json
 import os
 import re
 from abc import ABC, abstractmethod
@@ -8,7 +9,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_warning
+from ...utils.path_security import has_symlink_component
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -334,6 +337,7 @@ class MCPClientAdapter(ABC):
         """
         self._project_root = Path(project_root) if project_root is not None else None
         self.user_scope = user_scope
+        self.written_mcp_hashes: dict[str, str] = {}
         # Per-server tracking populated by the env-resolution helpers and
         # consumed by ``configure_mcp_server`` for the post-install summary
         # and the aggregated legacy-syntax deprecation warning. Defined on
@@ -364,18 +368,38 @@ class MCPClientAdapter(ABC):
             return self._project_root
         return Path(os.getcwd())
 
-    def render_server_config(self, server_info: dict) -> dict:
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
         """Render one native server entry for exact baseline comparisons."""
         rendered = self._format_server_config(
             server_info,
-            env_overrides={},
-            runtime_vars={},
+            env_overrides=env_overrides or {},
+            runtime_vars=runtime_vars or {},
         )
         if isinstance(rendered, tuple):
             rendered = rendered[0]
         if not isinstance(rendered, dict):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
+
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """Compare the native connection with the adapter's rendered baseline."""
+        return native == expected
+
+    def managed_server_config(self, native: dict) -> dict:
+        """Return connection data for an actual-write fingerprint."""
+        return dict(native)
+
+    def project_managed_server_config(
+        self, native: object, *, baseline: dict, requested: dict
+    ) -> object:
+        """Return a comparison-only view for an already recorded managed connection."""
+        return native
 
     @abstractmethod
     def get_config_path(self):
@@ -395,6 +419,71 @@ class MCPClientAdapter(ABC):
     def get_current_config(self):
         """Get the current MCP configuration."""
         pass
+
+    def validate_config_for_install(self) -> bool:
+        """Allow adapters to refuse unsafe configs before existing-server shortcuts."""
+        return True
+
+    def _read_json_config_for_update(self, config_path: Path) -> dict | None:
+        """Return the JSON object at *config_path* before a merge-and-write.
+
+        A missing or blank file yields ``{}``.  Returns ``None`` after a
+        warning when rewriting the file could lose data, so the caller skips
+        the write: the existing content is not a JSON object (for example
+        JSONC comments), or a user-scope path runs through a symlink, which
+        stale cleanup refuses to rewrite later.
+        """
+        if self.user_scope and has_symlink_component(Path.home(), config_path):
+            _rich_warning(
+                f"Skipped {config_path}: APM does not write MCP config through "
+                "symlinks. Replace the symlink or configure this server manually.",
+                symbol="warning",
+            )
+            return None
+        try:
+            raw = config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except (OSError, UnicodeError) as exc:
+            _rich_warning(
+                f"Could not read {config_path}: {exc} -- skipping config write; "
+                "fix the file's permissions or encoding, or add this server manually",
+                symbol="warning",
+            )
+            return None
+        if not raw.strip():
+            return {}
+        try:
+            config = json.loads(raw)
+        except json.JSONDecodeError:
+            config = None
+        if not isinstance(config, dict):
+            _rich_warning(
+                f"Could not parse {config_path} as a JSON object -- skipping config "
+                "write to avoid data loss (comments and trailing commas are not "
+                "preserved); fix the file or add this server manually",
+                symbol="warning",
+            )
+            return None
+        if self.mcp_servers_key in config and not isinstance(config[self.mcp_servers_key], dict):
+            _rich_warning(
+                f"Could not parse {config_path}: {self.mcp_servers_key} must be "
+                "a JSON object -- skipping config write to avoid data loss; "
+                "fix the file or add this server manually",
+                symbol="warning",
+            )
+            return None
+        return config
+
+    @staticmethod
+    def _write_json_config(config_path: Path, config: dict) -> None:
+        """Atomically write *config* as JSON and keep the file owner-only.
+
+        Entries can carry env values resolved at install time.
+        """
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(config_path, json.dumps(config, indent=2), new_file_mode=0o600)
+        os.chmod(config_path, 0o600)
 
     @abstractmethod
     def configure_mcp_server(
@@ -1049,6 +1138,28 @@ class MCPClientAdapter(ABC):
         if os.getenv("APM_E2E_TESTS") == "1":
             return True
         return not (sys.stdin.isatty() and sys.stdout.isatty())
+
+    def _resolve_explicit_environment_values(
+        self,
+        env_vars: dict[str, object],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Translate authored references while preserving explicit env literals.
+
+        Resets placeholder tracking; mid-render callers must preserve prior keys.
+        """
+        resolved: dict[str, str] = {}
+        self._last_env_placeholder_keys = set()
+        for name, value in env_vars.items():
+            if not name or value is None:
+                continue
+            if isinstance(value, TrustedEnvLiteral):
+                resolved[name] = value
+            elif isinstance(value, str):
+                resolved[name] = self._resolve_env_variable(name, value, env_overrides)
+            else:
+                resolved[name] = _stringify_env_literal(value)
+        return resolved
 
     def _resolve_environment_variables(self, env_vars, env_overrides=None):
         """Resolve (or translate) declared environment variables.

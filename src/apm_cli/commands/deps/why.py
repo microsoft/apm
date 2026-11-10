@@ -58,6 +58,11 @@ def _format_dep_label(dep) -> str:
         or dep.resolved_ref
         or "unknown"
     )
+    if dep.replacement is not None:
+        return (
+            f"{dep.get_unique_key()}@{version} "
+            f"-> {dep.to_dependency_ref().source_reference.to_display_reference()}"
+        )
     return f"{dep.repo_url}@{version}"
 
 
@@ -85,7 +90,7 @@ def _render_human(result: WhyResult) -> str:
     header_kind = "direct dependency" if result.is_direct else "transitive"
     lines: list[str] = [f"[i] {_format_dep_label(target)}  ({header_kind})", ""]
 
-    if result.is_direct:
+    if result.is_direct and len(result.paths) == 1:
         # Single trivial chain.
         edge = result.paths[0].chain[0]
         annotation = _edge_annotation(edge, is_root=True)
@@ -135,6 +140,8 @@ def _render_json(result: WhyResult) -> str:
             for path in result.paths
         ],
     }
+    if target.replacement is not None:
+        payload["package"]["replacement"] = target.replacement.to_dict()
     return json.dumps(payload, indent=2, sort_keys=True)
 
 

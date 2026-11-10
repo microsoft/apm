@@ -79,6 +79,39 @@ def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None)
     return f"Policy fetch failed: {err_text or outcome}"
 
 
+def _is_explicit_policy_source(policy_source: str | None) -> bool:
+    """Return True when ``--policy`` names one concrete policy to enforce.
+
+    ``--policy org`` keeps auto-discovery semantics (#829 / #1159); every
+    other value (path, ``owner/repo``, https URL) is an explicit request
+    that must fail closed when it cannot be loaded (#3195).
+    """
+    return bool(policy_source) and policy_source != "org"
+
+
+def _explicit_policy_load_reason(policy_source: str, fetch_result) -> str:
+    """Explain why an explicit ``--policy`` source produced no policy."""
+    if fetch_result.error or fetch_result.fetch_error:
+        return fetch_result.error or fetch_result.fetch_error
+    if fetch_result.outcome == "absent" and not policy_source.startswith("https://"):
+        return f"no apm-policy.yml found in repository '{policy_source}'"
+    return fetch_result.outcome or "no policy was resolved"
+
+
+def _policy_enforcement_report(fetch_result) -> dict:
+    """Summarize whether the CI gate evaluated a policy (JSON / SARIF)."""
+    from ..policy.discovery import _redact_policy_ref
+
+    policy = fetch_result.policy if fetch_result is not None else None
+    if policy is None:
+        return {"enforced": False, "source": None, "enforcement": None}
+    return {
+        "enforced": policy.enforcement != "off",
+        "source": _redact_policy_ref(fetch_result.source) if fetch_result.source else None,
+        "enforcement": policy.enforcement,
+    }
+
+
 def _scan_single_file(file_path: Path, logger) -> tuple[dict[str, list[ScanFinding]], int]:
     """Scan a single arbitrary file.
 
@@ -593,7 +626,7 @@ def _audit_ci_gate(
         from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
 
         if get_lockfile_path(cfg.project_root).exists():
-            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root:
+            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve():
                 prepared_replay_error = (
                     "installed package materialization is missing at "
                     f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "
@@ -638,6 +671,35 @@ def _audit_ci_gate(
         fetch_result = discover_policy_with_chain(cfg.project_root)
         auto_discovered = True
 
+    # An explicit --policy <source> names the exact policy the caller wants
+    # enforced, so failing to load it fails closed regardless of
+    # policy.fetch_failure_default (#3195). A stale-but-valid cached policy
+    # still resolves to a policy object and is enforced as usual.
+    if fetch_result is not None and _is_explicit_policy_source(policy_source):
+        from ..policy.discovery import _redact_policy_ref
+
+        display_source = _redact_policy_ref(policy_source)
+        if fetch_result.outcome == "disabled":
+            click.echo(
+                f"{STATUS_SYMBOLS['warning']} --policy {display_source} ignored: "
+                "APM_POLICY_DISABLE=1 disables policy enforcement; no policy checks ran",
+                err=True,
+            )
+            fetch_result = None
+        elif not fetch_result.found:
+            reason = _explicit_policy_load_reason(policy_source, fetch_result)
+            click.echo(
+                f"{STATUS_SYMBOLS['error']} Policy '{display_source}' could not be loaded: "
+                f"{reason}",
+                err=True,
+            )
+            click.echo(
+                "    --policy was passed explicitly, so the audit fails closed instead "
+                "of skipping enforcement. Fix the policy source above and re-run.",
+                err=True,
+            )
+            sys.exit(1)
+
     if fetch_result is not None:
         # Honour project-side fetch_failure_default for outcomes that
         # mean "no enforcement applied".  Pre-#1159, auto-discovery
@@ -647,13 +709,12 @@ def _audit_ci_gate(
         #
         #   * malformed / cache_miss_fetch_fail / garbage_response
         #     -> existing fetch-failure handling (warn unless block);
-        #     applies to BOTH explicit --policy and auto-discovery.
+        #     applies to auto-discovery and `--policy org`. Any other
+        #     explicit --policy already failed closed above (#3195).
         #   * absent / no_git_remote / empty   (auto-discovery only)
         #     -> were silently dropped pre-#1159; now surfaced as
         #        explicit warnings, and honour `block` for parity with
-        #        install.  Explicit --policy keeps the legacy fall-
-        #        through so an opt-in pointer at a baseline file does
-        #        not regress.
+        #        install.  `--policy org` keeps the legacy fall-through.
         #   * disabled   (auto-discovery only)
         #     -> emit a forensic `[i]` breadcrumb in --ci mode so
         #        audit logs explain WHY no policy ran.
@@ -773,14 +834,19 @@ def _audit_ci_gate(
 
         from ..install.drift import render_drift_json, render_drift_sarif
 
+        policy_report = _policy_enforcement_report(fetch_result)
         if effective_format == "sarif":
             payload = ci_result.to_sarif()
             if drift_findings:
                 payload["runs"][0]["results"].extend(render_drift_sarif(drift_findings))
+            run = payload["runs"][0]
+            invocation = run.setdefault("invocations", [{}])[0]
+            invocation.setdefault("properties", {})["policy"] = policy_report
         else:
             payload = ci_result.to_json()
             if drift_findings or not no_drift:
                 payload["drift"] = render_drift_json(drift_findings)
+            payload["policy"] = policy_report
 
         output = _json.dumps(payload, indent=2)
         if cfg.output_path:

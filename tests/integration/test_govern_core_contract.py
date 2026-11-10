@@ -704,7 +704,7 @@ def _status_diagnostics(payload: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in payload.items() if key not in ignored}
 
 
-def _assert_policy_observations_equal(matrix: _PolicyMatrix) -> None:
+def _assert_policy_observations_equal(matrix: _PolicyMatrix, *, enforcement: str = "block") -> None:
     """Cold and warm public command observations must agree."""
     assert matrix.cold_status_returncode == matrix.warm_status_returncode
     assert matrix.cold_audit_returncode == matrix.warm_audit_returncode
@@ -713,7 +713,18 @@ def _assert_policy_observations_equal(matrix: _PolicyMatrix) -> None:
     assert matrix.cold_status["extends_chain"] == []
     assert matrix.warm_status["extends_chain"] == list(matrix.expected_warm_extends_chain)
     assert _status_diagnostics(matrix.cold_status) == _status_diagnostics(matrix.warm_status)
-    assert matrix.cold_audit == matrix.warm_audit
+    cold_policy = matrix.cold_audit["policy"]
+    warm_policy = matrix.warm_audit["policy"]
+    assert cold_policy == {
+        "enforced": True,
+        "source": f"file:{_POLICY_SOURCE}",
+        "enforcement": enforcement,
+    }
+    assert warm_policy == {**cold_policy, "source": f"org:{_POLICY_SOURCE}"}
+    assert matrix.cold_audit == {
+        **matrix.warm_audit,
+        "policy": {**warm_policy, "source": cold_policy["source"]},
+    }
 
 
 def test_real_govern_core_contract(
@@ -869,7 +880,7 @@ def test_minimal_policy_cache_is_observationally_equivalent(
         scenario_id="govern-minimal-policy",
     )
 
-    _assert_policy_observations_equal(matrix)
+    _assert_policy_observations_equal(matrix, enforcement="warn")
     assert matrix.cold_status["outcome"] == "empty"
     assert matrix.warm_status["outcome"] == "empty"
     cold_warnings = matrix.cold_status["warnings"]

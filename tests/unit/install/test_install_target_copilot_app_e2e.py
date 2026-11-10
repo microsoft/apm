@@ -162,6 +162,11 @@ class TestCopilotAppParserE2E:
         """
         import apm_cli.config as _conf
 
+        monkeypatch.chdir(fake_home)
+        assert Path.cwd() == fake_home.resolve()
+        _write_minimal_apm_yml(fake_home)
+        assert (fake_home / "apm.yml").read_text(encoding="ascii") == _MINIMAL_APM_YML
+
         monkeypatch.setattr(
             _conf,
             "_config_cache",
@@ -181,6 +186,8 @@ class TestCopilotAppParserE2E:
         assert "requires --global" not in (result.output or ""), result.output
         # Empty project apm.yml means zero deps to deploy; install succeeds.
         assert result.exit_code == 0, result.output
+        with sqlite3.connect(db) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM workflows").fetchone() == (0,)
 
 
 class TestCopilotAppDeployUninstall:

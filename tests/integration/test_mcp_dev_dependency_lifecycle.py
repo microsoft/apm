@@ -248,7 +248,7 @@ def _native_document(
     servers: dict[str, object] = {}
     for name in _EXPECTED_NAMES:
         if case.runtime == "codex":
-            config = {"url": _REMOTE_URLS[name], "id": ""}
+            config = {"url": _REMOTE_URLS[name]}
         else:
             config = {"type": "http", "url": _REMOTE_URLS[name]}
         servers[_native_key(case, name)] = config

@@ -19,6 +19,7 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.install import pipeline
 from apm_cli.install.context import InstallContext
+from apm_cli.install.deployment_plan import PackageDeploymentPlan
 from apm_cli.install.phases import integrate
 from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -181,13 +182,15 @@ def _observe_pipeline(
             assert ctx.integrators["skill"]._ownership_snapshots is None
         return run_phase(name, phase, ctx)
 
-    def observed_root(ctx: InstallContext) -> dict[str, int] | None:
+    def observed_root(
+        ctx: InstallContext, *, deployment_plan: PackageDeploymentPlan | None = None
+    ) -> dict[str, int] | None:
         if lockfile_only:
-            return root_project(ctx)
+            return root_project(ctx, deployment_plan=deployment_plan)
         assert ctx.integrators["skill"]._ownership_snapshots is not None
         assert lock_bytes() == phase_lock_bytes
         if not expect_skill_deployment:
-            result = root_project(ctx)
+            result = root_project(ctx, deployment_plan=deployment_plan)
             assert ctx.integrators["skill"]._ownership_snapshots == {}
             assert lock_bytes() == phase_lock_bytes
             assert not fixture.deployed.exists()
@@ -198,7 +201,7 @@ def _observe_pipeline(
             assert dep_key not in ctx.package_deployed_files
             assert ctx.diagnostics.error_count == 1
             assert not fixture.deployed.exists()
-            result = root_project(ctx)
+            result = root_project(ctx, deployment_plan=deployment_plan)
             assert fixture.deployed.read_bytes() == fixture.local_skill.read_bytes()
             assert lock_bytes() == phase_lock_bytes
             evidence.root_checks += 1
@@ -207,7 +210,7 @@ def _observe_pipeline(
         dep_key = fixture.package.get_apm_dependencies()[0].get_unique_key()
         assert ".agents/skills/shared" in ctx.package_deployed_files[dep_key]
         assert ctx.local_deployed_files == []
-        result = root_project(ctx)
+        result = root_project(ctx, deployment_plan=deployment_plan)
         assert lock_bytes() == phase_lock_bytes
         assert fixture.deployed.read_bytes() == fixture.local_skill.read_bytes()
         assert ".agents/skills/shared" in ctx.local_deployed_files
@@ -300,6 +303,51 @@ def test_real_reinstall_changes_deployments_but_not_lock_inside_phase(
     assert evidence.lock_writes >= 2
 
 
+@pytest.mark.parametrize("failed_write", [1, 2], ids=["rendered-receipt", "committed-claims"])
+def test_receipt_persistence_failure_is_a_pipeline_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    local_install_factory: Callable[..., LocalInstall],
+    failed_write: int,
+) -> None:
+    """Successful target writes do not turn a failed evidence write into success."""
+    from apm_cli.utils import atomic_io
+
+    fixture = local_install_factory()
+    evidence = _observe_pipeline(monkeypatch, fixture)
+    write = atomic_io.atomic_write_text
+    writes = 0
+    failed_path: Path | None = None
+    prior_receipt: bytes | None = None
+
+    def fail_receipt(path: Path, text: str, **kwargs: Any) -> None:
+        nonlocal writes, failed_path, prior_receipt
+        if path.parent.name == "deployment-receipts":
+            writes += 1
+            if writes == failed_write:
+                failed_path = path
+                prior_receipt = path.read_bytes() if path.exists() else None
+                raise OSError("injected materialization persistence failure")
+        write(path, text, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", fail_receipt)
+    with pytest.raises(RuntimeError, match="injected materialization persistence failure"):
+        pipeline.run_install_pipeline(
+            fixture.package,
+            scope=fixture.scope,
+            target="copilot",
+            parallel_downloads=0,
+            no_policy=True,
+            audit_override="off",
+        )
+    assert failed_path is not None
+    assert (failed_path.read_bytes() if failed_path.exists() else None) == prior_receipt
+    assert fixture.deployed.read_bytes() == fixture.local_skill.read_bytes()
+    assert get_lockfile_path(fixture.metadata).exists() is (failed_write == 2)
+    assert evidence.contexts[0].integrators["skill"]._ownership_snapshots is None
+    assert evidence.contexts[0].integrators["skill"]._materialization_session is None
+    assert "audit" not in evidence.events
+
+
 def test_exception_after_real_integration_exits_before_any_lock_writer(
     monkeypatch: pytest.MonkeyPatch, local_install_factory: Callable[..., LocalInstall]
 ) -> None:
@@ -345,21 +393,21 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     failed_this_run = False
     inject_failure = True
     copies: list[str] = []
-    copytree = shutil.copytree
+    copy_file = shutil.copy2
     evidence = _observe_pipeline(monkeypatch, fixture, failed_dependency=lambda: failed_this_run)
 
     def fail_first_skill_copy(src: Any, dst: Any, *args: Any, **kwargs: Any) -> Any:
         nonlocal failed_this_run, inject_failure
-        if Path(dst).parent == fixture.deployed.parent.parent:
-            copies.append(Path(dst).name)
-        if inject_failure and Path(dst) == fixture.deployed.parent:
+        if Path(dst).parent.parent == fixture.deployed.parent.parent:
+            copies.append(Path(dst).parent.name)
+        if inject_failure and Path(dst) == fixture.deployed:
             assert evidence.contexts[-1].integrators["skill"]._ownership_snapshots
             inject_failure = False
             failed_this_run = True
             raise OSError("injected package copy failure")
-        return copytree(src, dst, *args, **kwargs)
+        return copy_file(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(shutil, "copytree", fail_first_skill_copy)
+    monkeypatch.setattr(shutil, "copy2", fail_first_skill_copy)
     failed = pipeline.run_install_pipeline(
         fixture.package,
         target="copilot",

@@ -208,8 +208,9 @@ def test_transport_redeclaration_preserves_unowned_state(scenario: _Scenario, in
 def test_legacy_mixed_state_is_repaired_only_on_redeclaration(
     scenario: _Scenario, transport: str
 ) -> None:
-    """An unchanged install skips legacy state; actual same-family drift repairs it."""
+    """Mixed native state needs reconciliation before a declaration can replace it."""
     unrelated = _prepare(scenario, transport)
+    baseline = scenario.config_path(scenario.user_scope).read_bytes()
     document = scenario.document()
     entry = document["mcpServers"][_SERVER]
     if transport == "http":
@@ -217,10 +218,26 @@ def test_legacy_mixed_state_is_repaired_only_on_redeclaration(
     else:
         entry.update(url="https://stale.invalid/mcp", headers={"Authorization": "old-fixture"})
     _write_config(scenario.config_path(scenario.user_scope), document)
-    _assert_repeat(scenario)
     opposite = scenario.snapshot(not scenario.user_scope)
+    for flags in ((), ("--force",), ("--frozen",)):
+        before = scenario.snapshot(scenario.user_scope)
+        result = scenario.install(*flags)
+        assert result.returncode != 0
+        assert "conflicts with the existing claude" in result.stdout
+        assert scenario.snapshot(scenario.user_scope) == before
+        assert scenario.snapshot(not scenario.user_scope) == opposite
 
     scenario.declare(transport, revision=2)
+    for flags in ((), ("--force",)):
+        before = scenario.snapshot(scenario.user_scope)
+        result = scenario.install(*flags)
+        assert result.returncode != 0
+        assert "conflicts with the existing claude" in result.stdout
+        assert scenario.snapshot(scenario.user_scope) == before
+        assert scenario.snapshot(not scenario.user_scope) == opposite
+
+    # The operator restores the known connection; APM never guesses its provenance.
+    scenario.config_path(scenario.user_scope).write_bytes(baseline)
     _assert_success(scenario.install())
     _assert_entry(scenario, transport, 2)
     if transport == "stdio":

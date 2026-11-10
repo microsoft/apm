@@ -335,6 +335,7 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     findings: list[Violation] = []
     owner, owner_fail = _facts_for(provider, _SOURCE_PLAN_OWNER, rule_id)
     services, services_fail = _facts_for(provider, "src/apm_cli/install/services.py", rule_id)
+    plan, plan_fail = _facts_for(provider, "src/apm_cli/install/deployment_plan.py", rule_id)
     scan, scan_fail = _facts_for(provider, "src/apm_cli/install/helpers/security_scan.py", rule_id)
     engine, engine_fail = _facts_for(provider, "src/apm_cli/commands/uninstall/engine.py", rule_id)
     skill, skill_fail = _facts_for(provider, "src/apm_cli/integration/skill_integrator.py", rule_id)
@@ -345,6 +346,7 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     failures = (
         list(owner_fail)
         + list(services_fail)
+        + list(plan_fail)
         + list(scan_fail)
         + list(engine_fail)
         + list(skill_fail)
@@ -366,7 +368,8 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     )
     block_failed = (
         _count_re(owner, class_pattern) != 1
-        or not _present(services, "source_plan = DeployableSourcePlan.create(")
+        or not _present(plan, "source_plan = DeployableSourcePlan.create(")
+        or not _present(services, "source_plan = deployment_plan.source_plan")
         or not _present(scan, "source_plan.scan_security(")
         or not _present(owner, "paths=self.paths")
         or not _present(services, "source_plan=source_plan")
@@ -377,6 +380,16 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
         or not _present(hook, "selected_bundle_files=hook_sources.bundle_for")
         or not _present(kiro, "selected_bundle_files=selected_bundle_files")
         or not _present(owner, "CanvasIntegrator.find_canvas_bundles")
+        or not _present(owner, "native_plugin_root: Path | None = None")
+        or not _present(owner, "if native_plugin_root != source_root:")
+        or not _present(owner, "if not _is_safe_source_path(path, source_root):")
+        or not _present(owner, 'relative == MARKER_FILENAME or ".git" in Path(relative).parts')
+        or not _present(owner, "skill_discovery_complete: bool = False")
+        or not _present(owner, "BaseIntegrator.walk_source_tree(root)")
+        or not _present(owner, "BaseIntegrator.walk_source_tree(source_root)")
+        or not _present(owner, "skill_discovery_complete=discovery_complete")
+        or not _present(owner, "skill_source_roots=frozenset(skill_source_roots)")
+        or not _present(owner, "skill_source_files=frozenset(skill_source_files)")
         or bool(duplicates)
     )
     if block_failed:

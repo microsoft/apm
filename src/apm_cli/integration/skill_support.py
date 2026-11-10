@@ -17,6 +17,9 @@ def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dic
     lockfile = LockFile.read(get_lockfile_path(lockfile_root))
     if not lockfile:
         return owned_by, native_owners
+    from apm_cli.integration.targets import skills_root_prefixes
+
+    prefixes = tuple(f"{root}/" for root in skills_root_prefixes())
     for dep in lockfile.get_package_dependencies():
         unique_key = dep.get_unique_key()
         for deployed_path in dep.deployed_files:
@@ -24,7 +27,7 @@ def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dic
             skill_name = normalized.rsplit("/", 1)[-1]
             owned_by[skill_name] = unique_key
             # Another target's same-named skill cannot establish destination ownership.
-            if "/skills/" in normalized:
+            if "/skills/" in normalized or normalized.startswith(prefixes):
                 native_owners[normalized] = unique_key
     return owned_by, native_owners
 
@@ -50,7 +53,13 @@ def build_copy_ignore(
 
 @dataclass
 class SkillIntegrationResult:
-    """Compatibility result returned by skill-specific integration APIs."""
+    """Skill outputs and completion of the admitted skill-processing domain.
+
+    ``complete`` is false unless all selected physical targets materialized every
+    admitted source root/member, including final rewrites and hashes. It is not
+    inferred from ``skill_skipped`` or the successful-file inventory, and does
+    not certify other primitive domains or whole-package success.
+    """
 
     skill_created: bool
     skill_updated: bool
@@ -63,6 +72,8 @@ class SkillIntegrationResult:
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None
     materializations: tuple[MaterializationResult, ...] = ()
+    deployed_files: tuple[Path, ...] = ()
+    complete: bool = False
 
     def __post_init__(self) -> None:
         if self.target_paths is None:
@@ -75,6 +86,7 @@ def clean_orphaned_skills(
     *,
     project_root: Path | None,
     get_lockfile_owned_agent_skills: Callable[[Path], set[str]],
+    removed_paths: list[Path] | None = None,
 ) -> dict[str, int]:
     """Remove legacy-orphan skill directories without touching foreign agents."""
     protected_names = set(installed_skill_names)
@@ -96,6 +108,8 @@ def clean_orphaned_skills(
         try:
             shutil.rmtree(skill_subdir)
             files_removed += 1
+            if removed_paths is not None:
+                removed_paths.append(skill_subdir)
         except Exception:
             errors += 1
 

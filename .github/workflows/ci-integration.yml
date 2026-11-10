@@ -73,7 +73,7 @@ jobs:
           uv run ./scripts/build-binary.sh
 
       - name: Upload binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: apm-mq-linux-x86_64
           path: |
@@ -94,7 +94,7 @@ jobs:
       # in the build job), so download to ./dist/ to preserve the
       # dist/apm-linux-x86_64/apm layout the conftest expects.
       - name: Download binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: apm-mq-linux-x86_64
           path: ./dist/
@@ -173,7 +173,7 @@ jobs:
       # Artifact root is ./dist/ (least common ancestor of the uploaded paths in
       # the build job), so download to ./dist/ to preserve dist/apm-linux-x86_64/apm.
       - name: Download binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: apm-mq-linux-x86_64
           path: ./dist/
@@ -182,7 +182,7 @@ jobs:
         run: chmod +x ./dist/apm-linux-x86_64/apm
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -250,7 +250,7 @@ jobs:
 
       - name: Upload coverage data
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-coverage-shard-${{ matrix.shard }}
           path: .coverage.shard-${{ matrix.shard }}
@@ -282,7 +282,7 @@ jobs:
 
       - name: Download shard coverage
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: integration-coverage-shard-*
           path: coverage-shards/
@@ -341,7 +341,7 @@ jobs:
           path: repo
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -352,7 +352,7 @@ jobs:
 
       # See note in integration-tests: download to dist/ to preserve layout.
       - name: Download binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: apm-mq-linux-x86_64
           path: /tmp/apm-isolated-test/dist/

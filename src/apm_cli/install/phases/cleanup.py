@@ -26,9 +26,10 @@ cross-package file protection for stale cleanup (#1831).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.core.deployment_state import DeploymentReconciler
+from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -46,6 +47,19 @@ def run(ctx: InstallContext) -> None:
     ``ctx.targets``, ``ctx.logger``, ``ctx.project_root``,
     ``ctx.only_packages``.
     """
+    receipt_retirements: list[Path] = []
+    try:
+        _run_cleanup(ctx, receipt_retirements)
+    finally:
+        DeploymentMaterializationSession.retire_removed(
+            ctx.project_root,
+            receipt_retirements,
+            user_scope=is_user_scope(getattr(ctx, "scope", None)),
+        )
+
+
+def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
+    """Collect canonical cleanup outcomes without per-package receipt publication."""
     existing_lockfile = ctx.existing_lockfile
     only_packages = ctx.only_packages
     intended_dep_keys = ctx.intended_dep_keys
@@ -63,6 +77,26 @@ def run(ctx: InstallContext) -> None:
     if package_cleanup_retained is None:
         package_cleanup_retained = {}
         ctx.package_cleanup_retained = package_cleanup_retained
+    surviving_files: frozenset[str] = frozenset()
+    if existing_lockfile:
+        from apm_cli.install.manifest_reconcile import surviving_deployed_paths
+        from apm_cli.install.phases.targets import declared_target_profiles
+
+        surviving_files = surviving_deployed_paths(
+            existing_lockfile,
+            package_deployed_files,
+            _targets or [],
+            declared_target_profiles(ctx),
+            desired_owners=frozenset(
+                existing_lockfile.dependencies if only_packages else intended_dep_keys
+            ),
+            failed_owners=frozenset(
+                key
+                for key in existing_lockfile.dependencies
+                if diagnostics.count_for_package(key, "error") > 0
+            ),
+            user_scope=user_scope,
+        )
 
     # ------------------------------------------------------------------
     # Orphan cleanup: remove deployed files for packages that were
@@ -81,7 +115,6 @@ def run(ctx: InstallContext) -> None:
         # deployed files even though it is still in apm.yml.
         from apm_cli.deps.lockfile import _SELF_KEY
 
-        freshly_deployed_files = DeploymentReconciler.current_claimed_paths(package_deployed_files)
         _orphan_total_deleted = 0
         _orphan_deleted_targets: list = []
         for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
@@ -96,7 +129,7 @@ def run(ctx: InstallContext) -> None:
             orphan_only_files = [
                 deployed_file
                 for deployed_file in _orphan_dep.deployed_files
-                if deployed_file not in freshly_deployed_files
+                if deployed_file not in surviving_files
             ]
             if not orphan_only_files:
                 continue
@@ -117,6 +150,7 @@ def run(ctx: InstallContext) -> None:
                 recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                 failed_path_retained=False,
                 user_scope=user_scope,
+                receipt_retirements=receipt_retirements,
             )
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
@@ -142,8 +176,6 @@ def run(ctx: InstallContext) -> None:
     # packages that left the manifest entirely.
     # ------------------------------------------------------------------
     if existing_lockfile and package_deployed_files:
-        all_deployed_files = set(DeploymentReconciler.current_claimed_paths(package_deployed_files))
-
         for dep_key, new_deployed in package_deployed_files.items():
             # Skip packages whose integration reported errors this run --
             # a file that failed to re-deploy would look stale and get
@@ -162,14 +194,14 @@ def run(ctx: InstallContext) -> None:
             # that another currently-installed package still deploys.
             # package_deployed_files is integration outcome, not a security
             # boundary; content-hash provenance remains the deletion gate.
-            other_deployed = all_deployed_files - set(new_deployed)
+            other_deployed = surviving_files - set(new_deployed)
             protected = stale & other_deployed
             stale = stale - other_deployed
             if protected and logger:
                 for protected_path in sorted(protected):
                     logger.verbose_detail(
                         f"Kept stale file {protected_path} for {dep_key}; "
-                        "still deployed by another package"
+                        "still in use by another package or target"
                     )
 
             if not stale:
@@ -189,6 +221,7 @@ def run(ctx: InstallContext) -> None:
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
                 user_scope=user_scope,
+                receipt_retirements=receipt_retirements,
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.

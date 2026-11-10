@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Grok Build, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity and Hermes available as explicit-only targets. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
+A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Grok Build, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity, Hermes, and Grok Bot available as explicit-only targets. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
 
 This page is the canonical reference. Tutorials and how-tos link here; do not duplicate.
 
@@ -78,7 +78,7 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`). `agent-skills`, `antigravity`, and `hermes` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
@@ -93,6 +93,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
 | `hermes` | `.agents/` (project), `~/.hermes/` (user) | agents |
+| `grok-bot` | `agent-data/` (project and user) | none |
 
 Notes per target:
 
@@ -107,6 +108,7 @@ Notes per target:
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 - **kiro** -- Kiro IDE/CLI v3. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, MCP lands in `.kiro/settings/mcp.json`, and agents deploy to `.kiro/agents/<stem>.md` with frontmatter filtered to `description`, `model`, and `tools` only.
 - **hermes** -- Hermes Agent. Stable explicit-only target; skills use `.agents/skills/` at project scope and `~/.hermes/skills/` at user scope. Compiled instructions use `AGENTS.md`; MCP servers use `~/.hermes/config.yaml`.
+- **grok-bot** -- Grok Bot agent runtime. Stable explicit-only target, skills only; skills deploy to `agent-data/workflows/<name>/SKILL.md` at project scope and `~/agent-data/workflows/<name>/SKILL.md` at user scope (`--global`). Use `--global` for a live Grok Bot, which reads `~/agent-data/workflows/`.
 
 ## The compatibility matrix
 
@@ -120,7 +122,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 | Primitive | Copilot | Claude | Grok Build | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro | Hermes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | instructions | native | native | native | native | compiled | compiled | native | compiled | native | native | compiled |
-| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported | unsupported |
+| prompts | native | compiled | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | compiled | unsupported |
 | agents | native | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | compiled | unsupported |
 | skills | native | native | native | native | native | native | native | native | native | native | native |
 | hooks | native | native | unsupported | native | native | native | native | unsupported | native | native | unsupported |
@@ -136,6 +138,7 @@ How to read a cell:
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
 - `agents / antigravity = unsupported` -- Antigravity CLI has no agents primitive; their content reaches Antigravity through the compiled `AGENTS.md`.
 - `agents / kiro = compiled` -- APM writes `.kiro/agents/<relative-stem>.md`; frontmatter is filtered to `description`, `model`, and `tools` (unsupported tool values fail the deploy). See [targets-matrix](/apm/reference/targets-matrix/#kiro) for the approved tool set.
+- `prompts / kiro = compiled` -- APM converts `<name>.prompt.md` to body-only `.kiro/prompts/<name>.md` (or `~/.kiro/prompts/<name>.md` with `--global`). The filename supplies `/name`; frontmatter is stripped, not interpreted as tool/model configuration. Kiro CLI 2.33.0 V3 native arguments are preserved, but `${input:name}` is not translated. See [Kiro prompt conventions](../../reference/targets-matrix/#kiro) for supported syntax and scope.
 - `instructions / antigravity = native` -- APM deploys instructions as plain-markdown rules under `.agents/rules/`.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
