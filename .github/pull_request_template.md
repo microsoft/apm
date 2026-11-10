@@ -4,7 +4,8 @@ Brief description of changes and motivation.
 
 ## Issue and approved scope
 
-Issue: # (required; use the canonical issue or a bounded child issue)
+Issue: Fixes #N | Refs #N (required; keep one; use the canonical issue or a
+bounded child issue)
 
 Human scope-approval comment: (link, state the trivial-documentation
 standing-preapproval case, or indicate private security coordination without
@@ -12,7 +13,9 @@ disclosing report details)
 
 Does this PR complete the issue, or what remains?
 
-<!-- Use "Fixes #N" only for an issue this PR completes. A related issue,
+<!-- Use "Fixes #N" or "Closes #N" only for an issue this PR completes, so
+     GitHub closes it on merge. For partial or related work use "Refs #N"
+     and say what remains. A related issue,
      automated recommendation, or label alone is not scope approval.
      Routine automated maintenance needs a bounded, human-approved issue.
      Security changes may use private tracking: do not disclose report details.
