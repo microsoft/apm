@@ -174,6 +174,10 @@ class LockfileBuilder:
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
+            # The carry-forward steps above set fields such as resolved_tag
+            # and replacements directly, so re-derive the schema version
+            # before the semantic comparison (#3433).
+            lockfile.sync_lockfile_version()
 
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
