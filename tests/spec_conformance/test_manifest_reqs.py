@@ -760,22 +760,51 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
 
 @pytest.mark.req("req-tg-005")
 def test_consumer_deploys_antigravity_rules_with_expected_dedup():
-    # Needles updated for the v0.1.11 spec-guardian fold on req-tg-005:
-    # the anchor was reworded to (a) lowercase the `antigravity`
-    # identifier, (b) pin a canonical `globs` scalar-vs-sequence
-    # representation for hash reproducibility, and (c) redefine the
-    # deduplication scope to filenames derived from the resolved
-    # instruction primitives (fail-closed non-suppression). See
-    # Appendix D revision 0.1.11.
+    # Needles updated for the 0.1.56 amendment (issue #3472): `globs` is one
+    # comma-separated double-quoted string and unscoped rules carry
+    # `trigger: always_on`. The deduplication-scope needles are unchanged.
     assert_spec_contains(
         "For the `antigravity` target, instruction rules MUST be written under",
         "`.agents/rules/<name>.md`",
         "`trigger: glob` plus a `globs` field",
-        "emitted as a YAML scalar when `applyTo` resolves to exactly one glob",
-        "as a YAML block sequence when it resolves to two or more",
+        "emitted as a single YAML double-quoted string scalar",
+        "`globs` MUST NOT be emitted as a YAML",
+        "carry a frontmatter block declaring `trigger: always_on`",
         "names derive from the currently-resolved",
         "MUST NOT be treated as a deployed rule and MUST NOT",
     )
+
+
+@pytest.mark.req("req-tg-005")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "---\napplyTo: '*.py'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "*.py"},
+        ),
+        (
+            "---\napplyTo:\n  - '**/app/services/**'\n  - '**/app/jobs/**'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "**/app/services/**, **/app/jobs/**"},
+        ),
+        (
+            "---\napplyTo: '**/app/services/**, **/app/jobs/**'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "**/app/services/**, **/app/jobs/**"},
+        ),
+        (
+            "---\ndescription: General development principles\n---\n\nBody\n",
+            {"trigger": "always_on"},
+        ),
+    ],
+)
+def test_consumer_emits_antigravity_rule_frontmatter_per_native_schema(source, expected):
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+    from apm_cli.utils.yaml_io import loads_frontmatter
+
+    rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
+
+    assert loads_frontmatter(rendered).metadata == expected
+    assert rendered.endswith("\n\nBody\n")
 
 
 @pytest.mark.req("req-tg-006")

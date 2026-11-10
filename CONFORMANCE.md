@@ -168,7 +168,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 4 | - |
 | [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-004](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-004) | MUST | 4.2.1 | consumer | active | 1 | - |
-| [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 1 | - |
+| [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 5 | - |
 | [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 | - |
 | [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 1 | - |

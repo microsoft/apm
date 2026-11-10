@@ -2965,10 +2965,15 @@ For the `antigravity` target, instruction rules MUST be written under
 in deployed-file content hashes across conforming implementations
 (contributing to the canonical-content equivalence check of
 [req-lk-012](#req-lk-012)), `globs` MUST be
-emitted as a YAML scalar when `applyTo` resolves to exactly one glob
-pattern and as a YAML block sequence when it resolves to two or more
-patterns; when `applyTo` is absent or empty the emitted rule file MUST
-NOT carry a frontmatter block. Compile-time deduplication MUST treat
+emitted as a single YAML double-quoted string scalar, whether `applyTo`
+resolves to one glob pattern or to several, whose value joins the
+resolved patterns in declaration order with a comma followed by one
+space (a literal comma inside one pattern keeps its `\,` escape so
+it is not read as a separator); `globs` MUST NOT be emitted as a YAML
+sequence. When `applyTo` is absent or empty the emitted rule file MUST
+carry a frontmatter block declaring `trigger: always_on` and no `globs`
+field, because Antigravity discards rule files without a valid
+`trigger`. Compile-time deduplication MUST treat
 only those files whose names derive from the currently-resolved
 instruction primitives (specifically, for each resolved instruction
 primitive of name N the derived filename is `.agents/rules/N.md`; the
@@ -4703,6 +4708,7 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.53 (proposed) | 2026-10-21 | Amendment for accepted issue #3202 in PR #3314. Added [req-pr-008](#req-pr-008) (Section 8.3.1, consumer MUST): default refusal of a differing unmanaged skill file checks the complete effective selected plan before native deployment, success-state persistence or cleanup; preserves prior bytes and ownership; and provides truthful read-only audit and nondestructive correction. Warning/success becomes refusal, a new hard conformance obligation rather than errata. Identical-content recovery, existing explicit destructive replacement, managed-source priority, native-plugin and non-skill/MCP policies remain outside this change. No schema or lockfile-version change. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived; no ratification or release is claimed. Sections 1.3, 8.7, 10.11, 11.3.2, Appendix C, requirements manifest and conformance test binding updated. Statement count: 129 -> 130 (125 MUST, 5 SHOULD). |
 | 0.1.54 (proposed) | 2026-10-21 | Opt-in root source-replacement proposal for #3180 / PR #3309. Added four conditional consumer requirements [req-rpl-001] through [req-rpl-004] for exact root-owned graph binding, original ownership with selected-source lifecycle/security, proposed lock version 3 evidence, and frozen full-table/content verification. Distinct candidate schema identities preserve earlier published bytes; version 1/2 semantics remain unchanged. This is a new opt-in capability and explicit versioned lock extension, not behavior-neutral errata. Section 9.3 review/public comment and first supporting release remain pending; source staging is not adoption. Statement count: 130 -> 134 (129 MUST, 5 SHOULD). |
 | 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
+| 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. Section 9.3 review requirements remain. |
 
 The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one
 MUST; 0.1.54 adds four. Together, this working draft contains 136 statements

@@ -436,19 +436,22 @@ tags: [security, validation]
 (`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
 way to specify multiple patterns, as it is portably expanded into
 target-specific YAML arrays/lists (under `paths:` / `globs:` /
-`fileMatchPattern:`) across Claude, Windsurf, Kiro, and Antigravity.
+`fileMatchPattern:`) across Claude, Windsurf, and Kiro.
 For Cursor, APM emits one comma-joined scalar rather than a YAML list
 (`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
 characters are escaped. Descriptions keep printable non-ASCII text readable
-and are quoted when needed to preserve their value.
+and are quoted when needed to preserve their value. For Antigravity, APM
+emits `trigger: glob` plus one double-quoted comma-joined string
+(`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
+`trigger: always_on`.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed
 placement and target-native installation. Use a sequence when its source
 readability matters. To match a literal comma in a filename, escape it as
 `\,`. APM preserves pattern boundaries when re-joining, including the
-escape in Cursor's scalar. Cursor's documentation does not specify
-literal-comma matching; verify such patterns in your Cursor version.
+escape in Cursor's and Antigravity's joined strings. Neither tool documents
+literal-comma matching; verify such patterns in your tool version.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot

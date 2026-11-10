@@ -1690,9 +1690,13 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 5,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: '**/app/services/**, **/app/jobs/**'\\n---\\n\\nBody\\n-expected2]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: '*.py'\\n---\\n\\nBody\\n-expected0]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo:\\n  - '**/app/services/**'\\n  - '**/app/jobs/**'\\n---\\n\\nBody\\n-expected1]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\ndescription: General development principles\\n---\\n\\nBody\\n-expected3]"
       ]
     },
     {
