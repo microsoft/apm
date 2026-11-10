@@ -95,7 +95,7 @@ apm deps info PACKAGE
 
 ### `apm deps why`
 
-Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. Subdirectory packages appear by their full path, and same-repository siblings are told apart by their installed manifests, as in `apm deps tree`. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
+Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. Subdirectory packages appear by their full path. The walk uses the lockfile alone, so it does not consult installed manifests to tell same-repository siblings apart. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
 
 ```bash
 apm deps why PACKAGE [OPTIONS]

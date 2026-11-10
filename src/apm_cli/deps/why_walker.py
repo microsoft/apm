@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .lock_parent_placement import DeclaredChildren
     from .lockfile import LockedDependency, LockFile
 
 
@@ -185,19 +184,15 @@ def resolve_package_query(lockfile: LockFile, query: str) -> LockedDependency:
 # ---------------------------------------------------------------------------
 
 
-def compute_why(
-    lockfile: LockFile,
-    target: LockedDependency,
-    declared_children: DeclaredChildren | None = None,
-) -> WhyResult:
+def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
     """Explain original incoming requirements, never substitute source refs.
 
     Replacement-aware locks record exact parent keys and every incoming
-    replacement request. Legacy locks place each entry under its declaring
-    parent via :mod:`apm_cli.deps.lock_parent_placement` (using
-    *declared_children* manifest evidence for same-repository siblings) and
-    otherwise retain their single repo-url parent. Virtual subdirectory
-    packages are named by their full unique key in legacy locks.
+    replacement request. Legacy locks place each entry under its parent via
+    :mod:`apm_cli.deps.lock_parent_placement` using lock data alone (OpenAPM
+    req-rs-005: no installed-manifest evidence) and otherwise retain their
+    single repo-url parent. Virtual subdirectory packages are named by their
+    full unique key in legacy locks.
     Cycles terminate at the repeated owner; at most 256 paths are expanded.
     """
     from .lock_parent_placement import place_legacy_lock_parents
@@ -205,9 +200,7 @@ def compute_why(
 
     legacy = lockfile.replacements is None
     project_deps = [dep for dep in lockfile.get_all_dependencies() if _is_project_dep(dep)]
-    placed_parents = (
-        place_legacy_lock_parents(project_deps, declared_children).parents if legacy else {}
-    )
+    placed_parents = place_legacy_lock_parents(project_deps).parents if legacy else {}
 
     def key_for(dep: LockedDependency) -> str:
         if legacy and dep.is_virtual:

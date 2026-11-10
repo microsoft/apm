@@ -104,13 +104,18 @@ def _declaring_candidates(
 
 
 def installed_manifest_children(apm_modules_dir: Path) -> DeclaredChildren:
-    """Return a cached reader of installed manifests under *apm_modules_dir*.
+    """Return a cached, read-only reader of installed manifests.
 
-    An installed package without ``apm.yml`` declares no APM dependencies.
-    A missing install directory or an unreadable manifest yields ``None``.
+    ``{git: parent, path: ...}`` declarations are expanded through the
+    resolver's canonical parent-reference owner before their keys are
+    collected. An installed package without ``apm.yml`` declares no APM
+    dependencies. A missing install directory, an unreadable manifest, or an
+    inherited reference that cannot be expanded yields ``None``.
     """
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.models.apm_package import APMPackage
 
+    resolver = APMDependencyResolver(apm_modules_dir=apm_modules_dir, read_only=True)
     cache: dict[str, frozenset[str] | None] = {}
 
     def read(dep: LockedDependency) -> frozenset[str] | None:
@@ -119,11 +124,21 @@ def installed_manifest_children(apm_modules_dir: Path) -> DeclaredChildren:
             return cache[key]
         declared: frozenset[str] | None = None
         try:
-            install_dir = dep.to_dependency_ref().get_install_path(apm_modules_dir)
+            parent_ref = dep.to_dependency_ref()
+            install_dir = parent_ref.get_install_path(apm_modules_dir)
             manifest = install_dir / APM_YML_FILENAME
             if manifest.is_file():
-                package = APMPackage.from_apm_yml(manifest, source_path=install_dir)
-                declared = frozenset(ref.get_unique_key() for ref in package.get_apm_dependencies())
+                package = APMPackage.from_apm_yml(
+                    manifest, source_path=install_dir, create_config=False
+                )
+                declared = frozenset(
+                    (
+                        resolver.expand_parent_repo_decl(parent_ref, ref)
+                        if ref.is_parent_repo_inheritance
+                        else ref
+                    ).get_unique_key()
+                    for ref in package.get_apm_dependencies()
+                )
             elif install_dir.is_dir():
                 declared = frozenset()
         except (OSError, ValueError):

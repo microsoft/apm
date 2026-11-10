@@ -27,10 +27,8 @@ import sys
 
 import click
 
-from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...core.scope import InstallScope, get_apm_dir
-from ...deps.lock_parent_placement import installed_manifest_children
 from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
 from ...deps.why_walker import (
     AmbiguousPackageError,
@@ -238,11 +236,7 @@ def why(package: str, global_: bool, as_json: bool) -> None:
             logger.info("Hint: run 'apm deps list' to see installed packages.")
         sys.exit(_EXIT_NOT_FOUND)
 
-    result = compute_why(
-        lockfile,
-        target,
-        declared_children=installed_manifest_children(apm_dir / APM_MODULES_DIR),
-    )
+    result = compute_why(lockfile, target)
 
     if as_json:
         click.echo(_render_json(result))

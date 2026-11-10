@@ -3,9 +3,10 @@
 Issue #3510: when two virtual subdirectory packages from one repository
 (``presets/anti-slop`` and ``presets/general``) are both depth-2 entries,
 their depth-3 children record ``resolved_by: <owner/repo>``, which matches
-both siblings. ``apm deps tree`` and ``apm deps why`` must use each
-sibling's installed manifest to attach every child to its declaring preset,
-and keep the "could not place" fallback only for genuinely ambiguous graphs.
+both siblings. ``apm deps tree`` uses each sibling's installed manifest to
+attach every child to its declaring preset and keeps the "could not place"
+fallback only for genuinely ambiguous graphs. ``apm deps why`` stays on lock
+data alone (OpenAPM req-rs-005) and names subdirectory parents by full path.
 """
 
 from __future__ import annotations
@@ -192,8 +193,31 @@ def test_tree_attaches_children_to_declaring_sibling_preset(
     assert "solo/leaf@3.0.0" in " ".join(_child_rows_under(output, "solo/single"))
 
 
+_SINGLE_SIBLING_LOCKFILE = dedent("""\
+    lockfile_version: '1'
+    dependencies:
+    - repo_url: example/dev
+      host: github.com
+      version: 1.0.0
+      virtual_path: presets/global
+      is_virtual: true
+    - repo_url: example/dev
+      host: github.com
+      version: 1.0.0
+      virtual_path: presets/anti-slop
+      is_virtual: true
+      depth: 2
+      resolved_by: example/dev
+    - repo_url: acme/humanizer
+      host: github.com
+      version: 4.0.0
+      depth: 3
+      resolved_by: example/dev
+""")
+
+
 @pytest.mark.parametrize("global_flag", [False, True])
-def test_why_names_declaring_sibling_preset(
+def test_why_names_subdirectory_parent_from_lock_data(
     global_flag: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_home: Path
 ) -> None:
     if global_flag:
@@ -202,19 +226,38 @@ def test_why_names_declaring_sibling_preset(
         apm_dir = tmp_path / "project"
         apm_dir.mkdir()
         monkeypatch.chdir(apm_dir)
-    _write_fixture(apm_dir)
+    apm_dir.mkdir(parents=True, exist_ok=True)
+    (apm_dir / "apm.yml").write_text(_manifest("consumer", (_GLOBAL,)), encoding="utf-8")
+    (apm_dir / "apm.lock.yaml").write_text(_SINGLE_SIBLING_LOCKFILE, encoding="utf-8")
     flag = ["-g"] if global_flag else []
 
     humanizer = _invoke(["deps", "why", *flag, "acme/humanizer"])
-    writing = _invoke(["deps", "why", *flag, "acme/skills/skills/writing"])
 
     assert [line.strip() for line in humanizer.splitlines()[2:]] == [
         f"{_GLOBAL}   [declared in apm.yml]",
         f"+-- {_ANTI_SLOP}",
         "+-- acme/humanizer",
     ]
-    assert f"+-- {_GENERAL}" in writing
-    assert _ANTI_SLOP not in writing
+
+
+def test_why_walks_lockfile_alone_for_sibling_presets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_home: Path
+) -> None:
+    """OpenAPM req-rs-005: why never consults installed manifests."""
+    apm_dir = tmp_path / "project"
+    apm_dir.mkdir()
+    monkeypatch.chdir(apm_dir)
+    _write_fixture(apm_dir)
+
+    with_modules = _invoke(["deps", "why", "acme/humanizer"])
+    for manifest in (apm_dir / "apm_modules").rglob("apm.yml"):
+        manifest.unlink()
+    clear_apm_yml_cache()
+    without_modules = _invoke(["deps", "why", "acme/humanizer"])
+
+    assert with_modules == without_modules
+    assert _ANTI_SLOP not in with_modules
+    assert _GENERAL not in with_modules
 
 
 def test_genuinely_ambiguous_siblings_keep_fallback_warning(

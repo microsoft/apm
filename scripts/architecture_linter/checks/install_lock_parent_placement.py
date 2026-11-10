@@ -1,4 +1,8 @@
-"""Keep legacy lockfile parent placement behind its canonical owner (#3510)."""
+"""Keep legacy lockfile parent placement behind its canonical owner (#3510).
+
+``deps tree`` may add installed-manifest evidence; ``deps why`` must stay on
+lock data alone (OpenAPM req-rs-005).
+"""
 
 from __future__ import annotations
 
@@ -54,7 +58,6 @@ def check_lock_parent_placement(provider: FactsProvider) -> tuple[Violation, ...
         (_TREE, re.compile(r"\bplace_legacy_lock_parents\(")),
         (_TREE, re.compile(r"\binstalled_manifest_children\(")),
         (_WHY_WALKER, re.compile(r"\bplace_legacy_lock_parents\(")),
-        (_WHY_CLI, re.compile(r"declared_children=installed_manifest_children\(")),
     )
     for path, pattern in required_calls:
         if not _present_re(facts[path], pattern):
@@ -65,6 +68,20 @@ def check_lock_parent_placement(provider: FactsProvider) -> tuple[Violation, ...
                     "deps tree/why must route parent placement through lock_parent_placement.py",
                 )
             )
+
+    for path in (_WHY_CLI, _WHY_WALKER):
+        for number, line in enumerate(_lines(facts[path]), start=1):
+            column = line.find("installed_manifest_children")
+            if column >= 0 and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule,
+                        path,
+                        "deps why must walk the lockfile alone (req-rs-005), not installed manifests",
+                        line=number,
+                        column=column + 1,
+                    )
+                )
 
     for path in (_TREE, _WHY_CLI, _WHY_WALKER):
         for number, line in enumerate(_lines(facts[path]), start=1):
