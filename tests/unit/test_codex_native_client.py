@@ -20,8 +20,24 @@ pytestmark = pytest.mark.component
 _POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-in executable")
 
 
-_ADMITTED = ["0.163.0", "0.164.0", "0.170.2", "1.0.0", "0.164.0-alpha.11.1"]
-_REFUSED = ["0.162.1", "0.163.0-alpha.1", "0.163", "v0.164.0", "0.164.0 extra", "unknown", ""]
+_ADMITTED = ["0.163.0", "0.164.0", "0.170.2", "1.0.0", "0.164.0-alpha.11.1", "0.164.0-0.rc-1"]
+_REFUSED = [
+    "0.162.1",
+    "0.163.0-alpha.1",
+    "0.163",
+    "v0.164.0",
+    "0.164.0 extra",
+    "unknown",
+    "",
+    "0.164.0-",
+    "0.164.0-.",
+    "0.164.0-alpha.",
+    "0.164.0-alpha..1",
+    "0.164.0-01",
+    "0.164.0-alpha.01",
+    "00.164.0",
+    "0.0164.0",
+]
 
 
 def _stand_in_codex(directory: Path, version_line: str, app_server: str = "") -> Path:

@@ -15,7 +15,11 @@ from typing import Any
 from apm_cli.core.scope import InstallScope
 
 MINIMUM_CODEX_VERSION = "0.163.0"
-_VERSION_OUTPUT = re.compile(r"codex-cli ([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?")
+_NUMBER = r"(0|[1-9][0-9]*)"
+_PRERELEASE_ID = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+_VERSION_OUTPUT = re.compile(
+    rf"codex-cli {_NUMBER}\.{_NUMBER}\.{_NUMBER}(-{_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*)?"
+)
 _TIMEOUT = 60
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
