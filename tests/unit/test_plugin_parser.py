@@ -1,6 +1,7 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
+import logging
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -1241,6 +1242,19 @@ class TestMCPJsonShapes:
         assert result == {}
         assert len(warnings) == 1
         assert "'config/servers.json'" in warnings[0]
+
+    def test_unreadable_file_logs_no_warning_with_absolute_path(self, tmp_path, caplog):
+        plugin_dir = self._plugin(tmp_path, ".mcp.json", "{not json")
+
+        for warn in (True, False):
+            caplog.clear()
+            with caplog.at_level(logging.WARNING):
+                result, warnings = self._extract(
+                    plugin_dir, {"name": "linear"}, warn_on_invalid=warn
+                )
+            assert result == {}
+            assert len(warnings) == (1 if warn else 0)
+            assert [r for r in caplog.records if str(tmp_path) in r.getMessage()] == []
 
     def test_warning_suppressed_when_requested(self, tmp_path):
         plugin_dir = self._plugin(tmp_path, ".mcp.json", {})

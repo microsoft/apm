@@ -37,8 +37,10 @@ def _install(tmp_path: Path, apm_binary_path: Path, shape: str) -> tuple[Path, s
         "flat": _SERVERS,
         "wrapped": {"mcpServers": _SERVERS},
         "unusable": {"linear": "https://mcp.linear.example.invalid/mcp"},
+        "malformed": "{not json",
     }[shape]
-    (source / ".mcp.json").write_text(json.dumps(payload), encoding="utf-8")
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    (source / ".mcp.json").write_text(text, encoding="utf-8")
     skill = source / "skills/linear-basics"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text(
@@ -97,10 +99,11 @@ def test_plugin_mcp_json_shape_reaches_claude_and_codex(
     assert "declares no usable MCP servers" not in output
 
 
+@pytest.mark.parametrize("shape", ["unusable", "malformed"])
 def test_plugin_mcp_json_without_usable_servers_warns_by_name(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, shape: str
 ) -> None:
-    project, output = _install(tmp_path, apm_binary_path, "unusable")
+    project, output = _install(tmp_path, apm_binary_path, shape)
 
     synthesized = next((project / "apm_modules").rglob("linear-plugin/apm.yml"))
     assert not load_yaml(synthesized).get("dependencies", {}).get("mcp")
@@ -108,3 +111,5 @@ def test_plugin_mcp_json_without_usable_servers_warns_by_name(
     flattened = " ".join(output.split())
     assert "MCP config '.mcp.json' in plugin 'linear' declares no usable MCP servers" in (flattened)
     assert "mcp.linear.example.invalid" not in output
+    assert flattened.count("declares no usable MCP servers") == 1
+    assert str(tmp_path) not in output

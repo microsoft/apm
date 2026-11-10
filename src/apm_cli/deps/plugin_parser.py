@@ -786,7 +786,7 @@ def _read_mcp_json(
     try:
         data = _bounded_read_json(path)
     except (ValueError, OSError) as exc:
-        logger.warning("Failed to read MCP config %s: %s", path, exc)
+        logger.debug("Failed to read MCP config %s: %s", path, exc)
         data = None
     servers: dict[str, Any] = {}
     if isinstance(data, dict):
