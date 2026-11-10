@@ -447,6 +447,19 @@ function Test-AntivirusBlockError {
     )
 }
 
+function Invoke-StagedBinaryTest {
+    # Runs the staged binary and returns Output plus Failure ($null on
+    # success).
+    param([string]$Path, [string[]]$Arguments)
+    try {
+        $output = & $Path @Arguments 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE - $output" }
+        return [pscustomobject]@{ Output = "$output"; Failure = $null }
+    } catch {
+        return [pscustomobject]@{ Output = $null; Failure = "$_" }
+    }
+}
+
 function Write-AppControlGuidance {
     param(
         [string]$Path,
@@ -902,13 +915,10 @@ try {
     }
 
     Write-Info "Testing binary..."
-    $testFailure = $null
-    try {
-        $testOutput = & $stagedExe --version 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE - $testOutput" }
-        Write-Success "Binary test successful: $testOutput"
-    } catch {
-        $testFailure = "$_"
+    $binaryTest = Invoke-StagedBinaryTest -Path $stagedExe -Arguments @('--version')
+    $testFailure = $binaryTest.Failure
+    if (-not $testFailure) {
+        Write-Success "Binary test successful: $($binaryTest.Output)"
     }
 
     if ($testFailure) {
