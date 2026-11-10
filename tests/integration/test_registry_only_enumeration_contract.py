@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -155,6 +155,7 @@ def _run(
     *,
     registry_only: bool,
     dependency_ref: str | None = None,
+    locked_git_dependency: bool = False,
 ) -> _Scenario:
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
@@ -165,6 +166,16 @@ def _run(
             f"dependencies:\n  apm:\n    - {_PACKAGE}#{dependency_ref}\n",
             encoding="utf-8",
         )
+    if locked_git_dependency:
+        lock = LockFile()
+        lock.dependencies = {
+            _PACKAGE: LockedDependency(
+                repo_url=_PACKAGE,
+                resolved_ref="v1.0.0",
+                resolved_commit="0123456789abcdef0123456789abcdef01234567",
+            ),
+        }
+        lock.write(project / "apm.lock.yaml")
     git_log = isolated.root / "git-network.log"
     bin_dir = isolated.root / "shim-bin"
     _install_git_shim(bin_dir, git_log)
@@ -271,3 +282,37 @@ def test_install_exact_pin_lists_source_tags_when_mode_is_off(
     )
 
     assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
+
+
+def test_outdated_names_remedy_without_contacting_source_host(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    scenario = _run(
+        tmp_path,
+        apm_binary_path,
+        ("outdated", "-j", "0"),
+        registry_only=True,
+        dependency_ref="v1.0.0",
+        locked_git_dependency=True,
+    )
+
+    assert scenario.result.returncode == 0, scenario.output
+    assert "unknown" in scenario.output
+    assert "PROXY_REGISTRY_ONLY is set" in scenario.output
+    assert scenario.git_network_calls == []
+    assert scenario.upstream_requests == []
+
+
+def test_outdated_lists_source_refs_when_mode_is_off(tmp_path: Path, apm_binary_path: Path) -> None:
+    """Sentinel: without the mode outdated enumerates source-host refs."""
+    scenario = _run(
+        tmp_path,
+        apm_binary_path,
+        ("outdated", "-j", "0"),
+        registry_only=False,
+        dependency_ref="v1.0.0",
+        locked_git_dependency=True,
+    )
+
+    assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
+    assert "PROXY_REGISTRY_ONLY is set" not in scenario.output

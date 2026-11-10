@@ -178,16 +178,6 @@ def maybe_resolve_git_semver(
     owner_repo = dep_ref.repo_url
     package_name = _git_semver_package_name(dep_ref)
 
-    # Registry-only mode: an exact version needs no tag listing. Decline
-    # the semver route so the pipeline keeps the version as a literal ref
-    # and the proxy download path resolves it directly. ``ref_kind``
-    # classifies bare ``1.2.3`` as semver (not a literal tag), so without
-    # this an exact pin would hit the range guard in GitSemverResolver --
-    # the very thing that guard's hint tells authors to use instead.
-    from apm_cli.deps.registry_proxy import is_enforce_only
-
-    if is_enforce_only() and _is_exact_semver_constraint(constraint):
-        return None
     if not update_refs and existing_lockfile is not None:
         locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if (
@@ -208,6 +198,18 @@ def maybe_resolve_git_semver(
                 matched_pattern="",
                 resolved_at=locked.resolved_at or "",
             )
+
+    # Registry-only mode: an exact version needs no tag listing. Decline
+    # the semver route so the pipeline keeps the version as a literal ref
+    # and the proxy download path resolves it directly. ``ref_kind``
+    # classifies bare ``1.2.3`` as semver (not a literal tag), so without
+    # this an exact pin would hit the range guard in GitSemverResolver --
+    # the very thing that guard's hint tells authors to use instead. A
+    # matching locked resolution is replayed above without any listing.
+    from apm_cli.deps.registry_proxy import is_enforce_only
+
+    if is_enforce_only() and _is_exact_semver_constraint(constraint):
+        return None
 
     dep_ref = dep_ref.source_reference
     from apm_cli.deps.git_semver_resolver import GitSemverResolver

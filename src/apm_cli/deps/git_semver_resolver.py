@@ -291,9 +291,10 @@ class GitSemverResolver:
                     "PROXY_REGISTRY_ONLY is set, so the upstream host cannot be"
                     " queried for the tag listing a range needs, and the proxy"
                     " exposes no version enumeration surface. Pin one exact"
-                    " version (e.g. '1.2.3'), which resolves through the proxy"
-                    " without a listing, or unset PROXY_REGISTRY_ONLY to"
-                    " resolve ranges from the upstream host."
+                    " version, written as the upstream tag name (e.g. 'v1.2.3'"
+                    " or '1.2.3'), which resolves through the proxy without a"
+                    " listing, or unset PROXY_REGISTRY_ONLY to resolve ranges"
+                    " from the upstream host."
                 ),
             )
         if remote_url is None:

@@ -467,3 +467,41 @@ class TestOutdatedRegistryOnly:
         assert result.exit_code == 0, result.output
         git_module.cmd.Git.assert_called()
         assert "PROXY_REGISTRY_ONLY is set" not in " ".join(result.output.split())
+
+
+class TestRegistryOnlyLockReplay:
+    """A locked semver resolution replays without a listing in registry-only mode."""
+
+    def _locked_lockfile(self, constraint: str) -> MagicMock:
+        locked = MagicMock()
+        locked.matches_replacement.return_value = True
+        locked.constraint = constraint
+        locked.resolved_tag = "v1.5.0"
+        locked.resolved_commit = _SHA
+        locked.version = "1.5.0"
+        locked.resolved_at = "2026-01-01T00:00:00Z"
+        lockfile = MagicMock()
+        lockfile.get_dependency.return_value = locked
+        return lockfile
+
+    @pytest.mark.parametrize("constraint", ["1.5.0", "^1.0.0"])
+    def test_locked_resolution_replays_without_resolver(self, constraint):
+        from apm_cli.install.helpers import ref_reuse
+
+        dep_ref = MagicMock()
+        dep_ref.reference = constraint
+        dep_ref.repo_url = "myorg/my-package"
+
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
+            with patch.object(ref_reuse, "is_git_semver_resolution_eligible", return_value=True):
+                with patch("apm_cli.deps.git_semver_resolver.GitSemverResolver") as resolver_cls:
+                    result = ref_reuse.maybe_resolve_git_semver(
+                        dep_ref=dep_ref,
+                        existing_lockfile=self._locked_lockfile(constraint),
+                        update_refs=False,
+                    )
+
+        assert result is not None
+        assert result.resolved_tag == "v1.5.0"
+        assert result.resolved_sha == _SHA
+        resolver_cls.assert_not_called()
