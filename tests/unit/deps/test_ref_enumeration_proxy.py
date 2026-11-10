@@ -1,8 +1,8 @@
 """Tests for registry-only ref enumeration (PROXY_REGISTRY_ONLY guard).
 
 Issue #3448: with ``PROXY_REGISTRY_ONLY=1`` the CLI still enumerated refs
-from the upstream host. PR #3455 fixed the ``apm view ... versions``
-command surface; these tests cover the two remaining enumeration paths:
+from the upstream host. These tests cover every enumeration path named in
+the approved scope:
 
 1. ``GitReferenceResolver._list_remote_refs`` -- used by ``apm outdated``
    and the downloader. Returns an empty list instead of running
@@ -12,8 +12,16 @@ command surface; these tests cover the two remaining enumeration paths:
    for semver ranges. Raises ``RegistryOnlySemverError`` instead of
    listing upstream tags, because a range needs a version listing the
    proxy does not expose.
+3. ``GitReferenceResolver.resolve_commit_sha_for_ref`` -- the GitHub
+   commits API used for ref-to-SHA lookup (tier L1 of
+   ``TieredRefResolver`` and single-file downloads). Returns ``None``
+   without a request.
+4. ``apm view <pkg> versions`` -- aborts with an actionable error instead
+   of running ``git ls-remote``.
+5. ``apm outdated`` -- reports git dependencies as unknown and names the
+   remedy instead of querying the source host.
 
-The assertion in both cases is that *no upstream call is attempted*, not
+The assertion in each case is that *no upstream call is attempted*, not
 merely that the result changed.
 """
 
@@ -289,3 +297,173 @@ class TestExactPinBypassesSemverRoute:
         # Reaching the eligibility check at all proves the registry-only
         # early return did not fire.
         eligible.assert_called_once()
+
+
+def _mode_off_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.pop("PROXY_REGISTRY_ONLY", None)
+    env.pop("ARTIFACTORY_ONLY", None)
+    return env
+
+
+_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _sha_response() -> MagicMock:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = _SHA
+    return response
+
+
+@pytest.fixture
+def downloader():
+    """A real downloader whose only network seam is ``resilient_get``."""
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+    auth = MagicMock()
+    ctx = MagicMock()
+    ctx.token = None
+    auth.resolve.return_value = ctx
+    return GitHubPackageDownloader(auth_resolver=auth)
+
+
+def _github_dep(ref: str = "v1.4.0"):
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    return DependencyReference(repo_url="myorg/my-package", reference=ref)
+
+
+class TestCommitsApiRegistryOnly:
+    """Ref-to-SHA lookup must not call the GitHub commits API."""
+
+    def test_returns_none_without_an_api_request(self, downloader):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
+            with patch.object(downloader._strategies, "resilient_get") as get:
+                sha = downloader._refs.resolve_commit_sha_for_ref(_github_dep(), "v1.4.0")
+
+        assert sha is None
+        get.assert_not_called()
+
+    def test_full_sha_still_passes_through(self, downloader):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
+            with patch.object(downloader._strategies, "resilient_get") as get:
+                sha = downloader._refs.resolve_commit_sha_for_ref(_github_dep(_SHA), _SHA.upper())
+
+        assert sha == _SHA
+        get.assert_not_called()
+
+    def test_tiered_l1_tier_makes_no_api_request(self, downloader):
+        from apm_cli.deps.tiered_ref_resolver import L1CommitsAPI
+
+        tier = L1CommitsAPI(host=downloader)
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
+            with patch.object(downloader._strategies, "resilient_get") as get:
+                sha = tier.try_resolve(_github_dep(), "v1.4.0")
+
+        assert sha is None
+        get.assert_not_called()
+
+    def test_without_the_flag_the_api_is_called(self, downloader):
+        """Regression trap: default behavior still uses the commits API."""
+        with patch.dict(os.environ, _mode_off_env(), clear=True):
+            with patch.object(
+                downloader._strategies, "resilient_get", return_value=_sha_response()
+            ) as get:
+                sha = downloader._refs.resolve_commit_sha_for_ref(_github_dep(), "v1.4.0")
+
+        assert sha == _SHA
+        get.assert_called_once()
+
+
+class TestViewVersionsRegistryOnly:
+    """``apm view <pkg> versions`` must not ls-remote in registry-only mode."""
+
+    def _display(self, tmp_path):
+        from apm_cli.commands import view
+
+        logger = MagicMock()
+        with (
+            patch.object(view, "_effective_default_registry", return_value=None),
+            patch.object(view, "GitHubPackageDownloader") as downloader_cls,
+            patch.object(view, "AuthResolver"),
+        ):
+            downloader_cls.return_value.list_remote_refs.return_value = []
+            try:
+                view.display_versions("myorg/my-package", logger, project_root=tmp_path)
+                exit_code = None
+            except SystemExit as exc:
+                exit_code = exc.code
+        return logger, downloader_cls, exit_code
+
+    def test_aborts_with_actionable_error_and_no_ls_remote(self, tmp_path):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
+            logger, downloader_cls, exit_code = self._display(tmp_path)
+
+        assert exit_code == 1
+        downloader_cls.return_value.list_remote_refs.assert_not_called()
+        message = logger.error.call_args.args[0]
+        assert "registry-only mode" in message
+        assert "exact version" in message
+        assert "unset PROXY_REGISTRY_ONLY" in message
+
+    def test_without_the_flag_remote_refs_are_listed(self, tmp_path):
+        with patch.dict(os.environ, _mode_off_env(), clear=True):
+            logger, downloader_cls, exit_code = self._display(tmp_path)
+
+        assert exit_code is None
+        downloader_cls.return_value.list_remote_refs.assert_called_once()
+        logger.error.assert_not_called()
+
+
+class TestOutdatedRegistryOnly:
+    """``apm outdated`` must not ls-remote and must name the remedy."""
+
+    def _run_outdated(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.models.apm_package import clear_apm_yml_cache
+
+        monkeypatch.chdir(tmp_path)
+        clear_apm_yml_cache()
+        (tmp_path / "apm.yml").write_text(
+            "name: consumer\nversion: 1.0.0\n"
+            "dependencies:\n  apm:\n    - myorg/my-package#v1.4.0\n",
+            encoding="utf-8",
+        )
+        lock = LockFile()
+        lock.dependencies = {
+            "myorg/my-package": LockedDependency(
+                repo_url="myorg/my-package",
+                resolved_ref="v1.4.0",
+                resolved_commit=_SHA,
+            ),
+        }
+        lock.write(tmp_path / "apm.lock.yaml")
+        with (
+            patch("apm_cli.deps.github_downloader.git") as git_module,
+            patch("apm_cli.core.auth.AuthResolver"),
+        ):
+            git_module.cmd.Git.return_value.ls_remote.return_value = ""
+            result = CliRunner().invoke(cli, ["outdated", "-j", "0"])
+        return result, git_module
+
+    def test_reports_unknown_with_remedy_and_no_ls_remote(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        result, git_module = self._run_outdated(tmp_path, monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        git_module.cmd.Git.assert_not_called()
+        assert "unknown" in result.output
+        assert "PROXY_REGISTRY_ONLY is set" in " ".join(result.output.split())
+
+    def test_without_the_flag_ls_remote_runs_and_no_hint(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PROXY_REGISTRY_ONLY", raising=False)
+        monkeypatch.delenv("ARTIFACTORY_ONLY", raising=False)
+        result, git_module = self._run_outdated(tmp_path, monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        git_module.cmd.Git.assert_called()
+        assert "PROXY_REGISTRY_ONLY is set" not in " ".join(result.output.split())
