@@ -286,6 +286,26 @@ class TestSourceShaPin:
         dependency = _dependency_reference_from_packed_source(plugin)
         assert dependency.reference == self.SHA
 
+    @pytest.mark.parametrize("bad", ["abc123", "z" * 40, 12345])
+    @pytest.mark.parametrize(
+        "resolve, source",
+        [
+            (_resolve_github_source, {"type": "github", "repo": "owner/repo"}),
+            (_resolve_url_source, {"type": "url", "url": "https://github.com/owner/repo"}),
+            (
+                _resolve_git_subdir_source,
+                {"type": "git-subdir", "repo": "owner/repo", "subdir": "x"},
+            ),
+        ],
+    )
+    def test_malformed_sha_is_rejected(self, resolve, source, bad):
+        with pytest.raises(ValueError, match="40-character commit SHA"):
+            resolve({**source, "ref": "main", "sha": bad})
+
+    def test_empty_sha_falls_back_to_ref(self):
+        source = {"type": "github", "repo": "owner/repo", "ref": "v1.0.0", "sha": ""}
+        assert _resolve_github_source(source) == "owner/repo#v1.0.0"
+
 
 class TestResolveRelativeSource:
     """Resolve relative path source type."""

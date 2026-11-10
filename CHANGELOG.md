@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Public `MAINTAINERS.md` roster replaces the duplicate `AUTHORS` file, with contributor credit in `CONTRIBUTING.md` and unchanged governance approval remits. (#3489)
 
+### Fixed
+
+- `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
+
 ## [0.35.0] - 2026-10-22
 
 ### Added

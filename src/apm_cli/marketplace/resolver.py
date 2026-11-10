@@ -40,6 +40,7 @@ from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
     is_azure_devops_hostname,
+    is_full_commit_sha,
     is_github_hostname,
     is_supported_git_host,
 )
@@ -533,8 +534,20 @@ def parse_marketplace_ref(
 
 
 def _source_pin(source: dict) -> str:
-    """Return the pin of a source: ``sha`` wins over ``ref``, as in Claude Code."""
-    return source.get("sha", "") or source.get("ref", "")
+    """Return the pin of a source: ``sha`` wins over ``ref``, as in Claude Code.
+
+    A declared ``sha`` must be a full 40-character commit SHA. Anything else
+    raises ``ValueError`` here, before install writes the manifest, lockfile
+    or any deployed file.
+    """
+    sha = source.get("sha")
+    if sha is None or sha == "":
+        return source.get("ref", "")
+    if not isinstance(sha, str) or not is_full_commit_sha(sha.strip()):
+        raise ValueError(
+            f"Invalid marketplace source sha {sha!r}: expected a full 40-character commit SHA."
+        )
+    return sha.strip()
 
 
 def _resolve_github_source(source: dict) -> str:
@@ -580,7 +593,7 @@ def _resolve_url_source(source: dict) -> str:
         raise ValueError(f"Cannot resolve URL source '{url}': {exc}") from exc
     if dep.is_local:
         raise ValueError(f"URL source '{url}' resolves to a local path, not a Git coordinate.")
-    pin = source.get("sha", "") or dep.reference
+    pin = _source_pin({"sha": source.get("sha"), "ref": dep.reference or ""})
     if pin:
         return f"{dep.repo_url}#{pin}"
     return dep.repo_url
