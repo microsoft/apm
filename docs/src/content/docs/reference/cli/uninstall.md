@@ -121,6 +121,12 @@ What gets removed, in order:
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
 
+When uninstall rebuilds a surviving package's loose skills, APM records those
+actual writes locally and binds them after the final lockfile update succeeds.
+Later installs can update the survivor without treating its unchanged files as
+user edits. Removed-output receipts are retired before survivor copies; failed
+removals do not retire evidence. Receipt failures are reported, not ignored.
+
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message
 names the source package; cleanup removes its deployed files, not source files.

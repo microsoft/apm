@@ -303,6 +303,51 @@ def test_real_reinstall_changes_deployments_but_not_lock_inside_phase(
     assert evidence.lock_writes >= 2
 
 
+@pytest.mark.parametrize("failed_write", [1, 2], ids=["rendered-receipt", "committed-claims"])
+def test_receipt_persistence_failure_is_a_pipeline_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    local_install_factory: Callable[..., LocalInstall],
+    failed_write: int,
+) -> None:
+    """Successful target writes do not turn a failed evidence write into success."""
+    from apm_cli.utils import atomic_io
+
+    fixture = local_install_factory()
+    evidence = _observe_pipeline(monkeypatch, fixture)
+    write = atomic_io.atomic_write_text
+    writes = 0
+    failed_path: Path | None = None
+    prior_receipt: bytes | None = None
+
+    def fail_receipt(path: Path, text: str, **kwargs: Any) -> None:
+        nonlocal writes, failed_path, prior_receipt
+        if path.parent.name == "deployment-receipts":
+            writes += 1
+            if writes == failed_write:
+                failed_path = path
+                prior_receipt = path.read_bytes() if path.exists() else None
+                raise OSError("injected materialization persistence failure")
+        write(path, text, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", fail_receipt)
+    with pytest.raises(RuntimeError, match="injected materialization persistence failure"):
+        pipeline.run_install_pipeline(
+            fixture.package,
+            scope=fixture.scope,
+            target="copilot",
+            parallel_downloads=0,
+            no_policy=True,
+            audit_override="off",
+        )
+    assert failed_path is not None
+    assert (failed_path.read_bytes() if failed_path.exists() else None) == prior_receipt
+    assert fixture.deployed.read_bytes() == fixture.local_skill.read_bytes()
+    assert get_lockfile_path(fixture.metadata).exists() is (failed_write == 2)
+    assert evidence.contexts[0].integrators["skill"]._ownership_snapshots is None
+    assert evidence.contexts[0].integrators["skill"]._materialization_session is None
+    assert "audit" not in evidence.events
+
+
 def test_exception_after_real_integration_exits_before_any_lock_writer(
     monkeypatch: pytest.MonkeyPatch, local_install_factory: Callable[..., LocalInstall]
 ) -> None:

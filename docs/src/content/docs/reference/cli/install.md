@@ -238,6 +238,23 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
 - **Conflicted lockfiles.** A lockfile containing unresolved Git merge conflict markers exits `1` for required readers and names the file; the conflicted bytes are never rewritten. Preview retains its warning and exit `0`. See [manual conflict repair](../../../troubleshooting/install-failures/#merge-conflict-markers-in-the-lockfile).
 - **Dependency versions after checkout.** Manifest-derived versions describe the acquired package, not an older copy in `apm_modules/`. The first ordinary install after switching branches records the current version; a second install is not needed to correct it. These values are inventory metadata, not frozen replay pins. Registry and Git-semver versions retain their resolver-selected meaning, which can differ from the package manifest or tag spelling.
+- **Skill bytes after checkout.** APM records successful rendered skill writes
+  locally, separately from the lockfile. After a branch switch, an unchanged
+  prior deployment can update even if modules and cache were removed. Edited
+  files remain protected, including edits matching an older package version.
+  The ignored `.apm-local/` installation identity and
+  `~/.apm/deployment-receipts/` are local state, not files to commit or share.
+  The identity lives in the project root, or your home directory for `--global`.
+  Configured external skill roots use the same ownership and receipt checks.
+  Switching targets that share a skill path refreshes valid same-writer evidence
+  through a guarded copy, even when the source bytes are unchanged.
+  Missing evidence, including installations predating these receipts, does not
+  authorize overwriting existing files. Preserve your edits and move the
+  conflicting file aside before reinstalling. Invalid evidence fails explicitly.
+  Creating this state requires filesystem hard-link support. State-write failures
+  are reported; successful earlier deployment writes are not rolled back.
+  Audit and dry-run never establish this authority. Frozen install may record
+  successful local writes but still preserves manifest and lockfile bytes.
 - **Frozen mode.** With `--frozen`, install replays the locked graph and **never writes `apm.lock.yaml`**. Missing lockfiles or direct dependencies, changed refs, full commit pins, host providers, HTTP/HTTPS transport, and available MCP declaration mismatches fail before the pipeline. This includes transport changes under an unchanged semver range. Add-style invocations (`apm install PACKAGE` and `apm install --mcp NAME`) are rejected because they mutate `apm.yml`. Orphan package lock entries do not fail manifest matching. Local-content verification ignores unused local entries, but MCP preflight can still reject unavailable local sources. Selected direct and transitive local-path dependencies are checked against their locked content hash before lifecycle or deployment: the hash covers the validated local-copy image, including dereferenced in-package symlinks, before integration transforms it. A missing entry or legacy lock without that hash requires a normal `apm install` to establish a baseline. See [`config-consistency`](../../baseline-checks/#config-consistency) for the full manifest rule. Use normal install to establish or intentionally repair lock state; use `apm audit --ci` for on-disk content verification.
 - **Cold frozen restoration.** A fresh checkout using a package-installing mode can restore supported locked remote packages, including whole plugins, without an ordinary-install-first workaround. Missing package bytes are not proof that their MCP declarations were removed. When the lock identifies an unavailable source unambiguously, APM downloads its pinned content and checks the actual restored declarations before deployment or native MCP configuration changes. Changed or removed declarations, ambiguous/shared origin evidence, invalid materialized shapes, missing local sources, and insufficient lock evidence still fail. A deferred MCP verification failure preserves previous native MCP configuration and user-owned settings; downloads/cache fills may already have happened. This is not rollback of arbitrary lifecycle scripts or every frozen failure.
   Inactive package lock entries without MCP declarations do not require hydration. This does not exempt active packages whose source evidence is still unavailable, or skip newly added declarations when the locked MCP set is empty.

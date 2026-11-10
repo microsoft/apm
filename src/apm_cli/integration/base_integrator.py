@@ -279,6 +279,9 @@ class BaseIntegrator:
         recorded_hashes: Mapping[str, str],
         write_allowed: Callable[[str], bool] | None = None,
         on_member_skipped: Callable[[Path], None] | None = None,
+        baseline_hash: Callable[[Path], str | None] | None = None,
+        on_member_written: Callable[[Path], None] | None = None,
+        requires_write: Callable[[Path], bool] | None = None,
         unchanged: bool = False,
         force: bool = False,
         diagnostics=None,
@@ -315,7 +318,11 @@ class BaseIntegrator:
                         f"Cannot deploy {entry}: destination is not a regular file. "
                         "Move the blocking directory before reinstalling."
                     )
-                if unchanged and self.is_content_identical_to_source(target_file, source_file):
+                if (
+                    unchanged
+                    and self.is_content_identical_to_source(target_file, source_file)
+                    and not (requires_write is not None and requires_write(target_file))
+                ):
                     copied.append(target_file)
                     continue
                 if self.check_collision(
@@ -328,15 +335,26 @@ class BaseIntegrator:
                     if on_member_skipped is not None:
                         on_member_skipped(target_file)
                     continue
-                expected = recorded_hashes.get(entry)
+                expected = (
+                    baseline_hash(target_file)
+                    if baseline_hash is not None
+                    else recorded_hashes.get(entry)
+                )
                 if (
                     not force
-                    and expected is not None
                     and target_file.is_file()
-                    and compute_file_hash(target_file) != expected
+                    and (
+                        (baseline_hash is not None and expected is None)
+                        or (expected is not None and compute_file_hash(target_file) != expected)
+                    )
                 ):
+                    reason = (
+                        "no trustworthy local deployment baseline"
+                        if expected is None
+                        else "modified since deployment"
+                    )
                     message = (
-                        f"Skipped {entry}: modified since deployment. "
+                        f"Skipped {entry}: {reason}. "
                         "Preserve your changes before reinstalling with --force."
                     )
                     if diagnostics is not None:
@@ -354,6 +372,8 @@ class BaseIntegrator:
                         self.cleanup_empty_parents([target_file], destination.parent)
                     raise
                 copied.append(target_file)
+                if on_member_written is not None:
+                    on_member_written(target_file)
         return copied
 
     @staticmethod

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec, DeploymentMaterializationSession
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
     DeploymentLocator,
@@ -87,6 +88,138 @@ def _make_orphan_dep(deployed_files: list[str], file_hashes: dict | None = None)
     dep.deployed_files = deployed_files
     dep.deployed_file_hashes = file_hashes or {}
     return dep
+
+
+@pytest.mark.parametrize("mode", ["complete", "later-error", "retirement-error"])
+def test_receipt_retirement_is_batched_and_preserves_unremoved_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    home, root = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    root.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    lock = LockFile()
+    records = {}
+    members: dict[str, list[Path]] = {}
+    for owner in ("a", "b", "c"):
+        paths = [root / f".agents/skills/{owner}/{name}" for name in ("SKILL.md", "asset.md")]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"managed content\n")
+        hashes = {path.relative_to(root).as_posix(): compute_file_hash(path) for path in paths}
+        lock.dependencies[owner] = LockedDependency(
+            repo_url=owner, deployed_files=list(hashes), deployed_file_hashes=hashes
+        )
+        for value, content_hash in hashes.items():
+            locator = DeploymentLocator(
+                LocatorKind.PROJECT_RELATIVE, "copilot", value, runtime=None, scope="project"
+            )
+            records[locator.key] = DeploymentRecord(locator, (owner,), owner, content_hash)
+        members[owner] = paths
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records), lock, write_legacy_views=False
+    )
+    session = DeploymentMaterializationSession(root, InstallScope.PROJECT, lock)
+    for owner, paths in members.items():
+        session.record(
+            {path: compute_file_hash(path) for path in paths}, [KNOWN_TARGETS["copilot"]], owner
+        )
+    session.flush()
+    receipt_before = session.state_path.read_bytes()
+    members["a"][1].unlink()
+    members["b"][0].write_bytes(b"user edit\n")
+    unlink = Path.unlink
+
+    def refuse_one(path: Path, *args, **kwargs) -> None:
+        if path == members["c"][0]:
+            raise PermissionError("injected deletion refusal")
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", refuse_one)
+    current = {}
+    for owner in ("b", "c"):
+        path = root / f".agents/skills/{owner}/current.md"
+        path.write_bytes(b"newly integrated\n")
+        current[owner] = [path.relative_to(root).as_posix()]
+    ctx = _make_ctx(
+        existing_lockfile=lock,
+        intended_dep_keys={"b", "c"},
+        package_deployed_files=current,
+        project_root=root,
+    )
+    ctx.diagnostics = DiagnosticCollector()
+    remove = cleanup.remove_stale_deployed_files
+
+    def remove_or_abort(*args, **kwargs):
+        if mode == "later-error" and kwargs["dep_key"] == "b":
+            raise RuntimeError("injected later package failure")
+        return remove(*args, **kwargs)
+
+    persist_receipt = DeploymentMaterializationSession._persist
+
+    def persist_or_refuse(
+        session: DeploymentMaterializationSession,
+        records: dict[str, DeploymentRecord],
+        destinations: dict[str, str],
+    ) -> None:
+        if mode == "retirement-error":
+            raise OSError("injected receipt retirement failure")
+        persist_receipt(session, records, destinations)
+
+    monkeypatch.setattr(cleanup, "remove_stale_deployed_files", remove_or_abort)
+    with (
+        patch.object(
+            DeploymentMaterializationSession,
+            "_load",
+            autospec=True,
+            side_effect=DeploymentMaterializationSession._load,
+        ) as load,
+        patch.object(
+            DeploymentMaterializationSession,
+            "_persist",
+            autospec=True,
+            side_effect=persist_or_refuse,
+        ) as persist,
+    ):
+        if mode == "later-error":
+            with pytest.raises(RuntimeError, match="injected later package failure"):
+                cleanup.run(ctx)
+        elif mode == "retirement-error":
+            with pytest.raises(OSError, match="injected receipt retirement failure"):
+                cleanup.run(ctx)
+        else:
+            cleanup.run(ctx)
+        assert load.call_count == 1
+        assert persist.call_count == 1
+    assert members["b"][0].read_bytes() == b"user edit\n"
+    assert members["c"][0].read_bytes() == b"managed content\n"
+    if mode == "retirement-error":
+        assert session.state_path.read_bytes() == receipt_before
+        assert not members["a"][0].exists()
+        return
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    expected = (
+        {*members["b"], *members["c"]}
+        if mode == "later-error"
+        else {members["b"][0], members["c"][0]}
+    )
+    assert {Path(path) for path in data["destinations"].values()} == expected
+    if mode == "complete":
+        for owner in ("b", "c"):
+            assert ctx.package_deployed_files[owner] == [
+                f".agents/skills/{owner}/current.md",
+                members[owner][0].relative_to(root).as_posix(),
+            ]
+
+
+def test_empty_receipt_retirement_does_not_load_or_publish(tmp_path: Path) -> None:
+    with (
+        patch.object(DeploymentMaterializationSession, "_load") as load,
+        patch.object(DeploymentMaterializationSession, "_persist") as persist,
+    ):
+        cleanup.run(_make_ctx(project_root=tmp_path))
+    load.assert_not_called()
+    persist.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

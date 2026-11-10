@@ -157,7 +157,14 @@ def test_ordinary_install_retires_obsolete_absent_dependency_claims(
 
 @pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
 @pytest.mark.parametrize(
-    "protection", ["edited-marker", "unprocessed-target", "required-selection", "untracked-content"]
+    "protection",
+    [
+        "edited-marker",
+        "unprocessed-target",
+        "required-selection",
+        "untracked-content",
+        "trusted-untracked-content",
+    ],
 )
 def test_historical_absence_respects_live_preservation_boundaries(
     tmp_path: Path, apm_binary_path: Path, user_scope: bool, protection: str
@@ -169,10 +176,12 @@ def test_historical_absence_respects_live_preservation_boundaries(
     lock = load_yaml(lock_path)
     shared = ".agents/skills/s/a.md"
     expected_hash = lock["dependencies"][0]["deployed_file_hashes"][shared]
-    for row in lock["deployments"]:
-        if row["value"].startswith(".agents/"):
-            row["target"] = "legacy"
-    dump_yaml(lock, lock_path)
+    # Rebinding claims invalidates the prior local receipt; retain a trusted control.
+    if protection != "trusted-untracked-content":
+        for row in lock["deployments"]:
+            if row["value"].startswith(".agents/"):
+                row["target"] = "legacy"
+        dump_yaml(lock, lock_path)
     (scenario.packages["a"] / "skills/s/a.md").unlink()
     for root in (".agents", ".claude"):
         (scenario.deploy_root / root / "skills/s/a.md").unlink()
@@ -187,25 +196,20 @@ def test_historical_absence_respects_live_preservation_boundaries(
                 "apm": [{"path": str(scenario.packages["a"]), "skills": ["no-such-skill"]}]
             }
         )
-    elif protection == "untracked-content":
+    elif protection in {"untracked-content", "trusted-untracked-content"}:
         untracked.write_bytes(b"Untracked personal content.\n")
     arguments = ("--target", "claude") if protection == "unprocessed-target" else ()
     expected_exit = 1 if protection == "required-selection" else 0
     prior_bytes = lock_path.read_bytes()
     for _ in range(2):
-        scenario.run("install", *arguments, expected=expected_exit)
+        result = scenario.run("install", *arguments, expected=expected_exit)
         repaired = load_yaml(lock_path)
         dependency = repaired["dependencies"][0]
         rows = [row for row in repaired["deployments"] if row["value"] == shared]
-        if protection == "untracked-content":
+        if protection == "trusted-untracked-content":
             assert shared not in dependency["deployed_files"]
             assert shared not in dependency["deployed_file_hashes"]
             assert rows == []
-            assert untracked.read_bytes() == b"Untracked personal content.\n"
-            personal = ".agents/skills/s/personal.txt"
-            assert personal not in dependency["deployed_files"]
-            assert personal not in dependency["deployed_file_hashes"]
-            assert all(row["value"] != personal for row in repaired["deployments"])
         else:
             assert shared in dependency["deployed_files"]
             assert dependency["deployed_file_hashes"][shared] == expected_hash
@@ -214,6 +218,14 @@ def test_historical_absence_respects_live_preservation_boundaries(
             assert rows[0]["owners"] == [str(scenario.packages["a"])]
             assert rows[0]["content_hash"] == expected_hash
             scenario.run("audit", "--ci", "--format", "json", expected=1)
+        if protection in {"untracked-content", "trusted-untracked-content"}:
+            assert untracked.read_bytes() == b"Untracked personal content.\n"
+            personal = ".agents/skills/s/personal.txt"
+            assert personal not in dependency["deployed_files"]
+            assert personal not in dependency["deployed_file_hashes"]
+            assert all(row["value"] != personal for row in repaired["deployments"])
+        if protection == "untracked-content":
+            assert "no trustworthy local deployment baseline" in " ".join(result.stdout.split())
         assert not (scenario.deploy_root / shared).exists()
         if protection == "edited-marker":
             assert marker.read_bytes() == b"User-edited skill marker.\n"

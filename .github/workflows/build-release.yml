@@ -253,7 +253,10 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 30
+        # Run 39834866538 timed out at 30m with workers still passing at 91%.
+        # 30 / 0.91 projects roughly 33m; 60m adds setup/tail headroom,
+        # not a completion guarantee. Keep selection and failure gates intact.
+        timeout-minutes: 60
 
       # PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only)
       - name: Prepare isolated release-validation environment
@@ -376,7 +379,9 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 60
+        # Run 39784442659 reached 77% at 60 minutes with all workers progressing.
+        # Allow setup/tail headroom beyond the roughly 78-minute linear estimate.
+        timeout-minutes: 120
 
       # PHASE 3: RELEASE VALIDATION
       - name: Prepare isolated release-validation environment
@@ -500,7 +505,9 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 60
+        # Linux x64 reached only 78% in 60 minutes in run 39819494530.
+        # Keep the proven ARM bound; allow x64 setup and full-corpus tail headroom.
+        timeout-minutes: ${{ matrix.arch == 'x86_64' && 120 || 60 }}
 
       - name: Run integration tests (Windows)
         if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')

@@ -225,6 +225,19 @@ serialized dependency paths with `Path.as_posix()`. For `deployed_file_hashes`,
 use `compute_file_hash`, which canonicalizes text CRLF; package-tree integrity
 continues to hash raw bytes.
 
+Concurrent fixtures must await every worker before inspecting shared results or
+cleaning up resources. Submit both consumers before collecting their futures;
+`Thread.join(timeout=...)` can return while a worker is still running. Keep real
+parallel materialization and content assertions in cache regression tests.
+
+Installation snapshots must allow only the three local identity paths
+(`.apm-local`, `.apm-local/.gitignore`, `.apm-local/installation`) at the
+appropriate project or user root, not the whole subtree. Changing ownership
+metadata in a fixture invalidates its bound local receipt. For project installs,
+derive the exact user-state receipt path through `DeploymentMaterializationSession`
+under the fixture home; do not allow arbitrary sibling receipts. Pair conservative
+preservation checks with an unchanged, trusted-receipt recovery control.
+
 When adding a registered architecture-owner guard, add its surgical mutation
 to `test_architecture_owner_rule_mutations.py` in the same change. The matrix
 requires exactly one mutation for every registered guard.
@@ -503,6 +516,25 @@ ledger, and failure/retry contracts when changing those behaviors.
 3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full non-live integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke and not live` subset plus native startup and isolated release validation.
 4. Create GitHub Release
 5. Publish to PyPI 
+
+The Linux x64 and macOS Apple Silicon full integration steps have 120-minute
+limits and keep `not live` selection with `-n 4 --dist loadgroup` for HOME-mutating
+test grouping. Previous 60-minute limits stopped progressing workers at 78% and
+77%, respectively; the budgets allow setup and tail headroom without excluding
+tests. Linux ARM keeps 60 minutes and Windows 20. The focused Intel step has
+60 minutes: its prior 30-minute limit stopped passing workers at 91%.
+The rough `30 / 0.91` projection is 33 minutes; 60 adds setup/tail headroom,
+not a completion guarantee.
+Its `lifecycle_smoke and not live` selection and four `loadgroup` workers are
+unchanged. Failures and timeouts still block release publication; a larger
+budget is not evidence that a failed assertion is fixed.
+
+The existing unprivileged `PR Binary Smoke (Linux)` job also runs
+`tests/integration/test_audit_workspace_identity_lifecycle.py` against its built
+binary with a five-minute limit. The fixture isolates HOME, credentials, cache,
+and local Git repositories; captured audit output and full failure tracebacks
+remain visible in the job log. This focused witness does not replace the full
+release qualification or change required checks.
 
 **Daily scheduled release smoke:**
 - Runs the same promotion validation path once per day.

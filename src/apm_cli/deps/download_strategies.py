@@ -549,13 +549,14 @@ class DownloadDelegate:
                 if resp.status_code != 200:
                     continue
                 with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                    names = zf.namelist()
-                    root_prefix = names[0] if names else ""
-                    target_name = root_prefix + file_path
-                    if target_name in names:
-                        return zf.read(target_name)
-                    if file_path in names:
-                        return zf.read(file_path)
+                    entries = zf.infolist()
+                    root_prefix = entries[0].filename if entries else ""
+                    for name in (root_prefix + file_path, file_path):
+                        try:
+                            entry = zf.getinfo(name)
+                        except KeyError:
+                            continue
+                        return zf.read(entry)
             except (zipfile.BadZipFile, requests.RequestException):
                 continue
 

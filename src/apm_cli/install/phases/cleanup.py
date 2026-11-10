@@ -26,8 +26,10 @@ cross-package file protection for stale cleanup (#1831).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -45,6 +47,19 @@ def run(ctx: InstallContext) -> None:
     ``ctx.targets``, ``ctx.logger``, ``ctx.project_root``,
     ``ctx.only_packages``.
     """
+    receipt_retirements: list[Path] = []
+    try:
+        _run_cleanup(ctx, receipt_retirements)
+    finally:
+        DeploymentMaterializationSession.retire_removed(
+            ctx.project_root,
+            receipt_retirements,
+            user_scope=is_user_scope(getattr(ctx, "scope", None)),
+        )
+
+
+def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
+    """Collect canonical cleanup outcomes without per-package receipt publication."""
     existing_lockfile = ctx.existing_lockfile
     only_packages = ctx.only_packages
     intended_dep_keys = ctx.intended_dep_keys
@@ -135,6 +150,7 @@ def run(ctx: InstallContext) -> None:
                 recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                 failed_path_retained=False,
                 user_scope=user_scope,
+                receipt_retirements=receipt_retirements,
             )
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
@@ -205,6 +221,7 @@ def run(ctx: InstallContext) -> None:
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
                 user_scope=user_scope,
+                receipt_retirements=receipt_retirements,
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.

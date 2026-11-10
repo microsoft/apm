@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+import hashlib
+import json
+import uuid
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,7 +19,11 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -63,6 +70,328 @@ class DeploymentCleanupSnapshot:
 
     paths: frozenset[str]
     hashes: dict[str, str]
+
+
+class DeploymentMaterializationSession:
+    """Installation-local rendered-write evidence, subordinate to current ownership.
+
+    Only live install and uninstall survivor boundaries create writing sessions. The checkout holds
+    an ignored random identity, not overwrite evidence; the OS-user state holds
+    canonical records. Neither a checked-out lock nor copied source bytes can
+    create a prior-local baseline.
+    """
+
+    def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
+        self.root = project_root.resolve()
+        self.scope = scope
+        key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
+        self.state_path = Path.home() / ".apm" / "deployment-receipts" / f"{key}.json"
+        self.identity_path = self.root / ".apm-local" / "installation"
+        self._records: dict[str, DeploymentRecord] = {}
+        self._destinations: dict[str, str] = {}
+        self._bindings: dict[str, list[str]] = {}
+        self._written: dict[str, str] = {}
+        self._dirty = False
+        self._claims: dict[str, list[DeploymentRecord]] = {}
+        if lockfile is not None:
+            for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+                self._claims.setdefault(
+                    DeploymentLedgerCodec.legacy_value(record.locator), []
+                ).append(record)
+        self._physical_keys: dict[str, str] = {}
+        self._valid_owners = (
+            DeploymentLedgerCodec.valid_owner_keys(lockfile) if lockfile else frozenset({"."})
+        )
+        self._installation: str | None = None
+        self._state_present = False
+        self._load()
+
+    def _validate_paths(self) -> None:
+        for base, path in (
+            (Path.home(), self.state_path),
+            (self.root, self.identity_path),
+            (self.root, self.identity_path.parent / ".gitignore"),
+        ):
+            ensure_path_within(path, base)
+            if has_symlink_component(base, path, raise_on_error=True):
+                raise PathTraversalError(
+                    f"Refusing symlinked materialization evidence at {path}. "
+                    "Restore a regular local state path before installing."
+                )
+            if path.exists() and not path.is_file():
+                raise ValueError(
+                    f"Refusing non-regular materialization evidence at {path}. "
+                    "Preserve this path and move it aside before retrying."
+                )
+
+    def _root_identity(self) -> list[int]:
+        metadata = self.root.stat()
+        return [metadata.st_dev, metadata.st_ino]
+
+    def _load(self) -> None:
+        self._validate_paths()
+        self._state_present = self.state_path.exists()
+        if not self.identity_path.exists():
+            return
+        try:
+            installation = self.identity_path.read_text(encoding="ascii").strip()
+            if uuid.UUID(hex=installation).hex != installation:
+                raise ValueError("invalid installation identity")
+            self._installation = installation
+            if not self.state_path.exists():
+                return
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+            if (
+                data["version"] != 1
+                or data["root"] != self.root.as_posix()
+                or data["scope"] != self.scope.value
+                or data["installation"] != installation
+                or data["root_identity"] != self._root_identity()
+            ):
+                raise ValueError("installation binding does not match")
+            ledger = DeploymentLedgerCodec.from_rows(data["records"])
+            if len(ledger.records) != len(data["records"]):
+                raise ValueError("duplicate rendered-write records")
+            destinations = data["destinations"]
+            bindings = data["bindings"]
+            if not isinstance(destinations, dict) or set(destinations) != set(ledger.records):
+                raise ValueError("destination bindings do not match")
+            if not isinstance(bindings, dict) or set(bindings) != set(ledger.records):
+                raise ValueError("ownership bindings do not match")
+            for record in ledger.records.values():
+                if (
+                    record.locator.kind == LocatorKind.URI
+                    or record.locator.scope != self.scope.value
+                    or not _is_canonical_bundle_hash(record.content_hash)
+                    or not isinstance(destinations[record.locator.key], str)
+                    or not isinstance(bindings[record.locator.key], list)
+                    or len(bindings[record.locator.key]) != 2
+                    or not all(isinstance(value, str) for value in bindings[record.locator.key])
+                ):
+                    raise ValueError("invalid rendered-write record")
+            self._records = dict(ledger.records)
+            self._destinations = destinations
+            self._bindings = bindings
+            self._physical_keys = {path: key for key, path in destinations.items()}
+            if len(self._physical_keys) != len(destinations):
+                raise ValueError("ambiguous physical write receipts")
+        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
+            raise ValueError(
+                f"Invalid local materialization evidence at {self.state_path}: {exc}. "
+                "Preserve local skill edits, then remove the invalid receipt file and retry. "
+                "Existing files without trustworthy evidence will not be overwritten."
+            ) from exc
+
+    def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
+        for target in targets:
+            if not target.supports("skills"):
+                continue
+            try:
+                ensure_path_within(path, target.skills_deploy_path(self.root))
+            except PathTraversalError:
+                continue
+            return DeploymentLedgerCodec.locator_for_path(
+                path, project_root=self.root, target=target, scope=self.scope
+            )
+        return None
+
+    def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
+        """Return a prior rendered hash only for a currently authorized physical member."""
+        from apm_cli.install.deployed_paths import deployed_path_entry
+
+        locator = self._locator(path, targets)
+        if locator is None:
+            return None
+        key = self._physical_keys.get(path.resolve().as_posix())
+        record = self._records.get(key)
+        if record is None:
+            return None
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        recorded_target = next(
+            (target for target in targets if target.name == record.locator.target), None
+        )
+        if recorded_target is None:
+            profile = KNOWN_TARGETS.get(record.locator.target)
+            recorded_target = (
+                profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+            )
+        if recorded_target is None or self._locator(path, [recorded_target]) != record.locator:
+            return None
+        if key in self._written:
+            return record.content_hash
+        value = deployed_path_entry(path, self.root, targets)
+        if (
+            not self._claims.get(value)
+            or record.active_owner not in self._valid_owners
+            or self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]
+        ):
+            return None
+        return record.content_hash
+
+    def _claim_signature(self, value: str) -> str:
+        """Bind to canonical ownership metadata, independently of the actual adapter writer."""
+        return json.dumps(
+            sorted(
+                (record.locator.key, record.owners, record.active_owner)
+                for record in self._claims.get(value, ())
+            ),
+            separators=(",", ":"),
+        )
+
+    def requires_target_write(
+        self, path: Path, targets: Sequence[TargetProfile], owner: str
+    ) -> bool:
+        """Require a real guarded write when a valid same-writer receipt changes target."""
+        locator = self._locator(path, targets)
+        key = self._physical_keys.get(path.resolve().as_posix())
+        record = self._records.get(key)
+        return (
+            locator is not None
+            and record is not None
+            and record.active_owner == owner
+            and record.locator.target != locator.target
+            and self.baseline(path, targets) is not None
+        )
+
+    def record(
+        self,
+        written: Mapping[Path, str],
+        targets: Sequence[TargetProfile],
+        owner: str,
+    ) -> None:
+        """Accumulate successful rendered writes for one atomic end-of-batch flush."""
+        from apm_cli.install.deployed_paths import deployed_path_entry
+
+        if not written:
+            return
+        prepared: list[tuple[DeploymentRecord, str, str]] = []
+        for path, content_hash in written.items():
+            locator = self._locator(path, targets)
+            if locator is None or not _is_canonical_bundle_hash(content_hash):
+                raise ValueError(f"Cannot record unverified skill materialization: {path}")
+            prepared.append(
+                (
+                    DeploymentRecord(locator, (owner,), owner, content_hash),
+                    path.resolve().as_posix(),
+                    deployed_path_entry(path, self.root, targets),
+                )
+            )
+        for record, physical, value in prepared:
+            key = record.locator.key
+            previous = self._physical_keys.get(physical)
+            if previous is not None:
+                self._records.pop(previous, None)
+                self._destinations.pop(previous, None)
+                self._bindings.pop(previous, None)
+            self._records[key] = record
+            self._destinations[key] = physical
+            self._physical_keys[physical] = key
+            self._bindings[key] = [
+                record.active_owner,
+                self._claim_signature(value),
+            ]
+            self._written[key] = value
+        self._dirty = True
+
+    def flush(self) -> None:
+        """Publish successful writes once, including those preceding another package's failure."""
+        if self._dirty:
+            self._persist(self._records, self._destinations)
+            self._dirty = False
+
+    def bind_committed_claims(self, lockfile: LockFile | None) -> None:
+        """Bind this batch's surviving writes to canonical post-install claims.
+
+        Root-local bytes can intentionally be represented by dependency claims.
+        Keep that projection separate from the actual writer; never infer a
+        writer or a baseline from the committed lock.
+        """
+        if not self._written:
+            return
+        committed = type(self)(self.root, self.scope, lockfile)
+        for key, value in self._written.items():
+            record = committed._records.get(key)
+            if record is None or record != self._records.get(key):
+                continue
+            committed._bindings[key] = [record.active_owner, committed._claim_signature(value)]
+            committed._dirty = True
+        committed.flush()
+
+    def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
+        from apm_cli.utils.atomic_io import atomic_write_text
+
+        self._validate_paths()
+        if self._installation is None:
+            self.identity_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            ignore = self.identity_path.parent / ".gitignore"
+            self._validate_paths()
+            if ignore.exists():
+                if ignore.read_bytes() != b"*\n":
+                    raise ValueError(
+                        f"Refusing to replace existing installation identity ignore rules: {ignore}. "
+                        "Preserve this directory's contents and move it aside before retrying."
+                    )
+            else:
+                atomic_write_text(ignore, "*\n", new_file_mode=0o600, create_only=True)
+            installation = uuid.uuid4().hex
+            atomic_write_text(
+                self.identity_path, installation + "\n", new_file_mode=0o600, create_only=True
+            )
+            self._installation = installation
+        self.state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._validate_paths()
+        data = {
+            "version": 1,
+            "root": self.root.as_posix(),
+            "root_identity": self._root_identity(),
+            "scope": self.scope.value,
+            "installation": self._installation,
+            "records": DeploymentLedgerCodec.rows(DeploymentLedger(records)),
+            "destinations": destinations,
+            "bindings": {key: self._bindings[key] for key in records},
+        }
+        atomic_write_text(
+            self.state_path,
+            json.dumps(data, sort_keys=True, indent=2) + "\n",
+            new_file_mode=0o600,
+            create_only=not self._state_present,
+        )
+        self._state_present = True
+
+    def retire(self, deleted: Sequence[Path]) -> None:
+        """Forget successfully removed physical outputs without granting cleanup authority."""
+        removed = {path.resolve().as_posix() for path in deleted}
+        keys = {
+            key
+            for key, value in self._destinations.items()
+            if value in removed
+            or any(parent.as_posix() in removed for parent in Path(value).parents)
+        }
+        if keys:
+            records = {key: record for key, record in self._records.items() if key not in keys}
+            destinations = {
+                key: value for key, value in self._destinations.items() if key not in keys
+            }
+            self._persist(records, destinations)
+            self._records = records
+            self._destinations = destinations
+            self._bindings = {
+                key: value for key, value in self._bindings.items() if key not in keys
+            }
+            self._physical_keys = {path: key for key, path in destinations.items()}
+
+    @classmethod
+    def retire_removed(
+        cls, project_root: Path, deleted: Sequence[Path], *, user_scope: bool
+    ) -> None:
+        """Route actual cleanup outcomes through the same local evidence owner."""
+        if not deleted:
+            return
+        from apm_cli.core.scope import InstallScope
+
+        scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+        cls(project_root, scope, None).retire(deleted)
 
 
 def _is_canonical_bundle_hash(content_hash: str | None) -> bool:

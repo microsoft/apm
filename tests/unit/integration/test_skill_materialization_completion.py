@@ -143,6 +143,44 @@ def test_identical_members_are_successful_materializations(tmp_path: Path) -> No
     assert _integrate(package, project, plan).complete is True
 
 
+@pytest.mark.parametrize("baseline", ["valid", "missing", "changed"])
+def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callback(
+    tmp_path: Path, baseline: str
+) -> None:
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    package, project, _ = _fixture(tmp_path)
+    source = package.install_path / "skills/s"
+    destination = project / ".agents/skills/s"
+    shutil.copytree(source, destination)
+    written = []
+    with patch("apm_cli.integration.base_integrator.shutil.copy2", wraps=shutil.copy2) as copy:
+        copied = BaseIntegrator().copy_directory_files(
+            source,
+            destination,
+            ignore=lambda _directory, _names: [],
+            path_entry=lambda path: path.relative_to(project).as_posix(),
+            is_managed=lambda _entry: True,
+            recorded_hashes={},
+            baseline_hash=lambda path: (
+                compute_file_hash(path)
+                if baseline == "valid"
+                else None
+                if baseline == "missing"
+                else "sha256:" + "0" * 64
+            ),
+            on_member_written=written.append,
+            requires_write=lambda _path: True,
+            unchanged=True,
+        )
+    assert copy.call_count == (2 if baseline == "valid" else 0)
+    assert written == copied
+    assert len(written) == copy.call_count
+    assert {path.name: path.read_bytes() for path in destination.iterdir()} == {
+        path.name: path.read_bytes() for path in source.iterdir()
+    }
+
+
 def test_replay_is_not_source_completion_authority(tmp_path: Path) -> None:
     from apm_cli.deps.lockfile import LockFile
 

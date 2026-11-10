@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.34.0"
+version = "0.35.0"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -61,6 +61,9 @@ build = [
 
 [project.scripts]
 apm = "apm_cli.entrypoint:main"
+
+[tool.setuptools]
+license-files = ["LICENSE", "LICENSE-DOCS", "LICENSING.md", "NOTICE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

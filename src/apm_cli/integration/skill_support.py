@@ -86,6 +86,7 @@ def clean_orphaned_skills(
     *,
     project_root: Path | None,
     get_lockfile_owned_agent_skills: Callable[[Path], set[str]],
+    removed_paths: list[Path] | None = None,
 ) -> dict[str, int]:
     """Remove legacy-orphan skill directories without touching foreign agents."""
     protected_names = set(installed_skill_names)
@@ -107,6 +108,8 @@ def clean_orphaned_skills(
         try:
             shutil.rmtree(skill_subdir)
             files_removed += 1
+            if removed_paths is not None:
+                removed_paths.append(skill_subdir)
         except Exception:
             errors += 1
 

@@ -20,6 +20,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _body_has,
     _facts_for,
     _line_findings,
+    _lines,
     _name_calls_in,
     _present,
     _present_re,
@@ -930,7 +931,8 @@ def _skill_lockfile_root_findings(provider: FactsProvider, rule_id: str) -> list
         not re.search(
             r"with \(\s*contextlib\.nullcontext\(\)\s*if ctx\.lockfile_only\s*"
             r'else ctx\.integrators\["skill"\]\.ownership_snapshot\(\s*'
-            r"replay_lockfile=ctx\.existing_lockfile if ctx\.frozen else None\s*\)\s*\):\s*"
+            r"replay_lockfile=ctx\.existing_lockfile if ctx\.frozen else None,"
+            r"\s*materialization_session=session,\s*\)\s*\):\s*"
             r'_run_phase\("integrate", _integrate_phase, ctx\)',
             "\n".join(pipeline.lines),
         )
@@ -1269,6 +1271,114 @@ def _claim_handoff_findings(provider: FactsProvider, rule_id: str) -> list[Viola
     return findings
 
 
+def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Keep local rendered-write authority behind the live install and canonical codec."""
+    findings: list[Violation] = []
+    requirements = {
+        _DEPLOYMENT_LEDGER: (
+            "class DeploymentMaterializationSession:",
+            'data["installation"] != installation',
+            'data["root_identity"] != self._root_identity()',
+            "record.active_owner not in self._valid_owners",
+            "self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]",
+            "value = deployed_path_entry(path, self.root, targets)",
+            "deployed_path_entry(path, self.root, targets),",
+            "self._written[key] = value",
+            "for key, value in self._written.items():",
+            "record.active_owner == owner",
+            "record.locator.target != locator.target",
+            "and self.baseline(path, targets) is not None",
+            'DeploymentLedgerCodec.from_rows(data["records"])',
+            "DeploymentLedgerCodec.rows(DeploymentLedger(records))",
+            'atomic_write_text(ignore, "*\\n", new_file_mode=0o600, create_only=True)',
+            'self.identity_path, installation + "\\n", new_file_mode=0o600, create_only=True',
+            "create_only=not self._state_present",
+        ),
+        _SKILL_INTEGRATOR: (
+            "on_member_written=written.append",
+            "session.baseline(path, targets)",
+            "session.requires_target_write(path, targets, owner)",
+            "session.record({path: written_hashes[entry(path)] for path in written}",
+            "materialization_session.flush()",
+            "self._materialization_session = None",
+            "removed_paths.append(target)",
+            "removed_paths=removed_paths",
+        ),
+        _BASE_INTEGRATOR_OWNER: (
+            "baseline_hash(target_file)",
+            "(baseline_hash is not None and expected is None)",
+            "on_member_written(target_file)",
+            "and not (requires_write is not None and requires_write(target_file))",
+        ),
+        "src/apm_cli/install/pipeline.py": (
+            "materialization_session=session",
+            "if ctx.lockfile_only or ctx.dry_run",
+            "ctx.project_root, ctx.scope, ctx.existing_lockfile",
+            "materialization_session.bind_committed_claims(",
+        ),
+        "src/apm_cli/integration/cleanup.py": (
+            "DeploymentMaterializationSession.retire_removed(",
+            "[*result.deleted_targets, *absent_targets]",
+            "if receipt_retirements is None:",
+            "receipt_retirements.extend(retired)",
+        ),
+        "src/apm_cli/install/phases/cleanup.py": (
+            "_run_cleanup(ctx, receipt_retirements)",
+            "finally:",
+            "DeploymentMaterializationSession.retire_removed(",
+            "receipt_retirements=receipt_retirements",
+        ),
+        "src/apm_cli/integration/skill_support.py": ("removed_paths.append(skill_subdir)",),
+        "src/apm_cli/commands/uninstall/engine.py": (
+            "DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)",
+            'with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):',
+            "materialization_session=materialization_session,",
+            "removed_paths=removed_skill_paths",
+            "finally:",
+            "project_root, removed_skill_paths, user_scope=user_scope",
+        ),
+        "src/apm_cli/commands/uninstall/cli.py": (
+            "_persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)",
+            "else:\n        if integration_cleanup.materialization_session is not None:",
+            "integration_cleanup.materialization_session.bind_committed_claims(lockfile)",
+        ),
+    }
+    for path, snippets in requirements.items():
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        text = "\n".join(_lines(facts))
+        if not failures and not all(snippet in text for snippet in snippets):
+            findings.append(
+                _summary(rule_id, path, "Local materialization evidence must use the guarded owner")
+            )
+    allowed = set(requirements)
+    for path in _python_paths(provider, _SRC_PREFIX):
+        facts = provider.file_facts(path)
+        if path != _DEPLOYMENT_LEDGER:
+            findings.extend(
+                _line_findings(
+                    facts,
+                    path,
+                    rule_id,
+                    re.compile(r'["\'](?:deployment-receipts|\.apm-local)["\']'),
+                    "Local materialization storage belongs only to the deployment owner",
+                    respect_exempt=False,
+                )
+            )
+        if path not in allowed:
+            findings.extend(
+                _line_findings(
+                    facts,
+                    path,
+                    rule_id,
+                    re.compile(r"\bDeploymentMaterializationSession\b|materialization_session="),
+                    "Only live install or uninstall survivor writes may promote materialization evidence",
+                    respect_exempt=False,
+                )
+            )
+    return findings
+
+
 def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     """Deployment provenance / state must stay owned by DeploymentLedgerCodec."""
     rule_id = _GUARD_PROVENANCE
@@ -1284,4 +1394,5 @@ def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     findings.extend(_membership_owner_findings(provider, rule_id))
     findings.extend(_cleanup_claim_findings(provider, rule_id))
     findings.extend(_claim_handoff_findings(provider, rule_id))
+    findings.extend(_materialization_evidence_findings(provider, rule_id))
     return tuple(findings)

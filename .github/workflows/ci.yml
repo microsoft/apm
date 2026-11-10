@@ -580,6 +580,15 @@ jobs:
         chmod +x scripts/build-binary.sh
         uv run ./scripts/build-binary.sh
 
+    - name: Test packaged audit workspace identity
+      timeout-minutes: 5
+      env:
+        APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
+      run: >-
+        uv run --frozen --extra dev pytest
+        tests/integration/test_audit_workspace_identity_lifecycle.py
+        -vv -ra --tb=long --show-capture=all --no-showlocals
+
   # Dogfood the audit-only CI gate we ship and document to users:
   #   - `apm audit --ci` -- the full producer+consumer gate. Runs the
   #     lockfile / content-integrity checks AND the install-replay drift

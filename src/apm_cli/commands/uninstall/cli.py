@@ -71,6 +71,29 @@ def _collect_deployed_cleanup_state(
     return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
 
 
+def _persist_uninstall_lockfile(
+    lockfile,
+    lockfile_path,
+    logger: CommandLogger,
+    integration_cleanup: IntegrationCleanupOutcome,
+) -> None:
+    """Bind actual survivor writes only after final lock persistence succeeds."""
+    from .lockfile_state import lockfile_has_persisted_state
+
+    try:
+        if lockfile_has_persisted_state(lockfile):
+            lockfile.write(lockfile_path)
+        else:
+            lockfile_path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning(
+            "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+        )
+    else:
+        if integration_cleanup.materialization_session is not None:
+            integration_cleanup.materialization_session.bind_committed_claims(lockfile)
+
+
 def _sync_integrations_for_manifest(
     *,
     manifest_path,
@@ -679,17 +702,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         lockfile_updated = lsp_lock_updated or lockfile_updated
 
         if lockfile and lockfile_updated and lockfile_ready and mcp_cleanup_error is None:
-            try:
-                from .lockfile_state import lockfile_has_persisted_state
-
-                if lockfile_has_persisted_state(lockfile):
-                    lockfile.write(lockfile_path)
-                else:
-                    lockfile_path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                )
+            _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
 
         # Rebuild the APM-owned Copilot plugin registration from the surviving
         # locked state: only APM's own rows disappear, user bytes never do.
