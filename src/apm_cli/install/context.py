@@ -98,6 +98,11 @@ class InstallContext:
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: list[Any] = field(default_factory=list)  # resolve
     update_plan_complete_dep_keys: set[str] = field(default_factory=set)  # resolve
+    # Partial installs: the selected packages' previously locked descendants
+    # that the complete graph no longer needs (dropped) or reaches elsewhere
+    # (rescued). See package_selection.previous_selected_subtree_keys (#3502).
+    partial_dropped_dep_keys: frozenset[str] = frozenset()  # resolve
+    partial_rescued_dep_keys: frozenset[str] = frozenset()  # resolve
     dependency_graph: Any = None  # resolve
     existing_lockfile: Any = None  # resolve
     lockfile_path: Path | None = None  # resolve

@@ -332,6 +332,31 @@ class TestOnlyPackagesSkipsOrphanCleanup:
         cleanup.run(ctx)
         ctx.logger.orphan_cleanup.assert_not_called()
 
+    def test_partial_install_retires_only_selected_dropped_descendants(self):
+        """#3502: a partial install never treats unrelated lock entries as orphans."""
+        dropped = _make_orphan_dep(["dropped.md"], file_hashes={"dropped.md": "h1"})
+        unrelated = _make_orphan_dep(["unrelated.md"], file_hashes={"unrelated.md": "h2"})
+        lf = _make_lockfile({"dropped": dropped, "unrelated": unrelated})
+        ctx = _make_ctx(existing_lockfile=lf, only_packages=True, intended_dep_keys=set())
+        ctx.partial_dropped_dep_keys = frozenset({"dropped"})
+        ctx.apm_modules_dir = None
+        result = CleanupResult(deleted=["dropped.md"])
+        with (
+            # Remove the survivor-projection backstop so the subtree guard
+            # alone must keep the unrelated entry out of orphan cleanup.
+            patch(
+                "apm_cli.install.manifest_reconcile.surviving_deployed_paths",
+                return_value=frozenset(),
+            ),
+            patch(
+                "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+                return_value=result,
+            ) as mock_rm,
+        ):
+            cleanup.run(ctx)
+        assert [call.kwargs["dep_key"] for call in mock_rm.call_args_list] == ["dropped"]
+        ctx.logger.orphan_cleanup.assert_called_once_with(1)
+
 
 # ---------------------------------------------------------------------------
 # Block 3: orphan cleanup — SELF_KEY skipped

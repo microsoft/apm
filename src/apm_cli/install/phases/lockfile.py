@@ -504,25 +504,56 @@ class LockfileBuilder:
                         # OR package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
                     elif retained := retained_orphans.get(dep_key):
-                        retained_files = [path for path in dep.deployed_files if path in retained]
-                        retained_hashes = {
-                            path: dep.deployed_file_hashes[path]
-                            for path in retained_files
-                            if path in dep.deployed_file_hashes
-                        }
-                        retained_dep = copy.deepcopy(dep)
-                        lockfile.dependencies[dep_key] = retained_dep
-                        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
-                        DeploymentLedgerCodec.replace_legacy_owner(
-                            lockfile,
-                            dep_key,
-                            retained_files,
-                            retained_hashes,
-                        )
+                        self._keep_retained_orphan(lockfile, dep_key, dep, retained)
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the
                     # lockfile stays in sync with what apm.yml declares.
+
+    @staticmethod
+    def _keep_retained_orphan(
+        lockfile: LockFile, dep_key: str, dep: object, retained: dict[str, str | None]
+    ) -> None:
+        """Keep an orphan's undeleted files owned so the next install can retry."""
+        retained_files = [path for path in dep.deployed_files if path in retained]
+        retained_hashes = {
+            path: dep.deployed_file_hashes[path]
+            for path in retained_files
+            if path in dep.deployed_file_hashes
+        }
+        lockfile.dependencies[dep_key] = copy.deepcopy(dep)
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.replace_legacy_owner(
+            lockfile,
+            dep_key,
+            retained_files,
+            retained_hashes,
+        )
+
+    def _reconcile_partial_subtree(self, existing: LockFile) -> None:
+        """Retire the selected packages' dropped descendants from a partial merge (#3502).
+
+        Rescued descendants -- still reached through another retained
+        package -- keep their entry but take their current parent from the
+        complete graph so later subtree scans and ``apm deps tree`` agree.
+        """
+        retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
+        for dep_key in sorted(getattr(self.ctx, "partial_dropped_dep_keys", ())):
+            dep = existing.dependencies.pop(dep_key, None)
+            if dep is not None and (retained := retained_orphans.get(dep_key)):
+                self._keep_retained_orphan(existing, dep_key, dep, retained)
+        graph = getattr(self.ctx, "dependency_graph", None)
+        if graph is None:
+            return
+        from apm_cli.install.source_helpers import locked_parent_identity
+
+        for dep_key in sorted(getattr(self.ctx, "partial_rescued_dep_keys", ())):
+            dep = existing.dependencies.get(dep_key)
+            node = graph.dependency_tree.get_node(dep_key)
+            if dep is None or node is None or dep.replacement is not None:
+                continue
+            dep.resolved_by = locked_parent_identity(self.ctx, node)
+            dep.depth = node.depth
 
     def _maybe_merge_partial(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> LockFile:
         if self.ctx.only_packages:
@@ -530,6 +561,7 @@ class LockfileBuilder:
             if existing:
                 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
+                self._reconcile_partial_subtree(existing)
                 DeploymentLedgerCodec.merge_dependencies(
                     existing,
                     lockfile,

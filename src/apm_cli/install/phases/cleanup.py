@@ -78,6 +78,9 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
         package_cleanup_retained = {}
         ctx.package_cleanup_retained = package_cleanup_retained
     surviving_files: frozenset[str] = frozenset()
+    # Partial installs retire only the selected packages' dropped descendants
+    # (#3502); every other previous entry stays owned and untouched.
+    partial_dropped = frozenset(getattr(ctx, "partial_dropped_dep_keys", ())) if only_packages else frozenset()
     if existing_lockfile:
         from apm_cli.install.manifest_reconcile import surviving_deployed_paths
         from apm_cli.install.phases.targets import declared_target_profiles
@@ -88,7 +91,9 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             _targets or [],
             declared_target_profiles(ctx),
             desired_owners=frozenset(
-                existing_lockfile.dependencies if only_packages else intended_dep_keys
+                set(existing_lockfile.dependencies) - partial_dropped
+                if only_packages
+                else intended_dep_keys
             ),
             failed_owners=frozenset(
                 key
@@ -102,11 +107,13 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
     # Orphan cleanup: remove deployed files for packages that were
     # removed from the manifest. This happens on every full install
     # (no only_packages), making apm install idempotent with the manifest.
+    # A partial install treats only the selected packages' dropped
+    # descendants as orphans.
     # Routed through remove_stale_deployed_files() so the same safety
     # gates -- including per-file content-hash provenance -- apply
     # uniformly with the intra-package stale path below.
     # ------------------------------------------------------------------
-    if existing_lockfile and not only_packages:
+    if existing_lockfile and (not only_packages or partial_dropped):
         # Use intended_dep_keys (manifest intent, computed at ~line 1707) --
         # NOT package_deployed_files.keys() (integration outcome). A transient
         # integration failure for a still-declared package would leave its key
@@ -126,6 +133,8 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 continue
             if _orphan_key in intended_dep_keys:
                 continue  # still in manifest -- handled by stale-cleanup below
+            if only_packages and _orphan_key not in partial_dropped:
+                continue  # unrelated to the selected packages' subtree
             orphan_only_files = [
                 deployed_file
                 for deployed_file in _orphan_dep.deployed_files
@@ -166,6 +175,8 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             BaseIntegrator.cleanup_empty_parents(_orphan_deleted_targets, project_root)
         if logger:
             logger.orphan_cleanup(_orphan_total_deleted)
+        if partial_dropped:
+            _remove_dropped_package_dirs(ctx, partial_dropped, orphan_cleanup_retained)
 
     # ------------------------------------------------------------------
     # Stale-file cleanup: within each package still present in the
@@ -240,3 +251,62 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                     logger.cleanup_skipped_user_edit(_skipped, dep_key)
             if logger:
                 logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
+
+
+def _remove_dropped_package_dirs(
+    ctx: InstallContext,
+    dropped: frozenset[str],
+    retained_orphans: dict[str, dict[str, str | None]],
+) -> None:
+    """Remove dropped descendants' ``apm_modules`` copies that nothing retained shares.
+
+    Selection routes through the declaration-aware orphan owner so a path
+    still used by a declared, retained or newly selected package survives.
+    Entries whose deployed files could not all be removed keep their copy
+    alongside their retained lock entry for the next install.
+    """
+    from apm_cli.commands._helpers import _build_expected_install_paths, _find_orphaned_packages
+    from apm_cli.deps.lockfile import _SELF_KEY
+    from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
+
+    apm_modules_dir = ctx.apm_modules_dir
+    existing_lockfile = ctx.existing_lockfile
+    if apm_modules_dir is None or existing_lockfile is None or not apm_modules_dir.is_dir():
+        return
+    removable = [
+        dependency
+        for key, dependency in sorted(existing_lockfile.dependencies.items())
+        if key in dropped and key not in retained_orphans
+    ]
+    try:
+        retained_refs = [*ctx.all_apm_deps, *ctx.deps_to_install]
+        retained_refs.extend(
+            dependency.to_dependency_ref()
+            for key, dependency in existing_lockfile.dependencies.items()
+            if key != _SELF_KEY and key not in dropped
+        )
+        expected = _build_expected_install_paths(retained_refs, None, apm_modules_dir)
+        candidates = _build_expected_install_paths(
+            [dependency.to_dependency_ref() for dependency in removable], None, apm_modules_dir
+        )
+    except (ValueError, PathTraversalError):
+        # Without every retained install path, no removal can be proven safe.
+        return
+    deleted: list[Path] = []
+    for relative in _find_orphaned_packages(
+        (path for path in candidates if not Path(path).is_absolute()), expected
+    ):
+        package_dir = apm_modules_dir / relative
+        if not package_dir.is_dir():
+            continue
+        try:
+            safe_rmtree(package_dir, apm_modules_dir)
+        except (OSError, PathTraversalError) as exc:
+            ctx.diagnostics.warn(
+                f"Could not remove dropped dependency copy apm_modules/{relative}: {exc}",
+                detail="Run 'apm prune' to retry.",
+            )
+            continue
+        deleted.append(package_dir)
+    if deleted:
+        BaseIntegrator.cleanup_empty_parents(deleted, stop_at=apm_modules_dir)
