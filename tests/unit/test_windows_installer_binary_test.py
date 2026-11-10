@@ -130,6 +130,21 @@ def test_staged_binary_launch_error_keeps_exception_text(host: str, tmp_path: Pa
     assert "missing-apm.exe" in result["failure"]
 
 
+def test_staged_binary_test_scopes_native_stderr_error_action_guard() -> None:
+    """The Continue guard is what prevents 5.1 truncation; pwsh 7 cannot detect its loss."""
+    body = _extract_function("Invoke-StagedBinaryTest")
+
+    previous_guard = "$previousErrorActionPreference = $ErrorActionPreference"
+    continue_guard = '$ErrorActionPreference = "Continue"'
+    invocation = "$output = & $Path @Arguments 2>&1"
+    restore_guard = "$ErrorActionPreference = $previousErrorActionPreference"
+
+    assert body.count(continue_guard) == 1
+    assert body.index(previous_guard) < body.index(continue_guard)
+    assert body.index(continue_guard) < body.index(invocation)
+    assert body.index(invocation) < body.index("finally {") < body.index(restore_guard)
+
+
 def test_installer_reports_binary_test_failure_text() -> None:
     text = (ROOT / "install.ps1").read_text(encoding="utf-8")
 

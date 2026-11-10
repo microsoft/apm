@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
+- `install.ps1` now prints the full output of a failed staged-binary `--version` check, so Windows PowerShell 5.1 users see the whole Python traceback instead of only its first line. (#3533)
 
 ## [0.35.0] - 2026-10-22
 
