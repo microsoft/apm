@@ -245,6 +245,9 @@ still cleans up its managed files, subject to the usual user-edit protections.
   The ignored `.apm-local/` installation identity and
   `~/.apm/deployment-receipts/` are local state, not files to commit or share.
   The identity lives in the project root, or your home directory for `--global`.
+  On Linux and macOS, a receipt stays valid when a reboot or remount changes
+  only the root's device number; the inode, path, installation identity and
+  recorded creation time must still match, so a recreated root is rejected.
   Configured external skill roots use the same ownership and receipt checks.
   Switching targets that share a skill path refreshes valid same-writer evidence
   through a guarded copy, even when the source bytes are unchanged.
