@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The uncached Git fallback pins `core.autocrlf=false` on both its working-tree clone and the checkout that follows, so a host whose gitconfig sets `core.autocrlf=true` no longer materializes CRLF bytes and then fails `apm install` with "Your local changes would be overwritten by checkout" when the locked commit differs from the branch head. (#3368)
+- The uncached Git fallback pins `core.autocrlf=false` on both its working-tree clone and the checkout that follows, so a host whose gitconfig sets `core.autocrlf=true` no longer materializes CRLF bytes and then fails `apm install` with "Your local changes would be overwritten by checkout" when the locked commit differs from the branch head. -- by @abhishekacharya200 (#3409)
 
 ## [0.35.0] - 2026-10-22
 
