@@ -204,7 +204,8 @@ def test_link_creation_failure_raises_diagnostic_and_cleans_stage(
         cache.get_checkout(str(origin), sha, locked_sha=sha)
 
     assert str(origin.name) in str(raised.value)
-    shard_root = tmp_path / "cache" / "checkouts_v1"
+    shard_root = tmp_path / "cache" / "git" / "checkouts_v1"
+    assert shard_root.is_dir()
     leftovers = [p for p in shard_root.rglob("*") if ".incomplete." in p.name]
     assert leftovers == []
 

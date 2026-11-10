@@ -139,13 +139,13 @@ def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     Shards written before the ``core.symlinks`` pin may hold Windows
     link-text files instead of symlinks (#3457); cache hits rematerialize them.
     """
+    from ..utils.git_env import git_symlink_pin_entry
+
+    key, value = git_symlink_pin_entry()
     values = _checkout_core_values(checkout_dir) or {}
-    return _checkout_pins_autocrlf_false(checkout_dir) and values.get("symlinks") in {
-        "true",
-        "1",
-        "yes",
-        "on",
-    }
+    return _checkout_pins_autocrlf_false(checkout_dir) and (
+        values.get(key.split(".", 1)[1]) == value
+    )
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -682,6 +682,7 @@ class GitCache:
             git_network_env,
             git_no_templates_args,
             git_subprocess_env,
+            git_symlink_pin_entry,
             raise_for_symlink_capability,
         )
 
@@ -784,7 +785,7 @@ class GitCache:
                 # Checkout itself still needs the ``-c`` pins from
                 # ``_safe_git_args`` because env-frozen host config outranks
                 # these local values.
-                for key, value in (("core.autocrlf", "false"), ("core.symlinks", "true")):
+                for key, value in (("core.autocrlf", "false"), git_symlink_pin_entry()):
                     subprocess.run(
                         [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
                         capture_output=True,

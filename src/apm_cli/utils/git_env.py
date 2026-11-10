@@ -495,6 +495,11 @@ _SYMLINK_PIN_VALUE = "true"
 _SYMLINK_CREATE_FAILURE = "unable to create symlink"
 
 
+def git_symlink_pin_entry() -> tuple[str, str]:
+    """Return the canonical ``(key, value)`` that APM pins for package links."""
+    return _SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE
+
+
 def git_symlink_pin_args() -> tuple[str, str]:
     """Return the canonical per-command pin that materializes real symlinks.
 
@@ -504,7 +509,8 @@ def git_symlink_pin_args() -> tuple[str, str]:
     POSIX for the same commit (#3457). ``-c`` outranks every config file and
     ``GIT_CONFIG_KEY_n`` entry, so the pin holds regardless of caller config.
     """
-    return "-c", f"{_SYMLINK_PIN_KEY}={_SYMLINK_PIN_VALUE}"
+    key, value = git_symlink_pin_entry()
+    return "-c", f"{key}={value}"
 
 
 class GitSymlinkCapabilityError(RuntimeError):
@@ -1063,7 +1069,7 @@ def _materialize_git_config_snapshot(
     retained: list[tuple[str, str]] = []
     for entry in snapshot.entries:
         normalized = entry.key.lower()
-        if normalized == _SYMLINK_PIN_KEY:
+        if normalized == git_symlink_pin_entry()[0]:
             # Replaced by the pin below; Git init's capability result and
             # inherited values must not turn package links into link text.
             continue
@@ -1090,7 +1096,7 @@ def _materialize_git_config_snapshot(
                 continue
         retained.append((entry.key, entry.value))
 
-    retained.append((_SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE))
+    retained.append(git_symlink_pin_entry())
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:

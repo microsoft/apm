@@ -1237,9 +1237,10 @@ class GitHubPackageDownloader:
                     encoding="utf-8",
                     timeout=120,
                 )
+                # Git may report a link it could not create with exit 0 or 1.
+                raise_for_symlink_capability(checkout_result, str(dep_ref))
                 if checkout_result.returncode != 0:
                     return False
-                raise_for_symlink_capability(checkout_result, str(dep_ref))
                 return _repair(setup_env)
 
             # Resolve per-dependency auth via AuthResolver.
@@ -1304,15 +1305,17 @@ class GitHubPackageDownloader:
                     encoding="utf-8",
                     timeout=120,
                 )
+                raise_for_symlink_capability(result, str(dep_ref))
                 if result.returncode != 0:
                     _debug(
                         f"Sparse-checkout {step_name} failed: "
                         f"{redact_git_diagnostic(result.stderr.strip())}"
                     )
                     return False
-                raise_for_symlink_capability(result, str(dep_ref))
 
             return _repair(env)
+        except GitSymlinkCapabilityError:
+            raise
         except Exception as e:
             _debug(f"Sparse-checkout failed: {git_subprocess_error_text(e)}")
             return False
@@ -1947,6 +1950,9 @@ class GitHubPackageDownloader:
                     progress_reporter=progress_reporter,
                     dep_ref=dep_ref,
                     verbose_callback=verbose_callback,
+                    # Only the pinned commit is materialized, so a default-branch
+                    # link cannot fail a package that has none.
+                    no_checkout=True,
                 )
                 checkout_git_worktree(
                     target_path,
