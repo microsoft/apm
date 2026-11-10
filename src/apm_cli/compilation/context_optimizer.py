@@ -28,7 +28,9 @@ from ..utils.patterns import (
     literal_apply_to_top_level_roots,
     parse_apply_to,
 )
+from .constants import decode_utf8_prefix, has_generated_marker_header
 from .inventory import CompileInventory
+from .root_context_protection import catalog_root_context_markers
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -66,6 +68,22 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
         ".windsurf",
     }
 )
+
+
+def _is_generated_context_output(path: Path, markers: tuple[str, ...] | None) -> bool:
+    """Return whether ``path`` is a context file written by a prior ``apm compile``.
+
+    Only catalog context filenames are probed, and only through a bounded
+    header read. Symlinks and unreadable or non-UTF-8 files count as authored.
+    """
+    if markers is None or path.is_symlink():
+        return False
+    try:
+        with path.open("rb") as handle:
+            prefix = decode_utf8_prefix(handle.read(4096))
+    except (OSError, UnicodeDecodeError):
+        return False
+    return has_generated_marker_header(prefix, markers)
 
 
 @dataclass
@@ -513,13 +531,21 @@ class ContextOptimizer:
             if self._scan_top_level_roots is None
             else set(inventory.files_under(self._scan_top_level_roots))
         )
+        generated_markers_by_name = catalog_root_context_markers()
         for entry in inventory.directories:
             current_path = entry.path
             if not self._is_placement_path(current_path, entry.relative_path):
                 continue
 
+            # Prior compile outputs are not authored content; counting them
+            # feeds placement its own output and breaks idempotency (#3506).
             project_files = [
-                current_path / name for name in entry.file_names if not name.startswith(".")
+                current_path / name
+                for name in entry.file_names
+                if not name.startswith(".")
+                and not _is_generated_context_output(
+                    current_path / name, generated_markers_by_name.get(name)
+                )
             ]
             self._children_by_directory[current_path] = [
                 current_path / name
