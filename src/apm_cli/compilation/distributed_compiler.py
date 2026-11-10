@@ -121,6 +121,7 @@ class DistributedAgentsCompiler:
         source_dir: str | None = None,
         source_inventory: CompileInventory | None = None,
         deploy_inventory: CompileInventory | None = None,
+        managed_section_markers: tuple[str, str] | None = None,
     ):
         """Initialize the distributed AGENTS.md compiler.
 
@@ -137,6 +138,9 @@ class DistributedAgentsCompiler:
                 ``$PWD``.
             source_inventory: Shared source-tree filesystem snapshot.
             deploy_inventory: Shared deploy-tree snapshot for orphan cleanup.
+            managed_section_markers: Configured AGENTS.md managed-section
+                markers, passed to placement so mixed-ownership files stay
+                authored content.
         """
         self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
         self._exclude_patterns = exclude_patterns
@@ -152,6 +156,7 @@ class DistributedAgentsCompiler:
             str(self.source_dir),
             exclude_patterns=exclude_patterns,
             inventory=self._source_inventory,
+            managed_section_markers=managed_section_markers,
         )
         self.link_resolver = UnifiedLinkResolver(self.source_dir)
         self.output_formatter = CompilationFormatter()

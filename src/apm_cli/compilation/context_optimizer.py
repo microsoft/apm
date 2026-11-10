@@ -70,20 +70,41 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
 )
 
 
-def _is_generated_context_output(path: Path, markers: tuple[str, ...] | None) -> bool:
+def _has_text_outside_managed_section(content: str, start_marker: str, end_marker: str) -> bool:
+    """Return whether authored text surrounds a complete managed-section block."""
+    start = content.find(start_marker)
+    end = content.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+    if end < 0:
+        return False
+    return bool((content[:start] + content[end + len(end_marker) :]).strip())
+
+
+def _is_generated_context_output(
+    path: Path,
+    markers: tuple[str, ...] | None,
+    managed_section_markers: tuple[str, str] | None = None,
+) -> bool:
     """Return whether ``path`` is a context file written by a prior ``apm compile``.
 
-    Only catalog context filenames are probed, and only through a bounded
-    header read. Symlinks and unreadable or non-UTF-8 files count as authored.
+    Only regular files with catalog context filenames are probed. Symlinks,
+    special files, unreadable or non-UTF-8 files, and managed-section files
+    with authored text outside the managed block count as authored.
     """
-    if markers is None or path.is_symlink():
+    if markers is None:
         return False
     try:
+        if path.is_symlink() or not path.is_file():
+            return False
         with path.open("rb") as handle:
-            prefix = decode_utf8_prefix(handle.read(4096))
+            raw = handle.read() if managed_section_markers else handle.read(4096)
+        content = decode_utf8_prefix(raw)
     except (OSError, UnicodeDecodeError):
         return False
-    return has_generated_marker_header(prefix, markers)
+    if managed_section_markers is not None and _has_text_outside_managed_section(
+        content, *managed_section_markers
+    ):
+        return False
+    return has_generated_marker_header(content, markers)
 
 
 @dataclass
@@ -160,12 +181,15 @@ class ContextOptimizer:
         base_dir: str = ".",
         exclude_patterns: builtins.list[str] | None = None,
         inventory: CompileInventory | None = None,
+        managed_section_markers: tuple[str, str] | None = None,
     ):
         """Initialize the context optimizer.
 
         Args:
             base_dir (str): Base directory for optimization analysis.
             exclude_patterns (Optional[List[str]]): Glob patterns for directories to exclude.
+            managed_section_markers: Configured AGENTS.md managed-section
+                start/end markers, when managed-section mode is active.
         """
         try:
             self.base_dir = Path(base_dir).resolve()
@@ -201,6 +225,7 @@ class ContextOptimizer:
         # Configurable exclusion patterns (validated at init time)
         self._exclude_patterns = validate_exclude_patterns(exclude_patterns)
         self._inventory = inventory
+        self._managed_section_markers = managed_section_markers
 
     def enable_timing(self, verbose: bool = False):
         """Enable performance timing instrumentation."""
@@ -544,7 +569,9 @@ class ContextOptimizer:
                 for name in entry.file_names
                 if not name.startswith(".")
                 and not _is_generated_context_output(
-                    current_path / name, generated_markers_by_name.get(name)
+                    current_path / name,
+                    generated_markers_by_name.get(name),
+                    self._managed_section_markers,
                 )
             ]
             self._children_by_directory[current_path] = [

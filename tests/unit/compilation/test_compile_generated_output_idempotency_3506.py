@@ -7,6 +7,9 @@ must not feed back into ``applyTo`` match counting on the next compile.
 
 from __future__ import annotations
 
+import os
+import re
+import threading
 from pathlib import Path
 
 import pytest
@@ -49,6 +52,12 @@ def _write_issue_fixture(root: Path) -> Path:
 
 def _analyzed_files(optimizer: ContextOptimizer, root: Path) -> set[str]:
     return {path.relative_to(root).as_posix() for path in optimizer._get_all_files()}
+
+
+def _analyzed_count(output: str) -> int:
+    match = re.search(r"(\d+) files analyzed", output)
+    assert match, output
+    return int(match.group(1))
 
 
 def test_repeated_compile_keeps_subtree_placement_without_orphan_warning(
@@ -145,4 +154,84 @@ def test_authored_files_are_still_counted(tmp_path: Path) -> None:
         "docs/guides/CLAUDE.md",
         "docs/guides/notes.md",
         "docs/guides/GEMINI.md",
+    }
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires POSIX named pipes")
+def test_named_pipe_context_filename_does_not_block_analysis(tmp_path: Path) -> None:
+    """A FIFO named like a context file is never opened by the generated probe."""
+    guides = tmp_path / "docs" / "guides"
+    guides.mkdir(parents=True)
+    (guides / "page.md").write_text("# Page\n", encoding="utf-8")
+    os.mkfifo(guides / "AGENTS.md")
+    result: dict[str, set[str]] = {}
+
+    def analyze() -> None:
+        result["files"] = _analyzed_files(ContextOptimizer(base_dir=str(tmp_path)), tmp_path)
+
+    worker = threading.Thread(target=analyze, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+
+    assert not worker.is_alive(), "placement analysis blocked opening a named pipe"
+    assert result["files"] == {"docs/guides/page.md", "docs/guides/AGENTS.md"}
+
+
+@pytest.mark.parametrize("prefix_lines", [1, 12], ids=["short-prefix", "long-prefix"])
+def test_managed_section_agents_md_with_authored_prefix_stays_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix_lines: int
+) -> None:
+    """Mixed-ownership AGENTS.md keeps counting as authored across compiles."""
+    monkeypatch.chdir(tmp_path)
+    instructions_dir = tmp_path / ".apm" / "instructions"
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "0100-guides.instructions.md").write_text(_INSTRUCTION, encoding="utf-8")
+    guides = tmp_path / "docs" / "guides"
+    guides.mkdir(parents=True)
+    (guides / "page.md").write_text("# Page\n", encoding="utf-8")
+    (tmp_path / "apm.yml").write_text(
+        "name: repro-package\nversion: 0.1.0\n"
+        "compilation:\n  agents_md:\n    mode: managed_section\n",
+        encoding="utf-8",
+    )
+    authored_prefix = "".join(f"Team note {i}.\n" for i in range(prefix_lines))
+    mixed = tmp_path / "docs" / "guides" / "AGENTS.md"
+    mixed.write_text(f"{authored_prefix}<!-- apm:start -->\n<!-- apm:end -->\n", encoding="utf-8")
+    runner = CliRunner()
+
+    counts = []
+    for run in range(1, 4):
+        result = runner.invoke(cli, ["compile"])
+        assert result.exit_code == 0, f"run {run}: {result.output}"
+        assert "rphaned" not in result.output, f"run {run}: {result.output}"
+        counts.append(_analyzed_count(result.output))
+        content = mixed.read_text(encoding="utf-8")
+        assert content.startswith(authored_prefix), f"run {run}"
+        assert "Keep guides focused." in content, f"run {run}: placement moved"
+
+    assert counts == [counts[0]] * 3, counts
+
+
+def test_managed_section_wrapper_without_authored_text_is_generated(tmp_path: Path) -> None:
+    """An APM-created managed wrapper is output; authored text around it is content."""
+    markers = ("<!-- apm:start -->", "<!-- apm:end -->")
+    generated_block = f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n\nGuidance.\n"
+    wrapper_dir = tmp_path / "docs" / "wrapper"
+    mixed_dir = tmp_path / "docs" / "mixed"
+    for directory in (wrapper_dir, mixed_dir):
+        directory.mkdir(parents=True)
+        (directory / "page.md").write_text("# Page\n", encoding="utf-8")
+    (wrapper_dir / "AGENTS.md").write_text(
+        f"{markers[0]}\n{generated_block}{markers[1]}\n", encoding="utf-8"
+    )
+    (mixed_dir / "AGENTS.md").write_text(
+        f"{markers[0]}\n{generated_block}{markers[1]}\nTeam footer.\n", encoding="utf-8"
+    )
+
+    optimizer = ContextOptimizer(base_dir=str(tmp_path), managed_section_markers=markers)
+
+    assert _analyzed_files(optimizer, tmp_path) == {
+        "docs/wrapper/page.md",
+        "docs/mixed/page.md",
+        "docs/mixed/AGENTS.md",
     }
