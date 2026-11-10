@@ -80,7 +80,9 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
     surviving_files: frozenset[str] = frozenset()
     # Partial installs retire only the selected packages' dropped descendants
     # (#3502); every other previous entry stays owned and untouched.
-    partial_dropped = frozenset(getattr(ctx, "partial_dropped_dep_keys", ())) if only_packages else frozenset()
+    partial_dropped = (
+        frozenset(getattr(ctx, "partial_dropped_dep_keys", ())) if only_packages else frozenset()
+    )
     if existing_lockfile:
         from apm_cli.install.manifest_reconcile import surviving_deployed_paths
         from apm_cli.install.phases.targets import declared_target_profiles
