@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
 if TYPE_CHECKING:
@@ -53,6 +54,42 @@ def selected_skill_sources(package_info: PackageInfo) -> SkillSourceSelection:
     ):
         return SkillSourceSelection("bundle", None, children)
     return SkillSourceSelection("subskills", None, local_children())
+
+
+def preflight_skill_selection(
+    integrator: SkillIntegrator,
+    package_info: PackageInfo,
+    *,
+    skill_subset: tuple[str, ...] | None,
+    source_plan: DeployableSourcePlan | None,
+    diagnostics: DiagnosticCollector | None = None,
+    logger=None,
+) -> bool:
+    """Report an unmatched skill selection before any primitive of the package writes.
+
+    Uses the same route and availability that skill deployment consumes, so a
+    selection refused here is exactly one deployment would also refuse (#3373).
+    """
+    selection = integrator.selected_skill_sources(package_info)
+    if selection.route not in ("bundle", "subskills"):
+        return True
+    name_filter = (
+        source_plan.selected_skill_names
+        if source_plan is not None
+        else skill_subset_filter_tokens(skill_subset)
+    )
+    available = frozenset(selection.children)
+    if not integrator._skill_filter_misses_available(name_filter, available):
+        return True
+    dependency = package_info.dependency_ref
+    integrator._error_no_skill_filter_match(
+        available,
+        tuple(skill_subset or ()),
+        dependency.get_unique_key() if dependency is not None else package_info.install_path.name,
+        diagnostics=diagnostics,
+        logger=logger,
+    )
+    return False
 
 
 @dataclass(frozen=True)
