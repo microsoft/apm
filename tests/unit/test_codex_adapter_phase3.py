@@ -931,12 +931,26 @@ class TestForwardedStdioEnv:
         assert "env_vars" not in cfg
         assert "TOKEN" in cfg["env"]
 
-    def test_extra_cannot_request_launch_environment_variables(self, tmp_path: Path) -> None:
+    def test_extra_cannot_replace_forwarded_names(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
-        server = _raw_stdio_server(LITERAL="value")
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}")
         server["_extra"] = {"env_vars": ["PRIVATE_TOKEN"]}
         cfg = adapter._format_server_config(server)
-        assert "env_vars" not in cfg
+        assert cfg["env_vars"] == ["FIGMA_API_KEY"]
+
+    def test_cwd_and_static_values_stay_intact(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}", LOG_LEVEL="debug")
+        server["_raw_stdio"]["cwd"] = "tools"
+        with patch.dict(os.environ, {"FIGMA_API_KEY": "example-token"}):
+            cfg = adapter._format_server_config(server)
+        assert cfg == {
+            "command": "npx",
+            "args": ["-y", "figma-developer-mcp", "--stdio"],
+            "env": {"LOG_LEVEL": "debug"},
+            "cwd": "tools",
+            "env_vars": ["FIGMA_API_KEY"],
+        }
 
     def test_literal_value_keeps_env_block(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
@@ -1047,3 +1061,46 @@ class TestForwardedStdioEnvScope:
         with patch("apm_cli.adapters.client.codex._rich_warning") as warning:
             adapter._format_server_config(_raw_stdio_server(TOKEN="${TOKEN}", B="${env:B}"))
         warning.assert_not_called()
+
+
+class TestUserScopeStdioOutputUnchanged:
+    """User-scope Codex config keeps the exact pre-#3393 output and passthrough."""
+
+    def test_user_scope_written_config_matches_previous_output(self, tmp_path: Path) -> None:
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        server = _raw_stdio_server(FIGMA_API_KEY="${FIGMA_API_KEY}")
+        server["_raw_stdio"]["cwd"] = "/srv/tools"
+        with patch.dict(
+            os.environ, {"FIGMA_API_KEY": "example-token", "CODEX_HOME": str(codex_home)}
+        ):
+            adapter = _make_adapter(user_scope=True)
+            cfg = adapter._format_server_config(server)
+            assert adapter.update_config({"figma": cfg}) is True
+        assert (codex_home / "config.toml").read_text(encoding="utf-8") == (
+            "[mcp_servers.figma]\n"
+            'command = "npx"\n'
+            'args = ["-y", "figma-developer-mcp", "--stdio"]\n'
+            'cwd = "/srv/tools"\n'
+            "\n"
+            "[mcp_servers.figma.env]\n"
+            'FIGMA_API_KEY = "example-token"\n'
+        )
+
+    def test_user_scope_extra_env_vars_passthrough_is_unchanged(self, tmp_path: Path) -> None:
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        dependency = MCPDependency.from_dict(
+            {
+                "name": "figma",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx",
+                "env": {"LOG_LEVEL": "debug"},
+                "extra": {"env_vars": ["PRIVATE_TOKEN"]},
+            }
+        )
+        adapter = _make_adapter(user_scope=True)
+        cfg = adapter._format_server_config(MCPIntegrator._build_self_defined_info(dependency))
+        assert cfg["env_vars"] == ["PRIVATE_TOKEN"]

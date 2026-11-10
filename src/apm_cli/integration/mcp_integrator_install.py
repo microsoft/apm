@@ -432,6 +432,11 @@ def _install_registry_group(  # noqa: PLR0913
     return configured_count
 
 
+def _ascii_names(names: list[str]) -> str:
+    """Join manifest-authored names for console output, escaping non-ASCII."""
+    return ", ".join(ascii(name)[1:-1] for name in names)
+
+
 def _codex_expanded_env_names(client: Any, name: str, requested_info: dict) -> list[str]:
     """Env names a Codex project entry stores as values but the declaration now forwards."""
     if getattr(client, "target_name", "") != "codex" or client.user_scope:
@@ -462,7 +467,7 @@ def _report_native_conflict(
         "retry the same install command. --force does not take ownership "
         "of user connections."
         + (
-            f" The connection stores values for {', '.join(expanded_env)} that the "
+            f" The connection stores values for {_ascii_names(expanded_env)} that the "
             "declaration now forwards through env_vars. Reconcile them by hand, then "
             "retry. If that file was ever shared or committed, rotate the credential "
             "because Git history still holds it."
@@ -1217,7 +1222,7 @@ def _install_self_defined_deps(
                     continue
                 if forwarded and state is NativeMcpConnectionState.UPDATE_MANAGED:
                     logger.warning(
-                        f"APM replaced a previously written value for {', '.join(forwarded)} "
+                        f"APM replaced a previously written value for {_ascii_names(forwarded)} "
                         f"in {client.get_config_path()} with env_vars. If that file was ever "
                         "shared or committed, rotate the credential because Git history "
                         "still holds it."

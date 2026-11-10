@@ -49,6 +49,11 @@ _CODEX_BEARER_VALUE_RE = re.compile(rf"(?i:Bearer) +{_ENV_VAR_RE.pattern}")
 _CODEX_UNSUPPORTED_REFERENCE_RE = re.compile(r"\$\{(?!input:)")
 
 
+def _ascii_names(names: list[str]) -> str:
+    """Join manifest-authored names for console output, escaping non-ASCII."""
+    return ", ".join(ascii(name)[1:-1] for name in names)
+
+
 class CodexClientAdapter(MCPClientAdapter):
     """Codex CLI implementation of MCP client adapter.
 
@@ -220,14 +225,18 @@ class CodexClientAdapter(MCPClientAdapter):
             comparable.pop("id")
         return comparable == expected
 
-    def matches_legacy_managed_server_config(self, native: object, expected: dict) -> bool:
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
+    ) -> bool:
         """Recognize a stdio entry written before ``${VAR}`` values moved to ``env_vars``.
 
-        The older formatter stored either the resolved value or the literal
+        When the lockfile recorded a fingerprint of the earlier write, it is the
+        proof: a mismatch means the entry changed after APM wrote it. Without
+        one, the older formatter stored either the resolved value or the literal
         reference, so anything else is a manual edit and stays a conflict.
         """
         names = expected.get("env_vars")
-        if self.user_scope:
+        if self.user_scope or recorded_write is False:
             return False
         native_env = native.get("env") if isinstance(native, dict) else None
         if not names or not isinstance(native_env, dict) or "env_vars" in native:
@@ -235,8 +244,12 @@ class CodexClientAdapter(MCPClientAdapter):
         legacy_env = dict(expected.get("env") or {})
         for name in names:
             value = native_env.get(name)
-            if value is None or value not in (f"${{{name}}}", os.getenv(name)):
+            if not isinstance(value, str):
                 return False
+            if recorded_write is None:
+                if value not in (f"${{{name}}}", os.getenv(name)):
+                    return False
+                _log.debug("Codex entry for %s verified without a recorded fingerprint", name)
             legacy_env[name] = value
         legacy = {key: value for key, value in expected.items() if key != "env_vars"}
         legacy["env"] = legacy_env
@@ -444,15 +457,17 @@ class CodexClientAdapter(MCPClientAdapter):
                     )
                 return self.normalize_project_arg(arg)
 
-            # Smoke scalars and arrays before the [env] sub-table: tomlkit nests
-            # any later key inside the table it has already opened.
-            stdio_config: dict = {"command": raw["command"]}
+            # Keep the key order the user-scope output has always had; tomlkit
+            # still renders scalars and arrays before the [env] sub-table.
+            stdio_config: dict = {
+                "command": raw["command"],
+                "args": [_process_stdio_arg(arg) for arg in raw.get("args") or []],
+                "env": written_env,
+            }
             if raw.get("cwd") is not None:
                 stdio_config["cwd"] = raw["cwd"]
-            stdio_config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
             if forwarded_env:
                 stdio_config["env_vars"] = forwarded_env
-            stdio_config["env"] = written_env
             self._merge_extra(stdio_config, server_info)
             return stdio_config
 
@@ -737,7 +752,8 @@ class CodexClientAdapter(MCPClientAdapter):
         if not keys:
             return
         _rich_warning(
-            f"Codex cannot forward env {', '.join(keys)} for server '{server_name}' by "
+            f"Codex cannot forward env {_ascii_names(keys)} for server "
+            f"'{_ascii_names([server_name])}' by "
             "reference, so APM resolved them at install time and wrote the values to "
             ".codex/config.toml. Declare each as KEY: ${KEY} to forward it instead.",
             symbol="warning",

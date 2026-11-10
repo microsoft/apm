@@ -10,6 +10,8 @@ import pytest
 import toml
 import yaml
 
+from apm_cli.install.mcp.ownership import mcp_native_hash
+
 pytestmark = pytest.mark.xdist_group(name="home_env")
 
 SET_SECRET = "codex-e2e-set-secret=canary"
@@ -222,12 +224,18 @@ def _legacy_shaped_project(tmp_path: Path, binary: str) -> Path:
     """Install once with the branch binary for lock state, then rewrite the config.
 
     The older formatter produced the same lock record (the declaration, with the
-    reference kept verbatim) and only differed in the native config it wrote.
+    reference kept verbatim) and fingerprinted the native entry it wrote, so the
+    lock is updated to that fingerprint as v0.35.0 recorded it.
     """
     project = _project(tmp_path, _migration_declaration())
     env = _secret_values_set(tmp_path)
     assert _install(binary, project, env).returncode == 0
+    current = mcp_native_hash(_server(project))
     _hand_write_legacy_install(project, SET_SECRET)
+    lock = project / "apm.lock.yaml"
+    lock_text = lock.read_text(encoding="utf-8")
+    assert current in lock_text
+    lock.write_text(lock_text.replace(current, mcp_native_hash(_server(project))), encoding="utf-8")
     return project
 
 

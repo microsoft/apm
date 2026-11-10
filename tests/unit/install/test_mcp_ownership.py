@@ -15,6 +15,7 @@ from apm_cli.install.mcp.ownership import (
     NativeMcpConnectionState,
     adopt_legacy_mcp_target_servers,
     compare_native_mcp_connection,
+    mcp_native_hash,
     migrate_legacy_project_target_servers,
     require_removable_mcp_connections,
 )
@@ -440,13 +441,21 @@ _FORWARDED_STDIO = {
 }
 
 
-def _compare_codex(tmp_path: Path, written_value: str) -> NativeMcpConnectionState:
-    """Compare a Codex entry the older formatter wrote with its current rendering."""
+def _compare_codex(
+    tmp_path: Path, written_value: str, recorded_value: str | None = None
+) -> NativeMcpConnectionState:
+    """Compare a Codex entry the older formatter wrote with its current rendering.
+
+    ``recorded_value`` simulates the lockfile fingerprint of the earlier write.
+    """
     client = CodexClientAdapter(project_root=tmp_path)
     requested = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_FORWARDED_STDIO))
     native = deepcopy(client.render_server_config(requested))
     native.pop("env_vars")
     native["env"] = {"MY_TOKEN": written_value}
+    native_hash = None
+    if recorded_value is not None:
+        native_hash = mcp_native_hash({**native, "env": {"MY_TOKEN": recorded_value}})
     return compare_native_mcp_connection(
         client,
         "managed",
@@ -454,7 +463,24 @@ def _compare_codex(tmp_path: Path, written_value: str) -> NativeMcpConnectionSta
         stored_config=_FORWARDED_STDIO,
         managed=True,
         existing_configs={"managed": native},
+        native_hash=native_hash,
     )
+
+
+def test_codex_entry_with_recorded_write_upgrades_after_variable_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "rotated-value")
+    state = _compare_codex(tmp_path, "previous-value", recorded_value="previous-value")
+    assert state is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+def test_codex_entry_edited_after_recorded_write_stays_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "resolved-value")
+    state = _compare_codex(tmp_path, "resolved-value", recorded_value="previous-value")
+    assert state is NativeMcpConnectionState.CONFLICT
 
 
 @pytest.mark.parametrize("written_value", ["${MY_TOKEN}", "resolved-value"])

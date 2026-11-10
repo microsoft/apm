@@ -79,9 +79,16 @@ def compare_native_mcp_connection(
                     comparison = client.project_managed_server_config(
                         native, baseline=expected, requested=requested
                     )
-                matches_baseline = client.matches_managed_server_config(
-                    comparison, expected
-                ) or client.matches_legacy_managed_server_config(native, expected)
+                matches_baseline = client.matches_managed_server_config(comparison, expected)
+                if not matches_baseline:
+                    recorded_write = (
+                        None
+                        if native_hash is None or not isinstance(native, dict)
+                        else mcp_native_hash(client.managed_server_config(native)) == native_hash
+                    )
+                    matches_baseline = client.matches_legacy_managed_server_config(
+                        native, expected, recorded_write=recorded_write
+                    )
                 if matches_baseline and managed_fields is not None:
                     managed_fields.update(expected)
             elif native_hash is not None and isinstance(native, dict):
