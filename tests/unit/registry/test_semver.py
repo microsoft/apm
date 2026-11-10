@@ -7,9 +7,6 @@ used by the resolver to pick the best published version.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from apm_cli.deps.registry.semver import (
@@ -194,35 +191,3 @@ class TestPickBestPrereleasePolicy:
             pick_best("^1.2.3", ["1.2.3", "1.3.0-beta.1"], include_prerelease=True)
             == "1.3.0-beta.1"
         )
-
-
-_SEMVER_DIALECT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "spec-conformance"
-    / "resolution"
-    / "semver-dialect.json"
-)
-
-
-def _dialect_cases_without_optin() -> list[dict]:
-    cases = json.loads(_SEMVER_DIALECT.read_text(encoding="utf-8"))["cases"]
-    return [
-        case for case in cases if not case["prerelease_optin"] and is_semver_range(case["range"])
-    ]
-
-
-class TestPickBestSemverDialectOracle:
-    """The registry picker agrees with the spec conformance oracle."""
-
-    @pytest.mark.parametrize("case", _dialect_cases_without_optin(), ids=lambda case: case["id"])
-    def test_matches_oracle(self, case):
-        assert pick_best(case["range"], case["tags"]) == case["expected"]
-
-    def test_oracle_prerelease_cases_are_exercised(self):
-        ids = {case["id"] for case in _dialect_cases_without_optin()}
-        assert {
-            "prerelease-excluded-default",
-            "prerelease-in-range-allows-same-tuple",
-            "build-metadata-tiebreak-ascii-highest",
-        } <= ids

@@ -195,6 +195,23 @@ class TestHappyPath:
         # Confirm download_archive was asked for the highest matching version.
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
 
+    def test_stable_range_skips_published_prerelease(self, tmp_path):
+        raw, digest = _make_apm_tarball(version="1.5.3")
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version=version, digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            )
+            for version in ("1.5.3", "1.6.0-rc.1")
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x/download"
+
+        resolver = _make_resolver(fake)
+        resolver.download_package(_make_dep("^1.0.0"), tmp_path / "p")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
+
     def test_build_metadata_selector_matches_exact_build(self, tmp_path):
         # Two published builds share the same major.minor.patch and differ only
         # by build metadata (e.g. a branch-build git hash). Range matching

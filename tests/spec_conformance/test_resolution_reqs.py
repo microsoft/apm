@@ -304,6 +304,33 @@ def test_resolver_honours_prerelease_inclusion_rules():
     assert pr, "oracle MUST exercise pre-release / build-metadata cases"
 
 
+@pytest.mark.req("req-rs-007")
+@pytest.mark.req("req-rs-014")
+@pytest.mark.parametrize(
+    "case_id",
+    [
+        "caret-1_x",
+        "caret-0_2",
+        "caret-0_0",
+        "tilde-1_2",
+        "gte-range",
+        "prerelease-excluded-default",
+        "prerelease-in-range-allows-same-tuple",
+        "build-metadata-ignored",
+        "build-metadata-tiebreak-ascii-highest",
+        "empty-set",
+    ],
+)
+def test_registry_picker_matches_semver_dialect_oracle(case_id):
+    """Registry version selection agrees with the oracle when no opt-in is declared."""
+    from apm_cli.deps.registry.semver import pick_best
+
+    oracle = load_json_fixture("resolution", "semver-dialect.json")
+    case = next(c for c in oracle["cases"] if c["id"] == case_id)
+    assert case["prerelease_optin"] is False
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
+
+
 @pytest.mark.req("req-rs-015")
 def test_resolver_replays_locked_commit_without_network():
     """A non-update install MUST replay a recorded `resolved_commit`

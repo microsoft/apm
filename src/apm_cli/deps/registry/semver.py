@@ -94,5 +94,6 @@ def pick_best(spec: str, versions: list[str], *, include_prerelease: bool = Fals
             candidates.append((v, raw))
     if not candidates:
         return None
+    # (SemVer, raw): equal precedence falls back to the raw string (req-rs-014).
     candidates.sort()
     return candidates[-1][1]
