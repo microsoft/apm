@@ -1,6 +1,6 @@
 """Cold-restore adoption of unchanged deployed skill trees (#3391).
 
-Without a trustworthy local deployment receipt, an existing skill directory is
+Without any local deployment receipt for it, an existing skill directory is
 adopted only when its whole file tree equals what this install would write:
 every admitted source member after final link rendering, with no extra or
 missing files. The verified on-disk hash then stands in for the missing

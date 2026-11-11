@@ -512,7 +512,7 @@ class SkillIntegrator(BaseIntegrator):
             )
             if session is not None
             and not force
-            and session.baseline(destination / "SKILL.md", targets) is None
+            and not session.has_receipt(destination / "SKILL.md")
             else {}
         )
         unchanged = unchanged and not adopted
