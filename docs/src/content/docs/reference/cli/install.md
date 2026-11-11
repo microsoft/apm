@@ -165,6 +165,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   dependency, source file, local path, and affected targets. Rename the local
   skill, or edit an existing `skills:`/`targets:` selection to exclude the
   conflict. A skill allow-list does not automatically include future skills.
+  A pre-existing skill directory that holds no files or symlinks at any depth
+  is not a conflict: install deploys into it and records the deployment.
   Matching names or shared directories alone are not conflicts; identical
   files and exact managed paths retain their existing handling. Preparation
   may populate caches; refusal does not delete an older partial installation
