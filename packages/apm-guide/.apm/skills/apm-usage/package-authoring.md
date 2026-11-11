@@ -517,6 +517,15 @@ When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
 
+For the `copilot` target, prompts deploy to `.github/prompts/<name>.prompt.md`.
+In VS Code, only Local harness sessions load prompt files; the Copilot harness
+and Copilot CLI do not
+(https://code.visualstudio.com/docs/agent-customization/prompt-files). For
+those harnesses, ship the workflow as a skill (`.apm/skills/<name>/SKILL.md`)
+and add `disable-model-invocation: true` to its frontmatter where the host
+supports it. APM copies skill frontmatter as-is and does not convert prompts
+to skills.
+
 #### Optional workflow frontmatter (GitHub Copilot App, experimental)
 
 When the `copilot_app` experimental flag is enabled and the package is
