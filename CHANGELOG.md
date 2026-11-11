@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Switch APM-owned software, agent primitives, code examples and OpenAPM to Apache-2.0, with general documentation under CC-BY-4.0; distribute both licenses and their scope, preserve historical MIT and third-party notices, and correct filelock attribution and NOTICE coverage wording. Redistributors should review the applicable terms and retain notices when updating; previous MIT releases are unchanged. (#3487)
+- Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer. Release builds bundle uv-managed Python and fail when any bundled ELF file needs a newer glibc symbol; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
 
 ### Added
 

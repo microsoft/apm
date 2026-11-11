@@ -51,7 +51,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # PyInstaller bundles the build interpreter's libpython. The setup-python
+      # build for ubuntu-24.04 needs glibc 2.38, so Linux uses uv-managed
+      # python-build-standalone (glibc 2.17) to keep RHEL/Rocky/Alma 8 working.
+      # APM_MAX_GLIBC turns on the ELF check in build-binary.sh.
+      - name: Use uv-managed Python (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
+          echo "UV_PYTHON=${PYTHON_VERSION}" >> "$GITHUB_ENV"
+          echo "APM_MAX_GLIBC=2.28" >> "$GITHUB_ENV"
+
       - name: Set up Python
+        if: matrix.platform != 'linux'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -124,6 +136,25 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      # apm imports GitPython at startup and exits when git is missing,
+      # so the container installs git-core before running the binary.
+      - name: Smoke-test binary on Rocky Linux 8 (glibc 2.28)
+        if: matrix.platform == 'linux'
+        env:
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+        run: |
+          docker run --rm -e GITHUB_APM_PAT \
+            -v "$PWD/dist/${{ matrix.binary_name }}:/opt/apm:ro" \
+            rockylinux:8 bash -euo pipefail -c '
+              dnf -y -q install git-core
+              rpm -q glibc
+              /opt/apm/apm --version
+              mkdir /tmp/smoke && cd /tmp/smoke
+              /opt/apm/apm init -y
+              /opt/apm/apm install microsoft/apm-sample-package --target claude
+              test -f apm_modules/microsoft/apm-sample-package/apm.yml
+            '
 
       - name: Build binary (Windows)
         if: matrix.platform == 'windows'
