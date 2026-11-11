@@ -973,6 +973,9 @@ Schema rules:
   optional inside the block (inherited from apm.yml top level).
 - Each remote plugin needs either `version` or `ref`.
 - `ref` takes precedence over `version`.
+- A `ref` may be a tag, a branch, or a full 40-character lowercase commit
+  SHA. `apm marketplace check` confirms a SHA by fetching that commit from
+  the remote; abbreviated SHAs fail.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),
