@@ -285,11 +285,13 @@ class BaseIntegrator:
         unchanged: bool = False,
         force: bool = False,
         diagnostics=None,
+        package: str = "",
     ) -> list[Path]:
         """Copy admitted members through the shared skill containment boundary.
 
         Skill copies route here for symlink and destination-containment checks,
-        without deleting or inventorying destination siblings.
+        without deleting or inventorying destination siblings. *package* is the
+        owning dependency key used to attribute refusal diagnostics.
         """
         from apm_cli.utils.content_hash import compute_file_hash
 
@@ -365,7 +367,7 @@ class BaseIntegrator:
                         )
                     if diagnostics is not None:
                         if expected is None:
-                            diagnostics.error(message)
+                            diagnostics.error(message, package=package)
                         else:
                             diagnostics.warn(message)
                     else:

@@ -515,12 +515,11 @@ class SkillIntegrator(BaseIntegrator):
             on_member_skipped=self._skill_member_skipped,
             unchanged=unchanged,
             write_allowed=lambda path: (
-                self._replay_owners is None
-                or self._replay_owners.get(path, self._skill_current_owner)
-                == self._skill_current_owner
+                self._replay_owners is None or self._replay_owners.get(path, owner) == owner
             ),
             force=force or managed_files is None,
             diagnostics=diagnostics,
+            package=owner or "",
         )
         if not unchanged:
             if self.link_resolver is None:

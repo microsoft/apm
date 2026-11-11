@@ -156,9 +156,10 @@ def test_missing_receipt_errors_reach_install_from_every_skill_target(
     for _ in range(2):
         result = runner.run(install, cwd=project, env=env)
         assert result.returncode != 0, result.stdout + result.stderr
-        assert "no trustworthy local deployment baseline" in " ".join(
-            (result.stdout + result.stderr).split()
-        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert "no trustworthy local deployment baseline" in output
+        assert "[x] 1 package failed:" in output, output
+        assert f"/{package.name} -- Skipped" in output, output
         difference = before.diff(ArtifactSnapshot.capture(secondary))
         assert difference.removed == frozenset()
         assert difference.changed == frozenset()
