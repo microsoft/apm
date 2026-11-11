@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Install apt packages on GitHub-hosted Ubuntu runners.
 #
-# Runner images route apt through azure.archive.ubuntu.com via
-# /etc/apt/apt-mirrors.txt. When that mirror does not resolve, apt's mirror
-# fallback still fails after minutes of retries and the step dies
-# (actions/runner-images#14594, #15040). Probe the mirror first and, when it
-# does not resolve or the install fails, point apt straight at the public
-# Ubuntu archive and retry once.
+# Runner images route apt through azure.archive.ubuntu.com, falling back to
+# other *.ubuntu.com hosts. When ubuntu.com DNS is down (for example the
+# Canonical outage of 2026-11-11) every one of those hosts fails to resolve
+# and the install dies after minutes of retries. On amd64, retry once against
+# a mirror outside the ubuntu.com zone. apt still verifies the archive with
+# the Ubuntu keyring (Signed-By in ubuntu.sources), so the mirror is only a
+# transport.
 #
 # Usage: scripts/ci-apt-install.sh <package>...
 set -euo pipefail
@@ -17,34 +18,35 @@ if [ "$#" -eq 0 ]; then
 fi
 
 SOURCES=/etc/apt/sources.list.d/ubuntu.sources
-MIRRORS=/etc/apt/apt-mirrors.txt
+FALLBACK_MIRROR=http://mirrors.edge.kernel.org/ubuntu/
 APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-
-use_public_archive() {
-  local archive
-  case "$(dpkg --print-architecture)" in
-    amd64 | i386) archive=http://archive.ubuntu.com/ubuntu/ ;;
-    *) archive=http://ports.ubuntu.com/ubuntu-ports/ ;;
-  esac
-  if grep -qs "mirror+file:${MIRRORS}" "$SOURCES"; then
-    echo "[!] Pointing apt at ${archive} instead of the runner mirror list"
-    sudo sed -i "s#mirror+file:${MIRRORS}#${archive}#" "$SOURCES"
-  fi
-}
 
 apt_install() {
   sudo apt-get "${APT_OPTS[@]}" update && sudo apt-get "${APT_OPTS[@]}" install -y "$@"
 }
 
-if grep -qs "azure.archive.ubuntu.com" "$MIRRORS" \
-  && ! getent hosts azure.archive.ubuntu.com > /dev/null; then
-  echo "[!] azure.archive.ubuntu.com does not resolve"
-  use_public_archive
+can_fall_back() {
+  [ "$(dpkg --print-architecture)" = amd64 ] && grep -qs '^URIs:' "$SOURCES"
+}
+
+use_fallback_mirror() {
+  echo "[!] Pointing apt at ${FALLBACK_MIRROR}"
+  sudo sed -i "s#^URIs:.*#URIs: ${FALLBACK_MIRROR}#" "$SOURCES"
+}
+
+if can_fall_back && ! getent hosts archive.ubuntu.com > /dev/null; then
+  echo "[!] archive.ubuntu.com does not resolve"
+  use_fallback_mirror
+  apt_install "$@"
+  exit 0
 fi
 
 if apt_install "$@"; then
   exit 0
 fi
-echo "[!] apt install failed; retrying once against the public Ubuntu archive"
-use_public_archive
+if ! can_fall_back; then
+  exit 1
+fi
+echo "[!] apt install failed; retrying once against a mirror outside ubuntu.com"
+use_fallback_mirror
 apt_install "$@"
