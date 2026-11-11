@@ -122,6 +122,8 @@ across protocols.
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Shorthand otherwise | HTTPS |
 
+`apm audit --ci` cold replay uses the same declared transport as install.
+
 A failed clone fails loudly, naming the URL and the protocol attempted.
 An explicit scheme prevents APM from selecting another protocol unless
 cross-protocol fallback is enabled. Git still applies a matching safe

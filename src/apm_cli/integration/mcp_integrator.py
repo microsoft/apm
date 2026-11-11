@@ -28,7 +28,12 @@ import yaml
 from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
+from apm_cli.deps.lockfile import (
+    LockFile,
+    LockfileSymlinkError,
+    get_lockfile_path,
+    installed_apm_version,
+)
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
@@ -1148,7 +1153,7 @@ class MCPIntegrator:
                 lock_path,
                 exc_info=True,
             )
-            if creating:
+            if creating and not isinstance(exc, LockfileSymlinkError):
                 # Failing to UPDATE leaves a usable lockfile behind, but failing
                 # to CREATE one reproduces #2373 exactly -- install reports
                 # success and the next audit says "run 'apm install'". Debug
@@ -1164,6 +1169,8 @@ class MCPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
+                if isinstance(exc, LockfileSymlinkError):
+                    raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "MCP lockfile update failed. Check apm.lock.yaml permissions, then retry."
                 ) from exc

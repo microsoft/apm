@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 import urllib.parse
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1091,3 +1092,91 @@ class TestGitUrlAndEnvPreservesRetainedGitConfig:
         assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
         assert env["GIT_CONFIG_VALUE_1"] == ""
         resolver.close()
+
+
+# ---------------------------------------------------------------------------
+# commit_exists -- real git against a local bare remote (#3458)
+# ---------------------------------------------------------------------------
+
+
+def _git(*args: str, cwd) -> str:
+    return subprocess.run(
+        [
+            get_git_executable(),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+class TestCommitExists:
+    """A commit-SHA pin is verified by fetching that exact commit."""
+
+    @pytest.fixture
+    def remote(self, tmp_path, monkeypatch):
+        work = tmp_path / "work"
+        work.mkdir()
+        _git("init", "-q", "-b", "main", cwd=work)
+        (work / "f.txt").write_text("v1", encoding="utf-8")
+        _git("add", "f.txt", cwd=work)
+        _git("commit", "-q", "-m", "one", cwd=work)
+        old = _git("rev-parse", "HEAD", cwd=work)
+        tree = _git("rev-parse", "HEAD^{tree}", cwd=work)
+        (work / "f.txt").write_text("v2", encoding="utf-8")
+        _git("commit", "-q", "-am", "two", cwd=work)
+        tip = _git("rev-parse", "HEAD", cwd=work)
+        bare = tmp_path / "remote.git"
+        _git("clone", "-q", "--bare", str(work), str(bare), cwd=tmp_path)
+        probe_root = tmp_path / "apm-tmp"
+        probe_root.mkdir()
+        monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: probe_root)
+        resolver = RefResolver()
+        monkeypatch.setattr(
+            resolver,
+            "_git_url_and_env",
+            lambda owner_repo, remote_url=None: (str(bare), {}),
+        )
+        yield SimpleNamespace(resolver=resolver, old=old, tip=tip, tree=tree, probe_root=probe_root)
+        resolver.close()
+
+    def test_non_tip_commit_is_reachable(self, remote) -> None:
+        assert remote.old != remote.tip
+        assert remote.resolver.commit_exists("acme/pkg", remote.old) is True
+
+    def test_tip_commit_is_reachable(self, remote) -> None:
+        assert remote.resolver.commit_exists("acme/pkg", remote.tip) is True
+
+    def test_unknown_commit_is_unreachable(self, remote) -> None:
+        assert remote.resolver.commit_exists("acme/pkg", "0" * 40) is False
+
+    def test_non_commit_object_is_rejected(self, remote) -> None:
+        assert remote.resolver.commit_exists("acme/pkg", remote.tree) is False
+
+    @pytest.mark.parametrize("configured", ["none", "str"])
+    def test_probe_directory_is_removed(self, remote, monkeypatch, configured) -> None:
+        # get_apm_temp_dir() returns None (system temp) or a str, never a Path.
+        if configured == "none":
+            monkeypatch.setattr("tempfile.tempdir", str(remote.probe_root))
+            monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: None)
+        else:
+            monkeypatch.setattr("apm_cli.config.get_apm_temp_dir", lambda: str(remote.probe_root))
+        assert remote.resolver.commit_exists("acme/pkg", remote.old) is True
+        assert list(remote.probe_root.iterdir()) == []
+
+    @pytest.mark.parametrize("bad", ["abc1234", "A" * 40, "g" * 40, ""])
+    def test_rejects_non_full_sha(self, bad) -> None:
+        with pytest.raises(ValueError, match="not a full commit SHA"):
+            RefResolver().commit_exists("acme/pkg", bad)
+
+    def test_offline_raises_without_network(self) -> None:
+        with pytest.raises(OfflineMissError):
+            RefResolver(offline=True).commit_exists("acme/pkg", "a" * 40)

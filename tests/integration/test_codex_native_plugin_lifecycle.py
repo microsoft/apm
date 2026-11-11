@@ -28,7 +28,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
-    pytest.mark.requires_runtime_codex(version="0.163.0"),
+    pytest.mark.requires_runtime_codex(min_version="0.163.0"),
 ]
 
 _NATIVE_SCRIPT = """
