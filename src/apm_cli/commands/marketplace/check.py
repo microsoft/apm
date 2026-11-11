@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import traceback
 from typing import TYPE_CHECKING
@@ -11,7 +12,7 @@ import click
 from ...core.command_logger import CommandLogger
 from ...marketplace.auth_helpers import resolve_auth_for_host
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
-from ...marketplace.ref_resolver import RefResolver
+from ...marketplace.ref_resolver import RefResolver, RemoteRef, is_commit_pin_ref
 from ...marketplace.semver import satisfies_range
 from ...marketplace.yml_schema import PackageEntry
 from ...models.dependency.host_virtual import repository_owner
@@ -65,6 +66,45 @@ def _entry_coordinates(
         org = dependency.ado_organization or repository_owner(dependency.repo_url)
         return dependency.host, dependency.repo_url, org, source_url
     return None, entry.source, None, None
+
+
+_HEX_REF_RE = re.compile(r"[0-9a-fA-F]{7,64}")
+
+
+def _explicit_ref_error(
+    ref: str,
+    refs: list[RemoteRef],
+    *,
+    resolver: RefResolver,
+    owner_repo: str,
+    offline: bool,
+) -> str:
+    """Return an error for an explicit ``ref``, or ``""`` when it resolves.
+
+    Tag and branch names match first, as before. A full commit SHA that no
+    name matches is accepted when it is a branch tip or when the
+    remote serves that commit; ``ls-remote`` alone never lists it.
+    """
+    for r in refs:
+        short = r.name
+        if short.startswith("refs/tags/"):
+            short = short[len("refs/tags/") :]
+        elif short.startswith("refs/heads/"):
+            short = short[len("refs/heads/") :]
+        if ref in (short, r.name):
+            return ""
+    if is_commit_pin_ref(ref):
+        # Only a branch tip is necessarily a commit; a tag may name a tree or blob.
+        if any(r.name.startswith("refs/heads/") and r.sha == ref for r in refs):
+            return ""
+        if offline:
+            return f"Commit '{ref}' cannot be verified offline"
+        if resolver.commit_exists(owner_repo, ref):
+            return ""
+        return f"Commit '{ref}' not reachable on remote"
+    if _HEX_REF_RE.fullmatch(ref):
+        return f"Ref '{ref}' not found; commit pins need the full 40-char lowercase SHA"
+    return f"Ref '{ref}' not found"
 
 
 @marketplace.command(help="Validate marketplace entries are resolvable")
@@ -160,29 +200,26 @@ def check(offline, verbose):
                     f"Resolving {entry.name} via "
                     f"{host or default_host() or 'github.com'}: {remote_label}"
                 )
-                refs = _resolver_for(host, org).list_remote_refs(owner_repo)
+                resolver = _resolver_for(host, org)
+                refs = resolver.list_remote_refs(owner_repo)
 
                 # Check version/ref resolution
-                ref_ok = False
                 if entry.ref is not None:
-                    # Check the explicit ref exists
-                    for r in refs:
-                        tag_name = r.name
-                        if tag_name.startswith("refs/tags/"):
-                            tag_name = tag_name[len("refs/tags/") :]
-                        elif tag_name.startswith("refs/heads/"):
-                            tag_name = tag_name[len("refs/heads/") :]
-                        if tag_name == entry.ref or r.name == entry.ref:  # noqa: PLR1714
-                            ref_ok = True
-                            break
-                    if not ref_ok:
+                    error = _explicit_ref_error(
+                        entry.ref,
+                        refs,
+                        resolver=resolver,
+                        owner_repo=owner_repo,
+                        offline=offline,
+                    )
+                    if error:
                         results.append(
                             _CheckResult(
                                 name=entry.name,
                                 reachable=True,
                                 version_found=False,
                                 ref_ok=False,
-                                error=f"Ref '{entry.ref}' not found",
+                                error=error,
                             )
                         )
                         failure_count += 1
@@ -194,9 +231,7 @@ def check(offline, verbose):
                     matching = [
                         (sv, tag) for sv, tag in tag_versions if satisfies_range(sv, version_range)
                     ]
-                    if matching:
-                        ref_ok = True
-                    else:
+                    if not matching:
                         results.append(
                             _CheckResult(
                                 name=entry.name,
