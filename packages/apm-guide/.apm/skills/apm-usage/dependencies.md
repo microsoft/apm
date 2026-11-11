@@ -580,7 +580,18 @@ dependencies:
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
         #                            OpenCode: translated to {env:VAR}; export variables at runtime.
         #                            Windsurf/Claude/Gemini: resolved at install time.
-        #                            Codex: env resolved at install time; a remote
+        #                            Codex project scope: a stdio env value that is
+        #                            exactly KEY: ${KEY} or KEY: ${env:KEY} becomes
+        #                            env_vars = ["KEY"], read from the environment
+        #                            that launches Codex and never written. Other
+        #                            references are still resolved at install time
+        #                            and written, with a names-only warning.
+        #                            Reinstall replaces an APM-written value only for
+        #                            an unchanged managed entry; otherwise it keeps
+        #                            the entry, exits 1, and asks you to reconcile
+        #                            by hand and rotate any committed credential.
+        #                            Codex user scope (-g): env resolved at install
+        #                            time as before; a remote
         #                            server's headers are written as
         #                            bearer_token_env_var / env_http_headers and
         #                            resolved by Codex at server-start.

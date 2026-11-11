@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Codex project-scope stdio MCP `env` values declared as `KEY: ${KEY}` or `KEY: ${env:KEY}` are written as `env_vars` in `.codex/config.toml` instead of resolved secrets, with a names-only warning for other references -- by @abhishekacharya200 (#3406)
 - Self-defined MCP servers whose names contain a slash, such as `com.example/server`, now keep their declared name as the config key in every target instead of colliding on the final segment; registry, `@scope/name` and plain names are unchanged. An older truncated entry is replaced only when APM's ownership records prove it wrote it; otherwise it is left in place. -- by @bodapatisaikrishna (#3493)
 - Registry-only mode (`PROXY_REGISTRY_ONLY`) no longer contacts the upstream host to enumerate refs or versions: semver ranges and `apm view <pkg> versions` fail with an actionable error, `apm outdated` reports git dependencies as unknown and names the remedy, ref-to-SHA lookup skips the GitHub commits API, and exact tags and locked resolutions keep installing through the proxy. -- by @pearlatvg (#3471)
 - `apm install` and `apm compile` create a new `apm.lock.yaml` and compiled outputs such as `AGENTS.md` with umask-derived permissions (`-rw-r--r--` under umask 022) instead of owner-only `0600`; existing files keep their mode and secret-bearing configs stay `0600`. (#3547)

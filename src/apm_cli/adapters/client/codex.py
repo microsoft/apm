@@ -18,7 +18,7 @@ from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
-from .base import _ENV_VAR_RE, MCPClientAdapter
+from .base import _ENV_PLACEHOLDER_RE, _ENV_VAR_RE, MCPClientAdapter
 
 _log = logging.getLogger(__name__)
 
@@ -47,6 +47,11 @@ _CODEX_BEARER_VALUE_RE = re.compile(rf"(?i:Bearer) +{_ENV_VAR_RE.pattern}")
 # semantics untouched. ``${input:...}`` is excluded: input variables are
 # collected elsewhere and carry their own warning.
 _CODEX_UNSUPPORTED_REFERENCE_RE = re.compile(r"\$\{(?!input:)")
+
+
+def _ascii_names(names: list[str]) -> str:
+    """Join manifest-authored names for console output, escaping non-ASCII."""
+    return ", ".join(ascii(name)[1:-1] for name in names)
 
 
 class CodexClientAdapter(MCPClientAdapter):
@@ -80,6 +85,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 config paths instead of project-local paths.
         """
         super().__init__(project_root=project_root, user_scope=user_scope)
+        self._rendering_baseline = False
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
@@ -218,6 +224,58 @@ class CodexClientAdapter(MCPClientAdapter):
         if comparable.get("id") == "":
             comparable.pop("id")
         return comparable == expected
+
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
+    ) -> bool:
+        """Recognize a stdio entry written before ``${VAR}`` values moved to ``env_vars``.
+
+        When the lockfile recorded a fingerprint of the earlier write, it is the
+        proof: a mismatch means the entry changed after APM wrote it. Without
+        one, the older formatter stored either the resolved value or the literal
+        reference, so anything else is a manual edit and stays a conflict.
+        """
+        names = expected.get("env_vars")
+        if self.user_scope or recorded_write is False:
+            return False
+        native_env = native.get("env") if isinstance(native, dict) else None
+        if not names or not isinstance(native_env, dict) or "env_vars" in native:
+            return False
+        legacy_env = dict(expected.get("env") or {})
+        for name in names:
+            value = native_env.get(name)
+            if not isinstance(value, str):
+                return False
+            if recorded_write is None:
+                if value not in (f"${{{name}}}", os.getenv(name)):
+                    return False
+                _log.debug("Codex entry for %s verified without a recorded fingerprint", name)
+            legacy_env[name] = value
+        legacy = {key: value for key, value in expected.items() if key != "env_vars"}
+        legacy["env"] = legacy_env
+        return self.matches_managed_server_config(native, legacy)
+
+    def render_server_config(self, server_info: dict, **kwargs) -> dict:
+        """Render a baseline without repeating the install-time write warnings."""
+        self._rendering_baseline = True
+        try:
+            return super().render_server_config(server_info, **kwargs)
+        finally:
+            self._rendering_baseline = False
+
+    def expanded_env_names(self, native: object, requested: dict) -> list[str]:
+        """Names the requested entry forwards that the native entry stores as ``env`` values."""
+        native_env = native.get("env") if isinstance(native, dict) else None
+        if not isinstance(native_env, dict):
+            return []
+        names = []
+        for name in requested.get("env_vars") or []:
+            value = native_env.get(name)
+            # A stored reference such as ``${VAR}`` never held a secret.
+            if value is None or (isinstance(value, str) and _ENV_VAR_RE.fullmatch(value)):
+                continue
+            names.append(name)
+        return names
 
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
@@ -363,17 +421,33 @@ class CodexClientAdapter(MCPClientAdapter):
         # syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``) are resolved at
         # install time before being written to ~/.codex/config.toml.
         # See issue #1266.
+        #
+        # A value authored as exactly ``${VAR}`` under the key ``VAR`` is the
+        # one case that must NOT be resolved and stored: Codex reads those from
+        # the launching environment through ``env_vars`` at server start, so the
+        # secret never lands in config.toml. See issue #3393.
         raw = server_info.get("_raw_stdio")
         if raw:
-            config["command"] = raw["command"]
-            if raw.get("cwd") is not None:
-                config["cwd"] = raw["cwd"]
+            forwarded_env: list[str] = []
             resolved_env_for_args: dict = {}
+            written_env: dict = {}
             if raw.get("env"):
-                resolved_env_for_args = self._resolve_environment_variables(
-                    raw["env"], env_overrides=env_overrides
+                if self.user_scope:
+                    literal_env = raw["env"]
+                else:
+                    literal_env, forwarded_env = self._split_forwarded_stdio_env(raw["env"])
+                    self._warn_unforwardable_env(literal_env, server_info.get("name", ""))
+                written_env = self._resolve_environment_variables(
+                    literal_env, env_overrides=env_overrides
                 )
-                config["env"] = resolved_env_for_args
+                # Args keep resolving against every declared name; a forwarded
+                # value is read from the environment when it is available, and
+                # never prompts for a value that only the runtime needs.
+                resolved_env_for_args = dict(written_env)
+                for name in forwarded_env:
+                    value = (env_overrides or {}).get(name) or os.getenv(name)
+                    if value:
+                        resolved_env_for_args[name] = value
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
 
             def _process_stdio_arg(arg):
@@ -383,9 +457,19 @@ class CodexClientAdapter(MCPClientAdapter):
                     )
                 return self.normalize_project_arg(arg)
 
-            config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
-            self._merge_extra(config, server_info)
-            return config
+            # Keep the key order the user-scope output has always had; tomlkit
+            # still renders scalars and arrays before the [env] sub-table.
+            stdio_config: dict = {
+                "command": raw["command"],
+                "args": [_process_stdio_arg(arg) for arg in raw.get("args") or []],
+                "env": written_env,
+            }
+            if raw.get("cwd") is not None:
+                stdio_config["cwd"] = raw["cwd"]
+            if forwarded_env:
+                stdio_config["env_vars"] = forwarded_env
+            self._merge_extra(stdio_config, server_info)
+            return stdio_config
 
         # Remote MCP handling.
         # Precedence on Codex when a server publishes BOTH a remote and a stdio
@@ -655,6 +739,50 @@ class CodexClientAdapter(MCPClientAdapter):
                 processed.append(processed_value)
 
         return processed
+
+    def _warn_unforwardable_env(self, literal_env: dict, server_name: str) -> None:
+        """Name the env keys whose references Codex cannot forward; never print values."""
+        if self._rendering_baseline:
+            return
+        keys = [
+            name
+            for name, value in literal_env.items()
+            if isinstance(value, str) and _ENV_PLACEHOLDER_RE.search(value)
+        ]
+        if not keys:
+            return
+        _rich_warning(
+            f"Codex cannot forward env {_ascii_names(keys)} for server "
+            f"'{_ascii_names([server_name])}' by "
+            "reference, so APM resolved them at install time and wrote the values to "
+            ".codex/config.toml. Declare each as KEY: ${KEY} to forward it instead.",
+            symbol="warning",
+        )
+
+    @staticmethod
+    def _split_forwarded_stdio_env(raw_env: dict) -> tuple[dict, list[str]]:
+        """Split a self-defined stdio env block into literals and forwarded names.
+
+        Codex reads a stdio server's variables from the environment that launches
+        it when they are named in ``env_vars``, so a value written as exactly
+        ``${VAR}`` under the key ``VAR`` does not have to be resolved and stored
+        in config.toml. Everything else keeps the existing install-time
+        resolution and is written to ``[mcp_servers.<name>.env]``.
+
+        Returns:
+            tuple: ``(literal_env, forwarded_env)`` -- the entries to resolve and
+                the variable names to forward.
+        """
+        literal_env: dict = {}
+        forwarded_env: list[str] = []
+        for name, raw_value in raw_env.items():
+            if isinstance(raw_value, str):
+                reference = _ENV_VAR_RE.fullmatch(raw_value)
+                if reference and reference.group(1) == name:
+                    forwarded_env.append(name)
+                    continue
+            literal_env[name] = raw_value
+        return literal_env, forwarded_env
 
     def _process_environment_variables(self, env_vars, env_overrides=None):
         """Process environment variable definitions and resolve actual values.

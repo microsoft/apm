@@ -432,8 +432,31 @@ def _install_registry_group(  # noqa: PLR0913
     return configured_count
 
 
+def _ascii_names(names: list[str]) -> str:
+    """Join manifest-authored names for console output, escaping non-ASCII."""
+    return ", ".join(ascii(name)[1:-1] for name in names)
+
+
+def _codex_expanded_env_names(client: Any, name: str, requested_info: dict) -> list[str]:
+    """Env names a Codex project entry stores as values but the declaration now forwards."""
+    if getattr(client, "target_name", "") != "codex" or client.user_scope:
+        return []
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+
+    native = MCPConflictDetector(client).get_existing_server_configs()
+    return client.expanded_env_names(
+        native.get(client._determine_config_key(name, None)),
+        client.render_server_config(requested_info),
+    )
+
+
 def _report_native_conflict(
-    name: str, runtime: str, client: Any, logger: Any, conflicts: list[str]
+    name: str,
+    runtime: str,
+    client: Any,
+    logger: Any,
+    conflicts: list[str],
+    expanded_env: list[str] | None = None,
 ) -> None:
     """Report a preserved native collision identically for both dependency sources."""
     conflicts.append(f"{name} ({runtime})")
@@ -443,6 +466,14 @@ def _report_native_conflict(
         "Rename or remove the conflicting native connection yourself, then "
         "retry the same install command. --force does not take ownership "
         "of user connections."
+        + (
+            f" The connection stores values for {_ascii_names(expanded_env)} that the "
+            "declaration now forwards through env_vars. Reconcile them by hand, then "
+            "retry. If that file was ever shared or committed, rotate the credential "
+            "because Git history still holds it."
+            if expanded_env
+            else ""
+        )
     )
 
 
@@ -1272,9 +1303,19 @@ def _install_self_defined_deps(
                     managed_target_servers.get(rt, set()).discard(dep.name)
                     if native_hashes is not None:
                         native_hashes.get(rt, {}).pop(dep.name, None)
+                forwarded = _codex_expanded_env_names(client, dep.name, synthetic_info)
                 if state is NativeMcpConnectionState.CONFLICT:
-                    _report_native_conflict(dep.name, rt, client, logger, native_conflicts)
+                    _report_native_conflict(
+                        dep.name, rt, client, logger, native_conflicts, expanded_env=forwarded
+                    )
                     continue
+                if forwarded and state is NativeMcpConnectionState.UPDATE_MANAGED:
+                    logger.warning(
+                        f"APM replaced a previously written value for {_ascii_names(forwarded)} "
+                        f"in {client.get_config_path()} with env_vars. If that file was ever "
+                        "shared or committed, rotate the credential because Git history "
+                        "still holds it."
+                    )
                 if state in {
                     NativeMcpConnectionState.MATCHING_MANAGED,
                     NativeMcpConnectionState.MATCHING_FOREIGN,
