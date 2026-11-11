@@ -261,7 +261,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Switching targets that share a skill path refreshes valid same-writer evidence
   through a guarded copy, even when the source bytes are unchanged.
   Missing evidence, including installations predating these receipts, does not
-  authorize overwriting existing files. Preserve your edits and move the
+  authorize overwriting existing files. A fresh clone or CI runner is the one
+  exception: a skill directory whose files all match what this install would
+  write, and are recorded in the lockfile, is kept and receipts are recorded.
+  Lockfile hashes are never that proof. Preserve your edits and move the
   conflicting file aside before reinstalling. Invalid evidence fails explicitly.
   Creating this state requires filesystem hard-link support. State-write failures
   are reported; successful earlier deployment writes are not rolled back.

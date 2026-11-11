@@ -95,6 +95,10 @@ but edited files and legacy files without receipts stay protected. Preserve
 edits and move conflicting files aside before reinstalling. Audit and dry-run
 do not create receipts; frozen install can record local writes without changing
 the manifest or lockfile.
+Without local receipts (a fresh clone or CI runner), a committed skill whose
+whole directory matches what the install would write, and whose files are
+recorded in `apm.lock.yaml`, is kept and receipts are recorded; lockfile hashes
+are never the proof.
 When a missing local receipt prevents an existing skill from being overwritten,
 install exits nonzero before stale cleanup and lock replacement. The refused
 files and prior lock contents are preserved, including cold `--frozen` replay
