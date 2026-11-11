@@ -37,11 +37,12 @@ _GUARD_IMMUTABLE_REQUIREMENTS = "install-deployment-immutable-requirements"
 
 
 def check_orphan_selection(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Prune and advisory warnings share declaration-aware orphan selection."""
+    """Prune, advisory warnings and targeted installs share orphan selection."""
     findings: list[Violation] = []
     for path, scope in (
         ("src/apm_cli/commands/_helpers.py", "_check_orphaned_packages"),
         ("src/apm_cli/commands/prune.py", "prune"),
+        ("src/apm_cli/install/phases/cleanup.py", "_remove_dropped_package_dirs"),
     ):
         facts, failures = _facts_for(provider, path, _GUARD_ORPHAN_SELECTION)
         findings.extend(failures)

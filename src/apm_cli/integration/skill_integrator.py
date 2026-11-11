@@ -27,6 +27,7 @@ from apm_cli.integration.skill_package_routing import (
     should_install_skill as _should_install_skill,
 )
 from apm_cli.integration.skill_preflight import find_unmanaged_conflicts, selected_skill_sources
+from apm_cli.integration.skill_preflight import preflight_skill_selection as _preflight_selection
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
@@ -367,6 +368,7 @@ class SkillIntegrator(BaseIntegrator):
 
     selected_skill_sources = staticmethod(selected_skill_sources)
     find_unmanaged_conflicts = find_unmanaged_conflicts
+    preflight_skill_selection = staticmethod(_preflight_selection)
 
     def __init__(self) -> None:
         super().__init__()
