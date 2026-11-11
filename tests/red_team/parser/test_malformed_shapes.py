@@ -146,7 +146,6 @@ def test_field_type_confusion_does_not_crash(tmp_path):
     "raw_timeout, expected",
     [
         ('"abc"', "abc"),  # string survives via `timeoutSec or timeout`
-        ("-5", -5),  # negative survives (truthy)
         ("true", True),  # bool survives (truthy)
         ("1.5", 1.5),  # float survives
         ("99999999999", 99999999999),  # huge int survives
@@ -167,19 +166,15 @@ def test_bad_timeout_reaches_entry_without_crash(tmp_path, raw_timeout, expected
     assert entries[0].effective_timeout == expected
 
 
-def test_timeout_zero_silently_falls_through_to_default(tmp_path):
-    """CHARACTERISATION: timeoutSec:0 is falsy, so `0 or timeout` -> default 30.
-
-    A low-severity silent mis-parse: an author asking for a 0s timeout
-    instead gets the 30s default. Pinned here so any future change to the
-    `or` coalescing is caught.
-    """
+@pytest.mark.parametrize("raw_timeout", ["0", "-5"])
+def test_non_positive_timeout_falls_back_to_default(tmp_path, raw_timeout):
+    """A non-positive timeoutSec is invalid: default 30s, no crash (#3435)."""
     content = (
         "lifecycle:\n"
         "  post-install:\n"
         "    - type: command\n"
         "      bash: echo hi\n"
-        "      timeoutSec: 0\n"
+        f"      timeoutSec: {raw_timeout}\n"
     )
     entries = _parse(tmp_path, content)
     assert len(entries) == 1

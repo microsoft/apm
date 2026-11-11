@@ -1392,6 +1392,12 @@ def _dispatch_http_request(
         # daemon, reaped at process exit) and reclaim the permit when it dies.
         if _abort_dispatch_sock(holder):
             worker.join(_HTTP_ABANDON_GRACE)
+        # The worker may publish its response during the grace join; close it
+        # like the completion path does so the late response does not leak.
+        late_resp = holder.get("resp")
+        if late_resp is not None:
+            with contextlib.suppress(Exception):
+                late_resp.close()
         _append_to_script_log(
             event_name,
             "http",

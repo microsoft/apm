@@ -1123,6 +1123,15 @@ class LockFile:
             return "3"
         return "2" if self._needs_v2() else "1"
 
+    def sync_lockfile_version(self) -> None:
+        """Re-derive ``lockfile_version`` from current content.
+
+        Callers that mutate content directly (instead of through
+        ``add_dependency``) use this to keep the in-memory version equal to
+        what ``to_yaml`` would emit before comparing locks (issue #3433).
+        """
+        self.lockfile_version = self._required_lockfile_version()
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -1136,7 +1145,7 @@ class LockFile:
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
         # that mutate content directly need the field re-derived here.
-        self.lockfile_version = self._required_lockfile_version()
+        self.sync_lockfile_version()
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
@@ -1302,7 +1311,7 @@ class LockFile:
             return
         if path.is_symlink():
             raise LockfileSymlinkError(path)
-        from ..utils.atomic_io import atomic_write_text
+        from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
 
@@ -1340,7 +1349,7 @@ class LockFile:
             self.generated_at = None
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
-        atomic_write_text(path, serialized)
+        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
