@@ -51,15 +51,17 @@ def _write_issue_fixture(apm_home: Path, *, locked_commit: str, pin_commit: str 
         "    - example/demo/skills/demo\n",
         encoding="utf-8",
     )
-    (package / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    # newline="\n" keeps the bytes (and the pinned content hash) identical on Windows.
+    (package / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8", newline="\n")
     (package / ".codex-plugin" / "plugin.json").write_text(
-        '{"name":"demo-skill"}\n', encoding="utf-8"
+        '{"name":"demo-skill"}\n', encoding="utf-8", newline="\n"
     )
     if pin_commit is not None:
         (package / ".apm-pin").write_text(
             json.dumps({"schema_version": 1, "resolved_commit": pin_commit}, separators=(",", ":"))
             + "\n",
             encoding="utf-8",
+            newline="\n",
         )
     content_hash = compute_package_hash(package)
     assert content_hash == _ISSUE_CONTENT_HASH
