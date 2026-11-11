@@ -450,3 +450,157 @@ def host_has_pcre_grep() -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# CI-faithful environment (D3)
+# ---------------------------------------------------------------------------
+
+ENV_PASSTHROUGH = (
+    "PATH",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TERM",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    # Tool location, not user config: bundled gits (e.g. the Copilot CLI's)
+    # cannot find their http helpers without it.
+    "GIT_EXEC_PATH",
+)
+ENV_PASSTHROUGH_PREFIXES = ("UV_", "PREFLIGHT_")
+
+
+def _real_dirs(env: dict[str, str]) -> dict[str, Path]:
+    home = Path(env.get("HOME") or os.path.expanduser("~"))
+    config = Path(env.get("XDG_CONFIG_HOME") or home / ".config")
+    cache = Path(env.get("XDG_CACHE_HOME") or home / ".cache")
+    data = Path(env.get("XDG_DATA_HOME") or home / ".local" / "share")
+    return {"home": home, "config": config, "cache": cache, "data": data}
+
+
+def short_tmpdir(env: dict[str, str]) -> Path:
+    """A short, stable temp root: deep macOS TMPDIRs make CLI output wrap."""
+    path = _real_dirs(env)["cache"] / "apm-pf"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def ci_like_env(env: dict[str, str], home: Path, tmpdir: Path) -> dict[str, str]:
+    """Environment for command checks that mirrors a fresh CI runner.
+
+    Only an allowlist of host variables passes through, so user-specific
+    APM / Claude / Copilot / token variables never leak into test lanes.
+    HOME and XDG dirs are isolated; uv keeps the real cache, config and
+    managed pythons so it never needs the network.
+    """
+    real = _real_dirs(env)
+    out = {k: v for k, v in env.items() if k in ENV_PASSTHROUGH}
+    out.update({k: v for k, v in env.items() if k.startswith(ENV_PASSTHROUGH_PREFIXES)})
+    out.update(
+        {
+            # GitHub-hosted runners run as `runner`; pytest embeds the user
+            # name in tmp paths, and some CLI-output assertions in the suite
+            # are sensitive to that path length.
+            "USER": "runner",
+            "LOGNAME": "runner",
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            "XDG_CACHE_HOME": str(home / ".cache"),
+            "XDG_DATA_HOME": str(home / ".local" / "share"),
+            "XDG_STATE_HOME": str(home / ".local" / "state"),
+            "TMPDIR": str(tmpdir),
+        }
+    )
+    out.setdefault("UV_CACHE_DIR", str(real["cache"] / "uv"))
+    py_dir = real["data"] / "uv" / "python"
+    if py_dir.is_dir():
+        out.setdefault("UV_PYTHON_INSTALL_DIR", str(py_dir))
+    uv_config = real["config"] / "uv" / "uv.toml"
+    if uv_config.is_file():
+        out.setdefault("UV_CONFIG_FILE", str(uv_config))
+    for sub in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+        Path(out[sub]).mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def force_rmtree(path: str | Path) -> None:
+    """Remove a tree even when tests left unreadable/unwritable dirs in it."""
+    base = Path(path)
+    if not base.exists():
+        return
+    with contextlib.suppress(OSError):
+        os.chmod(base, 0o700)
+    # topdown: children are made traversable before os.walk descends.
+    for dirpath, dirnames, _files in os.walk(base, topdown=True):
+        for name in dirnames:
+            with contextlib.suppress(OSError):
+                os.chmod(os.path.join(dirpath, name), 0o700)
+    shutil.rmtree(base)
+
+
+def lock_sync(root: str | Path) -> tuple[bool, list[str]]:
+    """Does the env `uv run` uses match uv.lock (CI: `uv sync --frozen --extra dev`)?"""
+    env = {k: v for k, v in os.environ.items() if k not in ("UV_NO_SYNC", "UV_FROZEN")}
+    try:
+        proc = subprocess.run(
+            ["uv", "sync", "--frozen", "--extra", "dev", "--dry-run", "--offline"],  # noqa: S607
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, [f"cannot run uv: {exc}"]
+    output = (proc.stdout + proc.stderr).splitlines()
+    if proc.returncode == 0 and any("Would make no changes" in line for line in output):
+        return True, ["environment matches uv.lock"]
+    drift = [line.strip() for line in output if line.startswith((" - ", " + "))]
+    lines = [
+        "the uv project environment does not match uv.lock, so test results would not "
+        "match CI (which runs `uv sync --frozen --extra dev`).",
+        f"{len(drift)} package line(s) differ, e.g.: " + ", ".join(drift[:8]),
+        "Fix: `uv sync --frozen --extra dev`, or point UV_PROJECT_ENVIRONMENT at a "
+        "lock-faithful environment.",
+    ]
+    if not drift:
+        lines.insert(1, "\n".join(output[-15:]))
+    return False, lines
+
+
+def snapshot_outputs(root: str | Path, paths: tuple[str, ...]) -> dict[str, bytes | None]:
+    snap: dict[str, bytes | None] = {}
+    for rel in paths:
+        path = Path(root) / rel
+        snap[rel] = path.read_bytes() if path.is_file() else None
+    return snap
+
+
+def restore_outputs(root: str | Path, snap: dict[str, bytes | None]) -> list[str]:
+    """Put volatile outputs back to their pre-run state; return changed paths."""
+    restored = []
+    for rel, before in snap.items():
+        path = Path(root) / rel
+        now = path.read_bytes() if path.is_file() else None
+        if now == before:
+            continue
+        if before is None:
+            path.unlink()
+        else:
+            path.write_bytes(before)
+        restored.append(rel)
+    return restored

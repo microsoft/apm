@@ -6,9 +6,12 @@ Repo-local APM package for microsoft/apm. It ships:
   receipt bound to the exact commit, base and hook bundle into
   `$(git rev-parse --git-dir)/apm-preflight/` (per worktree, never committed).
 - a `preToolUse` hook (Copilot CLI / cloud agent; Claude payloads understood)
-  that denies `git push`, `gh pr create`, `gh pr ready`, `gh api` PR writes
-  and `*create_pull_request` tools unless that receipt is fresh, green,
-  complete and matches the pushed commit.
+  that denies `git push`, `gh pr create`, `gh pr ready`, `gh api` PR writes,
+  `*create_pull_request` tools and `*update_pull_request` calls that clear
+  draft, unless that receipt is fresh, green, complete and matches the
+  pushed commit. A push/PR must be its own tool call: only read-only
+  segments (`cd`, `echo`, `git status/log/diff/show/fetch/rev-parse`, ...)
+  may precede it, so `git commit && git push` is denied.
 
 There is intentionally no skill. The hook is the only agent-facing surface:
 every deny reason is self-sufficient (why, with HEAD sha; the exact runner
@@ -43,7 +46,18 @@ as ran only when all its checks ran. Logs stay per check.
 | T2 | src, pyproject.toml, uv.lock, shared test utils | full unit suite (both CI shards, `-n auto`, no coverage floors) |
 | T3 | src, tests/integration, lifecycle sharding, deps | both lifecycle smoke shards, changed integration tests |
 
-Only a clean worktree with `--tiers auto` produces a gate-eligible receipt.
+Only a clean worktree with `--tiers auto` produces a gate-eligible receipt;
+anything else exits 1.
+
+Command checks run in a CI-like environment: an allowlist of host variables
+(no `APM_*`, Claude, Copilot, `GIT_CONFIG_*` or token variables;
+`GIT_EXEC_PATH` is kept), `USER=runner` as on hosted runners, an isolated
+`HOME`/XDG under the preflight dir, a short `TMPDIR` (`~/.cache/apm-pf`) and
+the real uv cache/config. When test tiers are selected, `env.lock-sync` fails unless
+the uv environment matches `uv.lock` (CI runs `uv sync --frozen --extra
+dev`). Files checks are known to regenerate (`VOLATILE_OUTPUTS` in the
+policy, e.g. `CONFORMANCE.*`) are restored afterwards and listed in the
+receipt as `restored_outputs`; any other change fails `hygiene.tree-mutated`.
 `ci.drift` fails when a mirrored workflow job changes: update
 `preflight_policy.py` and its fingerprints.
 
@@ -58,15 +72,17 @@ value is ignored. Bypasses are appended to `apm-preflight/bypass.log`.
   still run in CI.
 - Native Windows: the hook is a no-op (`powershell: exit 0`) and the runner
   refuses to run. Use WSL or rely on CI.
-- Scope: the hook `matcher` limits it to shell and `*create_pull_request`
-  tools, and the launcher starts Python only when the payload mentions
-  `push`, `create_pull_request`, or `gh` with `pr` / `pulls` /
-  `createPullRequest` / `markPullRequestReadyForReview`. Everything else
-  (`git status`, `git commit`, `gh issue ...`) exits in shell.
+- Scope: the hook `matcher` limits it to shell, `*create_pull_request` and
+  `*update_pull_request` tools, and the launcher starts Python only when the
+  payload mentions `push`, `create_pull_request`, `update_pull_request` with
+  draft/ready, or `gh` with `pr` / `pulls` / `createPullRequest` /
+  `markPullRequestReadyForReview`. Everything else (`git status`,
+  `git commit`, `gh issue ...`) exits in shell.
 - Fail-open by design: a missing `python3`, a missing or broken gate script,
   or a hook timeout releases the tool call. Only a well-formed deny blocks.
-- Git aliases are not expanded (`git p` for `push` is not gated) and `gh`
-  aliases are not tracked; CI remains the authority.
+- Not detected (CI remains the authority): git aliases, including
+  `git -c alias.p=push p`; a dynamically built argv0 such as
+  `$(echo git) push`; plumbing such as `git send-pack`; `gh` aliases.
 - Tag, `--all`, `--mirror` and wildcard pushes are always denied.
 - Pushes from a shell whose cwd changed in an earlier tool call are not
   tracked; `gh pr ready` does not verify the PR base.

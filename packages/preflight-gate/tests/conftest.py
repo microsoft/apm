@@ -159,5 +159,6 @@ def fake_policy() -> SimpleNamespace:
         CI_FINGERPRINTS={},
         CI_ONLY_LANES=("Windows (CI only)",),
         ASCII_GUARD_PATHS=["src/"],
+        VOLATILE_OUTPUTS=("CONFORMANCE.json", ".github/mcp.json"),
         UVLOCK_ALLOWED_HOSTS=policy.UVLOCK_ALLOWED_HOSTS,
     )

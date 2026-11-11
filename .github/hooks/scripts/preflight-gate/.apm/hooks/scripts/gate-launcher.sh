@@ -6,14 +6,17 @@
 # exits 0; only a well-formed deny JSON printed by gate.py denies.
 #
 # Fast path (pure shell, no subprocess): Python starts only for payloads that
-# can publish -- a create_pull_request tool, any text containing `push`, or
-# `gh` together with pr / pulls / createPullRequest /
-# markPullRequestReadyForReview. Everything else exits 0 here.
+# can publish -- a create_pull_request tool, an update_pull_request tool that
+# touches draft/ready, any text containing `push`, or `gh` together with
+# pr / pulls / createPullRequest / markPullRequestReadyForReview. Everything
+# else exits 0 here.
 payload=""
 IFS= read -r -d '' payload 2>/dev/null || true
 publish=""
 case "$payload" in
   *create_pull_request*|*push*) publish=1 ;;
+  *update_pull_request*)
+    case "$payload" in *draft*|*ready*|*Ready*) publish=1 ;; esac ;;
   *'gh '*|*'gh\t'*)
     case "$payload" in
       *'pr '*|*'pr\t'*|*'pr"'*|*pulls*|*createPullRequest*|*markPullRequestReadyForReview*)

@@ -45,20 +45,26 @@ def _deny(box: Sandbox, command: str, **kwargs) -> str:
     return data["permissionDecisionReason"]
 
 
-def assert_self_sufficient(text: str, box: Sandbox, why: str) -> list[str]:
+PREFLIGHT_FIX = (
+    f"Fix: commit all changes, then run from the repo root: {RUNNER_CMD} "
+    "(exit 0 = pass; re-run after any new commit), then retry."
+)
+
+
+def assert_self_sufficient(
+    text: str, box: Sandbox, why: str, fix: str = PREFLIGHT_FIX
+) -> list[str]:
     lines = text.splitlines()
     head7 = box.git("rev-parse", "HEAD")[:7]
     assert len(text) <= gate.REASON_LIMIT
     assert all(ch == "\n" or " " <= ch <= "~" for ch in text)
     assert "|" not in text
-    assert "allow" not in text.lower().replace("allowed", "")
     assert lines[0].startswith("preflight gate: push/PR blocked: ")
     assert why in lines[0]
     assert f"(HEAD {head7})" in lines[0]
-    assert lines[1] == (
-        f"Fix: commit all changes, then run from the repo root: {RUNNER_CMD} "
-        "(exit 0 = pass; re-run after any new commit), then retry."
-    )
+    assert lines[1] == fix
+    if fix != PREFLIGHT_FIX and "--base" not in fix:
+        assert "preflight.py" not in fix
     assert "draft" not in text.lower()
     assert lines[-1] == (
         "Bypass is for humans only (APM_PREFLIGHT_BYPASS=accept-unverified when launching the CLI)."
@@ -85,7 +91,7 @@ def test_failed_receipt_lists_ids_and_log_paths(sandbox: Sandbox, fake_policy) -
         _deny(sandbox, "gh pr create --fill"), sandbox, "last preflight run failed"
     )
     logs = lib.preflight_dir(sandbox.git_dir) / "logs"
-    assert lines[2] == f"Failed checks: t0.flag. Logs: {logs}/<check-id>.log"
+    assert lines[2] == f"Failed checks: t0.flag (log: {logs / 't0.flag.log'})"
     assert (logs / "t0.flag.log").is_file()
 
 
@@ -98,7 +104,7 @@ def test_partial_receipt(sandbox: Sandbox, fake_policy) -> None:
 
 def test_dirty_receipt_is_ineligible(sandbox: Sandbox, fake_policy) -> None:
     sandbox.write("notes.txt", "dirty\n")
-    assert _preflight(sandbox, fake_policy) == 0
+    assert _preflight(sandbox, fake_policy) == 1
     assert_self_sufficient(_deny(sandbox, "git push"), sandbox, "not gate-eligible")
 
 
@@ -136,23 +142,71 @@ def test_too_old(sandbox: Sandbox, fake_policy) -> None:
 
 
 @pytest.mark.parametrize(
-    ("command", "why"),
+    ("command", "why", "fix"),
     [
-        ("git push --tags", "--tags"),
-        ("git push origin 'refs/heads/*:refs/heads/*'", "wildcard"),
-        ("cd - && git push", "cannot resolve the target repository"),
-        ("git push 'unterminated", "could not parse"),
-        ("gh pr create --base release", "no fresh green preflight receipt"),
+        ("git push --tags", "--tags", gate.FIX_PUSH_HEAD),
+        ("git push --all origin", "--all", gate.FIX_PUSH_HEAD),
+        ("git push origin 'refs/heads/*:refs/heads/*'", "wildcard", gate.FIX_PUSH_HEAD),
+        ("git push origin refs/tags/v1", "tag push", gate.FIX_PUSH_HEAD),
+        ("cd - && git push", "cannot resolve the target repository", gate.FIX_TARGET),
+        ("git push 'unterminated", "could not parse", gate.FIX_PARSE),
+        ("gh pr create --base release", "no fresh green preflight receipt", PREFLIGHT_FIX),
     ],
 )
-def test_unbindable_and_ambiguous(sandbox: Sandbox, command: str, why: str) -> None:
-    assert_self_sufficient(_deny(sandbox, command), sandbox, why)
+def test_unbindable_and_ambiguous(sandbox: Sandbox, command: str, why: str, fix: str) -> None:
+    assert_self_sufficient(_deny(sandbox, command), sandbox, why, fix)
+
+
+def test_tag_and_other_branch_with_receipt_do_not_say_run_preflight(
+    sandbox: Sandbox, fake_policy
+) -> None:
+    sandbox.git("branch", "other", "main")
+    sandbox.write("docs.md", "work\n")
+    sandbox.commit()
+    sandbox.git("tag", "v9.9.9")
+    assert _preflight(sandbox, fake_policy) == 0
+    assert_self_sufficient(
+        _deny(sandbox, "git push origin v9.9.9"), sandbox, "tag 'v9.9.9'", gate.FIX_PUSH_HEAD
+    )
+    assert_self_sufficient(
+        _deny(sandbox, "git push origin other:refs/heads/x"),
+        sandbox,
+        "push source 'other'",
+        gate.FIX_OTHER_SOURCE,
+    )
+    assert_self_sufficient(
+        _deny(sandbox, "git push origin nosuch"),
+        sandbox,
+        "cannot resolve push source",
+        gate.FIX_UNRESOLVED_SOURCE,
+    )
+    assert_self_sufficient(
+        _deny(sandbox, "gh pr create -H nosuch"), sandbox, "PR head 'nosuch'", gate.FIX_PR_HEAD
+    )
+
+
+def test_chained_push_names_the_segment(sandbox: Sandbox, fake_policy) -> None:
+    assert _preflight(sandbox, fake_policy) == 0
+    text = _deny(sandbox, "git commit --allow-empty -m x && git push origin HEAD")
+    fix = "Fix: run `git push origin HEAD` alone in its own tool call, after preflight passes for the final HEAD."
+    lines = assert_self_sufficient(
+        text,
+        sandbox,
+        "run the push/PR command as its own tool call after preflight; this call runs "
+        "'git commit --allow-empty -m x' before it",
+        fix,
+    )
+    assert len(lines) == 3
 
 
 def test_pr_base_mismatch_with_receipt(sandbox: Sandbox, fake_policy) -> None:
     assert _preflight(sandbox, fake_policy) == 0
     assert_self_sufficient(
-        _deny(sandbox, "gh pr create --base release"), sandbox, "PR base 'release'"
+        _deny(sandbox, "gh pr create --base release"),
+        sandbox,
+        "PR base 'release'",
+        f"Fix: target `main`, or re-run preflight against that base: {RUNNER_CMD} "
+        "--base origin/release",
     )
 
 
@@ -165,8 +219,10 @@ def test_internal_error(sandbox: Sandbox, monkeypatch) -> None:
 
 
 def test_long_failure_lists_are_truncated(sandbox: Sandbox) -> None:
-    failed = [(f"check.{i:03d}-with-a-long-name", f"/x/logs/check.{i}.log") for i in range(80)]
+    logs = "/Users/someone/src/repo/.git/worktrees/branch-name/apm-preflight/logs"
+    failed = [(f"check.{i:03d}", f"{logs}/check.{i:03d}.log") for i in range(80)]
     text = gate.compose_reason("the last preflight run failed", "abcdef1", RUNNER_CMD, failed)
     assert len(text) <= gate.REASON_LIMIT
+    assert f"check.000 (log: {logs}/check.000.log)" in text
     assert "more)" in text
     assert text.endswith("launching the CLI).")

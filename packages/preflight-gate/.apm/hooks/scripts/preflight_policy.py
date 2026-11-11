@@ -71,6 +71,14 @@ UVLOCK_ALLOWED_HOSTS = ("pypi.org", "files.pythonhosted.org")
 UNIT_MAP_CAP = 150
 UNIT_MAP_XDIST_THRESHOLD = 20
 
+# Files checks are known to (re)write. After the run the runner restores each
+# to its pre-run bytes (or deletes it if it did not exist) and records it in
+# the receipt as `restored_outputs`; they are excluded from tree-mutation.
+#  - CONFORMANCE.json/.md: tests/spec_conformance/test_gen_statement.py
+#    regenerates them in place (CI regenerates and diff-gates them separately).
+#  - .github/mcp.json: observed after the unit suite (test pollution of cwd).
+VOLATILE_OUTPUTS = ("CONFORMANCE.json", "CONFORMANCE.md", ".github/mcp.json")
+
 # --- verbatim ci.yml `lint` job steps --------------------------------------
 
 LINT_RUFF = (
@@ -381,6 +389,9 @@ def _t0_checks(ctx: Context) -> list[Check]:
     checks = []
     if (ctx.root / "packages/preflight-gate/.apm/hooks/scripts").is_dir():
         checks.append(Check("bundle.stale", "T0", internal="bundle_stale"))
+    if any(t in ctx.selected for t in ("T1", "T2", "T3")):
+        # CI runs every test lane after `uv sync --frozen --extra dev`.
+        checks.append(Check("env.lock-sync", "T0", internal="lock_sync"))
     checks += [
         Check("ci.drift", "T0", internal="ci_drift"),
         Check("git.merge-conflict", "T0", cmd=GIT_MERGE_PROBE),

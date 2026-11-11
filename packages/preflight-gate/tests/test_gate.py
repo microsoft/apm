@@ -168,8 +168,8 @@ def test_failed_receipt_lists_checks_and_logs(sandbox: Sandbox, fake_policy) -> 
     assert preflight_ok(sandbox, fake_policy) == 1
     text = reason(evaluate(sandbox, "git push"))
     assert "last preflight run failed" in text
-    assert "Failed checks: t0.flag." in text
-    assert str(lib.preflight_dir(sandbox.git_dir) / "logs") + "/<check-id>.log" in text
+    assert "Failed checks: t0.flag (log: " in text
+    assert str(lib.preflight_dir(sandbox.git_dir) / "logs" / "t0.flag.log") in text
 
 
 def test_partial_receipt_is_denied(sandbox: Sandbox, fake_policy) -> None:

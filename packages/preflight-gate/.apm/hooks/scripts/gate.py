@@ -44,6 +44,7 @@ SHELL_TOOL_NAMES = (
 )
 SHELL_TOOLS = {name.lower() for name in SHELL_TOOL_NAMES}
 PR_TOOL_SUFFIX = "create_pull_request"
+PR_UPDATE_SUFFIX = "update_pull_request"
 COMMAND_KEYS = ("command", "input", "cmd", "script")
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 KEYWORDS = {"!", "{", "}", "if", "then", "else", "elif", "do", "while", "until", "fi", "done"}
@@ -103,8 +104,31 @@ class Action:
     text: str
     sources: list[str] = field(default_factory=list)
     deny: str | None = None
+    fix: str | None = None
     base: str | None = None
     head: str | None = None
+
+
+# Tailored "Fix:" lines for denials that re-running preflight cannot cure.
+FIX_PUSH_HEAD = (
+    "Fix: push only the current branch HEAD (e.g. `git push origin HEAD`); tags, "
+    "--all/--mirror and multi-ref pushes are a human release step."
+)
+FIX_OTHER_SOURCE = (
+    "Fix: push only the preflight-verified commit (`git push origin HEAD`); to publish "
+    "another branch, check it out, run preflight there, then push it alone."
+)
+FIX_UNRESOLVED_SOURCE = "Fix: push an existing local branch or HEAD (e.g. `git push origin HEAD`)."
+FIX_PARSE = (
+    "Fix: rewrite it as one plain command (balanced quotes, no deep nesting) in its own tool call."
+)
+FIX_TARGET = "Fix: run the command from the repository root, without cd/-C/--git-dir indirection."
+FIX_PR_HEAD = "Fix: push the branch first, then create the PR from it without --head."
+
+# Segments that may precede a gated push/PR in the same tool call: they cannot
+# move HEAD, rewrite history or change the worktree (D1: chained pushes).
+READ_ONLY_COMMANDS = {"cd", "pushd", "popd", "true", "echo", "printf"}
+READ_ONLY_GIT = {"status", "log", "diff", "show", "fetch", "rev-parse"}
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +342,8 @@ def _push_action(args: list[str], cwd: str | None, text: str) -> Action | None:
             "git-push",
             cwd,
             text,
-            deny=f"`git push {unbindable}` cannot be bound to one verified commit; push a branch",
+            deny=f"`git push {unbindable}` cannot be bound to one verified commit",
+            fix=FIX_PUSH_HEAD,
         )
     if delete:
         return None
@@ -330,14 +355,60 @@ def _push_action(args: list[str], cwd: str | None, text: str) -> Action | None:
         src, _, dst = spec.partition(":")
         if "*" in spec:
             return Action(
-                "git-push", cwd, text, deny=f"wildcard refspec {spec!r} is not verifiable"
+                "git-push",
+                cwd,
+                text,
+                deny=f"wildcard refspec {spec!r} is not verifiable",
+                fix=FIX_PUSH_HEAD,
             )
         if src.startswith("refs/tags/") or dst.startswith("refs/tags/") or src == "tag":
-            return Action("git-push", cwd, text, deny=f"tag push {spec!r} is not verifiable")
+            return Action(
+                "git-push",
+                cwd,
+                text,
+                deny=f"tag push {spec!r} is not verifiable",
+                fix=FIX_PUSH_HEAD,
+            )
         sources.append(src or "HEAD")
     if refspecs and not sources:
         return None
     return Action("git-push", cwd, text, sources=sources or ["HEAD"])
+
+
+def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
+    idx = 0
+    while idx < len(args):
+        cur = args[idx]
+        if cur in GIT_VALUE_OPTS:
+            idx += 2
+        elif cur.startswith("-"):
+            idx += 1
+        else:
+            return cur, args[idx + 1 :]
+    return "", []
+
+
+def _is_read_only(argv: list[str]) -> bool:
+    """True for segments allowed before a gated push/PR in one tool call."""
+    if not argv:
+        return True
+    name = os.path.basename(argv[0])
+    if name in READ_ONLY_COMMANDS:
+        return True
+    if name != "git":
+        return False
+    sub, rest = _git_subcommand(argv[1:])
+    if sub in READ_ONLY_GIT:
+        return True
+    if sub == "remote":
+        return all(a in ("-v", "--verbose") for a in rest)
+    if sub == "branch":
+        return rest == ["--show-current"]
+    if sub == "config":
+        return bool(rest) and rest[0] in ("--get", "--get-all")
+    if sub == "push":
+        return any(a == "--dry-run" or (a[:1] == "-" and a[1:2] != "-" and "n" in a) for a in rest)
+    return False
 
 
 def _git_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
@@ -402,6 +473,8 @@ def _gh_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
     if group == "pr" and len(positionals) > 1:
         sub = positionals[1]
         if sub in ("create", "new"):
+            if "--help" in args or "-h" in args:
+                return []
             return [
                 Action(
                     "gh-pr-create",
@@ -459,7 +532,11 @@ def looks_gated(raw: str) -> bool:
 def _classify_script(script: str, cwd: str | None, depth: int = 0) -> list[Action]:
     if depth > 6:
         if looks_gated(script):
-            return [Action("unparseable", cwd, script[:200], deny="command nesting too deep")]
+            return [
+                Action(
+                    "unparseable", cwd, script[:200], deny="command nesting too deep", fix=FIX_PARSE
+                )
+            ]
         return []
     try:
         tokens = _lex(script)
@@ -470,28 +547,30 @@ def _classify_script(script: str, cwd: str | None, depth: int = 0) -> list[Actio
                     "unparseable",
                     cwd,
                     script[:200],
-                    deny="could not parse the command; rewrite it as a plain command",
+                    deny="could not parse the command",
+                    fix=FIX_PARSE,
                 )
             ]
         return []
+    segments = _split_simple(tokens)
     actions: list[Action] = []
+    backticked: list[Action] = []
     for inner in re.findall(r"`([^`]*)`", script):
-        actions += _classify_script(inner, cwd, depth + 1)
+        backticked += _classify_script(inner, cwd, depth + 1)
+    writers: list[str] = []
     stack: list[str | None] = []
     current = cwd
-    for words, delta in _split_simple(tokens):
+    for words, delta in segments:
         for _ in range(max(delta, 0)):
             stack.append(current)
         for _ in range(max(-delta, 0)):
             current = stack.pop() if stack else current
+        found: list[Action] = []
         for word in words:
             for inner in _substitutions(word):
-                actions += _classify_script(inner, current, depth + 1)
+                found += _classify_script(inner, current, depth + 1)
         argv, env_dir = _strip_prefix(words)
-        if not argv:
-            continue
-        run_dir = _resolve_dir(current, env_dir) if env_dir else current
-        head = os.path.basename(argv[0])
+        head = os.path.basename(argv[0]) if argv else ""
         if head in ("cd", "pushd"):
             targets = [a for a in argv[1:] if not a.startswith("-") or a == "-"]
             if not targets:
@@ -500,12 +579,45 @@ def _classify_script(script: str, cwd: str | None, depth: int = 0) -> list[Actio
                 current = None
             else:
                 current = _resolve_dir(current, targets[0])
-            continue
-        if head == "popd":
+        elif head == "popd":
             current = None
-            continue
-        actions += _command_actions(argv, run_dir, depth)
-    return actions
+        elif argv:
+            run_dir = _resolve_dir(current, env_dir) if env_dir else current
+            found += _command_actions(argv, run_dir, depth)
+        if writers:
+            _mark_chained(found, writers[0])
+        actions += found
+        if not _is_read_only(argv):
+            writers.append(" ".join(words)[:80])
+    if backticked and writers:
+        _mark_chained(backticked, writers[0])
+    return backticked + actions
+
+
+def _mark_chained(actions: list[Action], segment: str) -> None:
+    """D1: a gated action preceded by a mutating segment in the same call."""
+    for action in actions:
+        if action.deny is None:
+            action.deny = (
+                "run the push/PR command as its own tool call after preflight; this call "
+                f"runs '{segment}' before it"
+            )
+            action.fix = (
+                f"Fix: run `{action.text[:120]}` alone in its own tool call, after "
+                "preflight passes for the final HEAD."
+            )
+
+
+def _marks_ready(args: dict) -> bool:
+    """update_pull_request only publishes when it clears draft / marks ready."""
+    draft = args.get("draft")
+    if draft is False or (isinstance(draft, str) and draft.strip().lower() == "false"):
+        return True
+    for key in ("ready", "ready_for_review", "mark_ready", "markReadyForReview"):
+        value = args.get(key)
+        if value is True or (isinstance(value, str) and value.strip().lower() == "true"):
+            return True
+    return str(args.get("state", "")).strip().lower() == "ready"
 
 
 def classify(tool_name: str, tool_args: object, cwd: str | None) -> list[Action]:
@@ -518,6 +630,8 @@ def classify(tool_name: str, tool_args: object, cwd: str | None) -> list[Action]
         if not command:
             return []
         return _classify_script(command, cwd)
+    if lowered.endswith(PR_UPDATE_SUFFIX):
+        return [Action("tool-pr-ready", cwd, name)] if _marks_ready(args) else []
     if lowered.endswith(PR_TOOL_SUFFIX):
         base = args.get("base") or args.get("base_branch")
         head = args.get("head") or args.get("head_branch")
@@ -662,40 +776,53 @@ def _resolve_head_arg(value: str, root: str) -> str | None:
     return lib.rev_commit(branch, root) or lib.rev_commit(f"refs/remotes/origin/{branch}", root)
 
 
-def verify_action(action: Action, receipt: dict, root: str) -> str | None:
-    """Action-specific binding to the receipt commit. Returns a deny reason."""
+Problem = tuple[str, str | None]
+
+
+def verify_action(action: Action, receipt: dict, root: str, hint: str = "") -> Problem | None:
+    """Action-specific binding to the receipt commit: (why, fix) or None.
+
+    A None fix means "re-run preflight" (the default Fix line).
+    """
     verified = str(receipt.get("head"))
     if action.deny:
-        return action.deny
+        return action.deny, action.fix
+    current, _ = lib.head_and_tree(root)
     if action.kind == "git-push":
         for src in action.sources:
             full = lib.git_out(["rev-parse", "--symbolic-full-name", src], root) or ""
             if full.startswith("refs/tags/"):
-                return f"push of tag {src!r} is not verifiable"
+                return f"push of tag {src!r} is not verifiable", FIX_PUSH_HEAD
             sha = lib.rev_commit(src, root)
             if sha is None:
-                return f"cannot resolve push source {src!r}"
+                return f"cannot resolve push source {src!r}", FIX_UNRESOLVED_SOURCE
             if sha != verified:
-                return (
+                why = (
                     f"push source {src!r} ({sha[:12]}) is not the preflight-verified "
                     f"commit {verified[:12]}"
                 )
+                return why, (None if sha == current else FIX_OTHER_SOURCE)
         return None
-    head, _ = lib.head_and_tree(root)
+    head = current
     if action.head:
         resolved = _resolve_head_arg(action.head, root)
         if resolved is None:
-            return f"cannot resolve PR head {action.head!r} locally"
+            return f"cannot resolve PR head {action.head!r} locally", FIX_PR_HEAD
         head = resolved
     if head != verified:
-        return f"HEAD ({str(head)[:12]}) is not the preflight-verified commit {verified[:12]}"
+        why = f"HEAD ({str(head)[:12]}) is not the preflight-verified commit {verified[:12]}"
+        return why, (None if head == current else FIX_OTHER_SOURCE)
     if action.kind in ("gh-pr-create", "tool-create-pr"):
         wanted = action.base or "main"
         if wanted != receipt.get("base_branch"):
-            return (
-                f"PR base {wanted!r} differs from the preflight base "
-                f"{receipt.get('base_branch')!r} (re-run with --base)"
+            why = (
+                f"PR base {wanted!r} differs from the preflight base {receipt.get('base_branch')!r}"
             )
+            fix = (
+                f"Fix: target `{receipt.get('base_branch')}`, or re-run preflight against that "
+                f"base: {hint} --base origin/{wanted}"
+            )
+            return why, fix
     return None
 
 
@@ -705,36 +832,39 @@ BYPASS_LINE = (
 )
 
 
-def compose_reason(
-    why: str, head7: str | None, hint: str, failed: list[tuple[str, str]] | None = None
-) -> str:
-    """Self-sufficient deny text: why, exact fix command, failures, bypass."""
-    at = f" (HEAD {head7})" if head7 else ""
-    lines = [f"preflight gate: push/PR blocked: {why}{at}."]
-    lines.append(
+def preflight_fix(hint: str) -> str:
+    return (
         f"Fix: commit all changes, then run from the repo root: {hint} "
         "(exit 0 = pass; re-run after any new commit), then retry."
     )
+
+
+def compose_reason(
+    why: str,
+    head7: str | None,
+    hint: str,
+    failed: list[tuple[str, str]] | None = None,
+    fix: str | None = None,
+) -> str:
+    """Self-sufficient deny text: why, exact fix, failed checks + logs, bypass."""
+    at = f" (HEAD {head7})" if head7 else ""
+    lines = [f"preflight gate: push/PR blocked: {why}{at}.", fix or preflight_fix(hint)]
     tail = [BYPASS_LINE]
     if failed:
-        log_dirs = {os.path.dirname(log) for _cid, log in failed if log}
-        ids = [cid for cid, _log in failed]
-        if len(log_dirs) == 1:
-            logs = f"{log_dirs.pop()}/<check-id>.log"
-        else:
-            logs = "; ".join(log for _cid, log in failed if log) or "see receipt"
-        budget = REASON_LIMIT - len("\n".join([*lines, *tail])) - len(logs) - 40
+        budget = REASON_LIMIT - len("\n".join([*lines, *tail])) - 40
         shown: list[str] = []
-        for cid in ids:
-            if len(", ".join([*shown, cid])) > max(budget, 20):
+        for cid, log in failed:
+            entry = f"{cid} (log: {log})" if log else cid
+            if shown and len("; ".join([*shown, entry])) > budget:
                 break
-            shown.append(cid)
-        more = f" (+{len(ids) - len(shown)} more)" if len(shown) < len(ids) else ""
-        lines.append(f"Failed checks: {', '.join(shown)}{more}. Logs: {logs}")
+            shown.append(entry)
+        more = f" (+{len(failed) - len(shown)} more)" if len(shown) < len(failed) else ""
+        lines.append(f"Failed checks: {'; '.join(shown)}{more}")
     text = "\n".join([*lines, *tail])
     if len(text) > REASON_LIMIT:
         overflow = len(text) - REASON_LIMIT + 3
-        lines[0] = lines[0][: max(len(lines[0]) - overflow, 40)] + "..."
+        longest = max(range(len(lines)), key=lambda i: len(lines[i]))
+        lines[longest] = lines[longest][: max(len(lines[longest]) - overflow, 40)] + "..."
         text = "\n".join([*lines, *tail])
     return text
 
@@ -851,21 +981,20 @@ def _decide(tool: str, actions: list[Action], env: dict[str, str], cfg: GateConf
     now = cfg.now()
     for action, info in scoped:
         if info is None:
-            why = (
-                f"cannot resolve the target repository of `{action.text[:80]}`; run it "
-                "from the repo root without cd/-C indirection"
-            )
-            return deny_json(compose_reason(why, _head7(host["toplevel"]), hint))
+            why = f"cannot resolve the target repository of `{action.text[:80]}`"
+            return deny_json(compose_reason(why, _head7(host["toplevel"]), hint, fix=FIX_TARGET))
         root = info["toplevel"]
         if action.deny:
-            return deny_json(compose_reason(action.deny, _head7(root), hint))
+            return deny_json(compose_reason(action.deny, _head7(root), hint, fix=action.fix))
         receipt, error = lib.read_receipt(info["git_dir"])
-        problem = verify_receipt(receipt, error, info, cfg.bundle_hash_for(root), now)
-        if problem is None and receipt is not None:
-            problem = verify_action(action, receipt, root)
-        if problem:
+        why = verify_receipt(receipt, error, info, cfg.bundle_hash_for(root), now)
+        if why:
             failed = _failed_checks(receipt) if receipt is not None else []
-            return deny_json(compose_reason(problem, _head7(root), hint, failed))
+            return deny_json(compose_reason(why, _head7(root), hint, failed))
+        if receipt is not None:
+            problem = verify_action(action, receipt, root, hint)
+            if problem:
+                return deny_json(compose_reason(problem[0], _head7(root), hint, fix=problem[1]))
     return None
 
 

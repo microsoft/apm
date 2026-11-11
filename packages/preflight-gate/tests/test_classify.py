@@ -220,3 +220,24 @@ def test_create_pr_tool_carries_base() -> None:
 def test_gh_pr_create_flags() -> None:
     (action,) = gate.classify("bash", {"command": "gh pr create -B release --head me:topic"}, CWD)
     assert (action.base, action.head) == ("release", "me:topic")
+
+
+@pytest.mark.parametrize("command", ["gh pr create --help", "gh pr create -h", "gh pr new --help"])
+def test_gh_pr_create_help_is_exempt(command: str) -> None:
+    assert kinds(command) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "gated"),
+    [
+        ({"pullNumber": 1, "draft": False}, True),
+        ({"pullNumber": 1, "draft": "false"}, True),
+        ({"pullNumber": 1, "ready_for_review": True}, True),
+        ({"pullNumber": 1, "draft": True}, False),
+        ({"pullNumber": 1, "title": "new title", "body": "text"}, False),
+        ({"pullNumber": 1, "state": "closed"}, False),
+    ],
+)
+def test_update_pull_request_only_gates_ready(args: dict, gated: bool) -> None:
+    actions = gate.classify("update_pull_request", args, CWD)
+    assert [a.kind for a in actions] == (["tool-pr-ready"] if gated else [])

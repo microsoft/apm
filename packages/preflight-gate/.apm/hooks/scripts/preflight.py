@@ -6,7 +6,7 @@ Usage (from anywhere inside the repo):
         [--base REF] [--tiers auto|T0,T1,..] [--plan] [--json]
         [--keep-going] [--no-fetch] [--jobs N] [--print-ci-fingerprints]
 
-Exit codes: 0 pass, 1 fail or partial, 2 usage or internal error.
+Exit codes: 0 gate-eligible pass, 1 fail, partial or not gate-eligible, 2 usage/internal.
 Stdlib only. Unix/WSL only (native Windows is refused: CI covers Windows).
 """
 
@@ -182,6 +182,8 @@ def _internal(check, ctx, policy: ModuleType) -> tuple[bool, list[str]]:
         return lib.ascii_guard(root, ctx.merge_base, list(policy.ASCII_GUARD_PATHS))
     if check.internal == "uvlock_guard":
         return lib.uvlock_guard(root, ctx.merge_base, tuple(policy.UVLOCK_ALLOWED_HOSTS))
+    if check.internal == "lock_sync":
+        return lib.lock_sync(root)
     raise ValueError(f"unknown internal check {check.internal!r}")
 
 
@@ -323,7 +325,9 @@ def run(
 
     all_checks = [c for tier in to_run for c in plan[tier]]
     prelude, pcre_problem = shell_prelude(all_checks, warnings)
-    env = dict(os.environ)
+    home = lib.preflight_dir(git_dir) / "home"
+    lib.force_rmtree(home)
+    env = lib.ci_like_env(dict(os.environ), home, lib.short_tmpdir(dict(os.environ)))
     env.update(
         {
             "PREFLIGHT_ROOT": str(root),
@@ -363,6 +367,7 @@ def run(
 
     for tier in to_run:
         _say(f"[*] {tier}: {selected[tier]}")
+    volatile = lib.snapshot_outputs(root, tuple(getattr(policy, "VOLATILE_OUTPUTS", ())))
     phase_a, phase_b = schedule(plan, to_run)
     outcomes: dict[int, Outcome] = {}
     phase_wall: dict[str, float] = {}
@@ -402,6 +407,9 @@ def run(
         if all(id(check) in outcomes for check in plan[tier]):
             ran.append(tier)
 
+    restored = lib.restore_outputs(root, volatile)
+    if restored:
+        _say(f"  [i] restored volatile outputs: {', '.join(restored)}")
     tree1 = lib.worktree_tree(root, git_dir)
     head_end, _ = lib.head_and_tree(root)
     clean_end = lib.is_clean(root)
@@ -471,6 +479,7 @@ def run(
         "jobs": jobs,
         "phase_wall_s": phase_wall,
         "skipped_checks": [c.id for c in skipped],
+        "restored_outputs": restored,
         "checks": records,
         "warnings": warnings,
         "ci_only_lanes": list(policy.CI_ONLY_LANES),
@@ -493,7 +502,7 @@ def run(
         _say(f"[x] preflight {status.upper()}: {names}; receipt {path}")
     if args.json:
         print(json.dumps(receipt, indent=2, sort_keys=True))
-    return EXIT_PASS if status == "pass" else EXIT_FAIL
+    return EXIT_PASS if status == "pass" and not ineligible else EXIT_FAIL
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -55,7 +55,8 @@ def test_hook_json_shape() -> None:
     (entry,) = data["hooks"]["preToolUse"]
     assert entry["type"] == "command"
     assert isinstance(entry["matcher"], str)
-    assert entry["bash"].endswith("|| true")
+    assert entry["bash"].endswith("|| true; exit 0")
+    assert "git rev-parse --show-toplevel" in entry["bash"]
     assert "${PLUGIN_ROOT}/.apm/hooks/scripts/gate-launcher.sh" in entry["bash"]
     assert entry["powershell"] == "exit 0"
     assert entry["timeoutSec"] == 15
@@ -81,6 +82,13 @@ def test_matcher_covers_every_gated_tool_name(name: str) -> None:
     assert gate.classify(name, args, "/repo"), name
 
 
+@pytest.mark.parametrize("name", ["update_pull_request", "github-mcp-server-update_pull_request"])
+def test_matcher_covers_update_pull_request(name: str) -> None:
+    assert _matcher().match(name)
+    assert gate.classify(name, {"draft": False}, "/repo")
+    assert gate.classify(name, {"title": "t", "body": "b"}, "/repo") == []
+
+
 def test_matcher_covers_gate_shell_set_exactly() -> None:
     assert {n.lower() for n in gate.SHELL_TOOL_NAMES} == gate.SHELL_TOOLS
     assert gate.PR_TOOL_SUFFIX == "create_pull_request"
@@ -103,7 +111,7 @@ def test_matcher_covers_gate_shell_set_exactly() -> None:
         "bash2",
         "mybash",
         "create_pull_request_review",
-        "update_pull_request",
+        "update_pull_request_branch",
     ],
 )
 def test_matcher_skips_non_gated_tools(name: str) -> None:
@@ -152,6 +160,7 @@ PUBLISH = [
     ("write_bash", {"input": "git push\n"}),
     ("create_pull_request", {"title": "t", "base_branch": "main"}),
     ("github-mcp-server-create_pull_request", {"owner": "o", "repo": "r"}),
+    ("update_pull_request", {"pullNumber": 3, "draft": False}),
 ]
 
 
@@ -169,6 +178,12 @@ def test_publish_payloads_start_python(workdir: Path, tool: str, args: dict) -> 
     proc = launch(bundle, _tool_payload(tool, args))
     assert proc.returncode == 0
     assert marker.read_text(encoding="utf-8") == "x"
+
+
+def test_update_pull_request_text_edits_never_start_python(workdir: Path) -> None:
+    bundle, marker = _stub_bundle(workdir / "bundle")
+    launch(bundle, _tool_payload("update_pull_request", {"title": "t", "body": "b"}))
+    assert not marker.exists()
 
 
 def test_string_tool_args_publish_is_detected(workdir: Path) -> None:
@@ -226,3 +241,40 @@ def test_missing_launcher_fails_open_via_hook_command(workdir: Path) -> None:
         cwd=workdir,
     )
     assert (proc.returncode, proc.stdout) == (0, "")
+
+
+def _deployed_command(prefix: str) -> str:
+    command = json.loads(HOOK_JSON.read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]["bash"]
+    return command.replace("${PLUGIN_ROOT}", prefix)
+
+
+@pytest.mark.parametrize("subdir", ["", "docs", "docs/deep/er"])
+def test_project_hook_command_works_from_subdirectories(sandbox: Sandbox, subdir: str) -> None:
+    """D2: the repo-relative deployed command must resolve from any cwd."""
+    install_bundle(sandbox.root / ".github/hooks/scripts/preflight-gate/.apm/hooks/scripts")
+    cwd = sandbox.root / subdir
+    cwd.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        ["bash", "-c", _deployed_command(".github/hooks/scripts/preflight-gate")],
+        input=payload("git push origin HEAD", cwd),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=cwd,
+    )
+    assert proc.returncode == 0
+    (line,) = proc.stdout.splitlines()
+    assert json.loads(line)["permissionDecision"] == "deny"
+
+
+def test_user_scope_absolute_hook_command(sandbox: Sandbox, workdir: Path) -> None:
+    bundle = install_bundle(workdir / "user-hooks" / ".apm/hooks/scripts")
+    proc = subprocess.run(
+        ["bash", "-c", _deployed_command(str(bundle.parent.parent.parent))],
+        input=payload("git push origin HEAD", sandbox.root / "README.md").replace("/README.md", ""),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=workdir,
+    )
+    assert proc.returncode == 0

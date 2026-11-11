@@ -118,15 +118,15 @@ dependencies:
   - .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py
   - .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py
   deployed_file_hashes:
-    .github/hooks/preflight-gate-preflight-gate.json: sha256:9aecd2ac905a8c9b7085be7a0795eef6dcf6046d619f045577c8cfbe08153dc8
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh: sha256:faa659863bd282800ab89df396026dff3b5e6fde15d5e020a165f30968497a7f
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate.py: sha256:0b5871b5823db9f15a3315fb67111e7fdbfb8dc2ae372a96c42caf341e1f9919
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py: sha256:19f7a18c273523071604807577a477efd006e450191bcd9bf3b8cb2a89956c4e
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py: sha256:45c427ec13a3d478e92a854f641ec502a96f0e05b786776492dde3b59917ab68
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py: sha256:74b82099248a36edcf8001808a8ea5b1cdf0f844d196f4f27deb019811de41de
+    .github/hooks/preflight-gate-preflight-gate.json: sha256:b584859afb85235a939e285e17e10a2cf767bc13bb0c2a1a87e59d1cd8cfddf0
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh: sha256:4b9e007d92d9e631e4615bb70e3708256da7e9c1dfd9e2222e30a5fe66275865
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate.py: sha256:57f29082bdb8d427d2295abfad22fa464ea83dffc1724d31378a0cec8757e240
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py: sha256:56e794d404d95ad51821066817e8362df487dc259335491c9d2b470fd0d933e6
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py: sha256:193ab0b84f73745896c9a7bf43be50d8e9e15a293a354e67d5d04d65f9965da3
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py: sha256:d3c6cd784491afb8cbdeb5a1df0d28fbe603ec9982073bc3b4f9811eb815156a
   source: local
   local_path: ./packages/preflight-gate
-  content_hash: sha256:9e4603f58e7222559b37e410a0850cf8d4e1aae7c8c196a454e84976cd5d97f2
+  content_hash: sha256:da06ec86572522c40f40bbdade3a103c1b673424e496d1905a907ca46bd3db89
   declared_license: Apache-2.0
   exec_status: deployed
 - repo_url: _local/autopilot-comment
@@ -1489,7 +1489,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:9aecd2ac905a8c9b7085be7a0795eef6dcf6046d619f045577c8cfbe08153dc8
+  content_hash: sha256:b584859afb85235a939e285e17e10a2cf767bc13bb0c2a1a87e59d1cd8cfddf0
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh
@@ -1498,7 +1498,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:faa659863bd282800ab89df396026dff3b5e6fde15d5e020a165f30968497a7f
+  content_hash: sha256:4b9e007d92d9e631e4615bb70e3708256da7e9c1dfd9e2222e30a5fe66275865
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate.py
@@ -1507,7 +1507,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:0b5871b5823db9f15a3315fb67111e7fdbfb8dc2ae372a96c42caf341e1f9919
+  content_hash: sha256:57f29082bdb8d427d2295abfad22fa464ea83dffc1724d31378a0cec8757e240
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py
@@ -1516,7 +1516,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:19f7a18c273523071604807577a477efd006e450191bcd9bf3b8cb2a89956c4e
+  content_hash: sha256:56e794d404d95ad51821066817e8362df487dc259335491c9d2b470fd0d933e6
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py
@@ -1525,7 +1525,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:45c427ec13a3d478e92a854f641ec502a96f0e05b786776492dde3b59917ab68
+  content_hash: sha256:193ab0b84f73745896c9a7bf43be50d8e9e15a293a354e67d5d04d65f9965da3
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py
@@ -1534,7 +1534,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:74b82099248a36edcf8001808a8ea5b1cdf0f844d196f4f27deb019811de41de
+  content_hash: sha256:d3c6cd784491afb8cbdeb5a1df0d28fbe603ec9982073bc3b4f9811eb815156a
 - kind: project-relative
   target: copilot
   value: .github/instructions/architecture.instructions.md

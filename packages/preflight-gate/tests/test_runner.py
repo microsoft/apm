@@ -47,7 +47,7 @@ def test_receipt_lives_in_git_dir_not_worktree(sandbox: Sandbox, fake_policy) ->
 
 def test_dirty_worktree_runs_but_is_not_eligible(sandbox: Sandbox, fake_policy) -> None:
     sandbox.write("src/dirty.py", "x = 1\n")
-    assert run(sandbox, fake_policy) == 0
+    assert run(sandbox, fake_policy) == 1
     receipt = sandbox.receipt()
     assert receipt["status"] == "pass"
     assert receipt["gate_eligible"] is False
@@ -62,7 +62,7 @@ def test_explicit_tiers_subset_is_partial_and_ineligible(sandbox: Sandbox, fake_
     receipt = sandbox.receipt()
     assert receipt["status"] == "partial"
     assert receipt["gate_eligible"] is False
-    assert run(sandbox, fake_policy, "--tiers", "T1,T0") == 0
+    assert run(sandbox, fake_policy, "--tiers", "T1,T0") == 1
     receipt = sandbox.receipt()
     assert receipt["ran_tiers"] == ["T0", "T1"]
     assert receipt["status"] == "pass"
@@ -240,3 +240,134 @@ def test_pcre_prelude_selection(monkeypatch) -> None:
     prelude, problem = preflight.shell_prelude(checks, [])
     assert prelude == ""
     assert "brew install grep" in problem
+
+
+# --- volatile outputs, CI-like env, lock sync (D3) ------------------------------
+
+
+def _with_t0(fake_policy, *cmds: str):
+    from types import SimpleNamespace
+
+    def build(tier: str, _ctx) -> list[policy.Check]:
+        if tier != "T0":
+            return []
+        return [policy.Check(f"c{i}", "T0", cmd=c) for i, c in enumerate(cmds)]
+
+    return SimpleNamespace(**{**vars(fake_policy), "build_checks": build})
+
+
+def test_volatile_outputs_are_restored_and_recorded(sandbox: Sandbox, fake_policy) -> None:
+    sandbox.write("CONFORMANCE.json", '{"v": 1}\n')
+    sandbox.commit()
+    pol = _with_t0(
+        fake_policy,
+        "echo regenerated > CONFORMANCE.json",
+        "mkdir -p .github && echo '{}' > .github/mcp.json",
+    )
+    assert run(sandbox, pol, "--no-fetch") == 0
+    receipt = sandbox.receipt()
+    assert receipt["status"] == "pass"
+    assert receipt["gate_eligible"] is True
+    assert receipt["restored_outputs"] == ["CONFORMANCE.json", ".github/mcp.json"]
+    assert (sandbox.root / "CONFORMANCE.json").read_text(encoding="utf-8") == '{"v": 1}\n'
+    assert not (sandbox.root / ".github/mcp.json").exists()
+    assert lib.is_clean(sandbox.root)
+
+
+def test_other_mutations_still_fail(sandbox: Sandbox, fake_policy) -> None:
+    sandbox.write("CONFORMANCE.json", '{"v": 1}\n')
+    sandbox.commit()
+    pol = _with_t0(fake_policy, "echo x > CONFORMANCE.json", "echo x >> README.md")
+    assert run(sandbox, pol, "--no-fetch") == 1
+    receipt = sandbox.receipt()
+    assert receipt["restored_outputs"] == ["CONFORMANCE.json"]
+    assert "hygiene.tree-mutated" in [c["id"] for c in receipt["checks"] if c["exit"]]
+
+
+def test_command_checks_get_a_ci_like_env(
+    sandbox: Sandbox, fake_policy, workdir: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("APM_SECRET_SETTING", "leak")
+    monkeypatch.setenv("GITHUB_TOKEN", "leak")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "leak")
+    monkeypatch.setenv("UV_NO_SYNC", "1")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'credential.helper=leak'")
+    dump = workdir / "env.txt"
+    pol = _with_t0(fake_policy, f"env > {dump}")
+    assert run(sandbox, pol, "--no-fetch") == 0
+    env = dict(line.split("=", 1) for line in dump.read_text().splitlines() if "=" in line)
+    assert "APM_SECRET_SETTING" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert "CLAUDE_CONFIG_DIR" not in env
+    assert "GIT_CONFIG_PARAMETERS" not in env
+    assert env["UV_NO_SYNC"] == "1"
+    assert env["HOME"] == str(lib.preflight_dir(sandbox.git_dir) / "home")
+    assert env["USER"] == env["LOGNAME"] == "runner"
+    assert env["XDG_CONFIG_HOME"].startswith(env["HOME"])
+    assert env["TMPDIR"].endswith("/apm-pf")
+    assert len(env["TMPDIR"]) < 60
+    assert env["UV_CACHE_DIR"].endswith("/uv")
+    assert env["PREFLIGHT_BASE_REF"] == "origin/main"
+
+
+def test_ci_like_env_keeps_tool_locations(workdir: Path) -> None:
+    env = lib.ci_like_env(
+        {"PATH": "/bin", "GIT_EXEC_PATH": "/opt/git/libexec", "HOME": str(workdir)},
+        workdir / "home",
+        workdir / "tmp",
+    )
+    assert env["GIT_EXEC_PATH"] == "/opt/git/libexec"
+    assert env["PATH"] == "/bin"
+
+
+def _fake_uv(workdir: Path, output: str) -> Path:
+    bin_dir = workdir / "fakebin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(f"#!/bin/sh\ncat <<'OUT'\n{output}\nOUT\n", encoding="utf-8")
+    uv.chmod(0o755)
+    return bin_dir
+
+
+@pytest.mark.parametrize(
+    ("output", "ok"),
+    [
+        (
+            "Would use project environment at: .venv\nChecked 96 packages\nWould make no changes",
+            True,
+        ),
+        (
+            "Would uninstall 1 package\nWould install 1 package\n - click==8.5.0\n + click==8.2.1",
+            False,
+        ),
+    ],
+)
+def test_lock_sync_detects_drift(
+    sandbox: Sandbox, workdir: Path, monkeypatch, output: str, ok: bool
+) -> None:
+    import os
+
+    bin_dir = _fake_uv(workdir, output)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    result, lines = lib.lock_sync(sandbox.root)
+    assert result is ok
+    if not ok:
+        assert "- click==8.5.0" in lines[1]
+        assert "uv sync --frozen --extra dev" in lines[-1]
+
+
+def test_lock_sync_is_selected_only_with_test_tiers(sandbox: Sandbox) -> None:
+    ctx = _ctx(sandbox, ["docs/x.md"])
+    assert "env.lock-sync" not in [c.id for c in policy.build_checks("T0", ctx)]
+    ctx.selected = {"T0": "", "T1": ""}
+    assert "env.lock-sync" in [c.id for c in policy.build_checks("T0", ctx)]
+
+
+def test_isolated_home_with_locked_dirs_is_reset(sandbox: Sandbox, fake_policy) -> None:
+    locked = lib.preflight_dir(sandbox.git_dir) / "home" / ".cache" / "apm" / "x" / "y"
+    locked.mkdir(parents=True)
+    (locked / "f").write_text("x", encoding="utf-8")
+    locked.chmod(0o200)
+    locked.parent.chmod(0o200)
+    assert run(sandbox, fake_policy, "--no-fetch") == 0
+    assert not (lib.preflight_dir(sandbox.git_dir) / "home" / ".cache" / "apm").exists()
