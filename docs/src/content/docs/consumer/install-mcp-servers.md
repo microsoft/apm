@@ -109,6 +109,16 @@ For every selected target that passes its scope and adapter prerequisites,
 `apm install` writes a runtime-specific MCP config file. The schemas differ;
 the `apm.yml` source of truth does not.
 
+Self-defined servers (`registry: false`) are written under their exact
+declared `name`, including names with a slash such as `com.example/server`.
+Registry servers such as `io.github.github/github-mcp-server` keep the short
+`github-mcp-server` key in every target except VS Code. If an older APM release
+wrote a self-defined server under its final segment, `apm install` removes that
+entry only when APM's recorded ownership proves it wrote it (and, for Claude
+Code and Codex, that it is unchanged); otherwise it leaves the entry and prints
+its name and config path so you can remove it yourself. OpenCode entries are
+not checked.
+
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token
 prompts until you choose to configure one. See the
