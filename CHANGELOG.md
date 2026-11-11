@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving refused files and prior lock contents during cold `--frozen` replay with overlapping dependencies. Files admitted earlier in a failed install may remain; the failure summary counts each refusing package once, and conflicting files can be moved aside before retrying or overwritten with `--force` only intentionally. -- with credit to @TyceHerrman (#3440, #3490)
+
 ### Changed
 
 - Switch APM-owned software, agent primitives, code examples and OpenAPM to Apache-2.0, with general documentation under CC-BY-4.0; distribute both licenses and their scope, preserve historical MIT and third-party notices, and correct filelock attribution and NOTICE coverage wording. Redistributors should review the applicable terms and retain notices when updating; previous MIT releases are unchanged. (#3487)
@@ -29,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Repeated `apm compile` runs on unchanged sources now keep the same placement: `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` files written by an earlier compile (marked as APM-generated) no longer count as `applyTo` matches. Previously, sparse subtrees could switch to root-inline placement and show a permanent orphan warning for the compiler's own output. (#3539)
 - The uncached Git fallback pins `core.autocrlf=false` on both its working-tree clone and the checkout that follows, so a host whose gitconfig sets `core.autocrlf=true` no longer materializes CRLF bytes and then fails `apm install` with "Your local changes would be overwritten by checkout" when the locked commit differs from the branch head. -- by @abhishekacharya200 (#3409)
 - `apm install -g` into one Claude profile (`CLAUDE_CONFIG_DIR`) or Hermes home (`HERMES_HOME`) no longer deletes files deployed to another profile through the shared user lockfile; stale-file cleanup is limited to the selected root. -- by @xronos-i-am (#3424)
+- `apm uninstall -g` under a Claude profile (`CLAUDE_CONFIG_DIR`) removes the package's files and lockfile rows only from that profile instead of deleting the default profile's files; a package another profile still uses stays in `~/.apm/apm.yml` until it is uninstalled from every profile. (#3555)
 - `apm install` and `apm install -g` no longer fail with "installation binding does not match" after a reboot or remount changes only the root's device number on Linux (btrfs subvolumes) and macOS; the receipt is rebound when inode, path, installation identity and recorded creation time still match, and recreated roots stay rejected. -- by @TyceHerrman (#3439)
 - Antigravity rules now follow Antigravity's documented schema: multi-pattern `applyTo` becomes one quoted comma-separated `globs` string instead of a list Antigravity rejects, and instructions without `applyTo` get `trigger: always_on` so Antigravity no longer discards them. Rules re-render on the next install; OpenAPM `req-tg-005` is amended to match. (#3546)
 - A timed-out HTTP lifecycle hook whose response arrives during the post-abort grace window now closes that response instead of leaking its connection; the deadline error log is unchanged. (#3548)
