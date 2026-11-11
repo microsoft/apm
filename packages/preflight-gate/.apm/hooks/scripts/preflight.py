@@ -205,27 +205,27 @@ def default_jobs() -> int:
 Outcome = tuple[int, float, Path]
 
 
-def run_tier(checks: list, execute: Callable[[object], Outcome], jobs: int) -> list[Outcome]:
-    """Run one tier; return outcomes in policy order.
+def run_concurrent(checks: list, execute: Callable[[object], Outcome], jobs: int) -> list[Outcome]:
+    """Run *checks* on a bounded pool; outcomes in input order.
 
-    Non-exclusive checks run concurrently on a bounded pool (siblings always
-    finish even when one fails). Exclusive checks (xdist / E2E suites that
-    saturate the host) then run one at a time, never beside anything else.
+    Every check runs to completion even when a sibling fails.
     """
-    outcomes: dict[int, Outcome] = {}
-    shared = [i for i, c in enumerate(checks) if not getattr(c, "exclusive", False)]
-    if jobs > 1 and len(shared) > 1:
-        with ThreadPoolExecutor(max_workers=min(jobs, len(shared))) as pool:
-            futures = {i: pool.submit(execute, checks[i]) for i in shared}
-            for i, future in futures.items():
-                outcomes[i] = future.result()
-    else:
-        for i in shared:
-            outcomes[i] = execute(checks[i])
-    for i, check in enumerate(checks):
-        if i not in outcomes:
-            outcomes[i] = execute(check)
-    return [outcomes[i] for i in range(len(checks))]
+    if jobs <= 1 or len(checks) <= 1:
+        return [execute(check) for check in checks]
+    with ThreadPoolExecutor(max_workers=min(jobs, len(checks))) as pool:
+        futures = [pool.submit(execute, check) for check in checks]
+        return [future.result() for future in futures]
+
+
+def schedule(plan: dict[str, list], tiers: list[str]) -> tuple[list, list]:
+    """Two phases over ALL selected tiers, each in tier then policy order.
+
+    Phase A: every non-exclusive check (run concurrently, across tiers).
+    Phase B: exclusive checks (xdist / E2E suites), one at a time.
+    """
+    phase_a = [c for t in tiers for c in plan[t] if not getattr(c, "exclusive", False)]
+    phase_b = [c for t in tiers for c in plan[t] if getattr(c, "exclusive", False)]
+    return phase_a, phase_b
 
 
 def _plan_report(selected: dict[str, str], plan: dict[str, list]) -> None:
@@ -354,26 +354,53 @@ def run(
             code = 2
         return code, time.monotonic() - began, log_path
 
-    records: list[dict] = []
-    ran: list[str] = []
-    tier_wall: dict[str, float] = {}
+    def report(check, outcome: Outcome) -> None:
+        code, duration, log_path = outcome
+        if code == 0:
+            _say(f"  [+] {check.tier} {check.id} ({duration:.1f}s)")
+        else:
+            _say(f"  [x] {check.tier} {check.id} (exit {code}) log: {log_path}")
+
     for tier in to_run:
         _say(f"[*] {tier}: {selected[tier]}")
-        began = time.monotonic()
-        outcomes = run_tier(plan[tier], execute, jobs)
-        tier_wall[tier] = round(time.monotonic() - began, 2)
-        tier_failed = False
-        for check, (code, duration, log_path) in zip(plan[tier], outcomes, strict=True):
-            records.append(_check_record(check, code, duration, log_path))
-            if code == 0:
-                _say(f"  [+] {check.id} ({duration:.1f}s)")
-            else:
-                tier_failed = True
-                _say(f"  [x] {check.id} (exit {code}) log: {log_path}")
-        _say(f"  [i] {tier} wall time {tier_wall[tier]:.1f}s ({jobs} job(s))")
-        ran.append(tier)
-        if tier_failed and not args.keep_going:
-            break
+    phase_a, phase_b = schedule(plan, to_run)
+    outcomes: dict[int, Outcome] = {}
+    phase_wall: dict[str, float] = {}
+
+    _say(f"[*] phase A: {len(phase_a)} check(s) concurrently ({jobs} job(s))")
+    began = time.monotonic()
+    for check, outcome in zip(phase_a, run_concurrent(phase_a, execute, jobs), strict=True):
+        outcomes[id(check)] = outcome
+        report(check, outcome)
+    phase_wall["A"] = round(time.monotonic() - began, 2)
+    failed_a = any(outcomes[id(c)][0] != 0 for c in phase_a)
+
+    began = time.monotonic()
+    skipped: list = []
+    if phase_b:
+        _say(f"[*] phase B: {len(phase_b)} exclusive check(s), one at a time")
+    for check in phase_b:
+        stop = any(o[0] != 0 for o in outcomes.values())
+        if stop and not args.keep_going:
+            skipped.append(check)
+            continue
+        outcomes[id(check)] = execute(check)
+        report(check, outcomes[id(check)])
+    phase_wall["B"] = round(time.monotonic() - began, 2)
+    if skipped:
+        cause = "phase A failed" if failed_a else "an exclusive check failed"
+        names = ", ".join(c.id for c in skipped)
+        _say(f"  [i] skipped ({cause}; --keep-going runs them): {names}")
+    _say(f"  [i] wall time: phase A {phase_wall['A']:.1f}s, phase B {phase_wall['B']:.1f}s")
+
+    records: list[dict] = []
+    ran: list[str] = []
+    for tier in to_run:
+        for check in plan[tier]:
+            if id(check) in outcomes:
+                records.append(_check_record(check, *outcomes[id(check)]))
+        if all(id(check) in outcomes for check in plan[tier]):
+            ran.append(tier)
 
     tree1 = lib.worktree_tree(root, git_dir)
     head_end, _ = lib.head_and_tree(root)
@@ -442,7 +469,8 @@ def run(
         "ran_tiers": ran,
         "parallel": jobs > 1,
         "jobs": jobs,
-        "tier_wall_s": tier_wall,
+        "phase_wall_s": phase_wall,
+        "skipped_checks": [c.id for c in skipped],
         "checks": records,
         "warnings": warnings,
         "ci_only_lanes": list(policy.CI_ONLY_LANES),

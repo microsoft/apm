@@ -1,4 +1,4 @@
-"""Concurrency inside a tier: bounded pool, exclusive checks alone, order."""
+"""Two-phase scheduling: shared checks overlap across tiers, exclusives alone."""
 
 from __future__ import annotations
 
@@ -51,9 +51,9 @@ def test_shared_checks_run_concurrently_within_the_bound(
     receipt = sandbox.receipt()
     assert receipt["parallel"] is True
     assert receipt["jobs"] == 2
-    assert set(receipt["tier_wall_s"]) == {"T0"}
+    assert set(receipt["phase_wall_s"]) == {"A", "B"}
     total = sum(c["duration_s"] for c in receipt["checks"])
-    assert receipt["tier_wall_s"]["T0"] < total
+    assert receipt["phase_wall_s"]["A"] < total
 
 
 def test_exclusive_checks_never_overlap(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
@@ -70,36 +70,109 @@ def test_exclusive_checks_never_overlap(sandbox: Sandbox, fake_policy, workdir: 
     assert _peak(probes, "x1") == 1
     assert _peak(probes, "x2") == 1
     assert max(_peak(probes, s) for s in ("s1", "s2", "s3")) == 3
+    assert sandbox.receipt()["ran_tiers"] == ["T0"]
 
 
-def test_failure_lets_siblings_finish_and_fails_the_tier(
+def test_shared_checks_overlap_across_tiers(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
+    probes = workdir / "probes"
+    tiers = {
+        "T0": [policy.Check("t0.lint", "T0", cmd=_probe(probes, "t0"))],
+        "T1": [policy.Check("t1.contracts", "T1", cmd=_probe(probes, "t1"))],
+    }
+    pol = _policy(fake_policy, tiers)
+    assert preflight.run(["--jobs", "4", "--no-fetch"], policy=pol, cwd=sandbox.root) == 0
+    assert _peak(probes, "t0") == 2
+    assert _peak(probes, "t1") == 2
+    assert sandbox.receipt()["ran_tiers"] == ["T0", "T1"]
+
+
+def test_phase_b_runs_after_phase_a_in_tier_order(
     sandbox: Sandbox, fake_policy, workdir: Path, capsys
 ) -> None:
     probes = workdir / "probes"
-    t0 = [
-        policy.Check("a.fast-fail", "T0", cmd=_probe(probes, "a", sleep=0.1, fail=True)),
-        policy.Check("b.slow", "T0", cmd=_probe(probes, "b", sleep=0.8)),
-        policy.Check("c.slow", "T0", cmd=_probe(probes, "c", sleep=0.8)),
-    ]
-    t1 = [policy.Check("t1.never", "T1", cmd=_probe(probes, "never"))]
-    pol = _policy(fake_policy, {"T0": t0, "T1": t1})
-    assert preflight.run(["--jobs", "3", "--no-fetch"], policy=pol, cwd=sandbox.root) == 1
+    tiers = {
+        "T0": [policy.Check("a0", "T0", cmd=_probe(probes, "a0"))],
+        "T2": [policy.Check("x2", "T2", cmd=_probe(probes, "x2"), exclusive=True)],
+        "T3": [
+            policy.Check("x3", "T3", cmd=_probe(probes, "x3"), exclusive=True),
+            policy.Check("a3", "T3", cmd=_probe(probes, "a3")),
+        ],
+    }
+    pol = _policy(fake_policy, tiers)
+    assert preflight.run(["--jobs", "4", "--no-fetch"], policy=pol, cwd=sandbox.root) == 0
+    assert _peak(probes, "a0") == 2
+    assert _peak(probes, "x2") == 1
+    assert _peak(probes, "x3") == 1
+    order = re.findall(r"\[[+x]\] T\d (\S+) \(", capsys.readouterr().err)
+    assert order == ["a0", "a3", "x2", "x3"]
+    receipt = sandbox.receipt()
+    assert [c["id"] for c in receipt["checks"]] == ["a0", "x2", "x3", "a3"]
+    assert receipt["ran_tiers"] == ["T0", "T2", "T3"]
+    assert receipt["skipped_checks"] == []
+
+
+def test_phase_a_failure_skips_phase_b(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
+    probes = workdir / "probes"
+    tiers = {
+        "T0": [
+            policy.Check("a.fail", "T0", cmd=_probe(probes, "a", sleep=0.1, fail=True)),
+            policy.Check("b.slow", "T0", cmd=_probe(probes, "b", sleep=0.8)),
+        ],
+        "T1": [policy.Check("t1.shared", "T1", cmd=_probe(probes, "t1", sleep=0.8))],
+        "T2": [policy.Check("t2.xdist", "T2", cmd=_probe(probes, "t2"), exclusive=True)],
+    }
+    pol = _policy(fake_policy, tiers)
+    assert preflight.run(["--jobs", "4", "--no-fetch"], policy=pol, cwd=sandbox.root) == 1
     assert (probes / "done-b").exists()
-    assert (probes / "done-c").exists()
-    assert not (probes / "done-never").exists()
+    assert (probes / "done-t1").exists()
+    assert not (probes / "done-t2").exists()
     receipt = sandbox.receipt()
     assert receipt["status"] == "fail"
-    assert receipt["ran_tiers"] == ["T0"]
-    assert [(c["id"], c["exit"]) for c in receipt["checks"][:3]] == [
-        ("a.fast-fail", 1),
+    assert receipt["ran_tiers"] == ["T0", "T1"]
+    assert receipt["skipped_checks"] == ["t2.xdist"]
+    assert [(c["id"], c["exit"]) for c in receipt["checks"]] == [
+        ("a.fail", 1),
         ("b.slow", 0),
-        ("c.slow", 0),
+        ("t1.shared", 0),
     ]
-    err = capsys.readouterr().err
-    order = re.findall(r"\[[+x]\] (\S+) \(", err)
-    assert order[:3] == ["a.fast-fail", "b.slow", "c.slow"]
-    for check in receipt["checks"]:
-        assert Path(check["log"]).name == f"{check['id']}.log"
+    assert (
+        preflight.run(["--jobs", "4", "--no-fetch", "--keep-going"], policy=pol, cwd=sandbox.root)
+        == 1
+    )
+    assert (probes / "done-t2").exists()
+    assert sandbox.receipt()["ran_tiers"] == ["T0", "T1", "T2"]
+
+
+def test_exclusive_failure_skips_remaining_exclusives(
+    sandbox: Sandbox, fake_policy, workdir: Path
+) -> None:
+    probes = workdir / "probes"
+    tiers = {
+        "T0": [policy.Check("a0", "T0", cmd=_probe(probes, "a0", sleep=0.1))],
+        "T2": [policy.Check("x2", "T2", cmd=_probe(probes, "x2", fail=True), exclusive=True)],
+        "T3": [
+            policy.Check("x3a", "T3", cmd=_probe(probes, "x3a"), exclusive=True),
+            policy.Check("a3", "T3", cmd=_probe(probes, "a3", sleep=0.1)),
+        ],
+    }
+    pol = _policy(fake_policy, tiers)
+    assert preflight.run(["--jobs", "4", "--no-fetch"], policy=pol, cwd=sandbox.root) == 1
+    assert not (probes / "done-x3a").exists()
+    assert (probes / "done-a3").exists()
+    receipt = sandbox.receipt()
+    assert receipt["ran_tiers"] == ["T0", "T2"]
+    assert receipt["skipped_checks"] == ["x3a"]
+    assert receipt["status"] == "fail"
+
+
+def test_phase_wall_clock_is_recorded(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
+    probes = workdir / "probes"
+    tiers = {"T0": [policy.Check("a0", "T0", cmd=_probe(probes, "a0", sleep=0.1))]}
+    pol = _policy(fake_policy, tiers)
+    assert preflight.run(["--jobs", "2", "--no-fetch"], policy=pol, cwd=sandbox.root) == 0
+    receipt = sandbox.receipt()
+    assert receipt["status"] == "pass"
+    assert receipt["phase_wall_s"]["B"] < receipt["phase_wall_s"]["A"]
 
 
 def test_jobs_one_is_serial(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
@@ -111,17 +184,20 @@ def test_jobs_one_is_serial(sandbox: Sandbox, fake_policy, workdir: Path) -> Non
     assert sandbox.receipt()["parallel"] is False
 
 
-def test_run_tier_preserves_policy_order() -> None:
-    checks = [policy.Check(f"c{i}", "T0", cmd="true", exclusive=i % 2 == 0) for i in range(6)]
-    seen: list[str] = []
+def test_schedule_and_run_concurrent_preserve_policy_order() -> None:
+    plan = {
+        "T0": [policy.Check(f"t0.{i}", "T0", cmd="true", exclusive=i == 1) for i in range(3)],
+        "T1": [policy.Check(f"t1.{i}", "T1", cmd="true", exclusive=i == 0) for i in range(2)],
+    }
+    phase_a, phase_b = preflight.schedule(plan, ["T0", "T1"])
+    assert [c.id for c in phase_a] == ["t0.0", "t0.2", "t1.1"]
+    assert [c.id for c in phase_b] == ["t0.1", "t1.0"]
 
     def execute(check):
-        seen.append(check.id)
         return 0, 0.0, Path(f"{check.id}.log")
 
-    outcomes = preflight.run_tier(checks, execute, jobs=3)
-    assert [o[2].name for o in outcomes] == [f"c{i}.log" for i in range(6)]
-    assert seen[-3:] == ["c0", "c2", "c4"]
+    outcomes = preflight.run_concurrent(phase_a, execute, jobs=3)
+    assert [o[2].name for o in outcomes] == ["t0.0.log", "t0.2.log", "t1.1.log"]
 
 
 def test_heavy_policy_checks_are_exclusive() -> None:

@@ -75,17 +75,16 @@ def test_bad_tiers_value_is_usage_error(sandbox: Sandbox, fake_policy) -> None:
         run(sandbox, fake_policy, "--tiers", "T9")
 
 
-def test_failing_tier_stops_unless_keep_going(sandbox: Sandbox, fake_policy) -> None:
+def test_failure_still_runs_shared_checks_of_every_tier(sandbox: Sandbox, fake_policy) -> None:
     sandbox.write("FAIL_T0", "1\n")
     sandbox.write("src/a.py", "x = 1\n")
     sandbox.commit()
     assert run(sandbox, fake_policy) == 1
     receipt = sandbox.receipt()
     assert receipt["status"] == "fail"
-    assert receipt["ran_tiers"] == ["T0"]
+    assert receipt["ran_tiers"] == ["T0", "T1"]
+    assert receipt["skipped_checks"] == []
     assert [c["id"] for c in receipt["checks"] if c["exit"]] == ["t0.flag"]
-    assert run(sandbox, fake_policy, "--keep-going") == 1
-    assert sandbox.receipt()["ran_tiers"] == ["T0", "T1"]
 
 
 def test_tree_mutation_is_detected(sandbox: Sandbox, fake_policy) -> None:

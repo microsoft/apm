@@ -29,10 +29,12 @@ Flags: `--base REF` (default `origin/main`, fetched first unless
 `--no-fetch`), `--tiers T0,T1` (diagnostic; never gate-eligible),
 `--keep-going`, `--json`, `--jobs N`, `--print-ci-fingerprints`.
 
-Tiers run in order and stop after a failing tier. Inside a tier, checks run
-concurrently (`--jobs`, default `min(4, cpus)`); xdist and E2E suites are
-marked exclusive in the policy and run alone. Logs stay per check; the
-summary prints in policy order once the tier finishes.
+Tiers decide WHAT runs; scheduling is two-phase across all selected tiers.
+Phase A runs every non-exclusive check concurrently (`--jobs`, default
+`min(4, cpus)`). Phase B then runs the exclusive checks (xdist and E2E
+suites) one at a time in tier order. A Phase A failure skips Phase B, and a
+failing exclusive check skips the rest, unless `--keep-going`. A tier counts
+as ran only when all its checks ran. Logs stay per check.
 
 | Tier | Selected when | Runs |
 | --- | --- | --- |

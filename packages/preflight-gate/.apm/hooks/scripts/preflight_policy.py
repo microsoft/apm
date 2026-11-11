@@ -222,8 +222,9 @@ UNIT_SEARCH_ROOTS = ("tests/unit", "tests/red_team", "tests/test_console.py")
 class Check:
     """One unit of verification. Exactly one of `cmd` / `internal` is set.
 
-    Checks in a tier run concurrently unless `exclusive`: exclusive checks
-    (pytest-xdist suites that saturate every core, E2E suites) run alone.
+    Non-exclusive checks of all selected tiers run concurrently (phase A);
+    `exclusive` checks (xdist / E2E suites that saturate every core) run
+    afterwards, one at a time (phase B).
     """
 
     id: str
