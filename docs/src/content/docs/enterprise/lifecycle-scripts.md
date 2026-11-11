@@ -121,9 +121,12 @@ Fields:
 - `command` -- fallback command string (cross-platform)
 - `cwd` -- working directory (relative paths resolve against project root)
 - `env` -- extra environment variables merged into the process env
-- `timeoutSec` -- execution timeout (default: 30s)
+- `timeoutSec` -- execution timeout in seconds (default: 30s); `timeout` is an accepted alias
 
 If both `bash` and `command` are present, `bash` takes priority.
+
+Timeouts must be positive. A zero or negative `timeoutSec` (or `timeout`) is
+ignored with a warning naming the script, and the default applies.
 
 ### HTTP
 
@@ -143,7 +146,8 @@ Fields:
 - `description` -- (optional) human annotation shown in `apm lifecycle`
 - `url` -- HTTPS endpoint (**http:// is rejected**)
 - `headers` -- request headers; values support `$ENV_VAR` expansion
-- `timeoutSec` -- request timeout (default: 10s)
+- `timeoutSec` -- request timeout in seconds (default: 10s); `timeout` is an
+  accepted alias. Must be positive, as for command scripts
 
 Security:
 - **HTTPS only** -- `http://` URLs are rejected
