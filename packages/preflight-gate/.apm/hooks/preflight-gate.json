@@ -4,6 +4,7 @@
     "preToolUse": [
       {
         "type": "command",
+        "matcher": "bash|Bash|write_bash|shell|powershell|pwsh|run_in_terminal|runInTerminal|.*create_pull_request",
         "bash": "bash \"${PLUGIN_ROOT}/.apm/hooks/scripts/gate-launcher.sh\" || true",
         "powershell": "exit 0",
         "timeoutSec": 15

@@ -118,15 +118,15 @@ dependencies:
   - .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py
   - .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py
   deployed_file_hashes:
-    .github/hooks/preflight-gate-preflight-gate.json: sha256:6223c03a8cb623efbe59a187b84eb2786d960335601fda80708240d8fb4ce520
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh: sha256:8acf91fc52877a799890b933eee9f4c734d3862157230e8e6023986e6ca13cfb
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate.py: sha256:d08f15238fb6d89ed1b7e2be15618de3166c56ee797c77abf86ffbdb40daf508
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py: sha256:86a13f7dcedea9c22641176ff84f1fe41d8bf8c1838c55db7caf8061ed625ff5
+    .github/hooks/preflight-gate-preflight-gate.json: sha256:9aecd2ac905a8c9b7085be7a0795eef6dcf6046d619f045577c8cfbe08153dc8
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh: sha256:faa659863bd282800ab89df396026dff3b5e6fde15d5e020a165f30968497a7f
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate.py: sha256:0b5871b5823db9f15a3315fb67111e7fdbfb8dc2ae372a96c42caf341e1f9919
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py: sha256:e43b57b762e012eaad5b87cbc76a62ebcffc626fc01be4ae2e627516facf389f
     .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py: sha256:45c427ec13a3d478e92a854f641ec502a96f0e05b786776492dde3b59917ab68
-    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py: sha256:55f6a73beef2806eb69c03f04c7a847f7ef67eb181d0dc614533ef49ac6004b0
+    .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_policy.py: sha256:4178ce8ad8fba1483f650a0ba0151f68123c7d6c12137f7671d881bff8d71d7d
   source: local
   local_path: ./packages/preflight-gate
-  content_hash: sha256:3d0dc6b8680bcb026a546ea466374b5bacd54c4d9c04dfee6c41393ea3344b21
+  content_hash: sha256:58bff2c39342487d1784965ae7eb0355dbe5a34f058aa8df6bd85919e127a0c2
   declared_license: Apache-2.0
   exec_status: deployed
 - repo_url: _local/autopilot-comment
@@ -1489,7 +1489,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:6223c03a8cb623efbe59a187b84eb2786d960335601fda80708240d8fb4ce520
+  content_hash: sha256:9aecd2ac905a8c9b7085be7a0795eef6dcf6046d619f045577c8cfbe08153dc8
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh
@@ -1498,7 +1498,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:8acf91fc52877a799890b933eee9f4c734d3862157230e8e6023986e6ca13cfb
+  content_hash: sha256:faa659863bd282800ab89df396026dff3b5e6fde15d5e020a165f30968497a7f
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate.py
@@ -1507,7 +1507,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:d08f15238fb6d89ed1b7e2be15618de3166c56ee797c77abf86ffbdb40daf508
+  content_hash: sha256:0b5871b5823db9f15a3315fb67111e7fdbfb8dc2ae372a96c42caf341e1f9919
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py
@@ -1516,7 +1516,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:86a13f7dcedea9c22641176ff84f1fe41d8bf8c1838c55db7caf8061ed625ff5
+  content_hash: sha256:e43b57b762e012eaad5b87cbc76a62ebcffc626fc01be4ae2e627516facf389f
 - kind: project-relative
   target: copilot
   value: .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight_lib.py
@@ -1534,7 +1534,7 @@ deployments:
   owners:
   - ./packages/preflight-gate
   active_owner: ./packages/preflight-gate
-  content_hash: sha256:55f6a73beef2806eb69c03f04c7a847f7ef67eb181d0dc614533ef49ac6004b0
+  content_hash: sha256:4178ce8ad8fba1483f650a0ba0151f68123c7d6c12137f7671d881bff8d71d7d
 - kind: project-relative
   target: copilot
   value: .github/instructions/architecture.instructions.md

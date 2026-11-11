@@ -2,7 +2,8 @@
 
 Every deny must carry: (a) a one-line why with HEAD sha7, (b) the exact
 runner command at the deployed path, (c) failed check ids + log paths when
-the receipt failed, (d) the CI-only-lanes line, (e) the human-only bypass.
+the receipt failed, (d) the human-only bypass. No draft/wait-for-CI advice:
+agents open PRs ready for review and CI-only lanes simply run in CI.
 """
 
 from __future__ import annotations
@@ -58,10 +59,7 @@ def assert_self_sufficient(text: str, box: Sandbox, why: str) -> list[str]:
         f"Fix: commit all changes, then run from the repo root: {RUNNER_CMD} "
         "(exit 0 = pass; re-run after any new commit), then retry."
     )
-    assert lines[-2] == (
-        "Windows/other CI-only lanes still run in CI: open the PR as draft and mark "
-        "ready after CI is green."
-    )
+    assert "draft" not in text.lower()
     assert lines[-1] == (
         "Bypass is for humans only (APM_PREFLIGHT_BYPASS=accept-unverified when launching the CLI)."
     )
@@ -76,7 +74,7 @@ def test_missing_receipt(sandbox: Sandbox) -> None:
     lines = assert_self_sufficient(
         _deny(sandbox, "git push"), sandbox, "no fresh green preflight receipt"
     )
-    assert len(lines) == 4
+    assert len(lines) == 3
 
 
 def test_failed_receipt_lists_ids_and_log_paths(sandbox: Sandbox, fake_policy) -> None:

@@ -8,16 +8,8 @@ import pytest
 CWD = "/work/repo"
 
 
-def _no_alias(_cwd: str | None, _name: str) -> str | None:
-    return None
-
-
-def _aliases(_cwd: str | None, name: str) -> str | None:
-    return {"p": "push origin HEAD", "sync": "!git fetch && git push", "st": "status"}.get(name)
-
-
-def kinds(command: str, lookup=_no_alias, tool: str = "bash") -> list[str]:
-    return [a.kind for a in gate.classify(tool, {"command": command}, CWD, lookup)]
+def kinds(command: str, tool: str = "bash") -> list[str]:
+    return [a.kind for a in gate.classify(tool, {"command": command}, CWD)]
 
 
 @pytest.mark.parametrize(
@@ -123,10 +115,15 @@ def test_gh_not_gated(command: str) -> None:
     assert kinds(command) == []
 
 
-def test_git_aliases_are_expanded() -> None:
-    assert kinds("git p", _aliases) == ["git-push"]
-    assert kinds("git sync", _aliases) == ["git-push"]
-    assert kinds("git st", _aliases) == []
+def test_git_aliases_are_not_expanded(monkeypatch) -> None:
+    def no_subprocess(*_args, **_kwargs):
+        raise AssertionError("classification must not run git")
+
+    monkeypatch.setattr(gate.lib, "git", no_subprocess)
+    monkeypatch.setattr(gate.lib, "git_out", no_subprocess)
+    assert kinds("git p") == []
+    assert kinds("git sync && git st") == []
+    assert kinds("git p && git push") == ["git-push"]
 
 
 @pytest.mark.parametrize(
@@ -143,24 +140,22 @@ def test_git_aliases_are_expanded() -> None:
     ],
 )
 def test_unbindable_pushes_carry_a_deny(command: str, reason_part: str) -> None:
-    actions = gate.classify("bash", {"command": command}, CWD, _no_alias)
+    actions = gate.classify("bash", {"command": command}, CWD)
     assert len(actions) == 1
     assert reason_part in (actions[0].deny or "")
 
 
 def test_push_sources_are_extracted() -> None:
     (action,) = gate.classify(
-        "bash", {"command": "git push origin +a:refs/heads/x b :gone HEAD"}, CWD, _no_alias
+        "bash", {"command": "git push origin +a:refs/heads/x b :gone HEAD"}, CWD
     )
     assert action.sources == ["a", "b", "HEAD"]
-    (default,) = gate.classify("bash", {"command": "git push"}, CWD, _no_alias)
+    (default,) = gate.classify("bash", {"command": "git push"}, CWD)
     assert default.sources == ["HEAD"]
 
 
 def test_dry_run_exemption_is_per_simple_command() -> None:
-    actions = gate.classify(
-        "bash", {"command": "git push --dry-run && git push origin x"}, CWD, _no_alias
-    )
+    actions = gate.classify("bash", {"command": "git push --dry-run && git push origin x"}, CWD)
     assert [a.sources for a in actions] == [["x"]]
 
 
@@ -181,26 +176,26 @@ def test_dry_run_exemption_is_per_simple_command() -> None:
     ],
 )
 def test_target_directory_tracking(command: str, expected: str | None) -> None:
-    (action,) = gate.classify("bash", {"command": command}, CWD, _no_alias)
+    (action,) = gate.classify("bash", {"command": command}, CWD)
     assert action.cwd == expected
 
 
 def test_subshell_cd_does_not_leak() -> None:
-    actions = gate.classify("bash", {"command": "(cd /a && git push); git push"}, CWD, _no_alias)
+    actions = gate.classify("bash", {"command": "(cd /a && git push); git push"}, CWD)
     assert [a.cwd for a in actions] == ["/a", CWD]
 
 
 def test_unparseable_gated_text_is_conservatively_gated() -> None:
-    (action,) = gate.classify("bash", {"command": "git push 'unterminated"}, CWD, _no_alias)
+    (action,) = gate.classify("bash", {"command": "git push 'unterminated"}, CWD)
     assert action.kind == "unparseable"
     assert action.deny
-    assert gate.classify("bash", {"command": "echo 'unterminated"}, CWD, _no_alias) == []
+    assert gate.classify("bash", {"command": "echo 'unterminated"}, CWD) == []
 
 
 @pytest.mark.parametrize("tool", ["bash", "Bash", "shell", "powershell", "write_bash"])
 def test_shell_tool_names(tool: str) -> None:
     key = "input" if tool == "write_bash" else "command"
-    assert [a.kind for a in gate.classify(tool, {key: "git push"}, CWD, _no_alias)] == ["git-push"]
+    assert [a.kind for a in gate.classify(tool, {key: "git push"}, CWD)] == ["git-push"]
 
 
 @pytest.mark.parametrize(
@@ -214,16 +209,14 @@ def test_shell_tool_names(tool: str) -> None:
     ],
 )
 def test_non_shell_tools(tool: str, args: dict, expected: list[str]) -> None:
-    assert [a.kind for a in gate.classify(tool, args, CWD, _no_alias)] == expected
+    assert [a.kind for a in gate.classify(tool, args, CWD)] == expected
 
 
 def test_create_pr_tool_carries_base() -> None:
-    (action,) = gate.classify("create_pull_request", {"base_branch": "dev"}, CWD, _no_alias)
+    (action,) = gate.classify("create_pull_request", {"base_branch": "dev"}, CWD)
     assert action.base == "dev"
 
 
 def test_gh_pr_create_flags() -> None:
-    (action,) = gate.classify(
-        "bash", {"command": "gh pr create -B release --head me:topic"}, CWD, _no_alias
-    )
+    (action,) = gate.classify("bash", {"command": "gh pr create -B release --head me:topic"}, CWD)
     assert (action.base, action.head) == ("release", "me:topic")

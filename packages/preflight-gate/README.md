@@ -12,9 +12,8 @@ Repo-local APM package for microsoft/apm. It ships:
 
 There is intentionally no skill. The hook is the only agent-facing surface:
 every deny reason is self-sufficient (why, with HEAD sha; the exact runner
-command; failed check ids and log paths; the CI-only-lanes note; the
-human-only bypass), so an agent that has never heard of preflight can
-recover from the denial alone.
+command; failed check ids and log paths; the human-only bypass), so an
+agent that has never heard of preflight can recover from the denial alone.
 
 CI stays the authority. The gate is a guardrail against skipped local
 verification, not a tamper-proof control.
@@ -28,7 +27,12 @@ UV_NO_SYNC=1 python3 .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/pre
 
 Flags: `--base REF` (default `origin/main`, fetched first unless
 `--no-fetch`), `--tiers T0,T1` (diagnostic; never gate-eligible),
-`--keep-going`, `--json`, `--print-ci-fingerprints`.
+`--keep-going`, `--json`, `--jobs N`, `--print-ci-fingerprints`.
+
+Tiers run in order and stop after a failing tier. Inside a tier, checks run
+concurrently (`--jobs`, default `min(4, cpus)`); xdist and E2E suites are
+marked exclusive in the policy and run alone. Logs stay per check; the
+summary prints in policy order once the tier finishes.
 
 | Tier | Selected when | Runs |
 | --- | --- | --- |
@@ -48,13 +52,22 @@ value is ignored. Bypasses are appended to `apm-preflight/bypass.log`.
 
 ## Limits
 
+- Windows, macOS-x86 and merge-queue lanes are not reproducible locally and
+  still run in CI.
 - Native Windows: the hook is a no-op (`powershell: exit 0`) and the runner
   refuses to run. Use WSL or rely on CI.
+- Scope: the hook `matcher` limits it to shell and `*create_pull_request`
+  tools, and the launcher starts Python only when the payload mentions
+  `push`, `create_pull_request`, or `gh` with `pr` / `pulls` /
+  `createPullRequest` / `markPullRequestReadyForReview`. Everything else
+  (`git status`, `git commit`, `gh issue ...`) exits in shell.
 - Fail-open by design: a missing `python3`, a missing or broken gate script,
   or a hook timeout releases the tool call. Only a well-formed deny blocks.
+- Git aliases are not expanded (`git p` for `push` is not gated) and `gh`
+  aliases are not tracked; CI remains the authority.
 - Tag, `--all`, `--mirror` and wildcard pushes are always denied.
-- `gh` aliases and pushes from a shell whose cwd changed in an earlier tool
-  call are not tracked; `gh pr ready` does not verify the PR base.
+- Pushes from a shell whose cwd changed in an earlier tool call are not
+  tracked; `gh pr ready` does not verify the PR base.
 - Hooks require `executables.allow` in the root `apm.yml`; the grant is pinned
   to this package's version, so bump both together.
 

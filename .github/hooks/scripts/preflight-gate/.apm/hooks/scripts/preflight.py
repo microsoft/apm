@@ -4,7 +4,7 @@
 Usage (from anywhere inside the repo):
     python3 .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py
         [--base REF] [--tiers auto|T0,T1,..] [--plan] [--json]
-        [--keep-going] [--no-fetch] [--print-ci-fingerprints]
+        [--keep-going] [--no-fetch] [--jobs N] [--print-ci-fingerprints]
 
 Exit codes: 0 pass, 1 fail or partial, 2 usage or internal error.
 Stdlib only. Unix/WSL only (native Windows is refused: CI covers Windows).
@@ -23,6 +23,8 @@ import platform  # noqa: E402
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
 import time  # noqa: E402
+from collections.abc import Callable  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import ModuleType  # noqa: E402
 
@@ -63,6 +65,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="print the receipt JSON on stdout")
     parser.add_argument("--keep-going", action="store_true", help="run tiers after a failure")
     parser.add_argument("--no-fetch", action="store_true", help="do not fetch the base ref")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        help="concurrent checks per tier (default min(4, cpus); 1 = serial)",
+    )
     parser.add_argument(
         "--print-ci-fingerprints",
         action="store_true",
@@ -190,6 +198,36 @@ def _run_internal(check, ctx, policy: ModuleType, log_path: Path) -> int:
     return 0 if ok else 1
 
 
+def default_jobs() -> int:
+    return max(1, min(4, os.cpu_count() or 1))
+
+
+Outcome = tuple[int, float, Path]
+
+
+def run_tier(checks: list, execute: Callable[[object], Outcome], jobs: int) -> list[Outcome]:
+    """Run one tier; return outcomes in policy order.
+
+    Non-exclusive checks run concurrently on a bounded pool (siblings always
+    finish even when one fails). Exclusive checks (xdist / E2E suites that
+    saturate the host) then run one at a time, never beside anything else.
+    """
+    outcomes: dict[int, Outcome] = {}
+    shared = [i for i, c in enumerate(checks) if not getattr(c, "exclusive", False)]
+    if jobs > 1 and len(shared) > 1:
+        with ThreadPoolExecutor(max_workers=min(jobs, len(shared))) as pool:
+            futures = {i: pool.submit(execute, checks[i]) for i in shared}
+            for i, future in futures.items():
+                outcomes[i] = future.result()
+    else:
+        for i in shared:
+            outcomes[i] = execute(checks[i])
+    for i, check in enumerate(checks):
+        if i not in outcomes:
+            outcomes[i] = execute(check)
+    return [outcomes[i] for i in range(len(checks))]
+
+
 def _plan_report(selected: dict[str, str], plan: dict[str, list]) -> None:
     for tier, reason in selected.items():
         _say(f"[i] {tier}: {reason}")
@@ -295,14 +333,12 @@ def run(
         }
     )
 
-    records: list[dict] = []
-    ran: list[str] = []
-    for tier in to_run:
-        _say(f"[*] {tier}: {selected[tier]}")
-        tier_failed = False
-        for check in plan[tier]:
-            log_path = logs_dir / f"{check.id}.log"
-            began = time.monotonic()
+    jobs = args.jobs if args.jobs > 0 else default_jobs()
+
+    def execute(check) -> Outcome:
+        log_path = logs_dir / f"{check.id}.log"
+        began = time.monotonic()
+        try:
             if check.cmd is None:
                 code = _run_internal(check, ctx, policy, log_path)
             elif check.needs_pcre_grep and pcre_problem:
@@ -312,13 +348,29 @@ def run(
                 check_env = dict(env)
                 check_env.update(check.env)
                 code = _run_command(check, root, log_path, check_env, prelude)
-            duration = time.monotonic() - began
+        except Exception as exc:
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(f"\n# runner error: {exc!r}\n")
+            code = 2
+        return code, time.monotonic() - began, log_path
+
+    records: list[dict] = []
+    ran: list[str] = []
+    tier_wall: dict[str, float] = {}
+    for tier in to_run:
+        _say(f"[*] {tier}: {selected[tier]}")
+        began = time.monotonic()
+        outcomes = run_tier(plan[tier], execute, jobs)
+        tier_wall[tier] = round(time.monotonic() - began, 2)
+        tier_failed = False
+        for check, (code, duration, log_path) in zip(plan[tier], outcomes, strict=True):
             records.append(_check_record(check, code, duration, log_path))
             if code == 0:
                 _say(f"  [+] {check.id} ({duration:.1f}s)")
             else:
                 tier_failed = True
                 _say(f"  [x] {check.id} (exit {code}) log: {log_path}")
+        _say(f"  [i] {tier} wall time {tier_wall[tier]:.1f}s ({jobs} job(s))")
         ran.append(tier)
         if tier_failed and not args.keep_going:
             break
@@ -388,6 +440,9 @@ def run(
         "bundle_hash": lib.deployed_bundle_hash(root),
         "required_tiers": required,
         "ran_tiers": ran,
+        "parallel": jobs > 1,
+        "jobs": jobs,
+        "tier_wall_s": tier_wall,
         "checks": records,
         "warnings": warnings,
         "ci_only_lanes": list(policy.CI_ONLY_LANES),
@@ -403,7 +458,6 @@ def run(
         _say(f"[!] {warning}")
     if status == "pass" and not ineligible:
         _say(f"[+] preflight PASS; receipt {path}")
-        _say("[i] CI-only lanes still apply: " + "; ".join(policy.CI_ONLY_LANES[:3]) + "; ...")
     elif status == "pass":
         _say(f"[!] preflight passed but receipt is NOT gate-eligible: {'; '.join(ineligible)}")
     else:

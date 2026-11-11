@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
+import gate
 import pytest
 from conftest import SCRIPTS, Sandbox
 
@@ -52,21 +54,127 @@ def test_hook_json_shape() -> None:
     assert data["version"] == 1
     (entry,) = data["hooks"]["preToolUse"]
     assert entry["type"] == "command"
+    assert isinstance(entry["matcher"], str)
     assert entry["bash"].endswith("|| true")
     assert "${PLUGIN_ROOT}/.apm/hooks/scripts/gate-launcher.sh" in entry["bash"]
     assert entry["powershell"] == "exit 0"
     assert entry["timeoutSec"] == 15
 
 
-def test_fast_path_never_starts_python(sandbox: Sandbox) -> None:
-    bundle = install_bundle(sandbox.root / "bundle")
-    marker = sandbox.root / "python-ran"
-    (bundle / "gate.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n", encoding="utf-8")
-    for command in ("ls -la", "cat README.md", "view file"):
-        proc = launch(bundle, payload(command, sandbox.root))
-        assert (proc.returncode, proc.stdout) == (0, "")
-    assert not marker.exists()
-    launch(bundle, payload("git status", sandbox.root))
+def _matcher() -> re.Pattern[str]:
+    entry = json.loads(HOOK_JSON.read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    # Copilot compiles the matcher as ^(?:PATTERN)$ against toolName.
+    return re.compile(f"^(?:{entry['matcher']})$")
+
+
+PR_TOOL_NAMES = (
+    "create_pull_request",
+    "github-mcp-server-create_pull_request",
+    "mcp_github_create_pull_request",
+)
+
+
+@pytest.mark.parametrize("name", [*gate.SHELL_TOOL_NAMES, *PR_TOOL_NAMES])
+def test_matcher_covers_every_gated_tool_name(name: str) -> None:
+    assert _matcher().match(name), name
+    args = {"input" if name == "write_bash" else "command": "git push"}
+    assert gate.classify(name, args, "/repo"), name
+
+
+def test_matcher_covers_gate_shell_set_exactly() -> None:
+    assert {n.lower() for n in gate.SHELL_TOOL_NAMES} == gate.SHELL_TOOLS
+    assert gate.PR_TOOL_SUFFIX == "create_pull_request"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "view",
+        "edit",
+        "grep",
+        "glob",
+        "create",
+        "read_bash",
+        "stop_bash",
+        "list_bash",
+        "task",
+        "web_fetch",
+        "sql",
+        "bash2",
+        "mybash",
+        "create_pull_request_review",
+        "update_pull_request",
+    ],
+)
+def test_matcher_skips_non_gated_tools(name: str) -> None:
+    assert not _matcher().match(name), name
+    assert gate.classify(name, {"command": "git push"}, "/repo") == []
+
+
+def _stub_bundle(dest: Path) -> tuple[Path, Path]:
+    """Bundle whose gate.py only records that Python was started."""
+    bundle = install_bundle(dest)
+    marker = dest / "python-invocations"
+    (bundle / "gate.py").write_text(f"open({str(marker)!r}, 'a').write('x')\n", encoding="utf-8")
+    return bundle, marker
+
+
+def _tool_payload(tool: str, args: dict) -> str:
+    return json.dumps(
+        {"sessionId": "s", "timestamp": 1, "cwd": "/repo", "toolName": tool, "toolArgs": args}
+    )
+
+
+NON_PUBLISH = [
+    "ls -la",
+    "cat README.md",
+    "git status",
+    "git diff --stat",
+    "git commit -m 'fix tests'",
+    "git log --oneline -5",
+    "git fetch origin",
+    "git pull --rebase",
+    "gh issue create --title x --body y",
+    "gh issue list",
+    "gh run view 123",
+    "gh api repos/o/r/issues",
+    "uv run pytest tests/unit -q",
+    "python3 preflight.py --plan",
+]
+
+PUBLISH = [
+    ("bash", {"command": "git push origin HEAD"}),
+    ("bash", {"command": "cd sub && git -C . push"}),
+    ("bash", {"command": "gh pr create --fill"}),
+    ("bash", {"command": "gh pr ready 12"}),
+    ("bash", {"command": "gh api -X POST repos/o/r/pulls -f title=t"}),
+    ("bash", {"command": "gh api graphql -f query='mutation { createPullRequest }'"}),
+    ("write_bash", {"input": "git push\n"}),
+    ("create_pull_request", {"title": "t", "base_branch": "main"}),
+    ("github-mcp-server-create_pull_request", {"owner": "o", "repo": "r"}),
+]
+
+
+@pytest.mark.parametrize("command", NON_PUBLISH)
+def test_non_publish_shell_commands_never_start_python(workdir: Path, command: str) -> None:
+    bundle, marker = _stub_bundle(workdir / "bundle")
+    proc = launch(bundle, _tool_payload("bash", {"command": command, "description": "d"}))
+    assert (proc.returncode, proc.stdout) == (0, "")
+    assert not marker.exists(), command
+
+
+@pytest.mark.parametrize(("tool", "args"), PUBLISH)
+def test_publish_payloads_start_python(workdir: Path, tool: str, args: dict) -> None:
+    bundle, marker = _stub_bundle(workdir / "bundle")
+    proc = launch(bundle, _tool_payload(tool, args))
+    assert proc.returncode == 0
+    assert marker.read_text(encoding="utf-8") == "x"
+
+
+def test_string_tool_args_publish_is_detected(workdir: Path) -> None:
+    bundle, marker = _stub_bundle(workdir / "bundle")
+    raw = json.dumps({"cwd": "/repo", "toolName": "bash", "toolArgs": '{"command":"git push"}'})
+    launch(bundle, raw)
     assert marker.exists()
 
 

@@ -53,7 +53,7 @@ CI_FINGERPRINTS: dict[str, str] = {
     "spec-conformance.yml:spec-conformance": "920860630499bab79c30540c3f1327b74faea3a7917ec4556a2186f7a353e358",
 }
 
-# Lanes a green receipt does NOT cover. Recorded in every receipt.
+# Lanes not reproducible locally; they still run in CI. Recorded in every receipt.
 CI_ONLY_LANES = (
     "Windows Compatibility Gate (windows-latest)",
     "Windows native standard-user symlink gate",
@@ -220,7 +220,11 @@ UNIT_SEARCH_ROOTS = ("tests/unit", "tests/red_team", "tests/test_console.py")
 
 @dataclass
 class Check:
-    """One unit of verification. Exactly one of `cmd` / `internal` is set."""
+    """One unit of verification. Exactly one of `cmd` / `internal` is set.
+
+    Checks in a tier run concurrently unless `exclusive`: exclusive checks
+    (pytest-xdist suites that saturate every core, E2E suites) run alone.
+    """
 
     id: str
     tier: str
@@ -228,6 +232,7 @@ class Check:
     internal: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     needs_pcre_grep: bool = False
+    exclusive: bool = False
 
 
 @dataclass
@@ -408,9 +413,9 @@ def _t1_checks(ctx: Context) -> list[Check]:
     if tests and len(tests) <= UNIT_MAP_CAP:
         xdist = " -n auto --dist worksteal" if len(tests) > UNIT_MAP_XDIST_THRESHOLD else ""
         cmd = f"{UV} pytest -p no:cacheprovider -q{xdist} {_quote_all(tests)}"
-        checks.append(Check("unit.mapped", "T1", cmd=cmd))
+        checks.append(Check("unit.mapped", "T1", cmd=cmd, exclusive=bool(xdist)))
     elif tests and "T2" not in ctx.selected:
-        checks.append(Check("unit.mapped", "T1", cmd=UNIT_FULL))
+        checks.append(Check("unit.mapped", "T1", cmd=UNIT_FULL, exclusive=True))
     if any(_needs_arch_contracts(p) for p in ctx.changed):
         checks.append(
             Check(
@@ -437,6 +442,7 @@ def _t3_checks(ctx: Context) -> list[Check]:
             "T3",
             cmd=LIFECYCLE_SMOKE,
             env={"APM_E2E_TESTS": "1", "LIFECYCLE_SHARD": shard},
+            exclusive=True,
         )
         for shard in ("1", "2")
     ]
@@ -450,7 +456,9 @@ def _t3_checks(ctx: Context) -> list[Check]:
     )
     if integration:
         cmd = f"{UV} python -m pytest -p no:cacheprovider -q --strict-markers {_quote_all(integration)}"
-        checks.append(Check("integration.changed", "T3", cmd=cmd, env={"APM_E2E_TESTS": "1"}))
+        checks.append(
+            Check("integration.changed", "T3", cmd=cmd, env={"APM_E2E_TESTS": "1"}, exclusive=True)
+        )
     return checks
 
 
@@ -461,7 +469,7 @@ def build_checks(tier: str, ctx: Context) -> list[Check]:
     if tier == "T1":
         return _t1_checks(ctx)
     if tier == "T2":
-        return [Check("unit.full", "T2", cmd=UNIT_FULL)]
+        return [Check("unit.full", "T2", cmd=UNIT_FULL, exclusive=True)]
     if tier == "T3":
         return _t3_checks(ctx)
     raise ValueError(f"unknown tier {tier!r}")

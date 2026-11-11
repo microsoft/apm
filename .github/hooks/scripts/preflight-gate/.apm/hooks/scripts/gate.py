@@ -29,16 +29,21 @@ if str(_HERE) not in sys.path:
 
 import preflight_lib as lib  # noqa: E402
 
-SHELL_TOOLS = {
+# Exact tool names hosts emit for shell execution. The hook JSON `matcher`
+# (^(?:PATTERN)$ on toolName) MUST cover every name here plus
+# PR_TOOL_SUFFIX; tests/test_launcher.py enforces it.
+SHELL_TOOL_NAMES = (
     "bash",
+    "Bash",
+    "write_bash",
     "shell",
-    "sh",
     "powershell",
     "pwsh",
-    "write_bash",
     "run_in_terminal",
-    "runinterminal",
-}
+    "runInTerminal",
+)
+SHELL_TOOLS = {name.lower() for name in SHELL_TOOL_NAMES}
+PR_TOOL_SUFFIX = "create_pull_request"
 COMMAND_KEYS = ("command", "input", "cmd", "script")
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 KEYWORDS = {"!", "{", "}", "if", "then", "else", "elif", "do", "while", "until", "fi", "done"}
@@ -54,137 +59,6 @@ GIT_VALUE_OPTS = {
     "--super-prefix",
     "--attr-source",
 }
-KNOWN_GIT = set(
-    [
-        "add",
-        "am",
-        "annotate",
-        "apply",
-        "archive",
-        "bisect",
-        "blame",
-        "branch",
-        "bundle",
-        "cat-file",
-        "check-attr",
-        "check-ignore",
-        "check-mailmap",
-        "check-ref-format",
-        "checkout",
-        "checkout-index",
-        "cherry",
-        "cherry-pick",
-        "citool",
-        "clean",
-        "clone",
-        "column",
-        "commit",
-        "commit-graph",
-        "commit-tree",
-        "config",
-        "count-objects",
-        "credential",
-        "describe",
-        "diagnose",
-        "diff",
-        "diff-files",
-        "diff-index",
-        "diff-tree",
-        "difftool",
-        "fast-export",
-        "fast-import",
-        "fetch",
-        "fetch-pack",
-        "filter-branch",
-        "fmt-merge-msg",
-        "for-each-ref",
-        "for-each-repo",
-        "format-patch",
-        "fsck",
-        "gc",
-        "get-tar-commit-id",
-        "grep",
-        "gui",
-        "hash-object",
-        "help",
-        "hook",
-        "index-pack",
-        "init",
-        "instaweb",
-        "interpret-trailers",
-        "log",
-        "ls-files",
-        "ls-remote",
-        "ls-tree",
-        "mailinfo",
-        "mailsplit",
-        "maintenance",
-        "merge",
-        "merge-base",
-        "merge-file",
-        "merge-index",
-        "merge-tree",
-        "mergetool",
-        "mktag",
-        "mktree",
-        "multi-pack-index",
-        "mv",
-        "name-rev",
-        "notes",
-        "pack-objects",
-        "pack-redundant",
-        "pack-refs",
-        "patch-id",
-        "prune",
-        "prune-packed",
-        "pull",
-        "range-diff",
-        "read-tree",
-        "rebase",
-        "reflog",
-        "remote",
-        "repack",
-        "replace",
-        "request-pull",
-        "rerere",
-        "reset",
-        "restore",
-        "rev-list",
-        "rev-parse",
-        "revert",
-        "rm",
-        "send-email",
-        "send-pack",
-        "shortlog",
-        "show",
-        "show-branch",
-        "show-index",
-        "show-ref",
-        "sparse-checkout",
-        "stage",
-        "stash",
-        "status",
-        "stripspace",
-        "submodule",
-        "switch",
-        "symbolic-ref",
-        "tag",
-        "unpack-file",
-        "unpack-objects",
-        "update-index",
-        "update-ref",
-        "update-server-info",
-        "var",
-        "verify-commit",
-        "verify-pack",
-        "verify-tag",
-        "version",
-        "whatchanged",
-        "worktree",
-        "write-tree",
-        "lfs",
-    ]
-)
 PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 PUSH_UNBINDABLE = {
     "--all": "--all",
@@ -219,8 +93,6 @@ GRAPHQL_PR_MUTATION = re.compile(r"\b(createPullRequest|markPullRequestReadyForR
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PUNCT = set(";&|()<>\n")
 
-AliasLookup = Callable[[str | None, str], str | None]
-
 
 @dataclass
 class Action:
@@ -236,12 +108,8 @@ class Action:
 
 
 # ---------------------------------------------------------------------------
-# classification (pure, no subprocess except git alias lookup)
+# classification (pure: no subprocess; git aliases are NOT expanded)
 # ---------------------------------------------------------------------------
-
-
-def _default_alias_lookup(cwd: str | None, name: str) -> str | None:
-    return lib.git_out(["config", "--get", f"alias.{name}"], cwd or os.getcwd())
 
 
 def _lex(script: str) -> list[str]:
@@ -472,9 +340,8 @@ def _push_action(args: list[str], cwd: str | None, text: str) -> Action | None:
     return Action("git-push", cwd, text, sources=sources or ["HEAD"])
 
 
-def _git_actions(
-    args: list[str], cwd: str | None, text: str, alias_lookup: AliasLookup, depth: int
-) -> list[Action]:
+def _git_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
+    """Only a literal `push` subcommand is gated; aliases are not expanded."""
     target = cwd
     idx = 0
     while idx < len(args):
@@ -499,18 +366,7 @@ def _git_actions(
     if sub == "push":
         action = _push_action(rest, target, text)
         return [action] if action else []
-    if sub in KNOWN_GIT or depth > 3:
-        return []
-    expansion = alias_lookup(target, sub)
-    if not expansion:
-        return []
-    if expansion.startswith("!"):
-        return _classify_script(expansion[1:], target, alias_lookup, depth + 1)
-    try:
-        alias_words = shlex.split(expansion)
-    except ValueError:
-        alias_words = expansion.split()
-    return _git_actions(alias_words + rest, target, text, alias_lookup, depth + 1)
+    return []
 
 
 def _flag_value(args: list[str], short: str, long: str) -> str | None:
@@ -575,9 +431,7 @@ def _gh_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
     return []
 
 
-def _command_actions(
-    argv: list[str], cwd: str | None, alias_lookup: AliasLookup, depth: int
-) -> list[Action]:
+def _command_actions(argv: list[str], cwd: str | None, depth: int) -> list[Action]:
     text = " ".join(argv)[:300]
     name = os.path.basename(argv[0])
     if name.endswith(".exe"):
@@ -585,11 +439,11 @@ def _command_actions(
     args = argv[1:]
     if name in SHELLS:
         script = _shell_script(args)
-        return _classify_script(script, cwd, alias_lookup, depth + 1) if script else []
+        return _classify_script(script, cwd, depth + 1) if script else []
     if name == "eval":
-        return _classify_script(" ".join(args), cwd, alias_lookup, depth + 1)
+        return _classify_script(" ".join(args), cwd, depth + 1)
     if name == "git":
-        return _git_actions(args, cwd, text, alias_lookup, depth)
+        return _git_actions(args, cwd, text)
     if name == "gh":
         return _gh_actions(args, cwd, text)
     return []
@@ -602,9 +456,7 @@ def looks_gated(raw: str) -> bool:
     return bool(git_push or gh_pr)
 
 
-def _classify_script(
-    script: str, cwd: str | None, alias_lookup: AliasLookup, depth: int = 0
-) -> list[Action]:
+def _classify_script(script: str, cwd: str | None, depth: int = 0) -> list[Action]:
     if depth > 6:
         if looks_gated(script):
             return [Action("unparseable", cwd, script[:200], deny="command nesting too deep")]
@@ -624,7 +476,7 @@ def _classify_script(
         return []
     actions: list[Action] = []
     for inner in re.findall(r"`([^`]*)`", script):
-        actions += _classify_script(inner, cwd, alias_lookup, depth + 1)
+        actions += _classify_script(inner, cwd, depth + 1)
     stack: list[str | None] = []
     current = cwd
     for words, delta in _split_simple(tokens):
@@ -634,7 +486,7 @@ def _classify_script(
             current = stack.pop() if stack else current
         for word in words:
             for inner in _substitutions(word):
-                actions += _classify_script(inner, current, alias_lookup, depth + 1)
+                actions += _classify_script(inner, current, depth + 1)
         argv, env_dir = _strip_prefix(words)
         if not argv:
             continue
@@ -652,15 +504,12 @@ def _classify_script(
         if head == "popd":
             current = None
             continue
-        actions += _command_actions(argv, run_dir, alias_lookup, depth)
+        actions += _command_actions(argv, run_dir, depth)
     return actions
 
 
-def classify(
-    tool_name: str, tool_args: object, cwd: str | None, alias_lookup: AliasLookup | None = None
-) -> list[Action]:
+def classify(tool_name: str, tool_args: object, cwd: str | None) -> list[Action]:
     """Return gated actions for one tool call (empty list = not gated)."""
-    lookup = alias_lookup or _default_alias_lookup
     name = (tool_name or "").strip()
     lowered = name.lower()
     args = tool_args if isinstance(tool_args, dict) else {}
@@ -668,8 +517,8 @@ def classify(
         command = next((args[k] for k in COMMAND_KEYS if isinstance(args.get(k), str)), None)
         if not command:
             return []
-        return _classify_script(command, cwd, lookup)
-    if lowered.endswith("create_pull_request"):
+        return _classify_script(command, cwd)
+    if lowered.endswith(PR_TOOL_SUFFIX):
         base = args.get("base") or args.get("base_branch")
         head = args.get("head") or args.get("head_branch")
         return [
@@ -851,10 +700,6 @@ def verify_action(action: Action, receipt: dict, root: str) -> str | None:
 
 
 REASON_LIMIT = 800
-CI_ONLY_LINE = (
-    "Windows/other CI-only lanes still run in CI: open the PR as draft and mark "
-    "ready after CI is green."
-)
 BYPASS_LINE = (
     f"Bypass is for humans only ({lib.BYPASS_ENV}={lib.BYPASS_VALUE} when launching the CLI)."
 )
@@ -863,14 +708,14 @@ BYPASS_LINE = (
 def compose_reason(
     why: str, head7: str | None, hint: str, failed: list[tuple[str, str]] | None = None
 ) -> str:
-    """Self-sufficient deny text: why, exact fix command, failures, CI note, bypass."""
+    """Self-sufficient deny text: why, exact fix command, failures, bypass."""
     at = f" (HEAD {head7})" if head7 else ""
     lines = [f"preflight gate: push/PR blocked: {why}{at}."]
     lines.append(
         f"Fix: commit all changes, then run from the repo root: {hint} "
         "(exit 0 = pass; re-run after any new commit), then retry."
     )
-    tail = [CI_ONLY_LINE, BYPASS_LINE]
+    tail = [BYPASS_LINE]
     if failed:
         log_dirs = {os.path.dirname(log) for _cid, log in failed if log}
         ids = [cid for cid, _log in failed]
@@ -915,7 +760,6 @@ class GateConfig:
     """Injectable environment for run(); defaults derive from this file."""
 
     scripts_dir: Path = _HERE
-    alias_lookup: AliasLookup | None = None
     bundle_hash_for: Callable[[str], str | None] = lib.deployed_bundle_hash
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
@@ -953,7 +797,7 @@ def evaluate(raw: str, env: dict[str, str], config: GateConfig | None = None) ->
     tool, tool_args, payload_cwd = parsed
     cwd = payload_cwd or os.path.realpath(os.getcwd())
     try:
-        actions = classify(tool, tool_args, cwd, cfg.alias_lookup)
+        actions = classify(tool, tool_args, cwd)
     except Exception as exc:
         command = ""
         if isinstance(tool_args, dict):
