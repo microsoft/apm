@@ -121,16 +121,16 @@ if [ "$PLATFORM" = "linux" ] && [ -n "${APM_MAX_GLIBC:-}" ]; then
         fi
     done < <(find "dist/$BINARY_NAME" -type f \( -name 'apm' -o -name '*.so' -o -name '*.so.*' \) -print0)
     if [ -n "$GLIBC_VIOLATIONS" ]; then
-        echo -e "${RED}✗ Bundled files require glibc newer than ${APM_MAX_GLIBC}:${NC}"
+        echo -e "${RED}[x] Bundled files require glibc newer than ${APM_MAX_GLIBC}:${NC}"
         echo -e "$GLIBC_VIOLATIONS"
         echo -e "${RED}Build with a Python targeting an older glibc (e.g. UV_PYTHON_PREFERENCE=only-managed)${NC}"
         exit 1
     fi
     if [ "$GLIBC_CHECKED" -eq 0 ]; then
-        echo -e "${RED}✗ No ELF files found under dist/$BINARY_NAME${NC}"
+        echo -e "${RED}[x] No ELF files found under dist/$BINARY_NAME${NC}"
         exit 1
     fi
-    echo -e "${GREEN}✓ ${GLIBC_CHECKED} bundled ELF files work with glibc ${APM_MAX_GLIBC}${NC}"
+    echo -e "${GREEN}[+] ${GLIBC_CHECKED} bundled ELF files work with glibc ${APM_MAX_GLIBC}${NC}"
 fi
 
 # Show binary info
