@@ -171,6 +171,16 @@ def test_native_typed_error_guard_retains_legacy_and_rejects_broad_handlers(
             "False",
         ),
         (
+            "src/apm_cli/install/sources.py",
+            "is_codex_source_pin(cached_commit)",
+            "bool(cached_commit)",
+        ),
+        (
+            "src/apm_cli/install/sources.py",
+            "verify_marker(self.install_path, cached_commit)",
+            "None",
+        ),
+        (
             "src/apm_cli/install/drift.py",
             "codex_records = verify_codex_source_identity(",
             "codex_records = noncanonical_source_check(",
@@ -1821,6 +1831,20 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     old = "return _find_orphaned_packages(installed, expected)"
     assert source.count(old) == 1
     mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
+    """Targeted-install module removal cannot bypass the shared selector (#3502)."""
+    path = "src/apm_cli/install/phases/cleanup.py"
+    source = _source(path)
+    old = "for relative in _find_orphaned_packages("
+    assert source.count(old) == 1
+    mutated = source.replace(old, "for relative in sorted(", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-orphan-selection"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})

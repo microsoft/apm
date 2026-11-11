@@ -296,7 +296,9 @@ apm marketplace outdated     # packages with newer matching tags
 ```
 
 `check` is the gate to run in CI: a missing tag or unresolvable
-range exits non-zero before you push the release commit.
+range exits non-zero before you push the release commit. A full
+40-character commit SHA `ref` passes when the remote serves that commit;
+abbreviated SHAs are rejected.
 
 ## Pitfalls
 
