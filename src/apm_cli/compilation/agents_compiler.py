@@ -165,6 +165,13 @@ class CompilationConfig:
                 f"Supported values: {', '.join(repr(mode) for mode in VALID_AGENTS_MD_MODES)}."
             )
 
+    @property
+    def managed_section_markers(self) -> tuple[str, str] | None:
+        """Return the AGENTS.md managed-section markers when that mode is active."""
+        if self.agents_md_mode != "managed_section":
+            return None
+        return (self.agents_md_start_marker, self.agents_md_end_marker)
+
     @classmethod
     def from_apm_yml(cls, **overrides) -> "CompilationConfig":
         """Create configuration from apm.yml with command-line overrides.
@@ -540,6 +547,7 @@ class AgentsCompiler:
             source_dir=str(self.source_dir),
             source_inventory=self._source_inventory,
             deploy_inventory=self._deploy_inventory,
+            managed_section_markers=config.managed_section_markers,
         )
 
         # Skip instructions in AGENTS.md when they are already deployed to the
@@ -912,6 +920,7 @@ class AgentsCompiler:
                 source_dir=str(self.source_dir),
                 source_inventory=self._source_inventory,
                 deploy_inventory=self._deploy_inventory,
+                managed_section_markers=config.managed_section_markers,
             )
             placement_map = self._get_distributed_placement(
                 config,

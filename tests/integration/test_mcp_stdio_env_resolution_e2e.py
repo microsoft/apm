@@ -60,30 +60,18 @@ def _run_install(
 
 
 def _env_block(project_dir: Path, runtime: str) -> dict[str, str]:
-    if runtime == "claude":
-        config = json.loads((project_dir / ".mcp.json").read_text(encoding="utf-8"))
-        return config["mcpServers"]["env-demo"]["env"]
-    config = toml.load(project_dir / ".codex" / "config.toml")
-    return config["mcp_servers"]["env-demo"]["env"]
+    config = json.loads((project_dir / ".mcp.json").read_text(encoding="utf-8"))
+    return config["mcpServers"]["env-demo"]["env"]
 
 
-@pytest.mark.parametrize(
-    ("runtime", "signal_dir"),
-    [
-        ("claude", ".claude"),
-        ("codex", ".codex"),
-    ],
-)
-@pytest.mark.parametrize("verbose", [False, True], ids=["default-output", "verbose-output"])
-def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
+def _install_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     apm_binary_path: str,
     runtime: str,
     signal_dir: str,
     verbose: bool,
-) -> None:
-    """Real install writes process-env values for self-defined stdio env."""
+) -> tuple[Path, subprocess.CompletedProcess, str]:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     (project_dir / signal_dir).mkdir()
@@ -92,6 +80,8 @@ def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
     secret_value = "stdio-e2e-secret-value=canary"
     monkeypatch.setenv("APM_STDIO_E2E_TOKEN", secret_value)
     monkeypatch.delenv("APM_STDIO_E2E_UNSET_TOKEN", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "home" / ".codex"))
 
     result = _run_install(apm_binary_path, project_dir, runtime, verbose)
 
@@ -99,8 +89,22 @@ def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
         f"apm install failed (rc={result.returncode}).\n"
         f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
+    return project_dir, result, secret_value
 
-    env_block = _env_block(project_dir, runtime)
+
+@pytest.mark.parametrize("verbose", [False, True], ids=["default-output", "verbose-output"])
+def test_claude_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    apm_binary_path: str,
+    verbose: bool,
+) -> None:
+    """Real install writes process-env values for self-defined stdio env."""
+    project_dir, result, secret_value = _install_project(
+        tmp_path, monkeypatch, apm_binary_path, "claude", ".claude", verbose
+    )
+
+    env_block = _env_block(project_dir, "claude")
     assert env_block["APM_STDIO_E2E_TOKEN"] == secret_value
     assert env_block["APM_STDIO_E2E_TOKEN"] != "${APM_STDIO_E2E_TOKEN}"
     assert env_block["APM_STDIO_E2E_UNSET_TOKEN"] == "${APM_STDIO_E2E_UNSET_TOKEN}"
@@ -108,3 +112,25 @@ def test_self_defined_stdio_env_placeholders_resolve_from_process_env_e2e(
 
     observed_output = f"{result.stdout}\n{result.stderr}"
     assert secret_value not in observed_output
+
+
+@pytest.mark.parametrize("verbose", [False, True], ids=["default-output", "verbose-output"])
+def test_codex_self_defined_stdio_env_placeholders_are_forwarded_e2e(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    apm_binary_path: str,
+    verbose: bool,
+) -> None:
+    """Codex project installs forward same-key references through env_vars."""
+    project_dir, result, secret_value = _install_project(
+        tmp_path, monkeypatch, apm_binary_path, "codex", ".codex", verbose
+    )
+
+    config_path = project_dir / ".codex" / "config.toml"
+    server = toml.load(config_path)["mcp_servers"]["env-demo"]
+    assert sorted(server["env_vars"]) == ["APM_STDIO_E2E_TOKEN", "APM_STDIO_E2E_UNSET_TOKEN"]
+    assert server["env"] == {"LITERAL_VALUE": "literal-value"}
+
+    observed_output = f"{result.stdout}\n{result.stderr}"
+    assert secret_value not in observed_output
+    assert secret_value not in config_path.read_text(encoding="utf-8")

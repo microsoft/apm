@@ -78,13 +78,18 @@ def _persist_uninstall_lockfile(
     integration_cleanup: IntegrationCleanupOutcome,
 ) -> None:
     """Bind actual survivor writes only after final lock persistence succeeds."""
+    from ...deps.lockfile import LockfileSymlinkError
     from .lockfile_state import lockfile_has_persisted_state
 
     try:
         if lockfile_has_persisted_state(lockfile):
             lockfile.write(lockfile_path)
+        elif lockfile_path.is_symlink():
+            raise LockfileSymlinkError(lockfile_path)
         else:
             lockfile_path.unlink(missing_ok=True)
+    except LockfileSymlinkError:
+        raise
     except Exception:
         logger.warning(
             "Failed to update lockfile -- it may be out of sync with uninstalled packages."
