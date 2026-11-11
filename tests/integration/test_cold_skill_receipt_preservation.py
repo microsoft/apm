@@ -83,9 +83,12 @@ def test_cold_overlapping_skill_replay_preserves_files_and_lock(
     for _ in range(2):
         result = runner.run(replay, cwd=project, env=env)
         assert result.returncode != 0, result.stdout + result.stderr
-        assert "no trustworthy local deployment baseline" in " ".join(
-            (result.stdout + result.stderr).split()
-        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert "no trustworthy local deployment baseline" in output
+        assert (
+            "Move the conflicting file aside and retry; "
+            "use --force only to intentionally overwrite it." in output
+        ), output
         assert "stale files cleaned" not in result.stdout
         assert lock_path.read_bytes() == lock_before
         for snapshot, root in zip(before, roots, strict=True):
