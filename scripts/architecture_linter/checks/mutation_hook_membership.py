@@ -44,7 +44,7 @@ _PRUNE_COMMAND = "src/apm_cli/commands/prune.py"
 _UNINSTALL_COMMANDS = "src/apm_cli/commands/uninstall/"
 
 
-_USER_ROOT_OWNER = "src/apm_cli/integration/targets.py"
+_USER_ROOT_OWNER = "src/apm_cli/harnesses/types.py"
 
 
 _USER_ROOT_CONSUMER = "src/apm_cli/compilation/user_root_context.py"

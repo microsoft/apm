@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.install.context import InstallContext
-    from apm_cli.integration.targets import TargetProfile
 
 
 def _package_field(apm_package: Any, name: str) -> Any:

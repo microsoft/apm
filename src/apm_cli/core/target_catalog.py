@@ -1,243 +1,25 @@
-"""Canonical capability metadata for accepted APM targets."""
+"""Projection API for canonical capabilities registered by harness adapters."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from types import MappingProxyType
+from collections.abc import Mapping
+
+from apm_cli.harnesses.registry import get_harness_registry
+from apm_cli.harnesses.types import TargetCapability
 
 
-@dataclass(frozen=True)
-class TargetCapability:
-    """Command-facing capabilities of one native agent target."""
+class _CapabilityProjection(Mapping[str, TargetCapability]):
+    def __getitem__(self, name: str) -> TargetCapability:
+        return get_harness_registry().capabilities[name]
 
-    name: str
-    aliases: tuple[str, ...]
-    description: str
-    in_all: bool
-    explicit_only: bool
-    experimental_flag: str | None
-    mcp_only: bool
-    primitive_profile: str | None
-    compile_family: str | None
-    runtimes: tuple[str, ...]
-    commands: frozenset[str]
-    meta_target: bool = False
-    accepts_agent_skills_packages: bool = False
+    def __iter__(self):
+        return iter(get_harness_registry().capabilities)
+
+    def __len__(self) -> int:
+        return len(get_harness_registry().capabilities)
 
 
-_TARGET_COMMANDS = frozenset({"compile", "install", "update"})
-
-
-def _capability(
-    name: str,
-    description: str,
-    *,
-    aliases: tuple[str, ...] = (),
-    in_all: bool = False,
-    explicit_only: bool = False,
-    experimental_flag: str | None = None,
-    mcp_only: bool = False,
-    primitive_profile: str | None = None,
-    compile_family: str | None = None,
-    runtimes: tuple[str, ...] = (),
-    meta_target: bool = False,
-    accepts_agent_skills_packages: bool = False,
-) -> TargetCapability:
-    """Create catalog data shared by all target-selecting commands."""
-    return TargetCapability(
-        name=name,
-        aliases=aliases,
-        description=description,
-        in_all=in_all,
-        explicit_only=explicit_only,
-        experimental_flag=experimental_flag,
-        mcp_only=mcp_only,
-        primitive_profile=primitive_profile,
-        compile_family=compile_family,
-        runtimes=runtimes,
-        commands=_TARGET_COMMANDS,
-        meta_target=meta_target,
-        accepts_agent_skills_packages=accepts_agent_skills_packages,
-    )
-
-
-def _build_target_catalog(
-    capabilities: Iterable[TargetCapability],
-) -> Mapping[str, TargetCapability]:
-    """Validate and freeze target capability definitions."""
-    catalog: dict[str, TargetCapability] = {}
-    value_owners: dict[str, str] = {}
-    runtime_owners: dict[str, str] = {}
-
-    for capability in capabilities:
-        if not capability.name:
-            raise ValueError("Target capability name must not be empty")
-        if not capability.description:
-            raise ValueError(f"Target '{capability.name}' must have a description")
-        if not capability.commands:
-            raise ValueError(f"Target '{capability.name}' must declare at least one command")
-        if capability.name in value_owners:
-            raise ValueError(f"Duplicate target value '{capability.name}'")
-        if capability.mcp_only and capability.primitive_profile is None:
-            raise ValueError(f"MCP-only target '{capability.name}' must declare primitive_profile")
-        if capability.in_all and (
-            capability.experimental_flag is not None or capability.explicit_only
-        ):
-            raise ValueError(
-                f"Target '{capability.name}' cannot set in_all with "
-                "experimental_flag or explicit_only"
-            )
-
-        catalog[capability.name] = capability
-        value_owners[capability.name] = capability.name
-        for alias in capability.aliases:
-            if alias in value_owners:
-                raise ValueError(f"Duplicate target value '{alias}'")
-            value_owners[alias] = capability.name
-        for runtime in capability.runtimes:
-            owner = runtime_owners.get(runtime)
-            if owner is not None:
-                raise ValueError(
-                    f"Runtime '{runtime}' maps to multiple targets: "
-                    f"'{owner}' and '{capability.name}'"
-                )
-            runtime_owners[runtime] = capability.name
-
-    return MappingProxyType(catalog)
-
-
-TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
-    (
-        _capability(
-            "agent-skills",
-            "Cross-client native .agents skills configuration",
-            explicit_only=True,
-            primitive_profile="agent-skills",
-            meta_target=True,
-        ),
-        _capability(
-            "antigravity",
-            "Antigravity native .agents configuration",
-            aliases=("agy",),
-            explicit_only=True,
-            primitive_profile="antigravity",
-            compile_family="agents",
-        ),
-        _capability(
-            "claude",
-            "Claude Code native .claude configuration",
-            in_all=True,
-            primitive_profile="claude",
-            compile_family="claude",
-        ),
-        _capability(
-            "codex",
-            "Codex native .codex and .agents configuration",
-            in_all=True,
-            primitive_profile="codex",
-            compile_family="agents",
-        ),
-        _capability(
-            "copilot",
-            "GitHub Copilot native .github configuration",
-            aliases=("vscode", "agents"),
-            in_all=True,
-            primitive_profile="copilot",
-            compile_family="vscode",
-            runtimes=("copilot", "vscode", "agents"),
-        ),
-        _capability(
-            "copilot-app",
-            "GitHub Copilot desktop app native workflow configuration",
-            experimental_flag="copilot_app",
-            primitive_profile="copilot-app",
-        ),
-        _capability(
-            "copilot-cowork",
-            "Microsoft 365 Copilot Cowork native skills configuration",
-            experimental_flag="copilot_cowork",
-            primitive_profile="copilot-cowork",
-        ),
-        _capability(
-            "cursor",
-            "Cursor native .cursor configuration",
-            in_all=True,
-            primitive_profile="cursor",
-            compile_family="agents",
-        ),
-        _capability(
-            "gemini",
-            "Gemini CLI native .gemini configuration",
-            in_all=True,
-            primitive_profile="gemini",
-            compile_family="gemini",
-        ),
-        _capability(
-            "grok-bot",
-            "Grok Bot native agent-data/workflows skills configuration",
-            explicit_only=True,
-            primitive_profile="grok-bot",
-            accepts_agent_skills_packages=True,
-        ),
-        _capability(
-            "grok-build",
-            "xAI Grok Build native .grok configuration",
-            in_all=True,
-            primitive_profile="grok-build",
-            compile_family="agents",
-        ),
-        _capability(
-            "grok-cloud",
-            "xAI Grok Cloud native .grok/skills configuration",
-            explicit_only=True,
-            experimental_flag="grok_cloud",
-            primitive_profile="grok-cloud",
-        ),
-        _capability(
-            "hermes",
-            "Hermes native skills and MCP configuration",
-            explicit_only=True,
-            primitive_profile="hermes",
-            compile_family="agents",
-        ),
-        _capability(
-            "intellij",
-            "IntelliJ MCP integration using the Copilot primitive profile",
-            mcp_only=True,
-            primitive_profile="copilot",
-            compile_family="agents",
-            runtimes=("intellij",),
-        ),
-        _capability(
-            "kiro",
-            "Kiro native .kiro configuration",
-            in_all=True,
-            primitive_profile="kiro",
-            compile_family="agents",
-        ),
-        _capability(
-            "openclaw",
-            "OpenClaw native skills configuration",
-            experimental_flag="openclaw",
-            primitive_profile="openclaw",
-        ),
-        _capability(
-            "opencode",
-            "OpenCode native .opencode configuration",
-            in_all=True,
-            primitive_profile="opencode",
-            compile_family="agents",
-        ),
-        _capability(
-            "windsurf",
-            "Windsurf native .windsurf and .agents configuration",
-            in_all=True,
-            primitive_profile="windsurf",
-            compile_family="agents",
-        ),
-    )
-)
+TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _CapabilityProjection()
 
 
 def get_target_capability(name_or_alias: str) -> TargetCapability:
@@ -308,12 +90,7 @@ def target_help_fragment(command: str) -> str:
 
 
 def target_all_exclusion_help() -> str:
-    """Return the generated 'all' exclusion clause for command help strings.
-
-    Produces a sorted list of names excluded from 'all': explicit-only
-    non-experimental targets, 'experimental targets' as a category, and
-    mcp-only targets.  Adding a new catalog entry automatically appears here.
-    """
+    """Return the generated 'all' exclusion clause for command help strings."""
     explicit_non_experimental = sorted(
         cap.name
         for cap in TARGET_CAPABILITIES.values()

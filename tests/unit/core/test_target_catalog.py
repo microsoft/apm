@@ -2,7 +2,6 @@
 
 from contextlib import nullcontext
 from dataclasses import FrozenInstanceError, astuple
-from types import MappingProxyType
 
 import pytest
 from click.testing import CliRunner
@@ -11,8 +10,6 @@ from apm_cli.cli import cli
 from apm_cli.core.apm_yml import CANONICAL_TARGETS
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
-    TargetCapability,
-    _build_target_catalog,
     accepted_target_values,
     expand_all,
     get_target_capability,
@@ -29,6 +26,8 @@ from apm_cli.core.target_detection import (
     VALID_TARGET_VALUES,
     parse_target_field,
 )
+from apm_cli.harnesses.builtins import _build_target_catalog
+from apm_cli.harnesses.types import TargetCapability
 from apm_cli.integration.targets import KNOWN_TARGETS, RUNTIME_TO_CANONICAL_TARGET
 
 COMMANDS = ("compile", "install", "update")
@@ -302,7 +301,6 @@ def test_current_native_profiles_are_characterized() -> None:
 
 def test_catalog_is_immutable_and_projects_accepted_values() -> None:
     """The catalog owns every accepted target value."""
-    assert isinstance(TARGET_CAPABILITIES, MappingProxyType)
     assert accepted_target_values() == VALID_TARGET_VALUES
     assert accepted_target_values("install") == VALID_TARGET_VALUES
     assert accepted_target_values("update") == VALID_TARGET_VALUES

@@ -64,7 +64,7 @@ from apm_cli.integration.copilot_app_ws import (
 from apm_cli.utils.yaml_io import load_frontmatter
 
 if TYPE_CHECKING:
-    from apm_cli.integration.targets import TargetProfile
+    from apm_cli.harnesses.types import TargetProfile
 
 
 # ---------------------------------------------------------------------------

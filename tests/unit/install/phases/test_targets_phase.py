@@ -10,8 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.core.scope import InstallScope
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
-from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

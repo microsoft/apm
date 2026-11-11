@@ -192,6 +192,7 @@ def _install_registry_group(  # noqa: PLR0913
     """
     # Lazy import: only available after MCPIntegrator finishes loading.
     from apm_cli.factory import ClientFactory
+    from apm_cli.harnesses.registry import get_harness_registry
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         compare_native_mcp_connection,
@@ -206,7 +207,7 @@ def _install_registry_group(  # noqa: PLR0913
     protected_clients = {
         rt: ClientFactory.create_client(rt, project_root=project_root, user_scope=user_scope)
         for rt in target_runtimes
-        if rt in {"claude", "codex"}
+        if rt in {"claude", "codex"} | get_harness_registry().external_mcp_clients
     }
     registry_server_cache: dict[str, dict] = prevalidated_servers or {}
 
@@ -677,6 +678,9 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
         "windsurf": ".windsurf",
         "kiro": ".kiro",
     }
+    from apm_cli.harnesses.registry import get_harness_registry
+
+    external_runtimes = sorted(get_harness_registry().external_mcp_clients)
     try:
         from apm_cli.factory import ClientFactory
         from apm_cli.runtime.manager import RuntimeManager
@@ -695,6 +699,7 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
             "kiro",
             "claude",
             "intellij",
+            *external_runtimes,
         ]:
             try:
                 if not _runtime_is_present(
@@ -720,8 +725,34 @@ def _runtime_is_present(
     runtime_name, project_root_path, manager, dir_signal, *, user_scope: bool
 ) -> bool:
     """Return ``True`` when *runtime_name*'s opt-in presence signal fires."""
+    from apm_cli.harnesses.registry import get_harness_registry
     from apm_cli.integration.mcp_integrator import _is_vscode_available
 
+    registry = get_harness_registry()
+    if runtime_name in registry.external_mcp_clients:
+        for name in registry.external_names:
+            adapter = registry.adapters[name]
+            if runtime_name not in adapter.mcp_clients:
+                continue
+            if adapter.capability.explicit_only:
+                return False
+            if adapter.capability.experimental_flag is not None:
+                from apm_cli.core.experimental import is_enabled
+
+                if not is_enabled(adapter.capability.experimental_flag, create_config=False):
+                    return False
+            if user_scope:
+                profile = adapter.profile
+                if profile is not None and profile.user_supported:
+                    return (Path.home() / profile.effective_root(True)).is_dir() or (
+                        find_runtime_binary(runtime_name) is not None
+                    )
+            else:
+                for kind, path in adapter.signals:
+                    marker = project_root_path / path
+                    if (kind == "dir" and marker.is_dir()) or (kind == "file" and marker.is_file()):
+                        return True
+            return find_runtime_binary(runtime_name) is not None
     if runtime_name == "vscode":
         return _is_vscode_available(project_root=project_root_path)
     if runtime_name == "kiro" and user_scope:
@@ -772,6 +803,11 @@ def _discover_installed_runtimes_fallback(
         # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME is
         # misconfigured -- treat as "not installed" rather than crash.
         pass
+    from apm_cli.harnesses.registry import get_harness_registry
+
+    for runtime_name in sorted(get_harness_registry().external_mcp_clients):
+        if _runtime_is_present(runtime_name, project_root_path, None, {}, user_scope=user_scope):
+            installed_runtimes.append(runtime_name)
     return installed_runtimes
 
 
@@ -1180,6 +1216,7 @@ def _install_self_defined_deps(
     Returns the number of servers newly configured or updated.
     """
     from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.harnesses.registry import get_harness_registry
     from apm_cli.install.mcp.ownership import (
         NativeMcpConnectionState,
         compare_native_mcp_connection,
@@ -1205,7 +1242,8 @@ def _install_self_defined_deps(
         project_root=project_root,
         user_scope=user_scope,
     )
-    if {"claude", "codex"}.intersection(target_runtimes):
+    protected_runtimes = {"claude", "codex"} | get_harness_registry().external_mcp_clients
+    if protected_runtimes.intersection(target_runtimes):
         # Native content must be checked even when every requested name exists.
         self_defined_to_install = list(self_defined_names)
     already_configured_candidates_sd = [
@@ -1276,7 +1314,7 @@ def _install_self_defined_deps(
             replace_existing = is_update and (
                 managed_target_servers is None or dep.name in managed_target_servers.get(rt, set())
             )
-            if rt in {"claude", "codex"}:
+            if rt in protected_runtimes:
                 if rt not in protected_clients:
                     protected_clients[rt] = ClientFactory.create_client(
                         rt, project_root=project_root, user_scope=user_scope

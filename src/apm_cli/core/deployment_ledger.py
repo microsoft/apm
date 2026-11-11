@@ -31,7 +31,7 @@ from apm_cli.utils.paths import portable_relpath
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
-    from apm_cli.integration.targets import TargetProfile
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 

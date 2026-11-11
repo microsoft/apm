@@ -2,7 +2,8 @@
 
 Targets pure functions and data structures in:
 - apm_cli.integration.copilot_app_db (slug helpers, URI translation, WorkflowRow, resolvers)
-- apm_cli.integration.targets (PrimitiveMapping, TargetProfile, KNOWN_TARGETS, active_targets)
+- apm_cli.harnesses.types (PrimitiveMapping, TargetProfile)
+- apm_cli.integration.targets (KNOWN_TARGETS, active_targets)
 - apm_cli.integration.prompt_integrator (find_prompt_files, copy_prompt, get_target_filename)
 - apm_cli.core.experimental (FLAGS, normalise/validate, is_enabled, overrides query helpers)
 
@@ -475,7 +476,7 @@ class TestPrimitiveMapping:
     """PrimitiveMapping is a frozen dataclass for deployment specs."""
 
     def test_required_fields_stored(self) -> None:
-        from apm_cli.integration.targets import PrimitiveMapping
+        from apm_cli.harnesses.types import PrimitiveMapping
 
         pm = PrimitiveMapping(
             subdir="rules", extension=".md", format_id="cursor_rules", output_compare=True
@@ -485,13 +486,13 @@ class TestPrimitiveMapping:
         assert pm.format_id == "cursor_rules"
 
     def test_deploy_root_defaults_to_none(self) -> None:
-        from apm_cli.integration.targets import PrimitiveMapping
+        from apm_cli.harnesses.types import PrimitiveMapping
 
         pm = PrimitiveMapping(subdir="skills", extension="/SKILL.md", format_id="skill_standard")
         assert pm.deploy_root is None
 
     def test_deploy_root_can_be_set(self) -> None:
-        from apm_cli.integration.targets import PrimitiveMapping
+        from apm_cli.harnesses.types import PrimitiveMapping
 
         pm = PrimitiveMapping(
             subdir="skills",
@@ -502,7 +503,7 @@ class TestPrimitiveMapping:
         assert pm.deploy_root == ".agents"
 
     def test_frozen_raises_on_mutation(self) -> None:
-        from apm_cli.integration.targets import PrimitiveMapping
+        from apm_cli.harnesses.types import PrimitiveMapping
 
         pm = PrimitiveMapping(subdir="rules", extension=".md", format_id="x")
         with pytest.raises(AttributeError):
@@ -518,7 +519,7 @@ class TestTargetProfile:
     """TargetProfile dataclass behaviour: properties and methods."""
 
     def _make_profile(self, **kwargs):
-        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+        from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 
         defaults = dict(
             capability=replace(
@@ -552,7 +553,7 @@ class TestTargetProfile:
         assert ".cursor/" in profile.effective_pack_prefixes
 
     def test_effective_pack_prefixes_uses_override_when_set(self) -> None:
-        from apm_cli.integration.targets import TargetProfile
+        from apm_cli.harnesses.types import TargetProfile
 
         profile = TargetProfile(
             capability=TARGET_CAPABILITIES["codex"],

@@ -18,7 +18,8 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+from apm_cli.harnesses.types import TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 

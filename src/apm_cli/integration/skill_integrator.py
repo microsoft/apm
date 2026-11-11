@@ -14,6 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -36,7 +37,6 @@ from apm_cli.integration.skill_support import (
     get_lockfile_owned_agent_skills,
     skill_dir_has_content,
 )
-from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.atomic_io import write_text_lf
 

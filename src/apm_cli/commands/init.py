@@ -770,7 +770,19 @@ def _prompt_target_selection(
 
     Returns list of selected targets or None if user confirms empty selection.
     """
-    targets = [t for t in _PROMPT_TARGETS_ORDERED if t not in EXPLICIT_ONLY_TARGETS]
+    from apm_cli.harnesses.registry import get_harness_registry
+
+    registry = get_harness_registry()
+    extensions = [
+        name
+        for name in sorted(registry.external_names)
+        if registry.adapters[name].profile is not None
+        and registry.capabilities[name].experimental_flag is None
+        and "install" in registry.capabilities[name].commands
+    ]
+    targets = [
+        t for t in [*_PROMPT_TARGETS_ORDERED, *extensions] if t not in EXPLICIT_ONLY_TARGETS
+    ]
     selected: list[bool] = [t in prechecked for t in targets]
 
     def _render_choices() -> str:

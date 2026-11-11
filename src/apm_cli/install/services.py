@@ -10,7 +10,8 @@ Authorization preparation is shared through ``deployment_plan``.
 from __future__ import annotations
 
 import builtins
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from ..core.scope import InstallScope
     from ..install.context import InstallContext
     from ..integration.base_integrator import BaseIntegrator
+    from ..integration.skill_support import SkillIntegrationResult
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -48,12 +50,7 @@ dict = builtins.dict
 
 @dataclass(frozen=True)
 class IntegratorBundle:
-    """Groups the six primitive integrators passed to ``integrate_package_primitives``.
-
-    Using a bundle reduces the public argument count of
-    ``integrate_package_primitives`` below the PLR0913 threshold (≤15) while
-    keeping the integrator objects strongly typed and discoverable.
-    """
+    """Groups primitive integrators and their per-run adapter instances."""
 
     prompt: BaseIntegrator
     agent: BaseIntegrator
@@ -61,10 +58,11 @@ class IntegratorBundle:
     instruction: BaseIntegrator
     command: BaseIntegrator
     hook: BaseIntegrator
-    # Optional so the ~16 existing test/prod construction sites that omit it
-    # keep working. Production sites (template.py, integrate_local_content,
-    # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
+    # Optional so existing construction sites that omit canvas keep working.
     canvas: BaseIntegrator | None = None
+    integrator_cache: builtins.dict[tuple[str, type], BaseIntegrator] = field(
+        default_factory=builtins.dict
+    )
 
 
 def _log_hook_display_payloads(
@@ -197,6 +195,151 @@ def _targets_explicitly_requested(ctx: InstallContext | None) -> bool:
     return getattr(decision, "source", None) == "--target flag"
 
 
+def _merge_skill_results(results: list[SkillIntegrationResult]) -> SkillIntegrationResult:
+    """Combine native skill receipts, retaining the single-integrator fast path."""
+    from apm_cli.integration.skill_support import SkillIntegrationResult
+
+    if len(results) == 1:
+        return results[0]
+    return SkillIntegrationResult(
+        skill_created=any(item.skill_created for item in results),
+        skill_updated=any(item.skill_updated for item in results),
+        skill_skipped=any(item.skill_skipped for item in results),
+        skill_path=next((item.skill_path for item in results if item.skill_path), None),
+        references_copied=sum(item.references_copied for item in results),
+        links_resolved=sum(item.links_resolved for item in results),
+        sub_skills_promoted=sum(item.sub_skills_promoted for item in results),
+        bin_deployed=sum(item.bin_deployed for item in results),
+        bin_skipped_reason=next(
+            (item.bin_skipped_reason for item in results if item.bin_skipped_reason), None
+        ),
+        target_paths=list(dict.fromkeys(path for item in results for path in item.target_paths)),
+        materializations=tuple(
+            dict.fromkeys(
+                materialization for item in results for materialization in item.materializations
+            )
+        ),
+        deployed_files=tuple(
+            dict.fromkeys(path for item in results for path in item.deployed_files)
+        ),
+        complete=bool(results) and all(item.complete for item in results),
+    )
+
+
+def _reconcile_hook_targets(
+    package_info: Any,
+    project_root: Path,
+    targets: Any,
+    default: BaseIntegrator,
+    entry: Any,
+    cache: dict,
+) -> dict | None:
+    """Retire excluded hooks through the implementation that owns each target."""
+    from apm_cli.integration.dispatch import group_target_integrators
+
+    if not targets:
+        return None
+    combined = {"files_removed": 0, "errors": 0, "failed_targets": [], "failed_paths": []}
+    found = False
+    for integrator, group in group_target_integrators(
+        targets, "hooks", default, default_class=entry.integrator_class, cache=cache
+    ):
+        reconcile = getattr(integrator, "reconcile_package_target_restriction", None)
+        if not callable(reconcile):
+            continue
+        found = True
+        stats = reconcile(package_info, project_root, group)
+        for key in combined:
+            combined[key] += stats.get(key, 0 if key in {"files_removed", "errors"} else [])
+    return combined if found else None
+
+
+def _preflight_target_integrators(
+    package_info: Any,
+    project_root: Path,
+    integrators: IntegratorBundle,
+    plan: PackageDeploymentPlan,
+    *,
+    dispatch: dict,
+    cache: dict,
+    skill_subset: tuple | None,
+    diagnostics: DiagnosticCollector,
+    logger: InstallLogger | None,
+    scope: InstallScope | None,
+    force: bool,
+) -> bool:
+    """Validate all selected native projections before any primitive can write."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.dispatch import group_target_integrators
+
+    targets = plan.projection_targets
+    for integrator, _ in group_target_integrators(
+        targets,
+        "skills",
+        integrators.skill,
+        default_class=dispatch["skills"].integrator_class,
+        cache=cache,
+    ):
+        preflight = getattr(integrator, "preflight_skill_selection", None)
+        if callable(preflight) and not preflight(
+            package_info,
+            skill_subset=skill_subset,
+            source_plan=plan.source_plan,
+            diagnostics=diagnostics,
+            logger=logger,
+        ):
+            return False
+    if plan.approvals[0]:
+        for integrator, _ in group_target_integrators(
+            targets,
+            "hooks",
+            integrators.hook,
+            default_class=dispatch["hooks"].integrator_class,
+            cache=cache,
+        ):
+            preflight = getattr(integrator, "preflight_hooks_for_targets", None)
+            if callable(preflight):
+                preflight(
+                    package_info,
+                    project_root,
+                    plan.source_plan,
+                    user_scope=scope is InstallScope.USER,
+                    retiring_targets=frozenset(
+                        t.name for t in plan.target_selection.excluded_targets
+                    ),
+                )
+    for integrator, group in group_target_integrators(
+        targets,
+        "instructions",
+        integrators.instruction,
+        default_class=dispatch["instructions"].integrator_class,
+        cache=cache,
+    ):
+        preflight = getattr(integrator, "preflight_instructions_for_targets", None)
+        if callable(preflight):
+            preflight(
+                group,
+                package_info,
+                project_root,
+                plan.source_plan,
+                force=force,
+                diagnostics=diagnostics,
+            )
+    return True
+
+
+def _resolve_target_integrators(
+    targets: list[Any],
+    dispatch: dict,
+    resolve: Callable[[Any, str], BaseIntegrator | None],
+) -> None:
+    """Construct every selected override before preflights or filesystem writes."""
+    for target in targets:
+        for primitive in target.primitives:
+            if primitive in dispatch:
+                resolve(target, primitive)
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -254,11 +397,39 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     enforce_agent_plugin_deployment_boundary(package_info)
 
-    from apm_cli.integration.dispatch import get_dispatch_table
+    from apm_cli.integration.dispatch import (
+        get_dispatch_table,
+        get_integrator_for_target,
+        group_target_integrators,
+    )
 
     from ..core.scope import InstallScope
 
     _dispatch = get_dispatch_table()
+    _integrator_cache = integrators.integrator_cache
+    context_cache = getattr(ctx, "harness_integrators", None)
+    if isinstance(context_cache, builtins.dict):
+        _integrator_cache = context_cache
+    _default_integrators = {
+        "prompts": integrators.prompt,
+        "agents": integrators.agent,
+        "commands": integrators.command,
+        "instructions": integrators.instruction,
+        "hooks": integrators.hook,
+        "canvas": integrators.canvas,
+        "skills": integrators.skill,
+    }
+
+    def _integrator_for(target, primitive: str):
+        entry = _dispatch[primitive]
+        return get_integrator_for_target(
+            target,
+            primitive,
+            _default_integrators[primitive],
+            default_class=entry.integrator_class,
+            cache=_integrator_cache,
+        )
+
     result = {
         "prompts": 0,
         "agents": 0,
@@ -308,20 +479,20 @@ def integrate_package_primitives(  # noqa: PLR0913
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
     dep_targets_active = target_selection.consumer_restriction_active
 
-    reconcile_package_targets = getattr(
-        integrators.hook,
-        "reconcile_package_target_restriction",
-        None,
-    )
+    def _reconcile_package_targets(reconcile_targets):
+        return _reconcile_hook_targets(
+            package_info,
+            project_root,
+            reconcile_targets,
+            integrators.hook,
+            _dispatch["hooks"],
+            _integrator_cache,
+        )
 
     def _reconcile_excluded_targets() -> None:
-        if target_selection.excluded_targets and callable(reconcile_package_targets):
-            reconcile_stats = reconcile_package_targets(
-                package_info,
-                project_root,
-                target_selection.excluded_targets,
-            )
-            _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+        stats = _reconcile_package_targets(target_selection.excluded_targets)
+        if stats is not None:
+            _warn_target_reconcile_failure(diagnostics, package_name, stats)
 
     if not targets:
         _reconcile_excluded_targets()
@@ -381,6 +552,11 @@ def integrate_package_primitives(  # noqa: PLR0913
             logger=logger,
         )
 
+    # Resolve every override before any primitive preflight or write. A
+    # constructor failure must not leave earlier primitive kinds deployed.
+    if codex_native is None:
+        _resolve_target_integrators(projection_targets, _dispatch, _integrator_for)
+
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
     warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
@@ -389,65 +565,27 @@ def integrate_package_primitives(  # noqa: PLR0913
         if logger:
             logger.tree_item(msg)
 
-    _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
+    _verbose = bool(getattr(ctx, "verbose", False))
 
-    _INTEGRATOR_KWARGS = {
-        "prompts": integrators.prompt,
-        "agents": integrators.agent,
-        "commands": integrators.command,
-        "instructions": integrators.instruction,
-        "hooks": integrators.hook,
-        "canvas": integrators.canvas,
-        "skills": integrators.skill,
-    }
-
-    # An unmatched skills: selection fails the package; refuse it before any
-    # primitive kind writes so the failed install leaves every file untouched.
-    preflight_skill_selection = getattr(integrators.skill, "preflight_skill_selection", None)
-    if (
-        codex_native is None
-        and callable(preflight_skill_selection)
-        and not preflight_skill_selection(
-            package_info,
-            skill_subset=skill_subset,
-            source_plan=source_plan,
-            diagnostics=diagnostics,
-            logger=logger,
-        )
+    if codex_native is None and not _preflight_target_integrators(
+        package_info,
+        project_root,
+        integrators,
+        deployment_plan,
+        dispatch=_dispatch,
+        cache=_integrator_cache,
+        skill_subset=skill_subset,
+        diagnostics=diagnostics,
+        logger=logger,
+        scope=scope,
+        force=force,
     ):
         return result
-
-    preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
-    if _hooks_approved and callable(preflight_hooks) and codex_native is None:
-        preflight_hooks(
-            package_info,
-            project_root,
-            source_plan,
-            user_scope=scope is InstallScope.USER,
-            retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
-        )
-
-    # Validate every converted instruction target before any primitive kind can
-    # write. A rejected instruction must not leave prompts, agents, commands,
-    # or identity-target instructions from the same package active.
-    if integrators.instruction is not None:
-        integrators.instruction.preflight_instructions_for_targets(
-            projection_targets,
-            package_info,
-            project_root,
-            source_plan,
-            force=force,
-            diagnostics=diagnostics,
-        )
 
     _reconcile_excluded_targets()
 
     if codex_native is not None:
-        _rc = (
-            reconcile_package_targets(package_info, project_root, targets)
-            if callable(reconcile_package_targets)
-            else None
-        )
+        _rc = _reconcile_package_targets(targets)
         return finalize_codex_native(result, codex_native, source_plan, _rc, ctx, scratch_root)
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
@@ -481,13 +619,6 @@ def integrate_package_primitives(  # noqa: PLR0913
             if not _dep_canvas_ok:
                 _log_canvas_skip(package_name, package_info, logger)
                 continue
-        _integrator = _INTEGRATOR_KWARGS[_prim_name]
-        # A primitive can be statically present on a target (e.g. the
-        # copilot canvas mapping) while a given IntegratorBundle omits its
-        # integrator (None). Skip rather than crash so test/replay bundles
-        # that don't wire the integrator simply no-op that primitive.
-        if _integrator is None:
-            continue
         _agg_files = 0
         _agg_adopted = 0
         _agg_paths: list[str] = []
@@ -498,6 +629,9 @@ def integrate_package_primitives(  # noqa: PLR0913
                 continue
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:
+                continue
+            _integrator = _integrator_for(_target, _prim_name)
+            if _integrator is None:
                 continue
             _call_kwargs: dict[str, Any] = {
                 "force": force,
@@ -609,9 +743,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         # display_payloads reflects post-path-rewrite data (what is
         # actually written to disk and executed), so this is faithful.
         if _prim_name == "hooks" and _info["files"] > 0:
-            _hook_verbose = _verbose or (
-                bool(getattr(logger, "verbose", False)) if logger is not None else False
-            )
+            _hook_verbose = _verbose or bool(getattr(logger, "verbose", False))
             _log_hook_display_payloads(
                 _info.get("hook_payloads", []),
                 _hook_verbose,
@@ -620,21 +752,32 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    skill_result = integrators.skill.integrate_package_skill(
-        package_info,
-        project_root,
-        diagnostics=diagnostics,
-        managed_files=managed_files,
-        force=force,
-        targets=projection_targets,
-        skill_subset=skill_subset,
-        scope=scope,
-        policy=policy,
-        skip_bin=_skip_bin,
-        bin_skip_reason_override=_bin_skip_reason_override,
-        trust_bin=trust_bin,
-        source_plan=source_plan,
-    )
+    _skill_results = []
+    for _skill_integrator, _skill_targets in group_target_integrators(
+        projection_targets,
+        "skills",
+        integrators.skill,
+        default_class=_dispatch["skills"].integrator_class,
+        cache=_integrator_cache,
+    ):
+        _skill_results.append(
+            _skill_integrator.integrate_package_skill(
+                package_info,
+                project_root,
+                diagnostics=diagnostics,
+                managed_files=managed_files,
+                force=force,
+                targets=_skill_targets,
+                skill_subset=skill_subset,
+                scope=scope,
+                policy=policy,
+                skip_bin=_skip_bin,
+                bin_skip_reason_override=_bin_skip_reason_override,
+                trust_bin=trust_bin,
+                source_plan=source_plan,
+            )
+        )
+    skill_result = _merge_skill_results(_skill_results)
     _skill_target_paths = _skill_summary_paths(
         skill_result.target_paths, project_root, targets
     ) or ["skills/"]
@@ -742,6 +885,9 @@ def integrate_local_content(  # noqa: PLR0913
         source_root = project_root
 
     local_info = build_project_local_package_info(source_root)
+    integrator_cache = getattr(ctx, "harness_integrators", None) if ctx is not None else None
+    if not isinstance(integrator_cache, builtins.dict):
+        integrator_cache = builtins.dict()
 
     return integrate_package_primitives(
         local_info,
@@ -755,6 +901,7 @@ def integrate_local_content(  # noqa: PLR0913
             command=command_integrator,
             hook=hook_integrator,
             canvas=CanvasIntegrator(),
+            integrator_cache=integrator_cache,
         ),
         force=force,
         managed_files=managed_files,

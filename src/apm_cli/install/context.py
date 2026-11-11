@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
     from apm_cli.install.helpers.ref_reuse import RefResolverCacheKey
+    from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.security.executables import ExecTrustContext
 
 
@@ -146,6 +147,9 @@ class InstallContext:
     # Populated lazily in _maybe_resolve_git_semver during the resolve phase.
     ref_resolver_cache: dict[RefResolverCacheKey, Any] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
+    harness_integrators: dict[tuple[str, type[BaseIntegrator]], BaseIntegrator] = field(
+        default_factory=dict
+    )
 
     # ------------------------------------------------------------------
     # Integrate phase outputs (written by integrate, read by cleanup/lockfile/summary)

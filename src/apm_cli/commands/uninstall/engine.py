@@ -1137,7 +1137,11 @@ def _sync_integrations_after_uninstall(
     )
     from ...install.target_filter import resolve_effective_package_targets
     from ...integration.base_integrator import BaseIntegrator
-    from ...integration.dispatch import get_dispatch_table
+    from ...integration.dispatch import (
+        get_dispatch_table,
+        get_integrator_for_target,
+        group_target_integrators,
+    )
     from ...integration.targets import resolve_targets
     from ...primitives.discovery import clear_discovery_cache
 
@@ -1171,7 +1175,19 @@ def _sync_integrations_after_uninstall(
     clear_discovery_cache()
 
     _dispatch = get_dispatch_table()
+    _integrator_cache = {}
     _integrators = {name: entry.integrator_class() for name, entry in _dispatch.items()}
+
+    def _integrator_for(target, primitive: str):
+        entry = _dispatch[primitive]
+        return get_integrator_for_target(
+            target,
+            primitive,
+            _integrators[primitive],
+            default_class=entry.integrator_class,
+            cache=_integrator_cache,
+        )
+
     _integrator_bundle = IntegratorBundle(
         prompt=_integrators["prompts"],
         agent=_integrators["agents"],
@@ -1180,6 +1196,7 @@ def _sync_integrations_after_uninstall(
         command=_integrators["commands"],
         hook=_integrators["hooks"],
         canvas=_integrators["canvas"],
+        integrator_cache=_integrator_cache,
     )
 
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
@@ -1243,7 +1260,7 @@ def _sync_integrations_after_uninstall(
             if _buckets is not None:
                 _bucket_key = BaseIntegrator.partition_bucket_key(_prim_name, _target.name)
                 _managed_subset = _buckets.get(_bucket_key, set())
-            result = _integrators[_prim_name].sync_for_target(
+            result = _integrator_for(_target, _prim_name).sync_for_target(
                 _target,
                 apm_package,
                 project_root,
@@ -1251,60 +1268,76 @@ def _sync_integrations_after_uninstall(
             )
             counts[_entry.counter_key] += result.get("files_removed", 0)
 
-    # Skills (multi-target, handled by SkillIntegrator)
-    # Check the target's effective skills root (deploy_root + skills subdir)
-    _skill_dirs_exist = False
-    for t in _resolved_targets:
-        if t.supports("skills"):
-            if (project_root / t.skills_rel_root).exists():
-                _skill_dirs_exist = True
-                break
+    # Skills use multi-target sync, grouped by adapter implementation so each
+    # native override owns only its targets and managed paths.
+    _skill_dirs_exist = any(
+        t.supports("skills") and (project_root / t.skills_rel_root).exists()
+        for t in _resolved_targets
+    )
 
-    # Scan sync_managed DIRECTLY for cowork:// entries.
-    # partition_managed_files() uses resolved_deploy_root to detect
-    # dynamic-root targets, but the static KNOWN_TARGETS["copilot-cowork"]
-    # always has resolved_deploy_root=None (it is only set after for_scope()
-    # resolves the OneDrive path at install time).  As a result, cowork://
-    # paths are never routed into _buckets["skills"] by the partition, so
-    # the bucket-based _has_cowork_skills check in the previous fix always
-    # returned False.  Bypassing the bucket and scanning sync_managed
-    # directly is the correct approach: no partition logic is involved.
-    _cowork_skill_files: set = set()
+    _cowork_skill_files: set[str] = set()
     if sync_managed:
         from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
         _cowork_skill_files = {p for p in sync_managed if p.startswith(COWORK_URI_SCHEME)}
     _has_cowork_skills = bool(_cowork_skill_files)
 
-    if _skill_dirs_exist or _has_cowork_skills:
-        # Merge cowork entries into the skills bucket so sync_integration
-        # receives them via managed_files.
-        if _has_cowork_skills and _buckets is not None:
-            _buckets.setdefault("skills", set()).update(_cowork_skill_files)
-        elif _has_cowork_skills:
-            _buckets = {"skills": _cowork_skill_files, "hooks": set()}
+    from ...integration.targets import KNOWN_TARGETS
 
-        # When cowork entries are present, pass targets=None so
-        # sync_integration builds skill_prefix_tuple from KNOWN_TARGETS
-        # (which includes the copilot-cowork target with user_root_resolver
-        # set).  Using _resolved_targets alone would yield only the local
-        # prefix (.copilot/skills/) and cowork:// paths would be silently
-        # skipped by the startswith() guard inside sync_integration.
-        _sync_targets = None if _has_cowork_skills else _resolved_targets
+    _cleanup_profiles = [*KNOWN_TARGETS.values(), *_resolved_targets]
+    if _has_cowork_skills:
+        _cowork_static = KNOWN_TARGETS.get("copilot-cowork")
+        if _cowork_static is not None:
+            _cleanup_profiles.append(_cowork_static.for_scope(user_scope=user_scope))
+
+    if _skill_dirs_exist or _has_cowork_skills:
+        _skill_groups = group_target_integrators(
+            _cleanup_profiles,
+            "skills",
+            _integrators["skills"],
+            default_class=_dispatch["skills"].integrator_class,
+            cache=_integrator_cache,
+        )
         removed_skill_paths: list[Path] = []
+        skill_removed = 0
+        _claimed_skill_files: set[str] = set()
         try:
-            result = _integrators["skills"].sync_integration(
-                apm_package,
-                project_root,
-                managed_files=_buckets["skills"] if _buckets else None,
-                targets=_sync_targets,
-                removed_paths=removed_skill_paths,
-            )
+            for _skill_integrator, _group_profiles in _skill_groups:
+                _active_targets = [
+                    target
+                    for target in _resolved_targets
+                    if _integrator_for(target, "skills") is _skill_integrator
+                ]
+                _group_managed = None
+                if _buckets is not None:
+                    _group_managed = BaseIntegrator.partition_managed_files(
+                        sync_managed or set(), targets=_group_profiles
+                    ).get("skills", set())
+                    _group_managed = set(_group_managed) - _claimed_skill_files
+                    _claimed_skill_files.update(_group_managed)
+                if _has_cowork_skills and any(
+                    target.name == "copilot-cowork" for target in _group_profiles
+                ):
+                    _group_managed = set(_group_managed or ())
+                    _group_managed.update(_cowork_skill_files)
+                _sync_targets = (
+                    None
+                    if _has_cowork_skills and _skill_integrator is _integrators["skills"]
+                    else _active_targets
+                )
+                _skill_result = _skill_integrator.sync_integration(
+                    apm_package,
+                    project_root,
+                    managed_files=_group_managed,
+                    targets=_sync_targets,
+                    removed_paths=removed_skill_paths,
+                )
+                skill_removed += _skill_result.get("files_removed", 0)
         finally:
             DeploymentMaterializationSession.retire_removed(
                 project_root, removed_skill_paths, user_scope=user_scope
             )
-        counts["skills"] = result.get("files_removed", 0)
+        counts["skills"] += skill_removed
 
     # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
     # The copilot-app target is opt-in: resolve_targets() excludes it from the
@@ -1329,7 +1362,7 @@ def _sync_integrations_after_uninstall(
                 if _ca_static is not None:
                     _ca_target = _ca_static.for_scope(user_scope=True)
             if _ca_target is not None:
-                result = _integrators["prompts"].sync_for_target(
+                result = _integrator_for(_ca_target, "prompts").sync_for_target(
                     _ca_target,
                     apm_package,
                     project_root,
@@ -1337,22 +1370,46 @@ def _sync_integrations_after_uninstall(
                 )
                 counts["prompts"] += result.get("files_removed", 0)
 
-    # Hooks: managed-file removal always scans every KNOWN_TARGETS prefix
-    # (safe -- it only ever deletes files already tracked as this
-    # package's own deployed_files). The merged-hook JSON wipe, in
-    # contrast, is scoped to `_resolved_targets` -- the SAME set the
-    # Phase 2 rebuild loop below iterates -- so a harness dropped from
-    # this project's `targets:` list is never wiped for packages that
-    # remain declared and installed (#2250).
-    result = _integrators["hooks"].sync_integration(
-        apm_package,
-        project_root,
-        managed_files=_buckets["hooks"] if _buckets else None,
-        managed_file_hashes=deployed_file_hashes,
-        targets=_resolved_targets,
+    # Hooks have target-specific cleanup implementations, but managed files
+    # and merged native configs must be synchronized exactly once.
+    _hook_groups = group_target_integrators(
+        _cleanup_profiles,
+        "hooks",
+        _integrators["hooks"],
+        default_class=_dispatch["hooks"].integrator_class,
+        cache=_integrator_cache,
     )
-    counts["hooks"] = result.get("files_removed", 0)
-    unsafe_hook_paths = result.get("unsafe_paths", [])
+    _hook_removed = 0
+    _hook_errors = 0
+    unsafe_hook_paths: list[str] = []
+    hook_failed_paths: list[str] = []
+    _claimed_hook_files: set[str] = set()
+    for _hook_integrator, _group_profiles in _hook_groups:
+        _active_targets = [
+            target
+            for target in _resolved_targets
+            if _integrator_for(target, "hooks") is _hook_integrator
+        ]
+        _group_managed = None
+        if _buckets is not None:
+            _group_managed = BaseIntegrator.partition_managed_files(
+                sync_managed or set(), targets=_group_profiles
+            ).get("hooks", set())
+            _group_managed = set(_group_managed) - _claimed_hook_files
+            _claimed_hook_files.update(_group_managed)
+        result = _hook_integrator.sync_integration(
+            apm_package,
+            project_root,
+            managed_files=_group_managed,
+            managed_file_hashes=deployed_file_hashes,
+            targets=_active_targets,
+        )
+        _hook_removed += result.get("files_removed", 0)
+        _hook_errors += result.get("errors", 0)
+        unsafe_hook_paths.extend(result.get("unsafe_paths", []))
+        hook_failed_paths.extend(result.get("failed_paths", []))
+    counts["hooks"] += _hook_removed
+    unsafe_hook_paths = sorted(set(unsafe_hook_paths))
     if unsafe_hook_paths:
         noun = "path" if len(unsafe_hook_paths) == 1 else "paths"
         logger.warning(
@@ -1360,7 +1417,7 @@ def _sync_integrations_after_uninstall(
             "containment validation. Inspect or repair symlinked parents before "
             "removing anything."
         )
-    failed_hook_paths = sorted(set(result.get("failed_paths", [])).union(unsafe_hook_paths))
+    failed_hook_paths = sorted(set(hook_failed_paths).union(unsafe_hook_paths))
     for failed_path in failed_hook_paths:
         path = Path(failed_path)
         if not path.is_absolute():
@@ -1398,7 +1455,27 @@ def _sync_integrations_after_uninstall(
         if target_survivor_plan
         else None
     )
-    with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):
+    from contextlib import ExitStack
+
+    _skill_instances = [
+        instance
+        for instance, _group_targets in group_target_integrators(
+            _resolved_targets,
+            "skills",
+            _integrators["skills"],
+            default_class=_dispatch["skills"].integrator_class,
+            cache=_integrator_cache,
+        )
+    ]
+    if all(instance is not _integrators["skills"] for instance in _skill_instances):
+        _skill_instances.insert(0, _integrators["skills"])
+    with ExitStack() as _skill_snapshots:
+        for _skill_integrator in _skill_instances:
+            _skill_snapshots.enter_context(
+                _skill_integrator.ownership_snapshot(
+                    materialization_session=materialization_session
+                )
+            )
         for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
             dep_key = dep_ref.get_unique_key()
             deployed_files = package_deployed_files.setdefault(dep_key, [])
@@ -1435,7 +1512,7 @@ def _sync_integrations_after_uninstall(
         counts=counts,
         deployed_files=package_deployed_files,
         failed_paths=failed_hook_paths,
-        error_count=result.get("errors", 0),
+        error_count=_hook_errors,
         materialization_session=materialization_session,
     )
 

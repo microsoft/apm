@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import logging as _logging_module
 
-    from ..integration.targets import TargetProfile
+    from ..harnesses.types import TargetProfile
     from ..primitives.models import Instruction
 
 # Root filename by compile_family.  Targets whose compile_family is not in

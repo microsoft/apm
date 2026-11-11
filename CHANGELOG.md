@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Installed Python distributions can register harness adapters through `apm.harnesses` entry points. Existing Codex, Claude Code and other targets retain their original profiles, integrators and MCP clients; external adapters participate in target selection, native primitive preflight/deployment, audit replay and uninstall.
+- Adapter discovery rejects invalid descriptors and identifier/runtime collisions. Python adapters are trusted executable code installed separately from APM package dependencies; see the contributor harness-adapter guide.
+
 ## [0.35.1] - 2026-11-11
 
 ### Changed

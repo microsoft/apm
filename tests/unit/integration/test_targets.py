@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.harnesses.types import RULE_FORMATS, PrimitiveMapping
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
-    RULE_FORMATS,
-    PrimitiveMapping,
     active_targets,
     resolve_targets,
 )

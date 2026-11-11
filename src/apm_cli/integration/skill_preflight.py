@@ -13,9 +13,9 @@ from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
 if TYPE_CHECKING:
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.skill_integrator import SkillIntegrator
-    from apm_cli.integration.targets import TargetProfile
     from apm_cli.models.apm_package import PackageInfo
 
 

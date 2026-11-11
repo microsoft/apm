@@ -3785,7 +3785,7 @@ def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa:
     Returns:
         A frozen TargetProfile suitable for cowork deployment tests.
     """
-    from apm_cli.integration.targets import TargetProfile  # noqa: F401
+    from apm_cli.harnesses.types import TargetProfile  # noqa: F401
 
     return _dc_replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
@@ -4267,7 +4267,7 @@ class TestCopySkillToTargetSymlinkContainment:
         os.symlink(str(outside), str(agents_link))
 
         # Build a minimal TargetProfile that routes skills to .agents/
-        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+        from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 
         target = TargetProfile(
             capability=TARGET_CAPABILITIES["agent-skills"],

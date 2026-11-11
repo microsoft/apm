@@ -11,7 +11,7 @@ import click
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
-    from ...integration.targets import TargetProfile
+    from ...harnesses.types import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME

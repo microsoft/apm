@@ -2,40 +2,10 @@
 
 from pathlib import Path
 
-from .adapters.client.antigravity import AntigravityClientAdapter
-from .adapters.client.claude import ClaudeClientAdapter
-from .adapters.client.codex import CodexClientAdapter
-from .adapters.client.copilot import CopilotClientAdapter
-from .adapters.client.cursor import CursorClientAdapter
-from .adapters.client.gemini import GeminiClientAdapter
-from .adapters.client.hermes import HermesClientAdapter
-from .adapters.client.intellij import IntelliJClientAdapter
-from .adapters.client.kiro import KiroClientAdapter
-from .adapters.client.opencode import OpenCodeClientAdapter
-from .adapters.client.vscode import VSCodeClientAdapter
-from .adapters.client.windsurf import WindsurfClientAdapter
-from .adapters.package_manager.default_manager import DefaultMCPPackageManager
+from apm_cli.harnesses.registry import get_harness_registry
 
-# Single source of truth for MCP client adapter registration.  Adding a
-# new MCP-capable target means a single dict entry here -- callers that
-# need "every MCP runtime APM supports" should iterate
-# ``ClientFactory.supported_clients()`` rather than maintain parallel
-# lists (see ``mcp_integrator`` runtime loops for the canonical
-# consumers).
-_MCP_CLIENT_REGISTRY: dict[str, type] = {
-    "antigravity": AntigravityClientAdapter,
-    "copilot": CopilotClientAdapter,
-    "vscode": VSCodeClientAdapter,
-    "codex": CodexClientAdapter,
-    "cursor": CursorClientAdapter,
-    "gemini": GeminiClientAdapter,
-    "intellij": IntelliJClientAdapter,
-    "kiro": KiroClientAdapter,
-    "opencode": OpenCodeClientAdapter,
-    "windsurf": WindsurfClientAdapter,
-    "claude": ClaudeClientAdapter,
-    "hermes": HermesClientAdapter,
-}
+from .adapters.client.base import MCPClientAdapter
+from .adapters.package_manager.default_manager import DefaultMCPPackageManager
 
 
 class ClientFactory:
@@ -62,13 +32,21 @@ class ClientFactory:
             ValueError: If the client type is not supported.
         """
         key = client_type.lower()
-        if key not in _MCP_CLIENT_REGISTRY:
+        registry = get_harness_registry()
+        constructor = registry.mcp_clients.get(key)
+        if constructor is None:
             raise ValueError(f"Unsupported client type: {client_type}")
 
-        return _MCP_CLIENT_REGISTRY[key](
-            project_root=project_root,
-            user_scope=user_scope,
-        )
+        client = constructor(project_root=project_root, user_scope=user_scope)
+        if not isinstance(client, MCPClientAdapter):
+            raise TypeError(f"Harness MCP constructor '{key}' must return MCPClientAdapter")
+        if key in registry.external_mcp_clients and not callable(
+            getattr(client, "remove_managed_servers", None)
+        ):
+            raise TypeError(
+                f"Harness MCP client '{key}' must implement remove_managed_servers(names)"
+            )
+        return client
 
     @staticmethod
     def supported_clients() -> frozenset[str]:
@@ -79,7 +57,7 @@ class ClientFactory:
         targets (e.g. cleanup loops, availability probes) instead of
         hand-maintaining a parallel list.
         """
-        return frozenset(_MCP_CLIENT_REGISTRY.keys())
+        return frozenset(get_harness_registry().mcp_clients)
 
 
 class PackageManagerFactory:

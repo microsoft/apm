@@ -22,6 +22,7 @@ import filecmp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -29,7 +30,6 @@ from apm_cli.integration.skill_integrator import (
     should_compile_instructions,
     validate_skill_name,
 )
-from apm_cli.integration.targets import TargetProfile
 
 # ---------------------------------------------------------------------------
 # Helpers

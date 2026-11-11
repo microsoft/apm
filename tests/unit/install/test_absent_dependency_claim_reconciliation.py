@@ -25,6 +25,7 @@ from apm_cli.core.deployment_state import (
     NativePayloadValidation,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.harnesses.types import PrimitiveMapping
 from apm_cli.install.context import InstallContext
 from apm_cli.install.helpers.absence_observation import verified_absent_dependency_values
 from apm_cli.install.manifest_reconcile import reconcile_deployed_block, union_preserving
@@ -32,7 +33,7 @@ from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.install.sources import CachedDependencySource, Materialization
 from apm_cli.install.template import run_integration_template
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.diagnostics import DiagnosticCollector

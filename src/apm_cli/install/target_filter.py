@@ -10,7 +10,7 @@ from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
-    from apm_cli.integration.targets import TargetProfile
+    from apm_cli.harnesses.types import TargetProfile
 
     from ..utils.diagnostics import DiagnosticCollector
 

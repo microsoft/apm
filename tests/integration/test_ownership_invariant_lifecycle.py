@@ -11,8 +11,9 @@ import pytest
 
 from apm_cli.core.target_catalog import manifest_target_names
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 from apm_cli.integration.agent_integrator import AgentIntegrator
-from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration.test_required_lifecycle_state_machine import (
     _EXTERNAL_USER_ROOT_ENV,

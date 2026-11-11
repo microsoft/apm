@@ -19,6 +19,7 @@ from ..core.target_detection import (
     should_compile_copilot_instructions_md,
     should_compile_gemini_md,
 )
+from ..core.target_views import TargetSetView
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -66,7 +67,7 @@ _VSCODE_TARGET_ALIASES = (
         if alias != _COPILOT_CAPABILITY.compile_family
     ),
 )
-_KNOWN_TARGETS = accepted_target_values("compile") | {"minimal"}
+_KNOWN_TARGETS = TargetSetView(lambda: accepted_target_values("compile") | {"minimal"})
 _AGENTS_ROOT_GENERATED_MARKERS = (
     AGENTS_MD_GENERATED_MARKER,
     DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,

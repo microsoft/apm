@@ -998,7 +998,7 @@ class TestIntegrateHooksForTarget:
         assert result.files_integrated >= 0
 
     def test_returns_empty_for_unknown_target_name(self, tmp_path):
-        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+        from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 
         pkg_dir = tmp_path / "apm_modules" / "pkg"
         pkg_dir.mkdir(parents=True)

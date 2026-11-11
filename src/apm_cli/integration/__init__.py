@@ -21,13 +21,7 @@ from .skill_integrator import (
     validate_skill_name,
 )
 from .skill_transformer import SkillTransformer
-from .targets import (
-    KNOWN_TARGETS,
-    PrimitiveMapping,
-    TargetProfile,
-    active_targets,
-    get_integration_prefixes,
-)
+from .targets import KNOWN_TARGETS, active_targets, get_integration_prefixes
 
 __all__ = [
     "KNOWN_TARGETS",
@@ -42,11 +36,9 @@ __all__ = [
     "McpConfigDiff",
     "McpSourceProblem",
     "PrimitiveDispatch",
-    "PrimitiveMapping",
     "PromptIntegrator",
     "SkillIntegrator",
     "SkillTransformer",
-    "TargetProfile",
     "active_targets",
     "check_primitive_coverage",
     "copy_skill_to_target",

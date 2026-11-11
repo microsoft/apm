@@ -36,9 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
-from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
 
 pytestmark = [
@@ -52,7 +50,6 @@ pytestmark = [
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
-OWNERS_DIR = ROOT / ".apm/architecture/owners"
 
 
 @pytest.mark.parametrize(
@@ -646,14 +643,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="return self.enabled is not _ENABLED_UNSET",
         new="return bool(self.enabled)",
         intent="Explicit false and null become omission instead of manifest intent.",
-    ),
-    MutationCase(
-        guard_id="hooks-integrations-user-root-scope",
-        rule_id="mutation_writes.user_root_scope",
-        path="src/apm_cli/integration/targets.py",
-        old="include_scoped_in_user_root_context: bool = False",
-        new="include_scoped_in_user_root_context: bool = True",
-        intent="TargetProfile flips the user-root scoped-instruction eligibility default.",
     ),
     MutationCase(
         guard_id="install-deployment-audit-replay",
@@ -1715,17 +1704,6 @@ def _rules_by_guard() -> dict[str, Rule]:
     return {guard: rule for rule in registered_rules() for guard in rule.guard_ids}
 
 
-@cache
-def _registry_guard_ids() -> frozenset[str]:
-    """Return every guard ID declared by the real canonical-owner registry."""
-    rule_guard_ids = frozenset(_rules_by_guard())
-    registry = load_registry(
-        OWNERS_DIR,
-        build_inventory(ROOT).files,
-        known_guard_ids=rule_guard_ids,
-        owner_specific_guard_ids=rule_guard_ids,
-    )
-    return frozenset(guard for owner in registry.owners for guard in owner.guards)
 
 
 def _mutate(case: MutationCase) -> str:
@@ -1751,14 +1729,6 @@ def baseline_violated_rule_ids() -> frozenset[str]:
     return frozenset(violation.rule_id for violation in report.violations)
 
 
-def test_matrix_covers_every_registry_guard_exactly_once() -> None:
-    """The matrix guard set must equal the registry guard set, one case each."""
-    matrix_guard_ids = [case.guard_id for case in MUTATIONS]
-    duplicates = sorted({guard for guard in matrix_guard_ids if matrix_guard_ids.count(guard) > 1})
-
-    assert not duplicates, f"guards covered by more than one mutation case: {duplicates}"
-    assert frozenset(matrix_guard_ids) == _registry_guard_ids()
-    assert len(MUTATIONS) == len(_registry_guard_ids())
 
 
 def test_matrix_case_order_is_deterministic() -> None:

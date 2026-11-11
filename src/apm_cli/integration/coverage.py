@@ -16,6 +16,7 @@ def check_primitive_coverage(dispatch_table: dict, special_cases: set | None = N
     1. Every primitive in ``KNOWN_TARGETS`` must have a dispatch entry.
     2. Every dispatch entry must map to at least one target (no dead entries).
     3. Every dispatch entry's integrator methods must exist on the class.
+    4. Registered harness overrides must subclass the primitive implementation.
 
     Args:
         dispatch_table: Mapping of primitive name to ``PrimitiveDispatch``
@@ -64,3 +65,40 @@ def check_primitive_coverage(dispatch_table: dict, special_cases: set | None = N
                     f"{cls.__name__} missing method '{method_name}' "
                     f"(referenced by dispatch entry '{name}.{method_attr}')"
                 )
+
+    # Adapter overrides must preserve the primitive's dispatch contract.
+    from collections.abc import Mapping
+
+    from apm_cli.harnesses.registry import get_harness_registry
+
+    registry = get_harness_registry()
+    known_target_names = set(KNOWN_TARGETS)
+    for target_name in sorted(registry.external_names):
+        adapter = registry.adapters[target_name]
+        if target_name not in known_target_names:
+            continue
+        overrides = getattr(adapter, "integrators", {})
+        if not isinstance(overrides, Mapping):
+            raise RuntimeError(
+                f"Harness {target_name!r} integrators must be a mapping of primitive names "
+                "to integrator classes"
+            )
+        for primitive, cls in overrides.items():
+            entry = dispatch_table.get(primitive)
+            if entry is None:
+                raise RuntimeError(
+                    f"Harness {target_name!r} overrides unknown primitive {primitive!r}"
+                )
+            base_class = entry.integrator_class
+            if not isinstance(cls, type) or not issubclass(cls, base_class):
+                raise RuntimeError(
+                    f"Harness {target_name!r} override for primitive {primitive!r} must "
+                    f"subclass {base_class.__module__}.{base_class.__qualname__}"
+                )
+            for method_attr in ("integrate_method", "sync_method"):
+                method_name = getattr(entry, method_attr, None)
+                if method_name and not hasattr(cls, method_name):
+                    raise RuntimeError(
+                        f"Harness {target_name!r} integrator {cls.__name__} missing "
+                        f"method {method_name!r} (primitive {primitive!r}.{method_attr})"
+                    )

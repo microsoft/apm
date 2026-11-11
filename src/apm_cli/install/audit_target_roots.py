@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from apm_cli.core.scope import InstallScope, get_deploy_root, get_modules_dir
-from apm_cli.integration.targets import TargetProfile
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
 _EXTERNAL_REPLAY_ROOT = ".apm-audit-targets"

@@ -13,10 +13,10 @@ if TYPE_CHECKING:
     from apm_cli.codex_plugins.admission import CodexNativePlugin
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.scope import InstallScope
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.install.context import InstallContext
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.install.target_filter import EffectivePackageTargets
-    from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
@@ -102,6 +102,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         diagnostics=diagnostics,
         package_name=package_name,
         native_plugin_root=codex_native.source_root if codex_native else None,
+        integrator_cache=getattr(ctx, "harness_integrators", None),
         plugin_bin_deployable=plugin_bin_deployable(
             package_info,
             projection_targets,

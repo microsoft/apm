@@ -23,12 +23,13 @@ from apm_cli.core.errors import (
     render_unknown_target_error,
 )
 from apm_cli.core.target_catalog import get_target_capability, manifest_target_names
+from apm_cli.core.target_views import TargetSetView
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 # Canonical target names accepted by APM.
-CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
+CANONICAL_TARGETS = TargetSetView(manifest_target_names)
 
 # --- Legacy 'all' migration bridge (#2271) ---------------------------------
 # 'all' predates the canonical catalog (#1154): manifests published before

@@ -114,8 +114,8 @@
     {
       "id": "user-root-scoped-instruction-eligibility",
       "decision": "User-root scoped instruction eligibility",
-      "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context)",
-      "selectors": ["src/apm_cli/integration/targets.py"],
+      "owner": "harnesses/types.py (TargetProfile.include_scoped_in_user_root_context)",
+      "selectors": ["src/apm_cli/harnesses/types.py"],
       "guards": ["hooks-integrations-user-root-scope"]
     }
   ]

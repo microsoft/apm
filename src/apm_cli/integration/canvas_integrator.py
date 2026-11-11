@@ -46,7 +46,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
-    from apm_cli.integration.targets import TargetProfile
+    from apm_cli.harnesses.types import TargetProfile
 
 #: Entry file that marks a directory under ``.apm/extensions/`` as a canvas.
 CANVAS_MARKER = "extension.mjs"

@@ -905,11 +905,12 @@ def test_lockfile_keeps_shared_root_paths_another_declared_target_governs(tmp_pa
         DeploymentRecord,
         LocatorKind,
     )
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.install.manifest_reconcile import (
         declared_target_profiles,
         reconcile_deployed_block,
     )
-    from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.content_hash import compute_file_hash
     from apm_cli.utils.diagnostics import DiagnosticCollector
 

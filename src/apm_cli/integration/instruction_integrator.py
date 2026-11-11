@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, ClassVar
 
 import yaml
 
+from apm_cli.harnesses.types import RULE_FORMATS
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.integration.targets import RULE_FORMATS
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
@@ -33,8 +33,8 @@ from apm_cli.utils.patterns import (
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
-    from apm_cli.integration.targets import TargetProfile
 
 
 @dataclass(frozen=True)

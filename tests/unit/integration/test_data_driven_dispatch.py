@@ -15,10 +15,11 @@ from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.skill_support import SkillIntegrationResult
-from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
 # ------------------------------------------------------------------

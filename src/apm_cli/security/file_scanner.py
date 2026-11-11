@@ -24,10 +24,10 @@ from typing import Literal
 import tomllib
 
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..harnesses.types import TargetProfile
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.hook_integrator import native_hook_config
 from ..integration.hook_native_formats import HookContentEntry, inspect_native_hooks
-from ..integration.targets import TargetProfile
 from ..security.content_scanner import ContentScanner, ScanFinding
 from .primitive_discovery import (
     PrimitiveSurface,

@@ -28,7 +28,8 @@ from apm_cli.adapters.client.kiro import KiroClientAdapter
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
-from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+from apm_cli.harnesses.types import TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 
 # Recognised values for ``TargetProfile.compile_family``.  Adding a new family
 # requires touching ``apm_cli.commands.compile.cli._resolve_compile_target``

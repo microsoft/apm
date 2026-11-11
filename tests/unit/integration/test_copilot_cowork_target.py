@@ -10,9 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
-    TargetProfile,
     active_targets,
     active_targets_user_scope,
     get_integration_prefixes,

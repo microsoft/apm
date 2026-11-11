@@ -25,6 +25,8 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
+    from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.integration.hook_source_selection import HookSourceSelection
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
@@ -55,6 +57,30 @@ def _optional_source_directory(root: Path) -> bool | None:
         return stat.S_ISDIR(root.stat().st_mode)
     except FileNotFoundError:
         return None
+
+
+def _select_authorized_hooks(
+    source_root: Path,
+    targets: list[Any],
+    cache: dict[tuple[str, type[BaseIntegrator]], BaseIntegrator] | None,
+) -> HookSourceSelection:
+    """Compose hook selectors without authorizing another target's sources."""
+    from apm_cli.integration.dispatch import group_target_integrators
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.hook_source_selection import HookSourceSelection
+
+    descriptors: dict[str, frozenset[Path]] = {}
+    bundles: dict[str, frozenset[Path]] = {}
+    hook_targets = [target for target in targets if "hooks" in target.primitives]
+    for integrator, group in group_target_integrators(
+        hook_targets, "hooks", HookIntegrator(), default_class=HookIntegrator, cache=cache
+    ):
+        names = [target.name for target in group]
+        selection = integrator.select_deployable_hook_sources(source_root, names)
+        for name in names:
+            descriptors[name] = frozenset(selection.descriptors_for(name))
+            bundles[name] = selection.bundle_for(name)
+    return HookSourceSelection(descriptors, bundles)
 
 
 @dataclass(frozen=True)
@@ -102,6 +128,7 @@ class DeployableSourcePlan:
         native_plugin_root: Path | None = None,
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
+        integrator_cache: dict[tuple[str, type[BaseIntegrator]], BaseIntegrator] | None = None,
     ) -> DeployableSourcePlan:
         """Build the authorized deploy set after all deployment gates resolve."""
         from apm_cli.integration.base_integrator import BaseIntegrator
@@ -213,17 +240,7 @@ class DeployableSourcePlan:
             add_matching_files(source_root / ".apm" / "instructions", "*.instructions.md")
 
         if hooks_approved and "hooks" in target_primitives:
-            from apm_cli.integration.hook_integrator import HookIntegrator
-
-            hook_target_names = [
-                target.name
-                for target in targets
-                if "hooks" in target.primitives and hasattr(target, "name")
-            ]
-            hook_source_selection = HookIntegrator.select_deployable_hook_sources(
-                source_root,
-                hook_target_names,
-            )
+            hook_source_selection = _select_authorized_hooks(source_root, targets, integrator_cache)
             for path in hook_source_selection.files:
                 add_file(path)
 

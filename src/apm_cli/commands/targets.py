@@ -79,20 +79,38 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     # whole signal whitelist on every call, so doing it inside _row turned a
     # 7-target render into 7x filesystem scans for no extra information.
     all_signals = detect_signals(project_root)
+    from apm_cli.harnesses.registry import get_harness_registry
+
+    registry = get_harness_registry()
+    extensions = [
+        name
+        for name in sorted(registry.external_names)
+        if not registry.capabilities[name].explicit_only
+        and registry.capabilities[name].experimental_flag is None
+        and registry.adapters[name].profile is not None
+    ]
 
     # Build per-target row data from canonical tables.
     def _row(name: str) -> dict:
         is_active = name in active
         active_source = next((s.source for s in all_signals if s.target == name), None)
+        adapter = registry.adapters.get(name)
+        profile = adapter.profile if adapter is not None else None
+        deploy_dir = CANONICAL_DEPLOY_DIRS.get(
+            name, f"{profile.root_dir}/" if profile is not None else "?"
+        )
+        needs = CANONICAL_SIGNAL.get(name)
+        if needs is None and adapter is not None and profile is not None:
+            needs = adapter.display_signal or f"{profile.root_dir}/"
         return {
             "target": name,
             "status": "active" if is_active else "inactive",
             "source": active_source if is_active else None,
-            "deploy_dir": CANONICAL_DEPLOY_DIRS.get(name, "?"),
-            "needs": None if is_active else CANONICAL_SIGNAL.get(name),
+            "deploy_dir": deploy_dir,
+            "needs": None if is_active else needs,
         }
 
-    rows = [_row(name) for name in CANONICAL_TARGETS_ORDERED]
+    rows = [_row(name) for name in [*CANONICAL_TARGETS_ORDERED, *extensions]]
 
     if as_json:
         if show_all:

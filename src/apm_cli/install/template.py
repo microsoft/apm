@@ -147,6 +147,7 @@ def preflight_skill_materializations(
     from apm_cli.install.errors import DirectDependencyError
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.integration.dispatch import get_dispatch_table, group_target_integrators
     from apm_cli.integration.skill_preflight import format_skill_conflicts
 
     if not ctx.targets:
@@ -161,17 +162,24 @@ def preflight_skill_materializations(
     def check(package_info, plan: PackageDeploymentPlan) -> None:
         if plan.source_plan is None or admits_native_plugin(package_info):
             return
-        conflicts.extend(
-            skill.find_unmanaged_conflicts(
-                package_info,
-                ctx.project_root,
-                targets=plan.projection_targets,
-                source_plan=plan.source_plan,
-                managed_files=managed,
-                force=ctx.force,
-                skip_bin=plan.skip_bin,
+        for integrator, targets in group_target_integrators(
+            plan.projection_targets,
+            "skills",
+            skill,
+            default_class=get_dispatch_table()["skills"].integrator_class,
+            cache=ctx.harness_integrators,
+        ):
+            conflicts.extend(
+                integrator.find_unmanaged_conflicts(
+                    package_info,
+                    ctx.project_root,
+                    targets=targets,
+                    source_plan=plan.source_plan,
+                    managed_files=managed,
+                    force=ctx.force,
+                    skip_bin=plan.skip_bin,
+                )
             )
-        )
 
     for source, materialization in prepared:
         if materialization.package_info is None or not ctx.targets:
@@ -510,6 +518,7 @@ def _integrate_materialization(
                 command=ctx.integrators["command"],
                 hook=ctx.integrators["hook"],
                 canvas=ctx.integrators.get("canvas"),
+                integrator_cache=ctx.harness_integrators,
             ),
             force=ctx.force,
             managed_files=ctx.managed_files,

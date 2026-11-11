@@ -1053,6 +1053,32 @@ class MCPIntegrator:
                 label=claude_label,
             )
 
+        # Third-party adapters own their native schema; core verifies durable
+        # ownership before asking them to remove precisely those native keys.
+        from apm_cli.harnesses.registry import get_harness_registry
+
+        for external_runtime in sorted(
+            target_runtimes & get_harness_registry().external_mcp_clients
+        ):
+            client = ClientFactory.create_client(
+                external_runtime,
+                project_root=project_root_path,
+                user_scope=clean_user_scope,
+            )
+            if not client.validate_config_for_install():
+                from apm_cli.install.errors import RequiredIntegrationError
+
+                raise RequiredIntegrationError(
+                    f"Cannot safely clean {external_runtime} MCP configuration"
+                )
+            verified_keys = require_removable_mcp_connections(
+                client,
+                stale_names,
+                stored_configs or {},
+                (native_hashes or {}).get(external_runtime),
+            )
+            client.remove_managed_servers(verified_keys)
+
     # ------------------------------------------------------------------
     # Lockfile persistence
     # ------------------------------------------------------------------
@@ -1206,6 +1232,12 @@ class MCPIntegrator:
                 detected.add("kiro")
             if re.search(r"\bantigravity\b|\bagy\b", command):
                 detected.add("antigravity")
+
+            from apm_cli.harnesses.registry import get_harness_registry
+
+            for runtime in get_harness_registry().external_mcp_clients:
+                if re.search(rf"(?<![\w-]){re.escape(runtime)}(?![\w-])", command):
+                    detected.add(runtime)
 
         return builtins.list(detected)
 

@@ -13,7 +13,8 @@ from apm_cli.core.deployment_ledger import DeploymentLedgerCodec, DeploymentMate
 from apm_cli.core.deployment_state import DeploymentLedger, DeploymentRecord
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+from apm_cli.harnesses.types import TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = pytest.mark.component

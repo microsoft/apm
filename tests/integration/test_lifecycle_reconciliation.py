@@ -15,7 +15,7 @@ from apm_cli.core.deployment_state import (
 )
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.deps.lockfile import LockFile
-from apm_cli.integration.targets import TargetProfile
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.diagnostics import DiagnosticCollector
 

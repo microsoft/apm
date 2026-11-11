@@ -15,9 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from ..core.apm_yml import parse_targets_field
-from ..core.target_catalog import normalize_target_name
-from ..core.target_detection import parse_target_field
 from .dependency import (
     DependencyReference,
     GitReferenceType,
@@ -456,6 +453,8 @@ class APMPackage:
 
     def __post_init__(self) -> None:
         """Derive the canonical target projection for compatibility callers."""
+        from apm_cli.core.target_catalog import normalize_target_name
+
         if self.canonical_targets:
             return
         raw_targets: list[str] = []
@@ -685,6 +684,10 @@ class APMPackage:
         # string like ``target: "claude,copilot"`` resolves identically to
         # ``--target claude,copilot`` and unknown tokens fail at parse time
         # (see apm_cli.core.target_detection.parse_target_field).
+        from apm_cli.core.apm_yml import parse_targets_field
+        from apm_cli.core.target_catalog import normalize_target_name
+        from apm_cli.core.target_detection import parse_target_field
+
         target_value = None
         targets_value: list[str] | None = None
         if "targets" in data and "target" in data:
@@ -886,6 +889,8 @@ class APMPackage:
 
 def canonical_package_targets(package: object) -> tuple[str, ...]:
     """Return canonical targets for packages and compatibility stand-ins."""
+    from apm_cli.core.target_catalog import normalize_target_name
+
     canonical = getattr(package, "canonical_targets", ())
     if isinstance(canonical, (tuple, list)) and canonical:
         return tuple(canonical)

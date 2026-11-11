@@ -25,9 +25,18 @@ def main() -> None:
         command.main(args=sys.argv[1:])
         return
 
-    from apm_cli.cli import main as cli_main
+    import click
 
-    cli_main()
+    from apm_cli.harnesses.registry import HarnessAdapterError, get_harness_registry
+
+    try:
+        get_harness_registry()
+        from apm_cli.cli import main as cli_main
+
+        cli_main()
+    except HarnessAdapterError as exc:
+        click.ClickException(str(exc)).show()
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

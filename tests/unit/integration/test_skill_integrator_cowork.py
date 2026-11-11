@@ -23,7 +23,7 @@ from apm_cli.integration.skill_integrator import SkillIntegrator
 
 def _make_cowork_target_profile():
     """Return a minimal TargetProfile that mimics the copilot-cowork target."""
-    from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+    from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 
     return TargetProfile(
         capability=TARGET_CAPABILITIES["copilot-cowork"],
@@ -40,7 +40,7 @@ def _make_cowork_target_profile():
 
 def _make_copilot_target_profile(project_root: Path):
     """Return a minimal copilot TargetProfile (local, non-cowork)."""
-    from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+    from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 
     return TargetProfile(
         capability=TARGET_CAPABILITIES["copilot"],

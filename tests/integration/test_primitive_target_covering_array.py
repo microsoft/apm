@@ -14,7 +14,8 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from apm_cli.deps.lockfile import LockFile
-from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
+from apm_cli.harnesses.types import TargetProfile
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged

@@ -184,6 +184,10 @@ also adds deploy paths to `apm.lock.yaml`; leave that local override uncommitted
 Check the [target catalogue](../../concepts/primitives-and-targets/#target-catalogue)
 for other targets; some write to more than one root.
 
+## Harness adapters
+
+See [Harness adapters](../harness-adapters/) for the installed-Python entry-point API, reuse of built-in implementations, lifecycle qualification and executable-code trust boundary. This API does not automatically install adapters from project dependencies or qualify a new native harness.
+
 ## Testing
 
 After setup, use pytest for focused feedback:

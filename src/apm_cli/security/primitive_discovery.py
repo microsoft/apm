@@ -10,8 +10,8 @@ from pathlib import Path
 from stat import S_ISLNK
 
 from apm_cli.compilation.root_context_protection import root_context_filename
+from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
 from apm_cli.integration.hook_integrator import native_hook_config
-from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,

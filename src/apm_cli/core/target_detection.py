@@ -31,13 +31,15 @@ import click
 
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
-    TargetCapability,
     accepted_target_values,
     expand_all,
     get_target_capability,
     normalize_target_name,
     target_error_values,
 )
+from apm_cli.core.target_views import TargetSetView
+from apm_cli.harnesses.registry import get_harness_registry
+from apm_cli.harnesses.types import TargetCapability
 
 
 class AgentsTargetDeprecationWarning(DeprecationWarning):
@@ -61,24 +63,8 @@ def agents_alias_was_detected() -> bool:
     return _agents_alias_detected
 
 
-# Valid target values (internal canonical form)
-TargetType = Literal[
-    "agent-skills",
-    "antigravity",
-    "claude",
-    "codex",
-    "cursor",
-    "gemini",
-    "grok-bot",
-    "grok-build",
-    "hermes",
-    "kiro",
-    "opencode",
-    "vscode",
-    "windsurf",
-    "all",
-    "minimal",
-]
+# Installed harness adapters extend the set of valid target identifiers.
+TargetType = str
 
 # Compiler families used inside a multi-target frozenset. Narrower than
 # TargetType because the families are produced by _resolve_compile_target()
@@ -103,26 +89,8 @@ CompileTargetType = Union[TargetType, frozenset[CompileFamily]]  # noqa: UP007
 # instead of substring matching.
 REASON_NO_TARGET_FOLDER = "no target folder found"
 
-# User-facing target values (includes aliases accepted by CLI)
-UserTargetType = Literal[
-    "agent-skills",
-    "agents",
-    "antigravity",
-    "claude",
-    "codex",
-    "copilot",
-    "cursor",
-    "gemini",
-    "grok-bot",
-    "grok-build",
-    "hermes",
-    "kiro",
-    "opencode",
-    "vscode",
-    "windsurf",
-    "all",
-    "minimal",
-]
+# Includes runtime-validated third-party names and aliases.
+UserTargetType = str
 
 
 def detect_target(  # noqa: PLR0911
@@ -142,70 +110,25 @@ def detect_target(  # noqa: PLR0911
         - target: The detected target type
         - reason: Human-readable explanation for the choice
     """
-    # Priority 1: Explicit --target flag
-    if explicit_target:
-        if (
-            explicit_target in ("copilot", "vscode", "agents")
-            or explicit_target in MCP_ONLY_TARGETS
-        ):
-            return "vscode", "explicit --target flag"
-        elif explicit_target == "claude":
-            return "claude", "explicit --target flag"
-        elif explicit_target == "cursor":
-            return "cursor", "explicit --target flag"
-        elif explicit_target == "opencode":
-            return "opencode", "explicit --target flag"
-        elif explicit_target == "codex":
-            return "codex", "explicit --target flag"
-        elif explicit_target == "gemini":
-            return "gemini", "explicit --target flag"
-        elif explicit_target == "antigravity":
-            return "antigravity", "explicit --target flag"
-        elif explicit_target == "windsurf":
-            return "windsurf", "explicit --target flag"
-        elif explicit_target == "kiro":
-            return "kiro", "explicit --target flag"
-        elif explicit_target == "grok-bot":
-            return "grok-bot", "explicit --target flag"
-        elif explicit_target == "grok-build":
-            return "grok-build", "explicit --target flag"
-        elif explicit_target == "agent-skills":
-            return "agent-skills", "explicit --target flag"
-        elif explicit_target == "hermes":
-            return "hermes", "explicit --target flag"
-        elif explicit_target == "all":
-            return "all", "explicit --target flag"
-
-    # Priority 2: apm.yml target setting
-    if config_target:
-        if config_target in ("copilot", "vscode", "agents") or config_target in MCP_ONLY_TARGETS:
-            return "vscode", "apm.yml target"
-        elif config_target == "claude":
-            return "claude", "apm.yml target"
-        elif config_target == "cursor":
-            return "cursor", "apm.yml target"
-        elif config_target == "opencode":
-            return "opencode", "apm.yml target"
-        elif config_target == "codex":
-            return "codex", "apm.yml target"
-        elif config_target == "gemini":
-            return "gemini", "apm.yml target"
-        elif config_target == "antigravity":
-            return "antigravity", "apm.yml target"
-        elif config_target == "windsurf":
-            return "windsurf", "apm.yml target"
-        elif config_target == "kiro":
-            return "kiro", "apm.yml target"
-        elif config_target == "grok-bot":
-            return "grok-bot", "apm.yml target"
-        elif config_target == "grok-build":
-            return "grok-build", "apm.yml target"
-        elif config_target == "agent-skills":
-            return "agent-skills", "apm.yml target"
-        elif config_target == "hermes":
-            return "hermes", "apm.yml target"
-        elif config_target == "all":
-            return "all", "apm.yml target"
+    registry = get_harness_registry()
+    for requested, reason in (
+        (explicit_target, "explicit --target flag"),
+        (config_target, "apm.yml target"),
+    ):
+        if not requested:
+            continue
+        if requested == "all":
+            return "all", reason
+        try:
+            capability = get_target_capability(requested)
+        except KeyError:
+            continue
+        if capability.name in registry.external_names:
+            return capability.name, reason
+        if capability.name == "copilot" or capability.mcp_only:
+            return "vscode", reason
+        if capability.compile_family is not None or capability.name in ("agent-skills", "grok-bot"):
+            return capability.name, reason
 
     # Priority 3: Auto-detect from existing folders
     github_exists = (project_root / ".github").exists()
@@ -236,6 +159,12 @@ def detect_target(  # noqa: PLR0911
         detected.append(".kiro/")
     if grok_exists:
         detected.append(".grok/")
+    signalled = {signal.target for signal in detect_signals(project_root)}
+    external_detected = sorted(registry.external_names & signalled)
+    if external_detected:
+        if detected or len(external_detected) > 1:
+            return "all", f"detected {', '.join([*detected, *sorted(external_detected)])}"
+        return external_detected[0], f"detected {external_detected[0]} harness"
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -277,6 +206,9 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
+    family = _external_compile_family(target)
+    if family is not None:
+        return family in ("agents", "vscode", "gemini")
     return target in (
         "vscode",
         "cursor",
@@ -305,7 +237,7 @@ def should_compile_claude_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "claude" in target
-    return target in ("claude", "all")
+    return target in ("claude", "all") or _external_compile_family(target) == "claude"
 
 
 def should_compile_gemini_md(target: CompileTargetType) -> bool:
@@ -320,7 +252,7 @@ def should_compile_gemini_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "gemini" in target
-    return target in ("gemini", "all")
+    return target in ("gemini", "all") or _external_compile_family(target) == "gemini"
 
 
 def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
@@ -344,7 +276,19 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
         # "agents" would over-fire because cursor/opencode/codex also map to
         # the "agents" family for AGENTS.md generation.
         return "vscode" in target
-    return target in ("vscode", "all")
+    return target in ("vscode", "all") or _external_compile_family(target) == "vscode"
+
+
+def _external_compile_family(target: str) -> str | None:
+    """Read an installed adapter's supported root-context compiler family."""
+    try:
+        canonical = normalize_target_name(target)
+    except KeyError:
+        return None
+    registry = get_harness_registry()
+    if canonical not in registry.external_names:
+        return None
+    return registry.capabilities[canonical].compile_family
 
 
 def get_dedup_rules_dir(target: CompileTargetType) -> tuple[str, str] | None:
@@ -414,6 +358,12 @@ def get_target_description(target: UserTargetType) -> str:
     """
     # Normalize aliases to internal value for lookup
     normalized = "vscode" if target in ("copilot", "agents") else target
+    try:
+        capability = get_target_capability(target)
+    except KeyError:
+        capability = None
+    if capability is not None and capability.name in get_harness_registry().external_names:
+        return capability.description
     descriptions = {
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
@@ -441,16 +391,18 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset(expand_all("install"))
+ALL_CANONICAL_TARGETS = TargetSetView(lambda: expand_all("install"))
 
 #: Targets that the parser must accept but that are gated at runtime by
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
-    capability.name
-    for capability in TARGET_CAPABILITIES.values()
-    if capability.experimental_flag is not None
+EXPERIMENTAL_TARGETS = TargetSetView(
+    lambda: (
+        capability.name
+        for capability in TARGET_CAPABILITIES.values()
+        if capability.experimental_flag is not None
+    )
 )
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
@@ -458,8 +410,10 @@ EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
 #: not represent a single client tool.  Antigravity is explicit-only
 #: because its workspace config lives under the SHARED ``.agents/`` root,
 #: so there is no Antigravity-unique signal to auto-detect on.
-EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset(
-    capability.name for capability in TARGET_CAPABILITIES.values() if capability.explicit_only
+EXPLICIT_ONLY_TARGETS = TargetSetView(
+    lambda: (
+        capability.name for capability in TARGET_CAPABILITIES.values() if capability.explicit_only
+    )
 )
 
 #: MCP-only pseudo-targets that have a client adapter but no
@@ -467,8 +421,8 @@ EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset(
 #: deployment via ``RUNTIME_TO_CANONICAL_TARGET``).  They must be accepted
 #: by ``--target`` so the CLI validates them, but they are excluded from
 #: ``"all"`` expansion and do not participate in target-profile machinery.
-MCP_ONLY_TARGETS: frozenset[str] = frozenset(
-    capability.name for capability in TARGET_CAPABILITIES.values() if capability.mcp_only
+MCP_ONLY_TARGETS = TargetSetView(
+    lambda: (capability.name for capability in TARGET_CAPABILITIES.values() if capability.mcp_only)
 )
 
 #: Alias mapping: user-facing name -> canonical internal name.
@@ -587,7 +541,7 @@ def normalize_policy_targets(value: str | list[str] | None) -> str | list[str] |
 
 #: All values accepted by the ``--target`` CLI option.
 #: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
-VALID_TARGET_VALUES: frozenset[str] = accepted_target_values()
+VALID_TARGET_VALUES = TargetSetView(accepted_target_values)
 
 #: Stable user-facing projection of every value accepted by ``--target``.
 TARGET_VALUES_HELP = ", ".join(sorted(accepted_target_values()))
@@ -1118,6 +1072,17 @@ def detect_signals(project_root: Path) -> list[Signal]:
             found.append(Signal(target=target, source=rel_path + "/"))
         elif check_type == "file" and full.is_file():
             found.append(Signal(target=target, source=rel_path))
+    registry = get_harness_registry()
+    for name in sorted(registry.external_names):
+        adapter = registry.adapters[name]
+        if adapter.capability.explicit_only or adapter.capability.experimental_flag is not None:
+            continue
+        for kind, path in adapter.signals:
+            full = project_root / path
+            if kind == "dir" and full.is_dir():
+                found.append(Signal(target=name, source=path + "/"))
+            elif kind == "file" and full.is_file():
+                found.append(Signal(target=name, source=path))
     return found
 
 

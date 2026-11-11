@@ -32,6 +32,7 @@ from __future__ import annotations
 import atexit
 import tempfile
 import tracemalloc
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import copytree, rmtree
@@ -76,6 +77,7 @@ from apm_cli.utils.guards import _ReadOnlyProjectGuard
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.install.replay_transport import DeclaredTransportIndex
+    from apm_cli.integration.base_integrator import BaseIntegrator
 
 
 # ---------------------------------------------------------------------------
@@ -626,13 +628,30 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
     from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.integration.dispatch import get_dispatch_table, group_target_integrators
+
+    harness_integrators: dict[tuple[str, type[BaseIntegrator]], BaseIntegrator] = {}
 
     try:
         with native_registration_scope(targets):
             with (
-                integrators["skill"].ownership_snapshot(replay_lockfile=lock),
+                ExitStack() as ownership,
                 _ReadOnlyProjectGuard(project_root, protected_subpaths),
             ):
+                groups = group_target_integrators(
+                    targets,
+                    "skills",
+                    integrators["skill"],
+                    default_class=get_dispatch_table()["skills"].integrator_class,
+                    cache=harness_integrators,
+                )
+                instances = [integrators["skill"], *(instance for instance, _ in groups)]
+                seen: set[int] = set()
+                for instance in instances:
+                    if id(instance) in seen:
+                        continue
+                    seen.add(id(instance))
+                    ownership.enter_context(instance.ownership_snapshot(replay_lockfile=lock))
                 for lock_dep in lock.get_all_dependencies():
                     if lock_dep.local_path == _SELF_KEY:
                         # Synthesized self-entry: project's own local content.
@@ -685,6 +704,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 instruction=integrators["instruction"],
                                 command=integrators["command"],
                                 hook=integrators["hook"],
+                                integrator_cache=harness_integrators,
                             ),
                             force=True,
                             managed_files=set(),

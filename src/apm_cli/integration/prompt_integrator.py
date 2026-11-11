@@ -16,7 +16,7 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_frontmatter, loads_frontmatter
 
 if TYPE_CHECKING:
-    from apm_cli.integration.targets import TargetProfile
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 

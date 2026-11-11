@@ -106,6 +106,7 @@ def _run_phase(name: str, phase, ctx):
 def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.integration.dispatch import get_dispatch_table, group_target_integrators
 
     from .phases import integrate as _integrate_phase
 
@@ -114,14 +115,28 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
         if ctx.lockfile_only or ctx.dry_run
         else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
     )
-    with (
-        contextlib.nullcontext()
-        if ctx.lockfile_only
-        else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
-            materialization_session=session,
-        )
-    ):
+    with contextlib.ExitStack() as stack:
+        if not ctx.lockfile_only:
+            groups = group_target_integrators(
+                ctx.targets,
+                "skills",
+                ctx.integrators["skill"],
+                default_class=get_dispatch_table()["skills"].integrator_class,
+                cache=ctx.harness_integrators,
+            )
+            # Even a target set without skills retains the default batch context.
+            instances = [ctx.integrators["skill"], *(instance for instance, _ in groups)]
+            seen: set[int] = set()
+            for instance in instances:
+                if id(instance) in seen:
+                    continue
+                seen.add(id(instance))
+                stack.enter_context(
+                    instance.ownership_snapshot(
+                        replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                        materialization_session=session,
+                    )
+                )
         _run_phase("integrate", _integrate_phase, ctx)
     return session
 

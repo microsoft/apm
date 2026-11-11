@@ -437,8 +437,8 @@ class TestCoworkUninstallSyncIntegration:
         """
         from unittest.mock import MagicMock
 
+        from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
         from apm_cli.integration.skill_integrator import SkillIntegrator
-        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         # -- setup: cowork skills dir with a skill ---
         cowork_root = tmp_path / "cowork-skills"
@@ -497,8 +497,8 @@ class TestCoworkUninstallSyncIntegration:
         """When OneDrive is unavailable, cowork entries are skipped (not error)."""
         from unittest.mock import MagicMock
 
+        from apm_cli.harnesses.types import PrimitiveMapping, TargetProfile
         from apm_cli.integration.skill_integrator import SkillIntegrator
-        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         project_root = tmp_path / "project"
         project_root.mkdir()

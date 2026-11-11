@@ -48,8 +48,8 @@ if TYPE_CHECKING:
         DeploymentLedger,
     )
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.harnesses.types import TargetProfile
     from apm_cli.integration.cleanup import CleanupResult
-    from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 

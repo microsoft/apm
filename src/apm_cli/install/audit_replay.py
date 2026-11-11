@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.harnesses.types import TargetProfile
 from apm_cli.install.drift import (
     CheckLogger,
     ReplayConfig,
@@ -23,7 +24,7 @@ from apm_cli.install.drift import (
     run_replay,
 )
 from apm_cli.install.plan import lockfile_satisfies_manifest, lockfile_satisfies_replacements
-from apm_cli.integration.targets import TargetProfile, resolve_audit_targets
+from apm_cli.integration.targets import resolve_audit_targets
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 

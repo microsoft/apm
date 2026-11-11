@@ -11,7 +11,7 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 
 if TYPE_CHECKING:
     from ..bundle.local_bundle import LocalBundleInfo
-    from ..integration.targets import TargetProfile
+    from ..harnesses.types import TargetProfile
 
 _APM_PRIMITIVE_SUFFIXES = (
     ".instructions.md",

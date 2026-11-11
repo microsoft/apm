@@ -23,9 +23,9 @@ from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
+    from ..harnesses.types import TargetProfile
     from ..install.audit_replay import PreparedCiAuditReplay
     from ..install.drift import DriftFinding
-    from ..integration.targets import TargetProfile
     from ..models.apm_package import APMPackage
     from ..models.dependency.reference import DependencyReference
 
