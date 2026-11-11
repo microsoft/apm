@@ -1838,6 +1838,20 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
+    """Targeted-install module removal cannot bypass the shared selector (#3502)."""
+    path = "src/apm_cli/install/phases/cleanup.py"
+    source = _source(path)
+    old = "for relative in _find_orphaned_packages("
+    assert source.count(old) == 1
+    mutated = source.replace(old, "for relative in sorted(", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @pytest.mark.parametrize(
     ("path", "rule_id", "old", "new"),
     [
