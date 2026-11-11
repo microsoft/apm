@@ -255,3 +255,104 @@ def test_profile_install_keeps_files_deployed_to_other_profiles(
     assert_state(all_skills, {"keep"})
     install(default)
     assert_state({"keep"}, {"keep"})
+
+
+def _declared(manifest_path: Path) -> list[str]:
+    """Return the APM dependencies declared in the user manifest."""
+    manifest = load_yaml(manifest_path) or {}
+    return list((manifest.get("dependencies") or {}).get("apm") or [])
+
+
+class _ProfileSkills:
+    """Two Claude profiles (default and B) sharing one user manifest and lockfile."""
+
+    def __init__(self, tmp_path: Path, location: str) -> None:
+        self.isolated, self.cwd, self.runner = _scenario(tmp_path)
+        config_root = self.isolated.config_root
+        dump_yaml({"name": "skills-home", "version": "0.1.0"}, config_root / "apm.yml")
+        self.manifest_path = config_root / "apm.yml"
+        self.lock_path = config_root / "apm.lock.yaml"
+        self.factory = LocalPackageFactory(self.isolated.package_root)
+        self.default = self.isolated.home / ".claude"
+        base = self.isolated.home if location == "home" else self.isolated.root
+        self.profile_b = base / "profiles" / "b"
+
+    def package(self, name: str, skill: str) -> Path:
+        """Create a local package with one skill and return its root."""
+        package = self.factory.create(name, targets=("claude",))
+        self.factory.add_skill(
+            package, skill, f"---\nname: {skill}\ndescription: Demo.\n---\nDemo.\n"
+        )
+        return package.root
+
+    def run(self, command: str, root: Path, *packages: Path) -> CommandResult:
+        """Run a global install or uninstall with *root* as the selected profile."""
+        args = [command, "--global", *(str(package) for package in packages)]
+        if command == "install":
+            args += ["--target", "claude", "--no-policy"]
+        result = self.runner.run(
+            tuple(args),
+            scenario_id=f"claude-profile-{command}",
+            cwd=self.cwd,
+            env={
+                **self.isolated.subprocess_env(),
+                "CLAUDE_CONFIG_DIR": "" if root == self.default else str(root),
+            },
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    def state(self, root: Path) -> tuple[set[str], set[str]]:
+        """Return the skills on disk and in lockfile rows under one profile."""
+        rows = (
+            _lock_skills(self.lock_path, self.isolated.home, root)
+            if self.lock_path.exists()
+            else set()
+        )
+        return _skills(root), rows
+
+
+@pytest.mark.parametrize("location", ["home", "outside-home"])
+@pytest.mark.parametrize("first", ["profile-b", "default"])
+def test_profile_uninstall_removes_only_the_selected_profile(
+    tmp_path: Path, location: str, first: str
+) -> None:
+    """Uninstall removes the selected profile's files and rows only (#3425).
+
+    The shared manifest entry goes only when no profile has rows left, so a
+    second uninstall from the other profile completes the removal.
+    """
+    env = _ProfileSkills(tmp_path, location)
+    package = env.package("profile-skills", "demo")
+    env.run("install", env.default, package)
+    env.run("install", env.profile_b, package)
+    assert env.state(env.default) == ({"demo"}, {"demo"})
+    assert env.state(env.profile_b) == ({"demo"}, {"demo"})
+
+    selected, other = (
+        (env.profile_b, env.default) if first == "profile-b" else (env.default, env.profile_b)
+    )
+    env.run("uninstall", selected, package)
+    assert env.state(selected) == (set(), set())
+    assert env.state(other) == ({"demo"}, {"demo"})
+    assert len(_declared(env.manifest_path)) == 1
+
+    env.run("uninstall", other, package)
+    assert env.state(selected) == (set(), set())
+    assert env.state(other) == (set(), set())
+    assert _declared(env.manifest_path) == []
+
+
+def test_profile_uninstall_does_not_redeploy_retained_package(tmp_path: Path) -> None:
+    """A mixed request removes a B-only package and keeps a shared one out of B."""
+    env = _ProfileSkills(tmp_path, "home")
+    shared = env.package("shared-skills", "shared")
+    only_b = env.package("b-only-skills", "only")
+    env.run("install", env.default, shared)
+    env.run("install", env.profile_b, shared)
+    env.run("install", env.profile_b, only_b)
+
+    env.run("uninstall", env.profile_b, shared, only_b)
+    assert env.state(env.profile_b) == (set(), set())
+    assert env.state(env.default) == ({"shared"}, {"shared"})
+    assert len(_declared(env.manifest_path)) == 1

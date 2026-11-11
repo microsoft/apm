@@ -343,6 +343,8 @@ profile's `.claude.json` for both installation and stale-server cleanup.
 Removing managed servers from the selected profile preserves other profiles and
 user-owned entries. Cleanup refuses symlinked config files or profile directories;
 replace the link with a regular file or directory before retrying.
+`apm uninstall -g <package>` removes files and lock rows only under the selected
+profile; a package another profile still uses stays in `~/.apm/apm.yml`.
 
 `apm install` prints a one-line provenance summary before any mutation:
 

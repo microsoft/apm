@@ -1240,7 +1240,9 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
     When *targets* is provided, prefixes are derived from those
     (already scope-resolved) profiles.  Otherwise falls back to
     ``KNOWN_TARGETS`` for backward compatibility. When *user_scope* is
-    true, that fallback also includes static ``user_root_dir`` prefixes.
+    true, that fallback also includes static ``user_root_dir`` prefixes and
+    the profile root an environment variable in :data:`USER_ROOT_ENV_VARS`
+    currently selects, so user-scope cleanup can reach the files it deployed.
 
     Includes prefixes from ``deploy_root`` overrides (e.g. ``.agents/``
     for Codex skills) so cross-root paths pass security validation.
@@ -1248,6 +1250,11 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
     source = targets if targets is not None else KNOWN_TARGETS.values()
     prefixes: list[str] = []
     seen: set[str] = set()
+    if targets is None and user_scope:
+        for profile in selected_user_profiles().values():
+            if profile.prefix not in seen:
+                seen.add(profile.prefix)
+                prefixes.append(profile.prefix)
     for t in source:
         # Dynamic-root targets (cowork) use cowork:// prefix in lockfile.
         # Check the *capability* (user_root_resolver is not None) rather
@@ -1279,6 +1286,21 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
                     seen.add(dp)
                     prefixes.append(dp)
     return tuple(prefixes)
+
+
+def selected_user_profiles() -> dict[str, TargetProfile]:
+    """Return the user-scope profile each :data:`USER_ROOT_ENV_VARS` target selects.
+
+    Without the variable the default root (``~/.claude``, ``~/.hermes``) is
+    the selected profile.
+    """
+    profiles: dict[str, TargetProfile] = {}
+    for name in USER_ROOT_ENV_VARS:
+        base = KNOWN_TARGETS.get(name)
+        scoped = base.for_scope(user_scope=True) if base is not None else None
+        if scoped is not None:
+            profiles[name] = scoped
+    return profiles
 
 
 def is_other_profile_path(profile: TargetProfile, value: str) -> bool:
