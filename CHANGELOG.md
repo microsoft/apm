@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP servers declared by a Claude plugin installed from a local path (`.mcp.json` or `plugin.json` `mcpServers`) now deploy to the selected targets like the same plugin installed from git, with the same policy, lockfile ownership and uninstall cleanup; APM warns instead of silently dropping them when the plugin's synthesized manifest is missing. (#3540)
 - Repeated `apm compile` runs on unchanged sources now keep the same placement: `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` files written by an earlier compile (marked as APM-generated) no longer count as `applyTo` matches. Previously, sparse subtrees could switch to root-inline placement and show a permanent orphan warning for the compiler's own output. (#3539)
 - The uncached Git fallback pins `core.autocrlf=false` on both its working-tree clone and the checkout that follows, so a host whose gitconfig sets `core.autocrlf=true` no longer materializes CRLF bytes and then fails `apm install` with "Your local changes would be overwritten by checkout" when the locked commit differs from the branch head. -- by @abhishekacharya200 (#3409)
 - `apm install -g` into one Claude profile (`CLAUDE_CONFIG_DIR`) or Hermes home (`HERMES_HOME`) no longer deletes files deployed to another profile through the shared user lockfile; stale-file cleanup is limited to the selected root. -- by @xronos-i-am (#3424)
