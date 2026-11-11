@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/.apm/hooks/scripts/gate-launcher.sh\" || true",
+        "powershell": "exit 0",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}
