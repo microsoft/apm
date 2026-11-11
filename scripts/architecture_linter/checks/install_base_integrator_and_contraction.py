@@ -1279,6 +1279,8 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "class DeploymentMaterializationSession:",
             'data["installation"] != installation',
             'data["root_identity"] != self._root_identity()',
+            "or recorded[1] != current[1]",
+            'return data["root_birth_time"] == self._root_birth_time()',
             "record.active_owner not in self._valid_owners",
             "self._bindings.get(key) != [record.active_owner, self._claim_signature(value)]",
             "value = deployed_path_entry(path, self.root, targets)",
