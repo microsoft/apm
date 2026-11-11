@@ -229,7 +229,12 @@ APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
     from ..deps.apm_resolver import APMDependencyResolver
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import (
+        LockFile,
+        LockfileSymlinkError,
+        get_lockfile_path,
+        migrate_lockfile_if_needed,
+    )
     from ..integration.mcp_integrator import (
         MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
     )
@@ -1852,6 +1857,8 @@ def _install_apm_packages(ctx, outcome):
     old_mcp_target_servers: builtins.dict = {}
     old_mcp_target_servers_present = True
     _lock_path = get_lockfile_path(ctx.apm_dir)
+    if _lock_path.is_symlink() and not _lock_path.exists():
+        raise LockfileSymlinkError(_lock_path)
     _existing_lock = LockFile.read(_lock_path)
     if _existing_lock:
         old_mcp_servers = builtins.set(_existing_lock.mcp_servers)

@@ -6,7 +6,11 @@ import pytest
 
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.skill_integrator import SkillIntegrator
-from apm_cli.integration.skill_preflight import SkillConflict, format_skill_conflicts
+from apm_cli.integration.skill_preflight import (
+    SkillConflict,
+    format_skill_conflicts,
+    preflight_skill_selection,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.models.dependency import DependencyReference
@@ -202,3 +206,54 @@ def test_copy_excluded_nested_bin_is_not_a_conflict(tmp_path: Path) -> None:
     local.write_bytes(b"Unrelated local script\n")
     assert _conflicts(info, root) == ()
     assert local.read_bytes() == b"Unrelated local script\n"
+
+
+@pytest.mark.parametrize("layout", ["subskills", "bundle"])
+@pytest.mark.parametrize(
+    ("subset", "admitted"),
+    [(("review",), True), (("renamed",), False), (None, True)],
+)
+def test_selection_preflight_matches_deployment_availability(
+    tmp_path: Path, layout: str, subset: tuple[str, ...] | None, admitted: bool
+) -> None:
+    """An unmatched skills: selection is refused before any primitive writes (#3373)."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    info = _package(tmp_path, layout)
+    if layout == "bundle":
+        info.package_type = PackageType.SKILL_BUNDLE
+    assert SkillIntegrator.selected_skill_sources(info).route == layout
+    targets = [KNOWN_TARGETS["copilot"]]
+    plan = DeployableSourcePlan.create(
+        info,
+        targets,
+        skill_subset=subset,
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+    )
+    diagnostics = DiagnosticCollector()
+
+    result = preflight_skill_selection(
+        info, skill_subset=subset, source_plan=plan, diagnostics=diagnostics
+    )
+
+    assert result is admitted
+    assert diagnostics.error_count == (0 if admitted else 1)
+    assert not (tmp_path / ".agents").exists()
+
+
+def test_selection_preflight_ignores_native_skill_filter(tmp_path: Path) -> None:
+    """A single native skill keeps its existing ignored-filter behavior."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    info = _package(tmp_path, "native")
+    diagnostics = DiagnosticCollector()
+
+    assert preflight_skill_selection(
+        info,
+        skill_subset=("renamed",),
+        source_plan=None,
+        diagnostics=diagnostics,
+    )
+    assert diagnostics.error_count == 0

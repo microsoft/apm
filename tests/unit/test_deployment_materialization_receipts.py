@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -657,3 +659,168 @@ def test_identical_unowned_members_do_not_create_local_authority(
         )
     assert result.deployed_files
     assert not session.state_path.exists()
+
+
+_LINUX_STYLE = None
+_MACOS_STYLE = 1767225600.123456
+_PLATFORM_STYLES = pytest.mark.parametrize(
+    "birth_time", [_LINUX_STYLE, _MACOS_STYLE], ids=["linux-stat", "macos-stat"]
+)
+
+
+def _root_stat(dev: int, ino: int, birth_time: float | None) -> SimpleNamespace:
+    """Model ``os.stat``: Linux omits ``st_birthtime``; macOS reports it."""
+    values: dict[str, float] = {"st_dev": dev, "st_ino": ino}
+    if birth_time is not None:
+        values["st_birthtime"] = birth_time
+    return SimpleNamespace(**values)
+
+
+@pytest.fixture
+def simulated_root_stat(monkeypatch: pytest.MonkeyPatch) -> dict[str, SimpleNamespace]:
+    """Drive the root's reported stat; every other path keeps the real filesystem."""
+    from apm_cli.core import deployment_ledger
+
+    current: dict[str, SimpleNamespace] = {}
+    monkeypatch.setattr(deployment_ledger, "_ROOT_DEVICE_REBIND_SUPPORTED", True)
+    monkeypatch.setattr(
+        DeploymentMaterializationSession, "_root_stat", lambda self: current["stat"]
+    )
+    return current
+
+
+def _recorded_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: InstallScope
+) -> tuple[Path, Path, LockFile, DeploymentMaterializationSession]:
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = DeploymentMaterializationSession(root, scope, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    return root, path, lock, session
+
+
+@_PLATFORM_STYLES
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_device_only_change_rebinds_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+    birth_time: float | None,
+    scope: InstallScope,
+) -> None:
+    simulated_root_stat["stat"] = _root_stat(56, 257, birth_time)
+    root, path, lock, session = _recorded_session(tmp_path, monkeypatch, scope)
+    recorded = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert recorded["root_identity"] == [56, 257]
+    assert recorded.get("root_birth_time") == birth_time
+    old_hash = compute_file_hash(path)
+
+    simulated_root_stat["stat"] = _root_stat(30, 257, birth_time)
+    rebound = DeploymentMaterializationSession(root, scope, lock)
+    assert rebound.baseline(path, [TARGET]) == old_hash
+    assert json.loads(rebound.state_path.read_text(encoding="utf-8")) == recorded
+    rebound.flush()
+    data = json.loads(rebound.state_path.read_text(encoding="utf-8"))
+    assert data == {**recorded, "root_identity": [30, 257]}
+
+    proof = rebound.state_path.read_bytes()
+    settled = DeploymentMaterializationSession(root, scope, lock)
+    settled.flush()
+    assert settled.state_path.read_bytes() == proof
+    assert settled.baseline(path, [TARGET]) == old_hash
+
+
+@_PLATFORM_STYLES
+@pytest.mark.parametrize("change", ["inode", "installation", "path", "birth-time"])
+def test_device_change_with_other_identity_drift_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+    birth_time: float | None,
+    change: str,
+) -> None:
+    if change == "birth-time" and birth_time is None:
+        pytest.skip("Linux-style stat reports no birth time")
+    simulated_root_stat["stat"] = _root_stat(56, 257, birth_time)
+    root, _path, lock, session = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    ino = 258 if change == "inode" else 257
+    birth = birth_time + 1 if change == "birth-time" else birth_time
+    simulated_root_stat["stat"] = _root_stat(30, ino, birth)
+    if change in {"installation", "path"}:
+        data = json.loads(session.state_path.read_text(encoding="utf-8"))
+        if change == "installation":
+            data["installation"] = "0" * 32
+        else:
+            data["root"] = (tmp_path / "elsewhere").as_posix()
+        session.state_path.write_text(json.dumps(data), encoding="utf-8")
+    proof = session.state_path.read_bytes()
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
+    assert session.state_path.read_bytes() == proof
+
+
+def test_recorded_birth_time_is_required_when_the_platform_stops_reporting_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+) -> None:
+    simulated_root_stat["stat"] = _root_stat(56, 257, _MACOS_STYLE)
+    root, _path, lock, _ = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    simulated_root_stat["stat"] = _root_stat(30, 257, None)
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
+
+
+@_PLATFORM_STYLES
+def test_recreated_checkout_with_copied_identity_and_new_device_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+    birth_time: float | None,
+) -> None:
+    simulated_root_stat["stat"] = _root_stat(56, 257, birth_time)
+    root, path, lock, _ = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    root.rename(tmp_path / "old-consumer")
+    path.parent.mkdir(parents=True)
+    path.write_text("rendered old\n", encoding="utf-8")
+    identity = root / ".apm-local/installation"
+    identity.parent.mkdir()
+    identity.write_bytes((tmp_path / "old-consumer/.apm-local/installation").read_bytes())
+    # A recreated directory has a new inode; on macOS even a reused inode has a new birth time.
+    recreated = (
+        _root_stat(30, 258, None) if birth_time is None else _root_stat(30, 257, birth_time + 60)
+    )
+    simulated_root_stat["stat"] = recreated
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
+
+
+def test_windows_root_identity_is_not_rebound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    simulated_root_stat: dict[str, SimpleNamespace],
+) -> None:
+    from apm_cli.core import deployment_ledger
+
+    monkeypatch.setattr(deployment_ledger, "_ROOT_DEVICE_REBIND_SUPPORTED", False)
+    simulated_root_stat["stat"] = _root_stat(56, 257, _MACOS_STYLE)
+    root, _path, lock, session = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    assert "root_birth_time" not in json.loads(session.state_path.read_text(encoding="utf-8"))
+    simulated_root_stat["stat"] = _root_stat(30, 257, _MACOS_STYLE)
+    with pytest.raises(ValueError, match="installation binding does not match"):
+        _session(root, lock)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows root identity is not rebound")
+def test_native_receipt_with_drifted_device_number_is_rebound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, path, lock, session = _recorded_session(tmp_path, monkeypatch, InstallScope.PROJECT)
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    actual = data["root_identity"]
+    data["root_identity"] = [actual[0] + 1, actual[1]]
+    session.state_path.write_text(json.dumps(data), encoding="utf-8")
+    rebound = _session(root, lock)
+    assert rebound.baseline(path, [TARGET]) == compute_file_hash(path)
+    rebound.flush()
+    assert json.loads(rebound.state_path.read_text(encoding="utf-8"))["root_identity"] == actual
