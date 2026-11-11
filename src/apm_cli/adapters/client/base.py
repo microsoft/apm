@@ -997,6 +997,118 @@ class MCPClientAdapter(ABC):
         return None
 
     @classmethod
+    def _is_options_only(cls, args: list[Any]) -> bool:
+        """Return True if args contains only options and their values.
+
+        An argument list is considered options-only if every non-option token
+        is consumed as the value of a preceding option that requires an
+        argument, and no positional subcommands or operands are present.
+        """
+        if not args:
+            return True
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if not isinstance(arg, str):
+                return False
+            if arg == "--":
+                return False
+            if arg.startswith("--"):
+                option = arg.split("=", 1)[0]
+                consumes_next = "=" not in arg and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                if consumes_next:
+                    if index + 1 >= len(args):
+                        return False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            next_arg = args[index + 1] if index + 1 < len(args) else None
+            if arg.startswith("-") and arg != "-":
+                consumes_next = cls._docker_option_requires_value(arg)
+                if arg in ("-v", "--version") and next_arg == "run":
+                    consumes_next = False
+                if consumes_next:
+                    if index + 1 >= len(args):
+                        return False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            return False
+        return True
+
+    @classmethod
+    def _is_docker_package(cls, package: dict | None) -> bool:
+        """Return whether the package resolves to a Docker/container launcher."""
+        if not package:
+            return False
+        runtime_hint = package.get("runtime_hint", "")
+        registry_name = cls._infer_registry_name(package)
+        return runtime_hint == "docker" or registry_name == "docker"
+
+    @classmethod
+    def _ensure_docker_run_args(
+        cls,
+        runtime_args: list[Any] | None,
+    ) -> list[Any]:
+        """Return runtime arguments with Docker's 'run' subcommand and stdio flags.
+
+        If runtime_args is empty, defaults to ['run', '-i', '--rm'].
+        If runtime_args contains options without a leading 'run' subcommand
+        (e.g. options-only metadata from OCI registries), prepends 'run' and
+        ensures '-i' and '--rm' are present unless already specified.
+        Otherwise, returns runtime_args as is to preserve authored invocations
+        (such as ['container', 'run', ...]).
+
+        Args:
+            runtime_args: Resolved runtime arguments from the package entry.
+
+        Returns:
+            list: Arguments with leading 'run', '-i', '--rm' and any options,
+            or authored arguments preserved as is.
+        """
+        if not runtime_args:
+            return ["run", "-i", "--rm"]
+        args = list(runtime_args)
+        if not cls._is_options_only(args):
+            return args
+
+        has_interactive = False
+        has_rm = False
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if arg in ("-i", "--interactive") or (
+                isinstance(arg, str)
+                and arg.startswith("-")
+                and not arg.startswith("--")
+                and "i" in arg[1:]
+                and not cls._docker_option_requires_value(arg)
+            ):
+                has_interactive = True
+                index += 1
+            elif arg == "--rm":
+                has_rm = True
+                index += 1
+            elif isinstance(arg, str) and arg.startswith("--"):
+                option = arg.split("=", 1)[0]
+                consumes_next = "=" not in arg and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                index += 2 if consumes_next else 1
+            elif isinstance(arg, str) and arg.startswith("-") and arg != "-":
+                consumes_next = cls._docker_option_requires_value(arg)
+                index += 2 if consumes_next else 1
+            else:
+                index += 1
+
+        prefix = ["run"]
+        if not has_interactive:
+            prefix.append("-i")
+        if not has_rm:
+            prefix.append("--rm")
+        return [*prefix, *args]
+
+    @classmethod
     def _ensure_docker_image_arg(
         cls,
         runtime_args: list[Any],

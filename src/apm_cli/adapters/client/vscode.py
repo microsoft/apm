@@ -300,7 +300,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             package = self._select_best_package(server_info["packages"])
             runtime_hint = package.get("runtime_hint", "") if package else ""
             registry_name = self._infer_registry_name(package) if package else ""
-            is_docker = runtime_hint == "docker" or registry_name == "docker"
+            is_docker = self._is_docker_package(package)
             env_config, declared_inputs = self._declared_vscode_environment(
                 package,
                 server_name=server_info.get("name", ""),
@@ -820,11 +820,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
         ``CopilotClientAdapter._process_arguments``.
 
         ``package_arguments`` are the container's own argv and follow the image
-        per ``docker run [OPTIONS] IMAGE [ARG...]``.
+        per ``docker run [OPTIONS] IMAGE [ARG...]``. Options-only
+        ``runtime_arguments`` (no leading ``run``, as in the MCP Registry OCI
+        examples) gain ``run -i --rm`` ahead of the options (#3404).
 
         Returns ``None`` -- leaving the caller on its previous synthesized
         launcher -- when the registry arguments cannot form a usable command:
-        no ``run`` verb, or a placeholder in a required entry that this
+        a non-``run`` subcommand, or a placeholder in a required entry that this
         install could not resolve. Emitting a half-substituted mount path
         would be worse than the image-only command that shipped before. An
         *optional* entry whose placeholder is unresolved is dropped on its
@@ -864,6 +866,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
         )
         if package_args is None:
             return None
+        if not run_options and not package_args:
+            return None
         if not run_options and package_args and package_args[0] == "run":
             image_index = cls._docker_image_arg_index(package_args, package.get("name"))
             if image_index is None:
@@ -874,6 +878,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 package_args = package_args[image_index + 1 :]
         elif not run_options and package_args:
             run_options = ["run", "-i", "--rm"]
+        elif cls._is_options_only(run_options):
+            run_options = cls._ensure_docker_run_args(run_options)
         # The subcommand has to lead: `docker -v … run` is not a run invocation,
         # and there would be nothing for the flag normalizer to anchor on.
         if not run_options or run_options[0] != "run":
