@@ -75,6 +75,7 @@ from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.policy.schema import ApmPolicy
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,7 @@ class ReplayConfig:
     scratch_root: Path | None = None
     modules_root: Path | None = None
     user_scope: bool = False
+    policy: ApmPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -525,6 +527,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     CacheMissError
         Surfaced verbatim when a locked dep cannot be materialized.
     """
+    from apm_cli.core.scope import get_workspace_deploy_root
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
@@ -584,6 +587,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
+    from apm_cli.security.executables import effective_exec_map_for_project
+
+    allow_executables = effective_exec_map_for_project(
+        project_root, policy=config.policy, migrate_user_legacy=False
+    )
 
     # Pre-create target root dirs in scratch so integrators with
     # auto_create=False do not skip non-skill primitives during replay.
@@ -685,7 +693,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 else None
                             ),
                             ctx=None,
+                            is_first_party=lock_dep.local_path == _SELF_KEY,
+                            allow_executables=allow_executables,
                             scratch_root=scratch_root,
+                            replay_deploy_root=get_workspace_deploy_root(project_root)
+                            if config.user_scope
+                            else None,
                             # Honor per-dependency 'targets:' narrowing from apm.yml so the
                             # replay does not write to targets excluded by the consumer (#1923).
                             dep_target_subset=lock_dep.target_subset or None,

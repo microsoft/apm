@@ -212,6 +212,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
+    replay_deploy_root: Path | None = None,
     policy: Any = None,
     is_first_party: bool = False,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
@@ -450,6 +451,27 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
         return finalize_codex_native(result, codex_native, source_plan, _rc, ctx, scratch_root)
 
+    from apm_cli.integration.inline_hooks import materialize_inline_hook_resources
+
+    previous = (
+        ctx.existing_lockfile.get_dependency(package_name)
+        if ctx is not None and ctx.existing_lockfile is not None and not is_first_party
+        else None
+    )
+    source_plan, inline_resources = materialize_inline_hook_resources(
+        source_plan,
+        package_info,
+        project_root,
+        user_scope=scope is InstallScope.USER,
+        managed_files=managed_files,
+        force=force,
+        diagnostics=diagnostics,
+        recorded_hashes=previous.deployed_file_hashes if previous else None,
+        targets=projection_targets,
+        command_deploy_root=replay_deploy_root if scratch_root is not None else None,
+    )
+    deployed.extend(_deployed_path_entry(path, project_root, targets) for path in inline_resources)
+
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
     # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
@@ -464,10 +486,8 @@ def integrate_package_primitives(  # noqa: PLR0913
             continue
         # Executable approval gate: skip canvas if not approved.
         # First-party (is_first_party=True) always deploys.
-        # Dependency canvas requires allowExecutables approval; the _local
-        # name shortcut in check_executable_approval does NOT bypass this
-        # gate when is_first_party=False (defence-in-depth: a malicious dep
-        # named _local must not bypass canvas trust via the name alone).
+        # Dependency canvas requires allowExecutables approval, regardless
+        # of its display name.
         if _prim_name == "canvas" and not is_first_party:
             if allow_executables is None:
                 _dep_canvas_ok = True
@@ -504,7 +524,7 @@ def integrate_package_primitives(  # noqa: PLR0913
                 "managed_files": managed_files,
                 "diagnostics": diagnostics,
                 "scope": scope,
-                "source_plan": source_plan,
+                "source_plan": source_plan.for_target(_target.name),
             }
             # Hook integrator alone needs the scope signal: project-scope
             # deploys keep ``command`` paths repo-relative (#1394), user-scope

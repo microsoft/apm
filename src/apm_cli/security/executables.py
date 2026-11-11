@@ -524,6 +524,7 @@ def scan_package_executables(
     manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
+    source_plan: Any = None,
 ) -> ExecutableDeclaration:
     """Scan a materialised package directory for executable primitives.
 
@@ -550,6 +551,17 @@ def scan_package_executables(
                 sorted(f for f in hook_dir.glob("*.json") if f.is_file() and not f.is_symlink())
             )
     hook_details = [f.name for f in hook_files]
+    if source_plan is None:
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+
+        source_plan = DeployableSourcePlan.for_executable_scan(install_path)
+    from apm_cli.utils.paths import portable_relpath
+
+    inline_details = [
+        f"{portable_relpath(path, source_plan.source_root)} (inline)"
+        for path in sorted(source_plan.inline_hook_documents)
+    ]
+    hook_details.extend(inline_details)
 
     # 2. Bin executables: top-level bin/ AND .apm/skills/*/bin/
     bin_files: list[Path] = []
@@ -621,7 +633,7 @@ def scan_package_executables(
         package_name=package_name,
         is_transitive=is_transitive,
         parent_name=parent_name,
-        hook_count=len(hook_files),
+        hook_count=len(hook_files) + len(inline_details),
         mcp_count=mcp_count,
         lsp_count=lsp_count,
         bin_count=len(bin_files),

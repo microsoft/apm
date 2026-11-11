@@ -262,8 +262,24 @@ class AgentIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            from apm_cli.integration.inline_hooks import render_inline_hook_text
+
+            prepared = (
+                render_inline_hook_text(
+                    source_file.read_text(encoding="utf-8"), source_file, source_plan
+                )
+                if target.name == "claude"
+                else None
+            )
             skip, adopted = self._check_adopt_or_skip(
-                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+                target_path,
+                source_file,
+                rel_path,
+                managed_files,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=prepared,
             )
             if skip:
                 if adopted:
@@ -285,7 +301,7 @@ class AgentIntegrator(BaseIntegrator):
                     self._warn_opencode_frontmatter(
                         source_file, diagnostics, package_info.package.name
                     )
-                links_resolved = self.copy_agent(source_file, target_path)
+                links_resolved = self.copy_agent(source_file, target_path, prepared=prepared)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -346,7 +362,7 @@ class AgentIntegrator(BaseIntegrator):
             KNOWN_TARGETS["copilot"],
         )
 
-    def copy_agent(self, source: Path, target: Path) -> int:
+    def copy_agent(self, source: Path, target: Path, *, prepared: str | None = None) -> int:
         """Copy agent file verbatim, resolving context links.
 
         Args:
@@ -358,7 +374,7 @@ class AgentIntegrator(BaseIntegrator):
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
-        content = source.read_text(encoding="utf-8")
+        content = source.read_text(encoding="utf-8") if prepared is None else prepared
         content, links_resolved = self.resolve_links(content, source, target)
         write_text_lf(target, content)
         return links_resolved

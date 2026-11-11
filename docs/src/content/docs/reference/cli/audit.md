@@ -297,6 +297,13 @@ its user-directed whole-file scan and remediation behavior.
 
 ### Drift detection
 
+For standalone Claude inline hooks, replay uses the same selected primitive
+sources and current effective executable consent as install. A deliberately
+withheld primitive is not reported as a missing installation; an approved but
+missing or changed primitive is still drift. Lockfile `exec_status` records an
+observation, not an approval. Audit remains read-only: it does not approve
+hooks, reconcile edited output, accept native trust or invoke a native client.
+
 The default audit replays the install pipeline into a scratch tree and diffs
 the result against the working tree. It catches hand-edits, missing
 integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when

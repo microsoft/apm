@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from ..integration.targets import TargetProfile
     from ..models.apm_package import APMPackage
     from ..models.dependency.reference import DependencyReference
+    from .schema import ApmPolicy
 
 _logger = logging.getLogger(__name__)
 
@@ -788,6 +789,7 @@ def _check_drift(
     cache_only: bool = True,
     verbose: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
+    policy: ApmPolicy | None = None,
 ) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
@@ -820,13 +822,15 @@ def _check_drift(
     logger = CheckLogger(verbose=verbose)
     deployment_root = get_workspace_deploy_root(project_root)
     user_scope = deployment_root != project_root.resolve()
-    if prepared_replay is None:
+    if prepared_replay is None or policy is not None:
         config = ReplayConfig(
             project_root=project_root,
             lockfile_path=get_lockfile_path(project_root),
             targets=frozenset(targets) if targets else None,
             cache_only=cache_only,
             user_scope=user_scope,
+            policy=policy,
+            modules_root=prepared_replay.modules_root if prepared_replay is not None else None,
         )
 
         try:

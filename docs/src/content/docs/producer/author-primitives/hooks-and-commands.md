@@ -26,6 +26,63 @@ primary distribution path.
 
 ## Hooks
 
+### Scoped inline hooks in Claude primitives
+
+Standalone Claude commands, skills and non-plugin agents can declare structured
+`hooks` in their Markdown frontmatter. APM discovers these declarations from
+the selected primitive sources, not from arbitrary Markdown or shell text.
+The package's existing `hooks` permission applies; there is no separate
+per-file grant or approval stored in the lockfile.
+
+```yaml
+---
+description: Review a change with a package-provided check
+allowed-tools: Read
+hooks:
+  PreToolUse:
+    - matcher: Bash
+      hooks:
+        - type: command
+          command: python ./scripts/check.py
+          timeout: 5
+---
+```
+
+Use a literal package-relative resource path. APM resolves `./` against the
+primitive directory, then the package root, and relocates the selected script
+bundle through the existing hook-resource mechanism. Missing, unsafe or
+unrepresentable required resources fail installation; APM does not infer
+dependencies from arbitrary shell expressions. Inline definitions stay on
+their primitive, with native event casing, matchers and invocation restrictions;
+they are never promoted into `.claude/settings.json`.
+
+With enforcement enabled, pending or denied hooks withhold the **whole affected
+Claude primitive**. APM does not strip a protective hook and install the rest
+as equivalent text. Separate pure-text primitives remain available. Inspect
+`apm policy explain <package>`, resolve any deny, approve the package and
+reinstall. Gate-disabled and genuine first-party behavior are unchanged.
+Project installation and `apm install --global` use their corresponding native
+command, skill and agent directories.
+
+Native behavior is not interchangeable: [commands use skill frontmatter](https://code.claude.com/docs/en/skills),
+[skill hooks](https://code.claude.com/docs/en/hooks#hooks-in-skills-and-agents)
+register on invocation and can remain for the session, while
+[standalone agent hooks](https://code.claude.com/docs/en/sub-agents#hooks-in-subagent-frontmatter)
+have the agent's lifetime and native trust requirements. Native-plugin agents
+that ignore `hooks` are not activated through this mechanism; intact plugins
+remain opaque.
+
+:::caution[Native trust and lifetime]
+APM approval does not accept Claude workspace trust or grant tool permissions.
+APM installation and audit are not native invocation tests or certification of
+a Claude version. After revoking approval and reinstalling, restart the native
+session as needed: deleting a primitive cannot revoke hooks already registered
+in a running session. Edited or unverified owned files are preserved and
+reported as unresolved conflicts, not successful revocation.
+:::
+
+### Separate JSON hook descriptors
+
 Source layout. APM discovers hook JSON files in either of two
 directories at the package root:
 

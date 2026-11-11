@@ -377,7 +377,7 @@ class TestCheckExecutableApprovalIntegration:
     def test_local_always_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "_local", "")
         hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
-            "_local", pkg_info, {"deny-all": {}}
+            "_local", pkg_info, {"deny-all": {}}, is_first_party=True
         )
         assert hooks_ok is True
         assert bin_ok is True

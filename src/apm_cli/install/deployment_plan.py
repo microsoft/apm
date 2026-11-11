@@ -68,7 +68,9 @@ def prepare_package_deployment(  # noqa: PLR0913
     log_package_target_restriction(logger, selection)
     if not selection.targets:
         return PackageDeploymentPlan(selection)
-    approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
+    approvals = check_executable_approval(
+        package_name, package_info, allow_executables, is_first_party=is_first_party
+    )
     hooks, bin_approved, mcp, canvas, lsp = approvals
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
@@ -111,4 +113,15 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=skip_bin,
         ),
     )
+    if ctx is not None:
+        if source_plan.claude_withheld_paths:
+            ctx.inline_hook_withheld_packages.add(package_name)
+        check_executable_approval(
+            package_name,
+            package_info,
+            allow_executables,
+            ctx=ctx,
+            is_first_party=is_first_party,
+            source_plan=source_plan,
+        )
     return PackageDeploymentPlan(selection, approvals, skip_bin, reason, codex_native, source_plan)

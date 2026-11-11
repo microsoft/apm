@@ -3,18 +3,23 @@
 import json
 import logging
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from apm_cli.hook_contract import walk_hook_commands
+from apm_cli.hook_contract import HookContractError, walk_hook_commands
 from apm_cli.integration.hook_bundle import _hook_source_root
 from apm_cli.integration.hook_command_paths import (
     iter_plugin_root_paths,
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
     plugin_root_relative_path,
+    unresolved_plugin_root_references,
 )
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 
 
 @dataclass(frozen=True)
@@ -23,10 +28,21 @@ class HookSourceSelection:
 
     descriptor_files: dict[str, frozenset[Path]]
     bundle_files: dict[str, frozenset[Path]]
+    inline_documents: dict[Path, dict] = field(default_factory=dict)
 
     def descriptors_for(self, target_name: str) -> list[Path]:
         """Return target-routed descriptors in stable path order."""
-        return sorted(self.descriptor_files.get(target_name, frozenset()))
+        return sorted(
+            self.descriptor_files.get(target_name, frozenset()) - self.inline_documents.keys()
+        )
+
+    def inline_for(self, target_name: str) -> dict[Path, dict]:
+        """Return native scoped documents, never inputs to global hook rendering."""
+        return {
+            path: self.inline_documents[path]
+            for path in sorted(self.descriptor_files.get(target_name, frozenset()))
+            if path in self.inline_documents
+        }
 
     def bundle_for(self, target_name: str) -> frozenset[Path]:
         """Return target-materialized bundle assets."""
@@ -59,12 +75,17 @@ def _resolve_relative_hook_script(
     package_path: Path,
     hook_file_dir: Path | None,
     rel_path: str,
+    *,
+    reject_symlinks: bool = False,
 ) -> Path | None:
     """Resolve a relative hook script path without escaping the package."""
     last_candidate: Path | None = None
     for base in _relative_hook_script_bases(package_path, hook_file_dir):
+        lexical = base / rel_path
+        if reject_symlinks and has_symlink_component(package_path, lexical):
+            raise HookContractError(f"Hook resource {rel_path!r} crosses a symlink.")
         try:
-            candidate = ensure_path_within(base / rel_path, package_path)
+            candidate = ensure_path_within(lexical, package_path)
         except PathTraversalError:
             continue
         last_candidate = candidate
@@ -100,29 +121,56 @@ def _referenced_hook_source_files(
     data: dict,
     package_path: Path,
     hook_file_dir: Path,
+    *,
+    strict: bool = False,
 ) -> set[Path]:
     """Resolve existing package files referenced by a parsed hook document."""
     source_files: set[Path] = set()
+
+    def admit(source_file: Path | None, reference: str) -> None:
+        if (
+            source_file is not None
+            and source_file.is_file()
+            and (not strict or not has_symlink_component(package_path, source_file))
+        ):
+            source_files.add(source_file)
+        elif strict:
+            raise HookContractError(
+                f"Inline hook resource {reference!r} is missing, unsafe or not a file. "
+                "Keep required resources inside the package and reinstall."
+            )
+
     for declaration in walk_hook_commands(data):
         command = normalize_quoted_plugin_root(declaration.command)
+        matched_references: set[str] = set()
         for match in iter_plugin_root_paths(command):
+            matched_references.add(match.group(0))
+            relative = plugin_root_relative_path(match.group(1))
+            if strict and has_symlink_component(package_path, package_path / relative):
+                raise HookContractError(f"Hook resource {relative!r} crosses a symlink.")
             try:
                 source_file = resolve_plugin_root_hook_script(
                     package_path,
-                    plugin_root_relative_path(match.group(1)),
+                    relative,
                 )
             except PathTraversalError:
+                if strict:
+                    raise
                 continue
-            if source_file.is_file():
-                source_files.add(source_file)
+            admit(source_file, match.group(0))
+        if strict and set(unresolved_plugin_root_references(command)) - matched_references:
+            raise HookContractError(
+                "Inline hook has an unrepresentable package resource reference. "
+                "Use a literal ${PLUGIN_ROOT}/path inside the package and reinstall."
+            )
         for match in iter_relative_script_paths(command):
             source_file = _resolve_relative_hook_script(
                 package_path,
                 hook_file_dir,
                 match.group(1)[2:].replace("\\", "/"),
+                reject_symlinks=strict,
             )
-            if source_file is not None and source_file.is_file():
-                source_files.add(source_file)
+            admit(source_file, match.group(1))
     return source_files
 
 
@@ -164,9 +212,11 @@ def select_hook_sources(
     filter_hook_files: Callable[..., list[Path]],
     iter_bundle_files: Callable[..., list[Path]],
     merge_target_names: Iterable[str],
+    inline_documents: dict[Path, dict] | None = None,
 ) -> HookSourceSelection:
     """Select descriptors and bundle assets for every supported target."""
-    all_descriptors = set(hook_files)
+    inline_documents = inline_documents or {}
+    all_descriptors = set(hook_files) | inline_documents.keys()
     descriptors_by_target: dict[str, frozenset[Path]] = {}
     bundles_by_target: dict[str, frozenset[Path]] = {}
     parsed_hooks: dict[Path, dict | None] = {}
@@ -182,11 +232,17 @@ def select_hook_sources(
             package_identity=package_identity,
             warned_packages=warned_packages,
         )
+        if target_name == "claude":
+            descriptors.extend(sorted(inline_documents))
         descriptors_by_target[target_name] = frozenset(descriptors)
         source_roots: set[Path] = set()
         for hook_file in descriptors:
             if hook_file not in parsed_hooks:
-                parsed_hooks[hook_file] = parse_hook_json(hook_file)
+                parsed_hooks[hook_file] = (
+                    inline_documents[hook_file]
+                    if hook_file in inline_documents
+                    else parse_hook_json(hook_file)
+                )
             data = parsed_hooks[hook_file]
             if data is None:
                 continue
@@ -194,6 +250,7 @@ def select_hook_sources(
                 data,
                 package_path,
                 hook_file.parent,
+                strict=hook_file in inline_documents,
             ):
                 source_roots.add(_hook_source_root(package_path, hook_file.parent, source_file))
 
@@ -208,4 +265,11 @@ def select_hook_sources(
             )
         bundles_by_target[target_name] = frozenset(bundle_files)
 
-    return HookSourceSelection(descriptors_by_target, bundles_by_target)
+    selected = set().union(*descriptors_by_target.values()) if descriptors_by_target else set()
+    return HookSourceSelection(
+        descriptors_by_target,
+        bundles_by_target,
+        inline_documents={
+            path: data for path, data in inline_documents.items() if path in selected
+        },
+    )

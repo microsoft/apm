@@ -196,6 +196,9 @@ class CommandIntegrator(BaseIntegrator):
     def _transform_prompt_to_command(
         self,
         source: Path,
+        *,
+        target_name: str = "claude",
+        inline_document: dict | None = None,
     ) -> tuple[str, frontmatter.Post, list[str], list[str]]:
         """Transform a .prompt.md file into Claude command format.
 
@@ -239,6 +242,32 @@ class CommandIntegrator(BaseIntegrator):
         elif "argumentHint" in post.metadata:
             claude_metadata["argument-hint"] = post.metadata["argumentHint"]
 
+        inline_keys: set[str] = set()
+        if target_name == "claude" and post.metadata.get("hooks"):
+            from apm_cli.hook_contract import HookContractError
+
+            if inline_document is None:
+                raise HookContractError(
+                    "Claude inline hooks require an authorized source plan. "
+                    "Run apm install to apply hooks consent before deployment."
+                )
+            inline_keys = {
+                "hooks",
+                "disable-model-invocation",
+                "user-invocable",
+                "disallowed-tools",
+                "context",
+                "agent",
+                "effort",
+                "background",
+                "shell",
+                "when_to_use",
+            }
+            claude_metadata.update(
+                {key: value for key, value in post.metadata.items() if key in inline_keys}
+            )
+            claude_metadata["hooks"] = inline_document["hooks"]
+
         # Map APM 'input' to Claude 'arguments' and 'argument-hint'
         input_names, rejected_names = _extract_input_names(post.metadata.get("input"))
         if rejected_names:
@@ -268,7 +297,7 @@ class CommandIntegrator(BaseIntegrator):
         # Compute keys present in source frontmatter but not preserved by
         # the shared command transformer.  Surfaced by integrate_command()
         # via diagnostics so users see the lossy transform at install time.
-        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS)
+        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS - inline_keys)
 
         return (command_name, new_post, warnings, dropped_keys)
 
@@ -281,6 +310,7 @@ class CommandIntegrator(BaseIntegrator):
         *,
         diagnostics: DiagnosticCollector | None = None,
         target_name: str = "claude",
+        source_plan=None,
     ) -> tuple[int, bool, bool]:
         """Integrate a prompt file as a slash command (verbatim copy with format conversion).
 
@@ -321,7 +351,13 @@ class CommandIntegrator(BaseIntegrator):
             decide whether to surface the one-shot passthrough notice.
         """
         # Transform to command format
-        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(source)
+        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(
+            source,
+            target_name=target_name,
+            inline_document=(
+                source_plan.inline_rendered_documents.get(source) if source_plan else None
+            ),
+        )
 
         # Resolve context links in content
         post.content, links_resolved = self.resolve_links(post.content, source, target)
@@ -619,6 +655,7 @@ class CommandIntegrator(BaseIntegrator):
                         prompt_file,
                         diagnostics=diagnostics,
                         target_name=target.name,
+                        source_plan=source_plan,
                     )
                 except yaml.YAMLError as exc:
                     # A malformed / over-budget frontmatter block must fail

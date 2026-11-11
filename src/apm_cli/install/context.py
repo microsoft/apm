@@ -153,6 +153,7 @@ class InstallContext:
     intended_dep_keys: set[str] = field(default_factory=set)
     # An empty result can also mean refusal; completeness is recorded separately.
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
+    inline_hook_withheld_packages: set[str] = field(default_factory=set)
     package_completed_reintegrations: dict[str, CompletedReintegration] = field(
         default_factory=dict
     )

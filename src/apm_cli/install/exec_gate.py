@@ -21,10 +21,12 @@ def check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
+    is_first_party: bool = False,
+    source_plan: Any = None,
 ) -> tuple[bool, bool, bool, bool, bool]:
     """Return hook, bin, MCP, canvas, and LSP approval for a package.
 
-    Local project content (``_local``) is always trusted.  Dependency
+    Explicitly identified first-party project content is trusted. Dependency
     packages are checked against the ``allowExecutables`` block.  When
     no ``allowExecutables`` block exists (``None``), all executables are
     considered approved (opt-in enforcement).
@@ -32,8 +34,7 @@ def check_executable_approval(
     When *ctx* is provided and a package is blocked, the declaration is
     recorded on ``ctx.blocked_executables`` for the post-loop prompt.
     """
-    is_local = package_name == "_local"
-    if is_local or allow_executables is None:
+    if is_first_party or allow_executables is None:
         return True, True, True, True, True
 
     from apm_cli.security.executables import (
@@ -78,8 +79,16 @@ def check_executable_approval(
             package_name,
             "",
             approval_identity=pkg_key,
+            source_plan=source_plan,
         )
-        if _decl.has_executables and blocked:
+        approved_types = {
+            EXEC_TYPE_HOOKS: hooks_ok,
+            EXEC_TYPE_BIN: bin_ok,
+            EXEC_TYPE_MCP: mcp_ok,
+            EXEC_TYPE_CANVAS: canvas_ok,
+            EXEC_TYPE_LSP: lsp_ok,
+        }
+        if any(not approved_types[kind] for kind in _decl.exec_types):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
             from apm_cli.security.executables import exec_status_for_declaration

@@ -38,6 +38,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_mcp_ownership_migration,
     check_uninstall_reachability,
 )
+from scripts.architecture_linter.checks.install_inline_hooks import (
+    GUARD_INLINE_HOOKS,
+    check_inline_hooks,
+)
 from scripts.architecture_linter.checks.install_lsp_plugin import (
     GUARD_EXECUTABLE_TRUST,
     GUARD_LSP_LIFECYCLE,
@@ -94,6 +98,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_INLINE_HOOKS,
+        "Standalone inline hooks reuse selected sources, consent and trustworthy materialization.",
+        check_inline_hooks,
+    ),
     _rule(
         _GUARD_SINGLE_FILE,
         "Local and remote single-file dependencies share package materialization and admission.",

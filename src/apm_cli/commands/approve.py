@@ -495,9 +495,19 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     lockfile = LockFile.read(get_lockfile_path(manifest.parent))
     if lockfile is not None:
+        from ..core.scope import get_workspace_deploy_root
         from ..deps.path_anchoring import LocalResolutionError, resolve_local_dep_dirs
+        from ..install.deployable_source_plan import DeployableSourcePlan
+        from ..install.drift import _build_package_info
+        from ..install.target_filter import resolve_effective_package_targets
+        from ..integration.targets import resolve_audit_targets
         from ..utils.yaml_io import load_yaml
 
+        targets = resolve_audit_targets(
+            manifest.parent,
+            user_scope=get_workspace_deploy_root(manifest.parent) != manifest.parent,
+            lockfile=lockfile,
+        )
         try:
             local_dependency_dirs = resolve_local_dep_dirs(lockfile, manifest.parent)
         except LocalResolutionError as exc:
@@ -531,12 +541,27 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                         version = str(manifest_data.get("version", version))
                 except Exception:
                     manifest_data = {}
+            package_info = _build_package_info(locked, package_dir)
+            selection = resolve_effective_package_targets(
+                targets, locked.target_subset or None, package_info, None, name
+            )
+            source_plan = DeployableSourcePlan.create(
+                package_info,
+                list(selection.targets),
+                skill_subset=tuple(locked.skill_subset) if locked.skill_subset else None,
+                hooks_approved=False,
+                canvas_approved=False,
+                skip_bin=True,
+            )
             declaration = scan_package_executables(
                 package_dir,
                 name,
                 version,
                 approval_identity=locked.get_unique_key(),
                 manifest_data=manifest_data,
+                source_plan=source_plan,
+                is_transitive=locked.depth > 1,
+                parent_name=locked.declaring_parent,
             )
             if declaration.has_executables:
                 results.append(declaration)

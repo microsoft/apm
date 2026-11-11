@@ -75,6 +75,14 @@ disambiguate.
 
 ## Body budget
 
+Claude-specific structured `hooks` in a standalone skill's frontmatter use the
+package's existing hooks consent. If hooks are pending or denied under an
+enabled gate, APM withholds that whole Claude skill, not just its hooks.
+Unrelated pure-text skills remain available. See
+[scoped inline hooks](../hooks-and-commands/#scoped-inline-hooks-in-claude-primitives)
+for resources, native scope and restart requirements; this is not a
+cross-harness execution-control guarantee.
+
 Keep `SKILL.md` under **500 lines and 5000 tokens**. This is the
 agent-skills convention, not an APM check, but every harness pays a
 context-window tax for an oversized body. Overflow goes into

@@ -221,6 +221,14 @@ The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, `absent`).
+This field is observational, not approval authority. Selected structured
+inline hooks in standalone Claude commands, skills and non-plugin agents use
+the same package/type consent. Pending or denied hooks withhold the whole
+affected primitive, not just its protective hook; separate pure text remains
+available. Read-only audit replays current consent and selection. Revocation
+preserves edited or unverifiable output and reports unresolved conflicts.
+Native trust still applies, and a running session may need restarting after
+files are removed.
 
 In CI, `apm install` SUCCEEDS when a required package is present-but-parked
 (executables gated pending approval) and prints a one-command remedy

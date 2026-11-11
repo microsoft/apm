@@ -816,6 +816,15 @@ Unix self-update passes the running binary's identity to preserve its launcher/b
 
 `apm approve [PACKAGE_REF...]` grants a package permission to deploy executable primitives (hooks, `bin/`, self-defined MCP servers, LSP servers, canvas extensions). By default it writes the project `apm.yml` `executables.allow` block -- committed to source control, so the whole team inherits the trust decision. `apm approve --user` records a personal grant in `~/.apm/config.json` instead (machine-local, never committed, lower authority than org or project denies).
 
+The `hooks` type includes selected structured inline hooks in standalone
+Claude commands, skills and non-plugin agents. Under enforcement, pending or
+denied hooks withhold that whole primitive while unrelated pure text remains
+available. After approving or revoking, rerun `apm install` (or
+`apm install --global` for user-scope output). Edited/unverified files are
+preserved with conflict diagnostics. Restart Claude as needed: file removal
+does not revoke already-registered hooks. Audit uses current consent, not the
+lock's observed `exec_status`, and never grants native trust.
+
 The project `apm.yml` must carry an `executables:` block (even empty `{}`) to enable the gate; without it, all executables are allowed unconditionally. Flags: `--pending` lists packages with unapproved executables; `--all` approves every currently blocked package; `--recommended` bulk-accepts the org `executables.recommend` set; `--list` shows the fleet-level effective trust decision and deciding layer per installed package.
 
 `apm deny [OPTIONS] PACKAGES...` runs from an APM project with `apm.yml` and writes a block to the project `executables.deny` (or `~/.apm/config.json` with `--user`); deny always wins. When no installed executable declaration is found, APM records all supported executable types, so denying a not-yet-installed package is allowed as a pre-emptive block. `apm policy explain <PACKAGE_REF>` (a subcommand of the `apm policy` group, sibling to `apm policy status`) prints the effective decision for a package: allowed or blocked per type, the deciding policy layer, and any shadowed (overridden) layers. `apm doctor` adds a fleet-level executable-trust drift check that flags packages allowed locally but denied by org policy.

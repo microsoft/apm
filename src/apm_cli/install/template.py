@@ -64,6 +64,10 @@ def _effective_allow(ctx) -> dict | None:
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    from apm_cli.core.scope import InstallScope, get_apm_dir
+
+    if getattr(ctx, "scope", None) is InstallScope.USER:
+        project_root = get_apm_dir(InstallScope.USER)
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
         project_root,

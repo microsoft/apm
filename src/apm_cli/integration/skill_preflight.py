@@ -204,6 +204,15 @@ def find_unmanaged_conflicts(
                 parent /= part
             else:
                 for destination, target in destinations.values():
+                    target_plan = source_plan.for_target(target.name)
+                    if not target_plan.includes(
+                        (source_root / "SKILL.md").relative_to(source_plan.source_root).as_posix()
+                    ):
+                        continue
+                    if not target_plan.includes(
+                        source.relative_to(source_plan.source_root).as_posix()
+                    ):
+                        continue
                     path = destination / suffix
                     relative_target = deployed_path_entry(path, project_root, [target])
                     if not BaseIntegrator.validate_deploy_path(

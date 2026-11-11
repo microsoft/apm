@@ -811,6 +811,9 @@ def _audit_ci_gate(
                         cache_only=prepared_replay is None,
                         verbose=cfg.verbose,
                         prepared_replay=prepared_replay,
+                        policy=fetch_result.policy
+                        if fetch_result is not None and fetch_result.found
+                        else None,
                     )
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":

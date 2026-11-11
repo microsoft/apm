@@ -704,6 +704,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Resolver skips canonical immutable admission before selecting a winner.",
     ),
     MutationCase(
+        guard_id="install-deployment-inline-hooks",
+        rule_id="install-deployment-inline-hooks",
+        path="src/apm_cli/install/services.py",
+        old='"source_plan": source_plan.for_target(_target.name)',
+        new='"source_plan": source_plan',
+        intent="Multi-target deployment bypasses the canonical whole-primitive withholding view.",
+    ),
+    MutationCase(
         guard_id="install-deployment-install-scope-selection",
         rule_id="install-deployment-install-scope-selection",
         path="src/apm_cli/commands/install.py",

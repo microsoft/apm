@@ -517,13 +517,11 @@ class HookIntegrator(BaseIntegrator):
         package_identity: str = "",
         warned_packages: set[str] | None = None,
         hook_files: list[Path] | None = None,
+        inline_documents: dict[Path, dict] | None = None,
     ) -> HookSourceSelection:
-        """Select hook inputs that each resolved target will materialize.
+        """Select routed descriptors and resource bundles through one owner.
 
-        This is the sole hook source-selection algorithm.  It applies
-        filename routing before discovering referenced script bundles, excludes
-        Copilot's recursively-scanned JSON assets, and enumerates each source
-        root once per target.
+        Inline definitions stay native-scoped; recursive-scanner targets omit JSON assets.
         """
         integrator = cls()
         discovered_files = (
@@ -540,6 +538,7 @@ class HookIntegrator(BaseIntegrator):
             filter_hook_files=_filter_hook_files_for_target,
             iter_bundle_files=iter_deployable_hook_bundle_files,
             merge_target_names=_MERGE_HOOK_TARGETS,
+            inline_documents=inline_documents,
         )
 
     def select_hook_sources_for_target(

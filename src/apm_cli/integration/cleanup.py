@@ -274,6 +274,7 @@ def remove_stale_deployed_files(
     targets,
     diagnostics,
     recorded_hashes: dict[str, str] | None = None,
+    require_recorded_hash: bool = False,
     failed_path_retained: bool = True,
     user_scope: bool = False,
     allow_final_symlink: bool = False,
@@ -441,6 +442,14 @@ def remove_stale_deployed_files(
         # cannot prove the file is unmodified (PermissionError, race,
         # etc.) we keep it rather than risk destroying user work.
         expected_hash = recorded_hashes.get(stale_path)
+        if require_recorded_hash and not expected_hash:
+            result.skipped_user_edit.append(stale_path)
+            diagnostics.warn(
+                f"Cannot revoke {stale_path}: no recorded APM content hash proves ownership. "
+                "Inspect and remove it manually if appropriate; inline hooks may remain available.",
+                package=dep_key,
+            )
+            continue
         if expected_hash:
             if allow_final_symlink and stale_target.is_symlink():
                 result.skipped_user_edit.append(stale_path)

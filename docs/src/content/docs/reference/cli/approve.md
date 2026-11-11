@@ -31,19 +31,32 @@ inherits the decision). `--user` writes your personal
 `~/.apm/config.json` instead -- a machine-local grant with lower authority than
 org or project denies. Use `apm deny --user` to narrow trust on one machine.
 
-Text primitives (skills, agents, instructions) are never gated. Local project
-content (the root `.apm/` directory) is always trusted.
+Pure-text primitives are not gated. A selected standalone Claude command,
+skill or non-plugin agent with structured inline hooks uses the package's
+`hooks` consent. Pending or denied hooks withhold that whole primitive rather
+than remove its protection. Unrelated text remains available. Genuine local
+project content (the root `.apm/` directory) remains trusted; a dependency's
+display name does not make it first-party.
 
 ### What is gated
 
 | Type | Gated | Notes |
 |------|-------|-------|
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
+| Claude standalone inline hooks | Yes | Whole hook-bearing command, skill or non-plugin agent is withheld when not approved |
 | Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
 | LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |
-| Text primitives (skills, agents, instructions) | No | No code execution risk |
+| Pure-text primitives | No | Not interpreted as structured executable declarations |
+
+Approval inventory respects the installed dependency's selected skills and
+targets. After approval or revocation, rerun the scope-appropriate install
+command (`apm install` or `apm install --global`). Revocation removes only
+verified, unchanged APM-owned output; edited or unverifiable files remain with
+an unresolved-conflict diagnostic. Restart Claude as needed to discard hooks
+already registered in a running session. Approval does not bypass native trust
+or permissions; see [inline hook scope](../../../producer/author-primitives/hooks-and-commands/#scoped-inline-hooks-in-claude-primitives).
 
 ### Precedence (deny-wins, first match wins)
 

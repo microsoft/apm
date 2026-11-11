@@ -38,6 +38,7 @@ from apm_cli.integration.skill_support import (
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.paths import portable_relpath
 
 __all__ = [
     "SkillIntegrationResult",
@@ -436,14 +437,14 @@ class SkillIntegrator(BaseIntegrator):
         ):
             return False
         roots = {
-            self._target_skills_root(target, project_root).resolve()
+            self._target_skills_root(target, project_root).resolve(): plan.for_target(target.name)
             for target in self._skill_targets or ()
             if target.supports("skills")
         }
         return bool(roots) and all(
-            plan.skill_source_roots <= self._skill_completed_roots.get(root, set())
-            and plan.skill_source_files <= self._skill_completed_files.get(root, set())
-            for root in roots
+            target_plan.skill_source_roots <= self._skill_completed_roots.get(root, set())
+            and target_plan.skill_source_files <= self._skill_completed_files.get(root, set())
+            for root, target_plan in roots.items()
         )
 
     def _skill_path_entry(self, path: Path, project_root: Path) -> str:
@@ -463,6 +464,7 @@ class SkillIntegrator(BaseIntegrator):
         force: bool,
         diagnostics,
         unchanged: bool = False,
+        source_plan: "DeployableSourcePlan | None" = None,
     ) -> list[Path]:
         """Record only successfully copied source members, never surviving sibling assets."""
         from collections import ChainMap
@@ -525,6 +527,14 @@ class SkillIntegrator(BaseIntegrator):
             if self.link_resolver is None:
                 self._skill_can_complete = False
             self._resolve_markdown_links_in_skill_bundle(source, destination, copied)
+            from apm_cli.integration.inline_hooks import render_inline_hook_text
+
+            anchor = destination / "SKILL.md"
+            if anchor in copied and source_plan is not None:
+                content = anchor.read_text(encoding="utf-8")
+                rendered = render_inline_hook_text(content, source / "SKILL.md", source_plan)
+                if rendered != content:
+                    write_text_lf(anchor, rendered)
         written_hashes = {entry(path): compute_file_hash(path) for path in copied}
         if session is not None and written:
             if self.link_resolver is None:
@@ -927,6 +937,10 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             if not (sub_skill_path / "SKILL.md").exists():
                 continue
+            if source_plan is not None and not source_plan.includes(
+                portable_relpath(sub_skill_path / "SKILL.md", source_plan.source_root)
+            ):
+                continue
             raw_sub_name = sub_skill_path.name
             # --skill filter: skip skills not in the requested subset
             if name_filter is not None and raw_sub_name not in name_filter:
@@ -992,6 +1006,7 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 diagnostics=diagnostics,
                 unchanged=unchanged,
+                source_plan=source_plan,
             )
             if not copied:
                 continue
@@ -1118,7 +1133,9 @@ class SkillIntegrator(BaseIntegrator):
                 name_filter=name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
-                source_plan=source_plan,
+                source_plan=source_plan.for_target(target.name)
+                if source_plan is not None
+                else None,
                 source_paths=source_paths,
             )
             if is_primary:
@@ -1214,10 +1231,33 @@ class SkillIntegrator(BaseIntegrator):
 
         seen_skill_dirs: set[Path] = set()
 
+        def promote(target, target_plan, is_primary):
+            _, promoted = self._promote_sub_skills(
+                sub_skills_dir,
+                self._target_skills_root(target, project_root),
+                current_key or skill_name,
+                warn=is_primary,
+                owned_by=owned_by if is_primary else None,
+                diagnostics=diagnostics if is_primary else None,
+                managed_files=managed_files,
+                force=force,
+                project_root=project_root,
+                logger=logger if is_primary else None,
+                link_rewriter=self,
+                skip_bin=skip_bin,
+                source_plan=target_plan,
+                source_paths=source_paths,
+            )
+            return promoted
+
         for target in targets:
             if not target.supports("skills"):
                 continue
 
+            target_plan = source_plan.for_target(target.name) if source_plan is not None else None
+            if target_plan is not None and not target_plan.includes("SKILL.md"):
+                all_target_paths.extend(promote(target, target_plan, primary_skill_md is None))
+                continue
             is_primary = primary_skill_md is None  # first successful target owns result/diagnostics
             target_skill_dir = self._target_skill_dir(target, project_root, skill_name)
 
@@ -1268,13 +1308,14 @@ class SkillIntegrator(BaseIntegrator):
                 project_root,
                 ignore=_build_deployable_copy_ignore(
                     skip_bin=skip_bin,
-                    source_plan=source_plan,
+                    source_plan=target_plan,
                     exclude_apm=True,
                     exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
                 ),
                 managed_files=collision_managed,
                 force=force,
                 diagnostics=diagnostics,
+                source_plan=target_plan,
             )
             if target_skill_dir / "SKILL.md" in copied:
                 all_target_paths.append(target_skill_dir)
@@ -1325,27 +1366,7 @@ class SkillIntegrator(BaseIntegrator):
                             _rich_warning(detail)
                 self._native_skill_session_owners[resolved] = current_key
 
-            # Promote sub-skills for this target. Identify the parent by its
-            # durable unique key (current_key), not skill_name -- the folder
-            # name collides across owners (see _build_ownership_maps).
-            target_skills_root = self._target_skills_root(target, project_root)
-            _, sub_deployed = self._promote_sub_skills(
-                sub_skills_dir,
-                target_skills_root,
-                current_key or skill_name,
-                warn=is_primary,
-                owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
-                managed_files=managed_files,
-                force=force,
-                project_root=project_root,
-                logger=logger if is_primary else None,
-                link_rewriter=self,
-                skip_bin=skip_bin,
-                source_plan=source_plan,
-                source_paths=source_paths,
-            )
-            all_target_paths.extend(sub_deployed)
+            all_target_paths.extend(promote(target, target_plan, is_primary))
 
         # Count unique sub-skills from primary target only
         primary_root = project_root / ".github" / "skills"
@@ -1453,7 +1474,9 @@ class SkillIntegrator(BaseIntegrator):
                 name_filter=_name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
-                source_plan=source_plan,
+                source_plan=source_plan.for_target(target.name)
+                if source_plan is not None
+                else None,
                 source_paths=source_paths,
             )
             if is_primary:

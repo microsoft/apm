@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import stat
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +75,10 @@ class DeployableSourcePlan:
     skill_discovery_complete: bool = False
     skill_source_roots: frozenset[str] = frozenset()
     skill_source_files: frozenset[str] = frozenset()
+    inline_hook_documents: dict[Path, dict] = field(default_factory=dict)
+    inline_rendered_documents: dict[Path, dict] = field(default_factory=dict)
+    claude_withheld_paths: frozenset[str] = frozenset()
+    claude_withheld_skills: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Index authorized parents for constant-time copy filtering."""
@@ -212,21 +216,6 @@ class DeployableSourcePlan:
         if "instructions" in target_primitives:
             add_matching_files(source_root / ".apm" / "instructions", "*.instructions.md")
 
-        if hooks_approved and "hooks" in target_primitives:
-            from apm_cli.integration.hook_integrator import HookIntegrator
-
-            hook_target_names = [
-                target.name
-                for target in targets
-                if "hooks" in target.primitives and hasattr(target, "name")
-            ]
-            hook_source_selection = HookIntegrator.select_deployable_hook_sources(
-                source_root,
-                hook_target_names,
-            )
-            for path in hook_source_selection.files:
-                add_file(path)
-
         if native_plugin_root is not None:
             if native_plugin_root != source_root:
                 raise ValueError("Native source plan must use the admitted package root.")
@@ -247,6 +236,7 @@ class DeployableSourcePlan:
             for bundle in CanvasIntegrator.find_canvas_bundles(source_root):
                 add_tree(bundle)
 
+        non_skill_paths = set(paths)
         if "skills" in target_primitives:
             from apm_cli.models.apm_package import PackageType
 
@@ -332,7 +322,7 @@ class DeployableSourcePlan:
             add_tree(source_root / "bin")
             add_file(source_root / ".claude-plugin" / "plugin.json")
 
-        return cls(
+        plan = cls(
             source_root=source_root,
             paths=frozenset(paths),
             selected_skill_names=selected_skill_names,
@@ -341,6 +331,150 @@ class DeployableSourcePlan:
             skill_discovery_complete=discovery_complete,
             skill_source_roots=frozenset(skill_source_roots),
             skill_source_files=frozenset(skill_source_files),
+        )
+        return plan._with_inline_hooks(
+            package_info,
+            targets,
+            hooks_approved=hooks_approved,
+            non_skill_paths=non_skill_paths,
+            native_plugin=native_plugin_root is not None,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        )
+
+    def _with_inline_hooks(
+        self,
+        package_info: Any,
+        targets: list[Any],
+        *,
+        hooks_approved: bool,
+        non_skill_paths: set[str],
+        native_plugin: bool,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> DeployableSourcePlan:
+        """Admit inline definitions from the existing primitive selection, once."""
+        from apm_cli.install.primitive_classification import (
+            PrimitiveKind,
+            classify_agent_source_file,
+        )
+        from apm_cli.integration.hook_integrator import HookIntegrator
+        from apm_cli.integration.inline_hooks import read_inline_hook_document
+        from apm_cli.models.apm_package import PackageType
+        from apm_cli.utils.helpers import find_plugin_json
+
+        documents: dict[Path, dict] = {}
+        withheld: set[str] = set()
+        withheld_skills: set[str] = set()
+        claude = next(
+            (target for target in targets if getattr(target, "name", None) == "claude"), None
+        )
+        standalone = (
+            not native_plugin
+            and getattr(package_info, "package_type", None) is not PackageType.MARKETPLACE_PLUGIN
+            and find_plugin_json(self.source_root) is None
+        )
+        if claude is not None and standalone:
+            candidates = {(Path(root) / "SKILL.md").as_posix() for root in self.skill_source_roots}
+            for relative in sorted(non_skill_paths):
+                source = self.source_root / relative
+                if "commands" in claude.primitives and source.name.endswith(".prompt.md"):
+                    candidates.add(relative)
+                elif "agents" in claude.primitives and (
+                    source.name.endswith(".agent.md") or relative.startswith(".apm/agents/")
+                ):
+                    classification = classify_agent_source_file(source, self.source_root)
+                    if classification.kind is PrimitiveKind.AGENT:
+                        candidates.add(relative)
+            for relative in sorted(candidates & self.paths):
+                source = self.source_root / relative
+                document = read_inline_hook_document(source)
+                if document is None:
+                    continue
+                documents[source] = document
+                if not hooks_approved:
+                    withheld.add(relative)
+                    if source.name == "SKILL.md":
+                        withheld_skills.add(Path(relative).parent.as_posix())
+            if withheld:
+                surviving_roots = self.skill_source_roots - withheld_skills
+                surviving_members = {
+                    relative
+                    for relative in self.skill_source_files
+                    if any(Path(relative).is_relative_to(root) for root in surviving_roots)
+                }
+                withheld.update(self.skill_source_files - surviving_members - non_skill_paths)
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        "Claude primitives with inline hooks were withheld as whole primitives "
+                        "because hooks are not approved. Inspect 'apm policy explain "
+                        f"{printable_ascii_text(package_name)}', resolve any deny, then approve "
+                        "and reinstall. Restart Claude to discard hooks already registered "
+                        "in a running session; removing files cannot revoke those hooks.",
+                        package=printable_ascii_text(package_name),
+                        detail=", ".join(
+                            sorted(portable_relpath(path, self.source_root) for path in documents)
+                        ),
+                    )
+
+        selection = None
+        paths = set(self.paths)
+        hook_targets = [target.name for target in targets if "hooks" in target.primitives]
+        if hooks_approved and hook_targets:
+            selection = HookIntegrator.select_deployable_hook_sources(
+                self.source_root,
+                hook_targets,
+                inline_documents=documents,
+            )
+            paths.update(
+                portable_relpath(path, self.source_root)
+                for path in selection.files
+                if _is_safe_source_path(path, self.source_root)
+            )
+        if targets and all(getattr(target, "name", None) == "claude" for target in targets):
+            paths.difference_update(withheld)
+        return replace(
+            self,
+            paths=frozenset(paths),
+            authorized_parent_prefixes=frozenset(),
+            hook_source_selection=selection,
+            inline_hook_documents=documents,
+            claude_withheld_paths=frozenset(withheld),
+            claude_withheld_skills=frozenset(withheld_skills),
+        )
+
+    def for_target(self, target_name: str) -> DeployableSourcePlan:
+        """Project the same selection to one target without re-discovering content."""
+        if target_name != "claude":
+            return (
+                replace(self, inline_rendered_documents={})
+                if self.inline_rendered_documents
+                else self
+            )
+        if not self.claude_withheld_paths:
+            return self
+        return replace(
+            self,
+            paths=self.paths - self.claude_withheld_paths,
+            authorized_parent_prefixes=frozenset(),
+            skill_source_roots=self.skill_source_roots - self.claude_withheld_skills,
+            skill_source_files=self.skill_source_files - self.claude_withheld_paths,
+        )
+
+    @classmethod
+    def for_executable_scan(cls, source_root: Path) -> DeployableSourcePlan:
+        """Use the canonical standalone selection for inspect/approval discovery."""
+        from types import SimpleNamespace
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        return cls.create(
+            SimpleNamespace(install_path=source_root, package_type=None),
+            [KNOWN_TARGETS["claude"]],
+            skill_subset=None,
+            hooks_approved=False,
+            canvas_approved=False,
+            skip_bin=True,
         )
 
     def includes(self, relative_path: str) -> bool:

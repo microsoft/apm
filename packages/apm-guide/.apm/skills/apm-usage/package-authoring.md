@@ -158,6 +158,19 @@ must select both descriptors and their resource paths; unsafe, missing,
 excluded or collision-displaced resources fail before replacing a bundle.
 Use `apm pack --dry-run --verbose` to inspect the complete file list.
 
+Standalone Claude commands, skills and non-plugin agents can also carry
+structured `hooks` frontmatter. Selected declarations share the package's
+existing hooks consent. With enforcement on, pending or denied hooks withhold
+the whole affected Claude primitive; unrelated pure text remains available.
+Allowed definitions remain native-scoped, never global settings. Literal `./`
+resources resolve from the primitive directory then package root through the
+existing bundle mechanism; missing, unsafe or unrepresentable required
+resources fail visibly. Do not infer arbitrary shell dependencies, activate
+ignored native-plugin-agent fields, or claim cross-harness compatibility.
+APM approval does not accept native workspace trust. Removing files cannot
+revoke hooks registered in a running session; explain reload/restart needs and
+qualify native versions separately from APM CLI tests.
+
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
 files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
 (`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.

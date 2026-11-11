@@ -237,6 +237,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 targets=_targets or None,
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
+                require_recorded_hash=dep_key in ctx.inline_hook_withheld_packages,
                 user_scope=user_scope,
                 receipt_retirements=receipt_retirements,
             )
@@ -250,6 +251,13 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                     path: prev_dep.deployed_file_hashes.get(path)
                     for path in cleanup_result.retained
                 }
+                if dep_key in ctx.inline_hook_withheld_packages:
+                    diagnostics.error(
+                        "Inline hook revocation is incomplete: conflicting deployed content "
+                        "was preserved. Resolve the reported files, reinstall, and restart "
+                        "Claude; running-session hooks cannot be revoked by deleting files.",
+                        package=dep_key,
+                    )
             if cleanup_result.deleted_targets:
                 BaseIntegrator.cleanup_empty_parents(cleanup_result.deleted_targets, project_root)
             for _skipped in cleanup_result.skipped_user_edit:

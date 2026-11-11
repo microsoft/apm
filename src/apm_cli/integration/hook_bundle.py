@@ -4,13 +4,13 @@ import json
 import logging
 import shutil
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
@@ -87,6 +87,23 @@ def _same_text(path: Path, content: str) -> bool:
         return False
 
 
+def _check_required_resource_destination(
+    project_root: Path, target_file: Path, recorded_hashes: Mapping[str, str] | None
+) -> None:
+    """Reject unsafe paths and edited ownership witnesses before replacing resources."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    if has_symlink_component(project_root, target_file):
+        raise ValueError(f"Cannot activate inline hooks through symlink {target_file}")
+    target_rel = portable_relpath(target_file, project_root)
+    expected = (recorded_hashes or {}).get(target_rel)
+    if expected and target_file.is_file() and compute_file_hash(target_file) != expected:
+        raise ValueError(
+            f"Cannot activate inline hooks: resource {target_rel} was edited since "
+            "deployment. Preserve your changes and resolve the conflict before reinstalling."
+        )
+
+
 def _is_root_hook_descriptor(
     source_file: Path, source_root: Path, descriptor_files: set[Path]
 ) -> bool:
@@ -141,6 +158,8 @@ def copy_deployed_hook_bundle(
     exclude_json_files: bool = False,
     source_plan=None,
     selected_bundle_files: frozenset[Path],
+    require_complete: bool = False,
+    recorded_hashes: Mapping[str, str] | None = None,
 ) -> HookBundleCopyResult:
     """Copy each referenced script's whole hooks root and module type.
 
@@ -196,9 +215,17 @@ def copy_deployed_hook_bundle(
                 continue
             source_rel = source_file.relative_to(source_root)
             target_file = target_root / source_rel
+            if require_complete:
+                _check_required_resource_destination(project_root, target_file, recorded_hashes)
             copy_plan[portable_relpath(target_file, project_root)] = source_file
             if source_file.suffix.lower() in _HOOK_SCRIPT_EXTENSIONS:
                 root_has_js_hook[(source_root, target_root)] = True
+
+    if require_complete and command_target_rels - copy_plan.keys():
+        raise ValueError(
+            "Cannot activate inline hooks: a required resource is excluded from its "
+            "selected deployment bundle. Choose a representable package resource and reinstall."
+        )
 
     for target_rel, source_file in copy_plan.items():
         target_file = project_root / target_rel
@@ -214,6 +241,11 @@ def copy_deployed_hook_bundle(
             force,
             diagnostics=diagnostics,
         ):
+            if require_complete:
+                raise ValueError(
+                    f"Cannot activate inline hooks: required resource {target_rel} conflicts "
+                    "with existing content. Preserve or move that content and reinstall."
+                )
             continue
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
@@ -228,6 +260,8 @@ def copy_deployed_hook_bundle(
         if not root_has_js_hook.get((_source_root, target_root), False):
             continue
         target_file = target_root / "package.json"
+        if require_complete:
+            _check_required_resource_destination(project_root, target_file, recorded_hashes)
         target_rel = portable_relpath(target_file, project_root)
         ensure_path_within(target_file, project_root)
         content = json.dumps({"type": module_type}, indent=2, sort_keys=True) + "\n"
@@ -241,6 +275,11 @@ def copy_deployed_hook_bundle(
             force,
             diagnostics=diagnostics,
         ):
+            if require_complete:
+                raise ValueError(
+                    f"Cannot activate inline hooks: module metadata {target_rel} conflicts "
+                    "with existing content. Preserve or move that content and reinstall."
+                )
             continue
         target_file.parent.mkdir(parents=True, exist_ok=True)
         target_file.write_text(content, encoding="utf-8")
