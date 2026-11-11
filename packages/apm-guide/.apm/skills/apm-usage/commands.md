@@ -759,7 +759,8 @@ deploying any package in the plan or committing manifest/lock success state.
 Rename the local skill or correct an existing `skills:`/`targets:` selection;
 an allow-list does not automatically include future skills. Cached preparation
 may remain, and old partial state is preserved. A shared name/directory alone
-is not a conflict. `--force` remains destructive and also bypasses the critical
+is not a conflict, and a skill directory with no files or symlinks at any
+depth is deployed into. `--force` remains destructive and also bypasses the critical
 security-scan block. Audit reports unowned differing skill files as
 `unmanaged-conflict`, not managed `modified` drift, and does not repair them.
 
