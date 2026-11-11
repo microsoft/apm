@@ -1292,7 +1292,7 @@ class LockFile:
         if suppressed is not None:
             suppressed.append(self.to_yaml())
             return
-        from ..utils.atomic_io import atomic_write_text
+        from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
 
@@ -1330,7 +1330,7 @@ class LockFile:
             self.generated_at = None
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
-        atomic_write_text(path, serialized)
+        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:

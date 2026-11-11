@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` and `apm compile` create a new `apm.lock.yaml` and compiled outputs such as `AGENTS.md` with umask-derived permissions (`-rw-r--r--` under umask 022) instead of owner-only `0600`; existing files keep their mode and secret-bearing configs stay `0600`. (#3547)
 - `apm marketplace check` accepts a `ref` that is a full 40-character commit SHA when the remote serves that commit, matching `apm pack`, instead of failing with `Ref '<sha>' not found`; unreachable commits and abbreviated SHAs fail with an actionable message, and tag and branch refs are unchanged. (#3543)
 - Claude plugin `.mcp.json` files in the flat top-level server-map shape (as in `linear`, `github` and `playwright` from `anthropics/claude-plugins-official`) now install their MCP servers like the `{"mcpServers": {...}}` shape; a plugin MCP file with no usable server now warns, naming the file, instead of being silently ignored. (#3541)
 - `apm audit` recognizes GitHub Copilot's documented `sessionStart` prompt hook (`"type": "prompt"`) and scans its `prompt` text instead of failing with incomplete coverage; prompt handlers on other Copilot events, unknown handler types and non-string prompts still fail closed. (#3542)
