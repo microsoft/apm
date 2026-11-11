@@ -25,6 +25,13 @@ Explicit transport or resolver changes are not no-ops: an HTTPS request can
 replace an HTTP declaration, and a Git-qualified marketplace source can replace
 a shorthand routed through the default registry.
 
+Installing named packages leaves other packages' lock entries untouched, but
+reconciles each named package's own transitive dependencies: a dependency the
+package no longer declares, and that no other installed package still needs, is
+removed from `apm.lock.yaml`, `apm_modules/` and its deployed files. A dependency
+still reached through another declared package is kept. This applies at project
+and user (`-g`) scope.
+
 `PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
 
 Local paths may select a directory package or one `.agent.md`,
