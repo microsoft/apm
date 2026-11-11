@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Claude plugin `.mcp.json` files in the flat top-level server-map shape (as in `linear`, `github` and `playwright` from `anthropics/claude-plugins-official`) now install their MCP servers like the `{"mcpServers": {...}}` shape; a plugin MCP file with no usable server now warns, naming the file, instead of being silently ignored. (#3541)
 - `apm audit` recognizes GitHub Copilot's documented `sessionStart` prompt hook (`"type": "prompt"`) and scans its `prompt` text instead of failing with incomplete coverage; prompt handlers on other Copilot events, unknown handler types and non-string prompts still fail closed. (#3542)
 - Prompt authoring, `copilot` target and packaged `apm-usage` docs now state that `.github/prompts/` files load only in VS Code Local harness sessions, not the Copilot harness or Copilot CLI, and show the skill alternative with `disable-model-invocation: true`; prompt deployment is unchanged. (#3550)
 - MCP servers declared by a Claude plugin installed from a local path (`.mcp.json` or `plugin.json` `mcpServers`) now deploy to the selected targets like the same plugin installed from git, with the same policy, lockfile ownership and uninstall cleanup; APM warns instead of silently dropping them when the plugin's synthesized manifest is missing. (#3540)
