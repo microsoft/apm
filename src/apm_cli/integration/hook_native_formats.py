@@ -209,6 +209,13 @@ def validate_cursor_config(document: object) -> None:
             _validate_cursor_handler(entry, event)
 
 
+# Copilot documents prompt handlers only on sessionStart; other events fail closed.
+# Ref: https://docs.github.com/en/copilot/reference/hooks-reference#prompt-hooks
+_EVENT_PROMPT_TYPES: dict[str, dict[str, tuple[str, ...]]] = {
+    "github_hooks": {"sessionStart": ("prompt",)},
+}
+
+
 @dataclass(frozen=True)
 class HookContentEntry:
     """Discovered native hook content, independent of ownership and safety."""
@@ -293,6 +300,7 @@ def inspect_native_hooks(
         return ()
     else:
         return (HookContentEntry("", error="missing native hook container"),)
+    event_prompt_types = _EVENT_PROMPT_TYPES.get(format_id, {})
     result: list[HookContentEntry] = []
     for prefix, events in containers:
         try:
@@ -338,11 +346,12 @@ def inspect_native_hooks(
             if isinstance(handler.value.get("hooks"), list):
                 continue
             pointer = prefix + handler.json_pointer.removeprefix("/hooks")
+            event_types = () if is_child else event_prompt_types.get(handler.event, ())
             result.append(
                 _inspect_handler(
                     dict(handler.value),
                     pointer,
-                    prompt_types,
+                    prompt_types + event_types,
                     HOOK_COMMAND_KEYS if format_id == "github_hooks" else ("command",),
                 )
             )
