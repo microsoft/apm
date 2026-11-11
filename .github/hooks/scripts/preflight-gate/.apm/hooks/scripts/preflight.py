@@ -4,7 +4,8 @@
 Usage (from anywhere inside the repo):
     python3 .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/preflight.py
         [--base REF] [--tiers auto|T0,T1,..] [--plan] [--json]
-        [--keep-going] [--no-fetch] [--jobs N] [--print-ci-fingerprints]
+        [--keep-going] [--no-fetch] [--no-provision] [--jobs N]
+        [--print-ci-fingerprints]
 
 Exit codes: 0 gate-eligible pass, 1 fail, partial or not gate-eligible, 2 usage/internal.
 Stdlib only. Unix/WSL only (native Windows is refused: CI covers Windows).
@@ -65,6 +66,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="print the receipt JSON on stdout")
     parser.add_argument("--keep-going", action="store_true", help="run tiers after a failure")
     parser.add_argument("--no-fetch", action="store_true", help="do not fetch the base ref")
+    parser.add_argument(
+        "--no-provision",
+        action="store_true",
+        help="do not repair a uv env that drifted from uv.lock (env.lock-sync)",
+    )
     parser.add_argument(
         "--jobs",
         type=int,
@@ -183,8 +189,55 @@ def _internal(check, ctx, policy: ModuleType) -> tuple[bool, list[str]]:
     if check.internal == "uvlock_guard":
         return lib.uvlock_guard(root, ctx.merge_base, tuple(policy.UVLOCK_ALLOWED_HOSTS))
     if check.internal == "lock_sync":
-        return lib.lock_sync(root)
+        result = lib.check_lock(root, lib.tolerated_names(dict(os.environ)))
+        return bool(result["ok"]), _lock_lines(result)
     raise ValueError(f"unknown internal check {check.internal!r}")
+
+
+def _lock_lines(result: dict) -> list[str]:
+    lines = []
+    for rec in result["tolerated"]:
+        lines.append(
+            f"tolerated drift ({lib.TOLERATE_ENV}): {rec['name']} locked "
+            f"{rec['locked']} installed {rec['installed']}"
+        )
+    for rec in result["untolerated"]:
+        lines.append(f"DRIFT: {rec['name']} locked {rec['locked']} installed {rec['installed']}")
+    if result["ok"]:
+        lines.append("uv environment matches uv.lock (modulo tolerated drift)")
+    else:
+        lines.append(
+            "uv environment does not match uv.lock, so test lanes would not match CI "
+            "(`uv sync --frozen --extra dev`). Fix: let preflight provision it (default), "
+            f"run `uv sync --frozen --extra dev`, or for a mirror that lacks a version set "
+            f"{lib.TOLERATE_ENV}=<pkg>[,<pkg>] on this machine."
+        )
+        lines.append("uv output (tail):\n" + str(result["output"])[-1500:])
+    return lines
+
+
+def run_lock_check(
+    check, root: Path, work_dir: Path, log_path: Path, provision: bool
+) -> tuple[int, dict]:
+    """env.lock-sync: detect drift, self-heal in place, re-check. Runs alone."""
+    tolerate = lib.tolerated_names(dict(os.environ))
+    with log_path.open("w", encoding="utf-8") as log:
+        log.write(f"# check: {check.id} (tier {check.tier})\n# internal: lock_sync\n# ---\n")
+        result = lib.check_lock(root, tolerate)
+        provisioned = False
+        if not result["ok"] and provision and result["untolerated"]:
+            log.write("drift detected; provisioning the uv env in place\n")
+            for line in _lock_lines(result):
+                log.write(line + "\n")
+            provisioned = lib.provision_env(
+                root, work_dir, tolerate, lambda text: log.write(text + "\n")
+            )
+            log.write(f"provisioning {'succeeded' if provisioned else 'FAILED'}; re-checking\n")
+            result = lib.check_lock(root, tolerate)
+        for line in _lock_lines(result):
+            log.write(line + "\n")
+    info = {"tolerated": result["tolerated"], "provisioned": provisioned}
+    return (0 if result["ok"] else 1), info
 
 
 def _run_internal(check, ctx, policy: ModuleType, log_path: Path) -> int:
@@ -372,6 +425,25 @@ def run(
     outcomes: dict[int, Outcome] = {}
     phase_wall: dict[str, float] = {}
 
+    env_info: dict = {"tolerated": [], "provisioned": False}
+    for check in [c for c in phase_a if c.internal == "lock_sync"]:
+        # Runs before phase A: provisioning rewrites the env other checks use.
+        phase_a.remove(check)
+        log_path = logs_dir / f"{check.id}.log"
+        began = time.monotonic()
+        code, env_info = run_lock_check(
+            check, root, lib.preflight_dir(git_dir), log_path, not args.no_provision
+        )
+        outcomes[id(check)] = (code, time.monotonic() - began, log_path)
+        report(check, outcomes[id(check)])
+        if env_info["provisioned"]:
+            _say("  [i] provisioned the uv env to match uv.lock")
+        for rec in env_info["tolerated"]:
+            warnings.append(
+                f"tolerated lock drift ({lib.TOLERATE_ENV}): {rec['name']} locked "
+                f"{rec['locked']}, installed {rec['installed']}"
+            )
+
     _say(f"[*] phase A: {len(phase_a)} check(s) concurrently ({jobs} job(s))")
     began = time.monotonic()
     for check, outcome in zip(phase_a, run_concurrent(phase_a, execute, jobs), strict=True):
@@ -480,6 +552,8 @@ def run(
         "phase_wall_s": phase_wall,
         "skipped_checks": [c.id for c in skipped],
         "restored_outputs": restored,
+        "lock_drift": env_info["tolerated"],
+        "env_provisioned": env_info["provisioned"],
         "checks": records,
         "warnings": warnings,
         "ci_only_lanes": list(policy.CI_ONLY_LANES),

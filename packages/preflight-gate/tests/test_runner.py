@@ -320,42 +320,6 @@ def test_ci_like_env_keeps_tool_locations(workdir: Path) -> None:
     assert env["PATH"] == "/bin"
 
 
-def _fake_uv(workdir: Path, output: str) -> Path:
-    bin_dir = workdir / "fakebin"
-    bin_dir.mkdir()
-    uv = bin_dir / "uv"
-    uv.write_text(f"#!/bin/sh\ncat <<'OUT'\n{output}\nOUT\n", encoding="utf-8")
-    uv.chmod(0o755)
-    return bin_dir
-
-
-@pytest.mark.parametrize(
-    ("output", "ok"),
-    [
-        (
-            "Would use project environment at: .venv\nChecked 96 packages\nWould make no changes",
-            True,
-        ),
-        (
-            "Would uninstall 1 package\nWould install 1 package\n - click==8.5.0\n + click==8.2.1",
-            False,
-        ),
-    ],
-)
-def test_lock_sync_detects_drift(
-    sandbox: Sandbox, workdir: Path, monkeypatch, output: str, ok: bool
-) -> None:
-    import os
-
-    bin_dir = _fake_uv(workdir, output)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    result, lines = lib.lock_sync(sandbox.root)
-    assert result is ok
-    if not ok:
-        assert "- click==8.5.0" in lines[1]
-        assert "uv sync --frozen --extra dev" in lines[-1]
-
-
 def test_lock_sync_is_selected_only_with_test_tiers(sandbox: Sandbox) -> None:
     ctx = _ctx(sandbox, ["docs/x.md"])
     assert "env.lock-sync" not in [c.id for c in policy.build_checks("T0", ctx)]

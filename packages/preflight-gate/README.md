@@ -30,7 +30,8 @@ UV_NO_SYNC=1 python3 .github/hooks/scripts/preflight-gate/.apm/hooks/scripts/pre
 
 Flags: `--base REF` (default `origin/main`, fetched first unless
 `--no-fetch`), `--tiers T0,T1` (diagnostic; never gate-eligible),
-`--keep-going`, `--json`, `--jobs N`, `--print-ci-fingerprints`.
+`--keep-going`, `--json`, `--jobs N`, `--no-provision`,
+`--print-ci-fingerprints`.
 
 Tiers decide WHAT runs; scheduling is two-phase across all selected tiers.
 Phase A runs every non-exclusive check concurrently (`--jobs`, default
@@ -53,9 +54,24 @@ Command checks run in a CI-like environment: an allowlist of host variables
 (no `APM_*`, Claude, Copilot, `GIT_CONFIG_*` or token variables;
 `GIT_EXEC_PATH` is kept), `USER=runner` as on hosted runners, an isolated
 `HOME`/XDG under the preflight dir, a short `TMPDIR` (`~/.cache/apm-pf`) and
-the real uv cache/config. When test tiers are selected, `env.lock-sync` fails unless
-the uv environment matches `uv.lock` (CI runs `uv sync --frozen --extra
-dev`). Files checks are known to regenerate (`VOLATILE_OUTPUTS` in the
+the real uv cache/config.
+
+When test tiers are selected, `env.lock-sync` runs first and requires the uv
+project environment to match `uv.lock` (CI runs `uv sync --frozen --extra
+dev`). On drift the runner repairs the env in place (disable with
+`--no-provision`): `uv sync --frozen --extra dev`, falling back to
+`uv export` + `uv pip sync` through your configured index and an editable
+re-install of the project. `uv.lock` is never modified.
+
+If your package mirror lacks a locked version, list the package in
+`APM_PREFLIGHT_LOCK_TOLERATE` (comma-separated, machine-local; never commit
+a default), e.g. `APM_PREFLIGHT_LOCK_TOLERATE=filelock`. Provisioning then
+installs the highest version with the same major.minor (or keeps the
+installed one); the difference is printed as `[!]` and recorded in the
+receipt as `lock_drift`, and the receipt stays gate-eligible. Any other
+drift fails.
+
+Files checks are known to regenerate (`VOLATILE_OUTPUTS` in the
 policy, e.g. `CONFORMANCE.*`) are restored afterwards and listed in the
 receipt as `restored_outputs`; any other change fails `hygiene.tree-mutated`.
 `ci.drift` fails when a mirrored workflow job changes: update

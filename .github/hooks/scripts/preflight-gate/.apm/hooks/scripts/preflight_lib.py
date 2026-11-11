@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -551,35 +552,213 @@ def force_rmtree(path: str | Path) -> None:
     shutil.rmtree(base)
 
 
-def lock_sync(root: str | Path) -> tuple[bool, list[str]]:
-    """Does the env `uv run` uses match uv.lock (CI: `uv sync --frozen --extra dev`)?"""
-    env = {k: v for k, v in os.environ.items() if k not in ("UV_NO_SYNC", "UV_FROZEN")}
+TOLERATE_ENV = "APM_PREFLIGHT_LOCK_TOLERATE"
+UvRunner = Callable[[list[str], Path, dict[str, str]], tuple[int, str]]
+_DRIFT_LINE = re.compile(r"^ ([-+~]) ([A-Za-z0-9_.\-]+)==(\S+)")
+_REQ_LINE = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s;]+)(.*)$")
+
+
+def normalize_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name.strip()).lower()
+
+
+def tolerated_names(env: dict[str, str]) -> set[str]:
+    """Machine-local packages allowed to differ from uv.lock (mirror gaps)."""
+    raw = env.get(TOLERATE_ENV, "")
+    return {normalize_name(n) for n in raw.split(",") if n.strip()}
+
+
+def uv_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k not in ("UV_NO_SYNC", "UV_FROZEN")}
+
+
+def run_uv(args: list[str], cwd: Path, env: dict[str, str]) -> tuple[int, str]:
     try:
-        proc = subprocess.run(
-            ["uv", "sync", "--frozen", "--extra", "dev", "--dry-run", "--offline"],  # noqa: S607
-            cwd=str(root),
+        proc = subprocess.run(  # noqa: S603 - fixed argv
+            ["uv", *args],  # noqa: S607
+            cwd=str(cwd),
             env=env,
             capture_output=True,
             text=True,
             check=False,
-            timeout=120,
+            timeout=1800,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return False, [f"cannot run uv: {exc}"]
-    output = (proc.stdout + proc.stderr).splitlines()
-    if proc.returncode == 0 and any("Would make no changes" in line for line in output):
-        return True, ["environment matches uv.lock"]
-    drift = [line.strip() for line in output if line.startswith((" - ", " + "))]
-    lines = [
-        "the uv project environment does not match uv.lock, so test results would not "
-        "match CI (which runs `uv sync --frozen --extra dev`).",
-        f"{len(drift)} package line(s) differ, e.g.: " + ", ".join(drift[:8]),
-        "Fix: `uv sync --frozen --extra dev`, or point UV_PROJECT_ENVIRONMENT at a "
-        "lock-faithful environment.",
+        return 127, f"cannot run uv: {exc}"
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def parse_drift(output: str) -> tuple[bool, dict[str, dict[str, str | None]]]:
+    """Parse `uv sync --dry-run`: (no changes?, {name: {locked, installed}}).
+
+    `~ <project> (from file://...)` re-install lines of the editable project
+    are not drift.
+    """
+    clean = "Would make no changes" in output
+    drift: dict[str, dict[str, str | None]] = {}
+    for line in output.splitlines():
+        match = _DRIFT_LINE.match(line)
+        if not match or (match.group(1) == "~" and "(from file:" in line):
+            continue
+        sign, name, version = match.groups()
+        entry = drift.setdefault(normalize_name(name), {"locked": None, "installed": None})
+        entry["installed" if sign == "-" else "locked"] = version
+    return clean, drift
+
+
+def check_lock(
+    root: str | Path, tolerate: set[str], runner: UvRunner = run_uv
+) -> dict[str, object]:
+    """Compare the uv project env with uv.lock (CI: `uv sync --frozen --extra dev`)."""
+    args = ["sync", "--frozen", "--extra", "dev", "--dry-run", "--offline"]
+    code, output = runner(args, Path(root), uv_env())
+    clean, drift = parse_drift(output)
+    records = [{"name": n, **v} for n, v in sorted(drift.items())]
+    tolerated = [r for r in records if r["name"] in tolerate]
+    untolerated = [r for r in records if r["name"] not in tolerate]
+    plan_seen = clean or "Would use project environment" in output
+    ok = code == 0 and plan_seen and not untolerated
+    return {
+        "ok": ok,
+        "tolerated": tolerated,
+        "untolerated": untolerated,
+        "output": output,
+        "exit": code,
+    }
+
+
+def project_env(root: str | Path, env: dict[str, str]) -> Path:
+    custom = env.get("UV_PROJECT_ENVIRONMENT")
+    if custom:
+        path = Path(custom)
+        return path if path.is_absolute() else Path(root) / path
+    return Path(root) / ".venv"
+
+
+def installed_version(venv: Path, name: str) -> str | None:
+    wanted = normalize_name(name)
+    for info in venv.glob("lib/python*/site-packages/*.dist-info"):
+        stem = info.name[: -len(".dist-info")]
+        dist, _, version = stem.rpartition("-")
+        if normalize_name(dist) == wanted:
+            return version
+    return None
+
+
+def relax_requirements(lines: list[str], tolerate: set[str], venv: Path, keep: bool) -> list[str]:
+    """Rewrite tolerated pins: same major.minor (`==X.Y.*`), or (keep=True) the
+    currently installed version; untolerated pins are untouched."""
+    out = []
+    for line in lines:
+        match = _REQ_LINE.match(line)
+        if not match or normalize_name(match.group(1)) not in tolerate:
+            out.append(line)
+            continue
+        name, version, rest = match.groups()
+        if keep:
+            current = installed_version(venv, name)
+            if current is None:
+                continue
+            out.append(f"{name}=={current}{rest}")
+        else:
+            parts = version.split(".")
+            out.append(f"{name}=={'.'.join(parts[:2])}.*{rest}" if len(parts) >= 2 else line)
+    return out
+
+
+def _upgrade_tolerated(
+    lines: list[str],
+    tolerate: set[str],
+    work_dir: Path,
+    root: Path,
+    python: str,
+    env: dict[str, str],
+    log: Callable[[str], None],
+    runner: UvRunner,
+) -> None:
+    """`uv pip sync` keeps an installed version that satisfies `==X.Y.*`;
+    move tolerated packages to the highest same-major.minor release."""
+    wanted = [
+        line
+        for line in lines
+        if (match := _REQ_LINE.match(line)) and normalize_name(match.group(1)) in tolerate
     ]
-    if not drift:
-        lines.insert(1, "\n".join(output[-15:]))
-    return False, lines
+    if not wanted:
+        return
+    target = work_dir / "lock-requirements.tolerated.txt"
+    target.write_text("\n".join(wanted) + "\n", encoding="utf-8")
+    args = ["pip", "install", "--python", python, "--no-deps"]
+    for name in sorted(tolerate):
+        args += ["--upgrade-package", name]
+    args += ["-r", str(target)]
+    code, output = runner(args, root, env)
+    log(f"$ uv {' '.join(args)} -> exit {code}\n{output[-1000:]}")
+
+
+def provision_env(
+    root: str | Path,
+    work_dir: Path,
+    tolerate: set[str],
+    log: Callable[[str], None],
+    runner: UvRunner = run_uv,
+) -> bool:
+    """Make the uv project env match uv.lock in place (never touches uv.lock).
+
+    1. `uv sync --frozen --extra dev` (the CI command).
+    2. Fallback for mirrors/proxies: `uv export` the lock and `uv pip sync` it
+       through the configured index; tolerated packages may resolve to the
+       highest same-major.minor version, else stay as installed. Then
+       re-install the project editable.
+    """
+    root = Path(root)
+    env = uv_env()
+    code, output = runner(["sync", "--frozen", "--extra", "dev"], root, env)
+    log(f"$ uv sync --frozen --extra dev -> exit {code}\n{output[-2000:]}")
+    if code == 0:
+        return True
+    work_dir.mkdir(parents=True, exist_ok=True)
+    req = work_dir / "lock-requirements.txt"
+    export = ["export", "--frozen", "--extra", "dev", "--no-hashes", "--no-emit-project"]
+    export += ["--format", "requirements-txt", "--no-header", "-o", str(req)]
+    code, output = runner(export, root, env)
+    log(f"$ uv {' '.join(export)} -> exit {code}\n{output[-1000:]}")
+    if code != 0 or not req.is_file():
+        return False
+    venv = project_env(root, env)
+    if not (venv / "bin" / "python").exists():
+        code, output = runner(["venv", str(venv)], root, env)
+        log(f"$ uv venv {venv} -> exit {code}\n{output[-500:]}")
+        if code != 0:
+            return False
+    penv = dict(env, VIRTUAL_ENV=str(venv))
+    python = str(venv / "bin" / "python")
+    lines = req.read_text(encoding="utf-8").splitlines()
+    attempts = (
+        [lines]
+        if not tolerate
+        else [
+            relax_requirements(lines, tolerate, venv, keep=False),
+            relax_requirements(lines, tolerate, venv, keep=True),
+        ]
+    )
+    synced = None
+    for index, attempt in enumerate(attempts):
+        target = work_dir / "lock-requirements.sync.txt"
+        target.write_text("\n".join(attempt) + "\n", encoding="utf-8")
+        code, output = runner(["pip", "sync", "--python", python, str(target)], root, penv)
+        log(f"$ uv pip sync {target} -> exit {code}\n{output[-2000:]}")
+        if code == 0:
+            synced = index
+            break
+    if synced is None:
+        return False
+    if synced == 0 and tolerate:
+        _upgrade_tolerated(attempts[0], tolerate, work_dir, root, python, penv, log, runner)
+    code, output = runner(
+        ["pip", "install", "--python", python, "--no-deps", "-e", "."], root, penv
+    )
+    log(f"$ uv pip install --no-deps -e . -> exit {code}\n{output[-1000:]}")
+    return code == 0
 
 
 def snapshot_outputs(root: str | Path, paths: tuple[str, ...]) -> dict[str, bytes | None]:
