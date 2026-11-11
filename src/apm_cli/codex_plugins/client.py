@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -13,13 +14,32 @@ from typing import Any
 
 from apm_cli.core.scope import InstallScope
 
-QUALIFIED_CODEX_VERSION = "0.163.0"
+MINIMUM_CODEX_VERSION = "0.163.0"
+_NUMBER = r"(0|[1-9][0-9]*)"
+_PRERELEASE_ID = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+_VERSION_OUTPUT = re.compile(
+    rf"codex-cli {_NUMBER}\.{_NUMBER}\.{_NUMBER}(-{_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*)?"
+)
 _TIMEOUT = 60
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 class CodexNativeError(ValueError):
     """Native registration failed or its version/scope is not qualified."""
+
+
+def is_qualified_codex_version(output: str) -> bool:
+    """Admit the measured floor or a later release; refuse older or unrecognized output.
+
+    A prerelease of the floor itself precedes it under semantic versioning and
+    is refused. Protocol drift in admitted clients still fails closed in CodexRpc.
+    """
+    match = _VERSION_OUTPUT.fullmatch(output.strip())
+    if match is None:
+        return False
+    core = tuple(int(part) for part in match.group(1, 2, 3))
+    minimum = tuple(int(part) for part in MINIMUM_CODEX_VERSION.split("."))
+    return core > minimum or (core == minimum and match.group(4) is None)
 
 
 class CodexRpc:
@@ -167,13 +187,13 @@ class CodexNativeClient:
 
     @classmethod
     def for_scope(cls, scope: InstallScope, cwd: Path) -> CodexNativeClient:
-        """Resolve the exactly qualified runtime without changing native settings."""
+        """Resolve a runtime at or above the qualified minimum without changing settings."""
         cls.require_scope(scope)
         executable = shutil.which("codex")
         if executable is None:
             raise CodexNativeError(
-                f"Codex native registration requires Codex CLI {QUALIFIED_CODEX_VERSION} on PATH. "
-                "Install that qualified client and retry."
+                f"Codex native registration requires Codex CLI {MINIMUM_CODEX_VERSION} "
+                "or later on PATH. Install a qualified client and retry."
             )
         try:
             result = subprocess.run(
@@ -186,12 +206,14 @@ class CodexNativeClient:
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise CodexNativeError(
-                f"Cannot start Codex CLI {QUALIFIED_CODEX_VERSION}. Check 'codex --version' and retry."
+                "Cannot start Codex CLI. Check 'codex --version' and retry; "
+                f"native registration requires {MINIMUM_CODEX_VERSION} or later."
             ) from error
-        if result.returncode or result.stdout.strip() != f"codex-cli {QUALIFIED_CODEX_VERSION}":
+        if result.returncode or not is_qualified_codex_version(result.stdout):
             raise CodexNativeError(
-                f"Codex native registration is qualified only for Codex CLI {QUALIFIED_CODEX_VERSION}. "
-                "Check 'codex --version'; other versions are not silently admitted."
+                f"Codex native registration requires Codex CLI {MINIMUM_CODEX_VERSION} or later. "
+                "Check 'codex --version' and update Codex; older or unrecognized versions "
+                "are not admitted."
             )
         return cls(Path(executable), cwd)
 

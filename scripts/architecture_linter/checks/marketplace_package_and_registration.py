@@ -486,7 +486,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
     required = {
         _CODEX_PREFIX + "client.py": (
             '"expectedVersion": version',
-            'QUALIFIED_CODEX_VERSION = "0.163.0"',
+            'MINIMUM_CODEX_VERSION = "0.163.0"',
         ),
         _CODEX_PREFIX + "admission.py": (
             "record_native_exec_status(",
