@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving refused files and prior lock contents during cold `--frozen` replay with overlapping dependencies. Files admitted earlier in a failed install may remain; move conflicting files aside before retrying or use `--force` only for intentional overwrites. (#3490)
+- `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving refused files and prior lock contents during cold `--frozen` replay with overlapping dependencies. Files admitted earlier in a failed install may remain; the failure summary counts each refusing package once, and conflicting files can be moved aside before retrying or overwritten with `--force` only intentionally. -- with credit to @TyceHerrman (#3440, #3490)
 
 ### Changed
 
