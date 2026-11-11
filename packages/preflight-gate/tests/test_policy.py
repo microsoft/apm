@@ -213,3 +213,14 @@ def test_policy_source_is_printable_ascii() -> None:
     for name in ("gate.py", "preflight.py", "preflight_lib.py", "preflight_policy.py"):
         text = (Path(policy.__file__).parent / name).read_text(encoding="utf-8")
         assert all(ch in "\n\t" or " " <= ch <= "~" for ch in text), name
+
+
+def test_provisioning_python_matches_ci() -> None:
+    ci = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    assert str(ci["env"]["PYTHON_VERSION"]) == policy.CI_PYTHON_VERSION
+
+
+def test_spec_conformance_skips_public_release_lookup() -> None:
+    selected = policy.select(["src/apm_cli/a.py"])
+    checks = {c.id: c for c in policy.build_checks("T1", _ctx(["src/apm_cli/a.py"], selected))}
+    assert checks["spec.conformance"].env == {"APM_NO_DIRECT_FALLBACK": "1"}

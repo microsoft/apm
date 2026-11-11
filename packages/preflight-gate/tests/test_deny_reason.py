@@ -63,8 +63,16 @@ def assert_self_sufficient(
     assert why in lines[0]
     assert f"(HEAD {head7})" in lines[0]
     assert lines[1] == fix
-    if fix != PREFLIGHT_FIX and "--base" not in fix:
-        assert "preflight.py" not in fix
+    no_preflight = (
+        gate.FIX_PUSH_HEAD,
+        gate.FIX_OTHER_SOURCE,
+        gate.FIX_UNRESOLVED_SOURCE,
+        gate.FIX_PARSE,
+        gate.FIX_TARGET,
+        gate.FIX_PR_HEAD,
+    )
+    if fix in no_preflight:
+        assert "preflight" not in fix
     assert "draft" not in text.lower()
     assert lines[-1] == (
         "Bypass is for humans only (APM_PREFLIGHT_BYPASS=accept-unverified when launching the CLI)."
@@ -87,11 +95,17 @@ def test_failed_receipt_lists_ids_and_log_paths(sandbox: Sandbox, fake_policy) -
     sandbox.write("FAIL_T0", "1\n")
     sandbox.commit()
     assert _preflight(sandbox, fake_policy) == 1
+    fix = (
+        f"Fix: fix the failed checks, commit, re-run `{RUNNER_CMD}` from the repo root, then retry."
+    )
     lines = assert_self_sufficient(
-        _deny(sandbox, "gh pr create --fill"), sandbox, "last preflight run failed"
+        _deny(sandbox, "gh pr create --fill"), sandbox, "last preflight run failed", fix
     )
     logs = lib.preflight_dir(sandbox.git_dir) / "logs"
-    assert lines[2] == f"Failed checks: t0.flag (log: {logs / 't0.flag.log'})"
+    assert lines[1] == (
+        f"Fix: fix the failed checks, commit, re-run `{RUNNER_CMD}` from the repo root, then retry."
+    )
+    assert lines[2] == f"Failed checks: t0.flag; logs: {logs}/<check-id>.log"
     assert (logs / "t0.flag.log").is_file()
 
 
@@ -188,7 +202,10 @@ def test_tag_and_other_branch_with_receipt_do_not_say_run_preflight(
 def test_chained_push_names_the_segment(sandbox: Sandbox, fake_policy) -> None:
     assert _preflight(sandbox, fake_policy) == 0
     text = _deny(sandbox, "git commit --allow-empty -m x && git push origin HEAD")
-    fix = "Fix: run `git push origin HEAD` alone in its own tool call, after preflight passes for the final HEAD."
+    fix = (
+        f"Fix: commit in its own tool call, run `{RUNNER_CMD}`, then run "
+        "`git push origin HEAD` alone."
+    )
     lines = assert_self_sufficient(
         text,
         sandbox,
@@ -218,11 +235,11 @@ def test_internal_error(sandbox: Sandbox, monkeypatch) -> None:
     assert_self_sufficient(_deny(sandbox, "git push"), sandbox, "internal error")
 
 
-def test_long_failure_lists_are_truncated(sandbox: Sandbox) -> None:
+def test_long_failure_lists_are_capped(sandbox: Sandbox) -> None:
     logs = "/Users/someone/src/repo/.git/worktrees/branch-name/apm-preflight/logs"
     failed = [(f"check.{i:03d}", f"{logs}/check.{i:03d}.log") for i in range(80)]
     text = gate.compose_reason("the last preflight run failed", "abcdef1", RUNNER_CMD, failed)
     assert len(text) <= gate.REASON_LIMIT
-    assert f"check.000 (log: {logs}/check.000.log)" in text
-    assert "more)" in text
+    ids = ", ".join(f"check.{i:03d}" for i in range(6))
+    assert f"Failed checks: {ids} (+74 more); logs: {logs}/<check-id>.log" in text
     assert text.endswith("launching the CLI).")

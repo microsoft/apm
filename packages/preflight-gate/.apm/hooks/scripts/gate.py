@@ -114,10 +114,9 @@ FIX_PUSH_HEAD = (
     "Fix: push only the current branch HEAD (e.g. `git push origin HEAD`); tags, "
     "--all/--mirror and multi-ref pushes are a human release step."
 )
-FIX_OTHER_SOURCE = (
-    "Fix: push only the preflight-verified commit (`git push origin HEAD`); to publish "
-    "another branch, check it out, run preflight there, then push it alone."
-)
+FIX_OTHER_SOURCE = "Fix: push only HEAD of the verified branch (`git push origin HEAD`)."
+RUNNER_PLACEHOLDER = "<RUNNER>"
+FAILED_IDS_CAP = 6
 FIX_UNRESOLVED_SOURCE = "Fix: push an existing local branch or HEAD (e.g. `git push origin HEAD`)."
 FIX_PARSE = (
     "Fix: rewrite it as one plain command (balanced quotes, no deep nesting) in its own tool call."
@@ -603,8 +602,8 @@ def _mark_chained(actions: list[Action], segment: str) -> None:
                 f"runs '{segment}' before it"
             )
             action.fix = (
-                f"Fix: run `{action.text[:120]}` alone in its own tool call, after "
-                "preflight passes for the final HEAD."
+                f"Fix: commit in its own tool call, run `{RUNNER_PLACEHOLDER}`, then run "
+                f"`{action.text[:120]}` alone."
             )
 
 
@@ -848,24 +847,24 @@ def compose_reason(
 ) -> str:
     """Self-sufficient deny text: why, exact fix, failed checks + logs, bypass."""
     at = f" (HEAD {head7})" if head7 else ""
+    if fix:
+        fix = fix.replace(RUNNER_PLACEHOLDER, hint)
+    elif failed:
+        fix = f"Fix: fix the failed checks, commit, re-run `{hint}` from the repo root, then retry."
     lines = [f"preflight gate: push/PR blocked: {why}{at}.", fix or preflight_fix(hint)]
-    tail = [BYPASS_LINE]
     if failed:
-        budget = REASON_LIMIT - len("\n".join([*lines, *tail])) - 40
-        shown: list[str] = []
-        for cid, log in failed:
-            entry = f"{cid} (log: {log})" if log else cid
-            if shown and len("; ".join([*shown, entry])) > budget:
-                break
-            shown.append(entry)
-        more = f" (+{len(failed) - len(shown)} more)" if len(shown) < len(failed) else ""
-        lines.append(f"Failed checks: {'; '.join(shown)}{more}")
-    text = "\n".join([*lines, *tail])
+        ids = [cid for cid, _log in failed]
+        more = f" (+{len(ids) - FAILED_IDS_CAP} more)" if len(ids) > FAILED_IDS_CAP else ""
+        dirs = sorted({os.path.dirname(log) for _cid, log in failed if log})
+        logs = f"; logs: {dirs[0]}/<check-id>.log" if len(dirs) == 1 else ""
+        lines.append(f"Failed checks: {', '.join(ids[:FAILED_IDS_CAP])}{more}{logs}")
+    lines.append(BYPASS_LINE)
+    text = "\n".join(lines)
     if len(text) > REASON_LIMIT:
         overflow = len(text) - REASON_LIMIT + 3
-        longest = max(range(len(lines)), key=lambda i: len(lines[i]))
+        longest = max(range(len(lines) - 1), key=lambda i: len(lines[i]))
         lines[longest] = lines[longest][: max(len(lines[longest]) - overflow, 40)] + "..."
-        text = "\n".join([*lines, *tail])
+        text = "\n".join(lines)
     return text
 
 

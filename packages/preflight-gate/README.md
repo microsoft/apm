@@ -36,9 +36,11 @@ Flags: `--base REF` (default `origin/main`, fetched first unless
 Tiers decide WHAT runs; scheduling is two-phase across all selected tiers.
 Phase A runs every non-exclusive check concurrently (`--jobs`, default
 `min(4, cpus)`). Phase B then runs the exclusive checks (xdist and E2E
-suites) one at a time in tier order. A Phase A failure skips Phase B, and a
-failing exclusive check skips the rest, unless `--keep-going`. A tier counts
-as ran only when all its checks ran. Logs stay per check.
+suites) one at a time in tier order. Fail-fast: the first failing check
+cancels the running Phase A checks (whole process groups) and skips the
+rest; they are listed as `cancelled_checks` / `skipped_checks`.
+`--keep-going` runs everything for a complete picture. A tier counts as ran
+only when all its checks ran. Logs stay per check.
 
 | Tier | Selected when | Runs |
 | --- | --- | --- |
@@ -56,16 +58,22 @@ Command checks run in a CI-like environment: an allowlist of host variables
 `HOME`/XDG under the preflight dir, a short `TMPDIR` (`~/.cache/apm-pf`) and
 the real uv cache/config.
 
-When test tiers are selected, `env.lock-sync` runs first and requires the uv
-project environment to match `uv.lock` (CI runs `uv sync --frozen --extra
+`env.lock-sync` runs first on every run and requires the uv project
+environment to match `uv.lock` (CI runs `uv sync --frozen --extra
 dev`). On drift the runner repairs the env in place (disable with
 `--no-provision`): `uv sync --frozen --extra dev`, falling back to
 `uv export` + `uv pip sync` through your configured index and an editable
 re-install of the project. `uv.lock` is never modified.
 
-If your package mirror lacks a locked version, list the package in
-`APM_PREFLIGHT_LOCK_TOLERATE` (comma-separated, machine-local; never commit
-a default), e.g. `APM_PREFLIGHT_LOCK_TOLERATE=filelock`. Provisioning then
+A fresh clone without `.venv` is provisioned the same way (Python from
+ci.yml `PYTHON_VERSION`). Child checks then always run with `UV_NO_SYNC=1`,
+`UV_FROZEN=1` and the project env's `bin/` first on `PATH`, so no tool is
+taken from the host and callers need not export anything.
+
+If your package mirror lacks a locked version, tolerate it machine-locally
+(never commit a default): `git config --global apm.preflight.lockTolerate
+filelock`, or `APM_PREFLIGHT_LOCK_TOLERATE=filelock` (comma-separated; the
+variable wins over git config). Provisioning then
 installs the highest version with the same major.minor (or keeps the
 installed one); the difference is printed as `[!]` and recorded in the
 receipt as `lock_drift`, and the receipt stays gate-eligible. Any other
@@ -96,6 +104,9 @@ value is ignored. Bypasses are appended to `apm-preflight/bypass.log`.
   `git commit`, `gh issue ...`) exits in shell.
 - Fail-open by design: a missing `python3`, a missing or broken gate script,
   or a hook timeout releases the tool call. Only a well-formed deny blocks.
+- Known limitation: Copilot CLI loads repo hooks only from the session's
+  starting directory's `.github/hooks`, so sessions started in a
+  subdirectory are not gated; start agent sessions at the repo root.
 - Not detected (CI remains the authority): git aliases, including
   `git -c alias.p=push p`; a dynamically built argv0 such as
   `$(echo git) push`; plumbing such as `git send-pack`; `gh` aliases.

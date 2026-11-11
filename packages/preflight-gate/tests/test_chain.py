@@ -45,7 +45,7 @@ def test_mutating_segment_before_publish_is_denied(command: str, segment: str) -
         assert action.deny is not None
         assert "as its own tool call after preflight" in action.deny
         assert f"this call runs '{segment}" in action.deny
-        assert action.fix and "alone in its own tool call" in action.fix
+        assert action.fix and "commit in its own tool call, run `<RUNNER>`, then run" in action.fix
 
 
 @pytest.mark.parametrize(

@@ -22,7 +22,9 @@ import json  # noqa: E402
 import os  # noqa: E402
 import platform  # noqa: E402
 import shutil  # noqa: E402
+import signal  # noqa: E402
 import subprocess  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import Callable  # noqa: E402
 from concurrent.futures import ThreadPoolExecutor  # noqa: E402
@@ -40,6 +42,8 @@ EXIT_PASS = 0
 EXIT_FAIL = 1
 EXIT_USAGE = 2
 CHECK_TIMEOUT_S = 3600
+CANCELLED = -999  # outcome code: stopped or never started by fail-fast
+KILL_GRACE_S = 3.0
 GGREP_PRELUDE = 'grep() { command ggrep "$@"; }\n'
 
 
@@ -137,28 +141,58 @@ def shell_prelude(checks: list, warnings: list[str]) -> tuple[str, str | None]:
     return "", "host grep lacks -P and ggrep is missing (macOS: brew install grep)"
 
 
-def _run_command(check, root: Path, log_path: Path, env: dict[str, str], prelude: str) -> int:
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Terminate the check's whole process group (xdist workers, uv, ...)."""
+    for sig, wait in ((signal.SIGTERM, KILL_GRACE_S), (signal.SIGKILL, KILL_GRACE_S)):
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            proc.wait(timeout=wait)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _run_command(
+    check,
+    root: Path,
+    log_path: Path,
+    env: dict[str, str],
+    prelude: str,
+    cancel: threading.Event | None = None,
+) -> int:
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"# check: {check.id} (tier {check.tier})\n# cmd:\n{check.cmd}\n# ---\n")
         log.flush()
         try:
-            proc = subprocess.run(  # noqa: S603 - policy-owned command via bash
+            proc = subprocess.Popen(  # noqa: S603 - policy-owned command via bash
                 ["bash", "--noprofile", "--norc", "-e", "-c", prelude + check.cmd],  # noqa: S607
                 cwd=str(root),
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
-                check=False,
-                timeout=CHECK_TIMEOUT_S,
+                start_new_session=True,
             )
-        except subprocess.TimeoutExpired:
-            log.write(f"\n# TIMEOUT after {CHECK_TIMEOUT_S}s\n")
-            return 124
         except OSError as exc:
             log.write(f"\n# could not start bash: {exc}\n")
             return 127
-        return proc.returncode
+        deadline = time.monotonic() + CHECK_TIMEOUT_S
+        while True:
+            try:
+                return proc.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                pass
+            if cancel is not None and cancel.is_set():
+                _kill_group(proc)
+                log.write("\n# CANCELLED: another check failed (fail-fast)\n")
+                return CANCELLED
+            if time.monotonic() > deadline:
+                _kill_group(proc)
+                log.write(f"\n# TIMEOUT after {CHECK_TIMEOUT_S}s\n")
+                return 124
 
 
 def _internal(check, ctx, policy: ModuleType) -> tuple[bool, list[str]]:
@@ -189,7 +223,7 @@ def _internal(check, ctx, policy: ModuleType) -> tuple[bool, list[str]]:
     if check.internal == "uvlock_guard":
         return lib.uvlock_guard(root, ctx.merge_base, tuple(policy.UVLOCK_ALLOWED_HOSTS))
     if check.internal == "lock_sync":
-        result = lib.check_lock(root, lib.tolerated_names(dict(os.environ)))
+        result = lib.check_lock(root, lib.tolerated_names(dict(os.environ), root))
         return bool(result["ok"]), _lock_lines(result)
     raise ValueError(f"unknown internal check {check.internal!r}")
 
@@ -217,10 +251,17 @@ def _lock_lines(result: dict) -> list[str]:
 
 
 def run_lock_check(
-    check, root: Path, work_dir: Path, log_path: Path, provision: bool
+    check,
+    root: Path,
+    work_dir: Path,
+    log_path: Path,
+    provision: bool,
+    tolerate: set[str] | None = None,
+    python: str | None = None,
 ) -> tuple[int, dict]:
     """env.lock-sync: detect drift, self-heal in place, re-check. Runs alone."""
-    tolerate = lib.tolerated_names(dict(os.environ))
+    if tolerate is None:
+        tolerate = lib.tolerated_names(dict(os.environ), root)
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"# check: {check.id} (tier {check.tier})\n# internal: lock_sync\n# ---\n")
         result = lib.check_lock(root, tolerate)
@@ -230,7 +271,7 @@ def run_lock_check(
             for line in _lock_lines(result):
                 log.write(line + "\n")
             provisioned = lib.provision_env(
-                root, work_dir, tolerate, lambda text: log.write(text + "\n")
+                root, work_dir, tolerate, lambda text: log.write(text + "\n"), python=python
             )
             log.write(f"provisioning {'succeeded' if provisioned else 'FAILED'}; re-checking\n")
             result = lib.check_lock(root, tolerate)
@@ -260,15 +301,31 @@ def default_jobs() -> int:
 Outcome = tuple[int, float, Path]
 
 
-def run_concurrent(checks: list, execute: Callable[[object], Outcome], jobs: int) -> list[Outcome]:
+def run_concurrent(
+    checks: list,
+    execute: Callable[[object], Outcome],
+    jobs: int,
+    cancel: threading.Event | None = None,
+) -> list[Outcome]:
     """Run *checks* on a bounded pool; outcomes in input order.
 
-    Every check runs to completion even when a sibling fails.
+    With *cancel* (fail-fast), the first failing check sets the event:
+    queued checks never start and running ones are terminated (their
+    outcome code is CANCELLED). Without it every check runs to completion.
     """
+
+    def guarded(check) -> Outcome:
+        if cancel is not None and cancel.is_set():
+            return CANCELLED, 0.0, Path()
+        outcome = execute(check)
+        if cancel is not None and outcome[0] not in (0, CANCELLED):
+            cancel.set()
+        return outcome
+
     if jobs <= 1 or len(checks) <= 1:
-        return [execute(check) for check in checks]
+        return [guarded(check) for check in checks]
     with ThreadPoolExecutor(max_workers=min(jobs, len(checks))) as pool:
-        futures = [pool.submit(execute, check) for check in checks]
+        futures = [pool.submit(guarded, check) for check in checks]
         return [future.result() for future in futures]
 
 
@@ -381,6 +438,11 @@ def run(
     home = lib.preflight_dir(git_dir) / "home"
     lib.force_rmtree(home)
     env = lib.ci_like_env(dict(os.environ), home, lib.short_tmpdir(dict(os.environ)))
+    # Child checks never sync or resolve on their own (env.lock-sync owns the
+    # env) and always prefer the project env's tools over anything on PATH.
+    venv_bin = lib.project_env(root, dict(os.environ)) / "bin"
+    env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
+    env.update({"UV_NO_SYNC": "1", "UV_FROZEN": "1"})
     env.update(
         {
             "PREFLIGHT_ROOT": str(root),
@@ -391,6 +453,7 @@ def run(
     )
 
     jobs = args.jobs if args.jobs > 0 else default_jobs()
+    cancel = None if args.keep_going else threading.Event()
 
     def execute(check) -> Outcome:
         log_path = logs_dir / f"{check.id}.log"
@@ -404,7 +467,7 @@ def run(
             else:
                 check_env = dict(env)
                 check_env.update(check.env)
-                code = _run_command(check, root, log_path, check_env, prelude)
+                code = _run_command(check, root, log_path, check_env, prelude, cancel)
         except Exception as exc:
             with log_path.open("a", encoding="utf-8") as log:
                 log.write(f"\n# runner error: {exc!r}\n")
@@ -415,6 +478,8 @@ def run(
         code, duration, log_path = outcome
         if code == 0:
             _say(f"  [+] {check.tier} {check.id} ({duration:.1f}s)")
+        elif code == CANCELLED:
+            _say(f"  [i] {check.tier} {check.id} cancelled (fail-fast)")
         else:
             _say(f"  [x] {check.tier} {check.id} (exit {code}) log: {log_path}")
 
@@ -426,13 +491,20 @@ def run(
     phase_wall: dict[str, float] = {}
 
     env_info: dict = {"tolerated": [], "provisioned": False}
+    tolerate = lib.tolerated_names(dict(os.environ), root)
     for check in [c for c in phase_a if c.internal == "lock_sync"]:
         # Runs before phase A: provisioning rewrites the env other checks use.
         phase_a.remove(check)
         log_path = logs_dir / f"{check.id}.log"
         began = time.monotonic()
         code, env_info = run_lock_check(
-            check, root, lib.preflight_dir(git_dir), log_path, not args.no_provision
+            check,
+            root,
+            lib.preflight_dir(git_dir),
+            log_path,
+            not args.no_provision,
+            tolerate,
+            getattr(policy, "CI_PYTHON_VERSION", None),
         )
         outcomes[id(check)] = (code, time.monotonic() - began, log_path)
         report(check, outcomes[id(check)])
@@ -440,17 +512,20 @@ def run(
             _say("  [i] provisioned the uv env to match uv.lock")
         for rec in env_info["tolerated"]:
             warnings.append(
-                f"tolerated lock drift ({lib.TOLERATE_ENV}): {rec['name']} locked "
-                f"{rec['locked']}, installed {rec['installed']}"
+                f"tolerated lock drift ({lib.TOLERATE_ENV} / git config "
+                f"{lib.TOLERATE_GIT_KEY}): {rec['name']} locked {rec['locked']}, "
+                f"installed {rec['installed']}"
             )
+        if code != 0 and cancel is not None:
+            cancel.set()
 
     _say(f"[*] phase A: {len(phase_a)} check(s) concurrently ({jobs} job(s))")
     began = time.monotonic()
-    for check, outcome in zip(phase_a, run_concurrent(phase_a, execute, jobs), strict=True):
+    results = run_concurrent(phase_a, execute, jobs, cancel)
+    for check, outcome in zip(phase_a, results, strict=True):
         outcomes[id(check)] = outcome
         report(check, outcome)
     phase_wall["A"] = round(time.monotonic() - began, 2)
-    failed_a = any(outcomes[id(c)][0] != 0 for c in phase_a)
 
     began = time.monotonic()
     skipped: list = []
@@ -465,18 +540,25 @@ def run(
         report(check, outcomes[id(check)])
     phase_wall["B"] = round(time.monotonic() - began, 2)
     if skipped:
-        cause = "phase A failed" if failed_a else "an exclusive check failed"
         names = ", ".join(c.id for c in skipped)
-        _say(f"  [i] skipped ({cause}; --keep-going runs them): {names}")
+        _say(f"  [i] skipped after a failure (--keep-going runs them): {names}")
     _say(f"  [i] wall time: phase A {phase_wall['A']:.1f}s, phase B {phase_wall['B']:.1f}s")
 
     records: list[dict] = []
+    cancelled: list[str] = []
     ran: list[str] = []
     for tier in to_run:
+        complete = True
         for check in plan[tier]:
-            if id(check) in outcomes:
-                records.append(_check_record(check, *outcomes[id(check)]))
-        if all(id(check) in outcomes for check in plan[tier]):
+            outcome = outcomes.get(id(check))
+            if outcome is None:
+                complete = False
+            elif outcome[0] == CANCELLED:
+                cancelled.append(check.id)
+                complete = False
+            else:
+                records.append(_check_record(check, *outcome))
+        if complete:
             ran.append(tier)
 
     restored = lib.restore_outputs(root, volatile)
@@ -551,6 +633,7 @@ def run(
         "jobs": jobs,
         "phase_wall_s": phase_wall,
         "skipped_checks": [c.id for c in skipped],
+        "cancelled_checks": cancelled,
         "restored_outputs": restored,
         "lock_drift": env_info["tolerated"],
         "env_provisioned": env_info["provisioned"],

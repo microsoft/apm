@@ -75,6 +75,19 @@ def test_check_lock(output, tolerate, ok, tolerated, untolerated, workdir: Path)
     assert fake.calls[0][:3] == ["sync", "--frozen", "--extra"]
 
 
+def test_tolerance_from_git_config_and_env_override(
+    sandbox: Sandbox, workdir: Path, monkeypatch
+) -> None:
+    gitconfig = Path(__import__("os").environ["GIT_CONFIG_GLOBAL"])
+    gitconfig.write_text(
+        gitconfig.read_text(encoding="utf-8") + '[apm "preflight"]\n\tlockTolerate = filelock\n',
+        encoding="utf-8",
+    )
+    assert lib.tolerated_names({}, sandbox.root) == {"filelock"}
+    assert lib.tolerated_names({lib.TOLERATE_ENV: "click"}, sandbox.root) == {"click"}
+    assert lib.tolerated_names({lib.TOLERATE_ENV: ""}, sandbox.root) == set()
+
+
 def test_tolerate_env_is_normalized() -> None:
     names = lib.tolerated_names({lib.TOLERATE_ENV: " FileLock, typing_extensions ,"})
     assert names == {"filelock", "typing-extensions"}
@@ -159,7 +172,7 @@ def _script(monkeypatch, results: list[dict], provision_ok: bool = True) -> list
         calls.append(f"check:{sorted(tolerate)}")
         return results.pop(0) if len(results) > 1 else results[0]
 
-    def provision_env(_root, _work, _tolerate, log, runner=None):
+    def provision_env(_root, _work, _tolerate, log, runner=None, python=None):
         calls.append("provision")
         log("fake provisioning")
         return provision_ok

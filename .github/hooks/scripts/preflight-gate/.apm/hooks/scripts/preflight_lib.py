@@ -534,6 +534,13 @@ def ci_like_env(env: dict[str, str], home: Path, tmpdir: Path) -> dict[str, str]
         out.setdefault("UV_CONFIG_FILE", str(uv_config))
     for sub in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         Path(out[sub]).mkdir(parents=True, exist_ok=True)
+    # The apm CLI checks GitHub for a newer release at most once a day and
+    # prints an update banner before command output; mark it as just done
+    # for commands that use this HOME (tests that override HOME are handled
+    # per check in the policy).
+    stamp = home / ".cache" / "apm" / "last_version_check"
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.touch()
     return out
 
 
@@ -553,6 +560,7 @@ def force_rmtree(path: str | Path) -> None:
 
 
 TOLERATE_ENV = "APM_PREFLIGHT_LOCK_TOLERATE"
+TOLERATE_GIT_KEY = "apm.preflight.lockTolerate"
 UvRunner = Callable[[list[str], Path, dict[str, str]], tuple[int, str]]
 _DRIFT_LINE = re.compile(r"^ ([-+~]) ([A-Za-z0-9_.\-]+)==(\S+)")
 _REQ_LINE = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s;]+)(.*)$")
@@ -562,9 +570,18 @@ def normalize_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name.strip()).lower()
 
 
-def tolerated_names(env: dict[str, str]) -> set[str]:
-    """Machine-local packages allowed to differ from uv.lock (mirror gaps)."""
-    raw = env.get(TOLERATE_ENV, "")
+def tolerated_names(env: dict[str, str], root: str | Path | None = None) -> set[str]:
+    """Machine-local packages allowed to differ from uv.lock (mirror gaps).
+
+    APM_PREFLIGHT_LOCK_TOLERATE wins when set; otherwise git config
+    `apm.preflight.lockTolerate` (set it --global; never commit it).
+    """
+    if TOLERATE_ENV in env:
+        raw = env[TOLERATE_ENV]
+    elif root is not None:
+        raw = git_out(["config", "--get", TOLERATE_GIT_KEY], root) or ""
+    else:
+        raw = ""
     return {normalize_name(n) for n in raw.split(",") if n.strip()}
 
 
@@ -617,6 +634,7 @@ def check_lock(
     tolerated = [r for r in records if r["name"] in tolerate]
     untolerated = [r for r in records if r["name"] not in tolerate]
     plan_seen = clean or "Would use project environment" in output
+    plan_seen = plan_seen or "Would create project environment" in output
     ok = code == 0 and plan_seen and not untolerated
     return {
         "ok": ok,
@@ -701,6 +719,7 @@ def provision_env(
     tolerate: set[str],
     log: Callable[[str], None],
     runner: UvRunner = run_uv,
+    python: str | None = None,
 ) -> bool:
     """Make the uv project env match uv.lock in place (never touches uv.lock).
 
@@ -712,8 +731,9 @@ def provision_env(
     """
     root = Path(root)
     env = uv_env()
-    code, output = runner(["sync", "--frozen", "--extra", "dev"], root, env)
-    log(f"$ uv sync --frozen --extra dev -> exit {code}\n{output[-2000:]}")
+    pin = ["--python", python] if python else []
+    code, output = runner(["sync", "--frozen", "--extra", "dev", *pin], root, env)
+    log(f"$ uv sync --frozen --extra dev {' '.join(pin)} -> exit {code}\n{output[-2000:]}")
     if code == 0:
         return True
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -726,7 +746,7 @@ def provision_env(
         return False
     venv = project_env(root, env)
     if not (venv / "bin" / "python").exists():
-        code, output = runner(["venv", str(venv)], root, env)
+        code, output = runner(["venv", *pin, str(venv)], root, env)
         log(f"$ uv venv {venv} -> exit {code}\n{output[-500:]}")
         if code != 0:
             return False

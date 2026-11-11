@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import preflight
+import preflight_lib as lib
 import preflight_policy as policy
 from conftest import Sandbox
 
@@ -111,7 +114,36 @@ def test_phase_b_runs_after_phase_a_in_tier_order(
     assert receipt["skipped_checks"] == []
 
 
-def test_phase_a_failure_skips_phase_b(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
+def test_phase_a_failure_cancels_siblings_and_skips_phase_b(
+    sandbox: Sandbox, fake_policy, workdir: Path
+) -> None:
+    probes = workdir / "probes"
+    tiers = {
+        "T0": [
+            policy.Check("a.fail", "T0", cmd=_probe(probes, "a", sleep=0.1, fail=True)),
+            policy.Check("b.slow", "T0", cmd=_probe(probes, "b", sleep=30)),
+        ],
+        "T1": [policy.Check("t1.shared", "T1", cmd=_probe(probes, "t1", sleep=30))],
+        "T2": [policy.Check("t2.xdist", "T2", cmd=_probe(probes, "t2"), exclusive=True)],
+    }
+    pol = _policy(fake_policy, tiers)
+    began = time.monotonic()
+    assert preflight.run(["--jobs", "4", "--no-fetch"], policy=pol, cwd=sandbox.root) == 1
+    assert time.monotonic() - began < 20
+    assert not (probes / "done-b").exists()
+    assert not (probes / "done-t1").exists()
+    assert not (probes / "done-t2").exists()
+    receipt = sandbox.receipt()
+    assert receipt["status"] == "fail"
+    assert receipt["ran_tiers"] == []
+    assert receipt["cancelled_checks"] == ["b.slow", "t1.shared"]
+    assert receipt["skipped_checks"] == ["t2.xdist"]
+    assert [(c["id"], c["exit"]) for c in receipt["checks"]] == [("a.fail", 1)]
+    log = lib.preflight_dir(sandbox.git_dir) / "logs" / "b.slow.log"
+    assert "CANCELLED" in log.read_text(encoding="utf-8")
+
+
+def test_keep_going_runs_everything(sandbox: Sandbox, fake_policy, workdir: Path) -> None:
     probes = workdir / "probes"
     tiers = {
         "T0": [
@@ -122,25 +154,63 @@ def test_phase_a_failure_skips_phase_b(sandbox: Sandbox, fake_policy, workdir: P
         "T2": [policy.Check("t2.xdist", "T2", cmd=_probe(probes, "t2"), exclusive=True)],
     }
     pol = _policy(fake_policy, tiers)
-    assert preflight.run(["--jobs", "4", "--no-fetch"], policy=pol, cwd=sandbox.root) == 1
-    assert (probes / "done-b").exists()
-    assert (probes / "done-t1").exists()
-    assert not (probes / "done-t2").exists()
+    args = ["--jobs", "4", "--no-fetch", "--keep-going"]
+    assert preflight.run(args, policy=pol, cwd=sandbox.root) == 1
+    for name in ("b", "t1", "t2"):
+        assert (probes / f"done-{name}").exists()
     receipt = sandbox.receipt()
-    assert receipt["status"] == "fail"
-    assert receipt["ran_tiers"] == ["T0", "T1"]
-    assert receipt["skipped_checks"] == ["t2.xdist"]
-    assert [(c["id"], c["exit"]) for c in receipt["checks"]] == [
-        ("a.fail", 1),
-        ("b.slow", 0),
-        ("t1.shared", 0),
-    ]
-    assert (
-        preflight.run(["--jobs", "4", "--no-fetch", "--keep-going"], policy=pol, cwd=sandbox.root)
-        == 1
+    assert receipt["ran_tiers"] == ["T0", "T1", "T2"]
+    assert receipt["cancelled_checks"] == []
+
+
+def test_cancellation_kills_the_whole_process_group(
+    sandbox: Sandbox, fake_policy, workdir: Path
+) -> None:
+    pidfile = workdir / "child.pid"
+    tiers = {
+        "T0": [
+            policy.Check("a.fail", "T0", cmd="sleep 0.5; exit 1"),
+            policy.Check("b.tree", "T0", cmd=f"sleep 60 & echo $! > {pidfile}; wait"),
+        ]
+    }
+    pol = _policy(fake_policy, tiers)
+    assert preflight.run(["--jobs", "2", "--no-fetch"], policy=pol, cwd=sandbox.root) == 1
+    child = int(pidfile.read_text().strip())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("background child of a cancelled check survived")
+
+
+def test_lock_failure_cancels_phase_a(sandbox: Sandbox, fake_policy, monkeypatch) -> None:
+    monkeypatch.setattr(
+        lib,
+        "check_lock",
+        lambda *_a, **_k: {
+            "ok": False,
+            "tolerated": [],
+            "untolerated": [{"name": "click", "locked": "1", "installed": "2"}],
+            "output": "",
+            "exit": 0,
+        },
     )
-    assert (probes / "done-t2").exists()
-    assert sandbox.receipt()["ran_tiers"] == ["T0", "T1", "T2"]
+    tiers = {
+        "T0": [
+            policy.Check("env.lock-sync", "T0", internal="lock_sync"),
+            policy.Check("t0.ok", "T0", cmd="true"),
+        ]
+    }
+    pol = _policy(fake_policy, tiers)
+    args = ["--no-fetch", "--no-provision"]
+    assert preflight.run(args, policy=pol, cwd=sandbox.root) == 1
+    receipt = sandbox.receipt()
+    assert receipt["cancelled_checks"] == ["t0.ok"]
+    assert [c["id"] for c in receipt["checks"]] == ["env.lock-sync"]
 
 
 def test_exclusive_failure_skips_remaining_exclusives(

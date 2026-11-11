@@ -310,6 +310,22 @@ def test_command_checks_get_a_ci_like_env(
     assert env["PREFLIGHT_BASE_REF"] == "origin/main"
 
 
+def test_child_checks_pin_uv_and_project_tools_without_caller_env(
+    sandbox: Sandbox, fake_policy, workdir: Path, monkeypatch
+) -> None:
+    for key in ("UV_NO_SYNC", "UV_FROZEN", "UV_PROJECT_ENVIRONMENT"):
+        monkeypatch.delenv(key, raising=False)
+    dump = workdir / "env.txt"
+    pol = _with_t0(fake_policy, f"env > {dump}")
+    assert run(sandbox, pol, "--no-fetch") == 0
+    env = dict(line.split("=", 1) for line in dump.read_text().splitlines() if "=" in line)
+    assert env["UV_NO_SYNC"] == "1"
+    assert env["UV_FROZEN"] == "1"
+    assert env["PATH"].split(":")[0] == str(sandbox.root / ".venv" / "bin")
+    stamp = Path(env["HOME"]) / ".cache" / "apm" / "last_version_check"
+    assert stamp.is_file()
+
+
 def test_ci_like_env_keeps_tool_locations(workdir: Path) -> None:
     env = lib.ci_like_env(
         {"PATH": "/bin", "GIT_EXEC_PATH": "/opt/git/libexec", "HOME": str(workdir)},
@@ -320,10 +336,8 @@ def test_ci_like_env_keeps_tool_locations(workdir: Path) -> None:
     assert env["PATH"] == "/bin"
 
 
-def test_lock_sync_is_selected_only_with_test_tiers(sandbox: Sandbox) -> None:
+def test_lock_sync_is_always_selected(sandbox: Sandbox) -> None:
     ctx = _ctx(sandbox, ["docs/x.md"])
-    assert "env.lock-sync" not in [c.id for c in policy.build_checks("T0", ctx)]
-    ctx.selected = {"T0": "", "T1": ""}
     assert "env.lock-sync" in [c.id for c in policy.build_checks("T0", ctx)]
 
 
@@ -334,4 +348,4 @@ def test_isolated_home_with_locked_dirs_is_reset(sandbox: Sandbox, fake_policy) 
     locked.chmod(0o200)
     locked.parent.chmod(0o200)
     assert run(sandbox, fake_policy, "--no-fetch") == 0
-    assert not (lib.preflight_dir(sandbox.git_dir) / "home" / ".cache" / "apm").exists()
+    assert not (lib.preflight_dir(sandbox.git_dir) / "home" / ".cache" / "apm" / "x").exists()

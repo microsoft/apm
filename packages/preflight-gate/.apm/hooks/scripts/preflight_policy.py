@@ -25,6 +25,8 @@ from pathlib import Path
 TIERS = ("T0", "T1", "T2", "T3")
 
 UV = "uv run --frozen --extra dev"
+# ci.yml `env.PYTHON_VERSION`; env.lock-sync provisions with this interpreter.
+CI_PYTHON_VERSION = "3.12"
 
 # key -> (workflow path, job key). Fingerprints: see preflight_lib.ci_job_block.
 MIRRORED_CI_JOBS: dict[str, tuple[str, str]] = {
@@ -389,9 +391,9 @@ def _t0_checks(ctx: Context) -> list[Check]:
     checks = []
     if (ctx.root / "packages/preflight-gate/.apm/hooks/scripts").is_dir():
         checks.append(Check("bundle.stale", "T0", internal="bundle_stale"))
-    if any(t in ctx.selected for t in ("T1", "T2", "T3")):
-        # CI runs every test lane after `uv sync --frozen --extra dev`.
-        checks.append(Check("env.lock-sync", "T0", internal="lock_sync"))
+    # Every lane (lint included) runs from the lock-matched env; CI runs
+    # them after `uv sync --frozen --extra dev`.
+    checks.append(Check("env.lock-sync", "T0", internal="lock_sync"))
     checks += [
         Check("ci.drift", "T0", internal="ci_drift"),
         Check("git.merge-conflict", "T0", cmd=GIT_MERGE_PROBE),
@@ -443,7 +445,13 @@ def _t1_checks(ctx: Context) -> list[Check]:
         checks.append(Check("apm.self-check", "T1", cmd=APM_SELF_CHECK))
     if any(_is_spec(p) for p in ctx.changed):
         checks.append(Check("spec.orphans", "T1", cmd=SPEC_ORPHAN))
-        checks.append(Check("spec.conformance", "T1", cmd=SPEC_SUITE))
+        # CI tests the merge commit, whose version is the latest release, so its
+        # apm never prints the "new version available" banner that breaks
+        # JSON-parsing tests on a branch cut before the latest release.
+        # APM_NO_DIRECT_FALLBACK=1 makes apm skip that public release lookup.
+        checks.append(
+            Check("spec.conformance", "T1", cmd=SPEC_SUITE, env={"APM_NO_DIRECT_FALLBACK": "1"})
+        )
     return checks
 
 
