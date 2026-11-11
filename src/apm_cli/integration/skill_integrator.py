@@ -27,12 +27,14 @@ from apm_cli.integration.skill_package_routing import (
     should_install_skill as _should_install_skill,
 )
 from apm_cli.integration.skill_preflight import find_unmanaged_conflicts, selected_skill_sources
+from apm_cli.integration.skill_preflight import preflight_skill_selection as _preflight_selection
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
     build_skill_ownership_maps,
     clean_orphaned_skills,
     get_lockfile_owned_agent_skills,
+    skill_dir_has_content,
 )
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
@@ -367,6 +369,7 @@ class SkillIntegrator(BaseIntegrator):
 
     selected_skill_sources = staticmethod(selected_skill_sources)
     find_unmanaged_conflicts = find_unmanaged_conflicts
+    preflight_skill_selection = staticmethod(_preflight_selection)
 
     def __init__(self) -> None:
         super().__init__()
@@ -934,7 +937,7 @@ class SkillIntegrator(BaseIntegrator):
             target = target_skills_root / sub_name
             rewriter = link_rewriter or SkillIntegrator()
             rel_path = rewriter._skill_path_entry(target, materialization_root)
-            target_existed = target.exists()
+            target_existed = skill_dir_has_content(target)
             unchanged = target_existed and SkillIntegrator.is_skill_dir_identical_to_source(
                 sub_skill_path, target
             )
@@ -1247,7 +1250,8 @@ class SkillIntegrator(BaseIntegrator):
 
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
-            if self.check_collision(
+            target_existed = skill_dir_has_content(target_skill_dir)
+            if target_existed and self.check_collision(
                 target_skill_dir,
                 rel_path,
                 {rel_path} if session_owned else collision_managed,
@@ -1257,7 +1261,6 @@ class SkillIntegrator(BaseIntegrator):
                 self._skill_can_complete = False
                 continue
 
-            target_existed = target_skill_dir.exists()
             from apm_cli.models.apm_package import PackageType as _PackageType
 
             copied = self._copy_skill_bundle(

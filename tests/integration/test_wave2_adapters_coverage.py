@@ -252,6 +252,15 @@ class TestMCPClientAdapterInfrastructure:
         key = MCPClientAdapter._determine_config_key("my-server", None)
         assert key == "my-server"
 
+    def test_determine_config_key_self_defined(self) -> None:
+        """Self-defined servers with slashes keep their declared name."""
+        key = MCPClientAdapter._determine_config_key(
+            "com.azure.dev/mcp-remote",
+            None,
+            {"name": "com.azure.dev/mcp-remote", "is_self_defined": True},
+        )
+        assert key == "com.azure.dev/mcp-remote"
+
     def test_infer_registry_name_npm_scoped(self) -> None:
         """Scoped npm package name infers npm."""
         pkg = {"name": "@azure/mcp"}
@@ -2282,6 +2291,15 @@ class TestKiroAdapterConfigure:
         }
         with pytest.raises(ValueError, match="Unsupported remote transport"):
             adapter._format_server_config(server_info)
+
+    def test_configure_mcp_server_fetch_raises_returns_false(self, tmp_path: Path) -> None:
+        """configure_mcp_server returns False without UnboundLocalError when fetch raises."""
+        kiro_dir = tmp_path / ".kiro"
+        kiro_dir.mkdir()
+        adapter = KiroClientAdapter(project_root=tmp_path)
+        with patch.object(adapter, "_fetch_server_info", side_effect=RuntimeError("network error")):
+            result = adapter.configure_mcp_server("test/server")
+        assert result is False
 
 
 # ===========================================================================

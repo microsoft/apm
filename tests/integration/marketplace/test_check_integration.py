@@ -198,3 +198,115 @@ class TestCheckMissingYml:
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(check, [], catch_exceptions=False)
         assert result.exit_code == 1
+
+
+def _flat(text: str) -> str:
+    """Drop all whitespace so assertions survive any terminal-width wrapping."""
+    return "".join(text.split())
+
+
+class TestCheckCommitShaRefRealGit:
+    """#3458: a full commit SHA ``ref`` is verified against a real git remote.
+
+    Only the remote URL builder is redirected to a local bare repository;
+    ``git ls-remote`` and the commit fetch run for real.
+    """
+
+    @staticmethod
+    def _git(*args: str, cwd: Path) -> str:
+        import subprocess
+
+        from apm_cli.utils.git_env import get_git_executable
+
+        return subprocess.run(
+            [
+                get_git_executable(),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def _remote(self, tmp_path: Path) -> tuple[Path, str]:
+        work = tmp_path / "work"
+        work.mkdir()
+        self._git("init", "-q", "-b", "main", cwd=work)
+        (work / "f.txt").write_text("v1", encoding="utf-8")
+        self._git("add", "f.txt", cwd=work)
+        self._git("commit", "-q", "-m", "one", cwd=work)
+        pinned = self._git("rev-parse", "HEAD", cwd=work)
+        self._git("tag", "v1.0.0", cwd=work)
+        (work / "f.txt").write_text("v2", encoding="utf-8")
+        self._git("commit", "-q", "-am", "two", cwd=work)
+        (work / "f.txt").write_text("v3", encoding="utf-8")
+        self._git("commit", "-q", "-am", "three", cwd=work)
+        middle = self._git("rev-parse", "HEAD~1", cwd=work)
+        bare = tmp_path / "remote.git"
+        self._git("clone", "-q", "--bare", str(work), str(bare), cwd=tmp_path)
+        assert pinned != middle
+        return bare, middle
+
+    def _invoke(self, tmp_path: Path, monkeypatch, bare: Path, ref: str):
+        yml = (
+            "name: sha-check\n"
+            "description: SHA check\n"
+            "version: 1.0.0\n"
+            "owner:\n"
+            "  name: Test Org\n"
+            "packages:\n"
+            "  - name: pinned\n"
+            "    source: org/pinned\n"
+            f'    ref: "{ref}"\n'
+        )
+        project = tmp_path / "project"
+        project.mkdir(exist_ok=True)
+        (project / "marketplace.yml").write_text(yml, encoding="utf-8")
+        monkeypatch.chdir(project)
+        # Plain one-line rows keep detail assertions independent of terminal width.
+        monkeypatch.setattr("apm_cli.commands.marketplace._get_console", lambda: None)
+        with patch(
+            "apm_cli.marketplace.ref_resolver.RefResolver._git_url_and_env",
+            lambda self, owner_repo, remote_url=None: (str(bare), {}),
+        ):
+            return CliRunner().invoke(check, [], catch_exceptions=False)
+
+    def test_reachable_non_tip_sha_passes(self, tmp_path: Path, monkeypatch):
+        bare, middle = self._remote(tmp_path)
+        result = self._invoke(tmp_path, monkeypatch, bare, middle)
+        assert result.exit_code == 0, result.output
+        assert _flat("All 1 entries OK") in _flat(result.output)
+
+    def test_unreachable_sha_fails(self, tmp_path: Path, monkeypatch):
+        bare, _ = self._remote(tmp_path)
+        missing = "0" * 40
+        result = self._invoke(tmp_path, monkeypatch, bare, missing)
+        assert result.exit_code == 1
+        assert _flat(f"Commit '{missing}' not reachable on remote") in _flat(result.output)
+
+    def test_abbreviated_sha_fails_with_hint(self, tmp_path: Path, monkeypatch):
+        bare, middle = self._remote(tmp_path)
+        result = self._invoke(tmp_path, monkeypatch, bare, middle[:12])
+        assert result.exit_code == 1
+        assert _flat("full 40-char lowercase SHA") in _flat(result.output)
+
+    def test_tagged_tree_sha_is_not_a_commit_pin(self, tmp_path: Path, monkeypatch):
+        bare, _ = self._remote(tmp_path)
+        tree = self._git("--git-dir", str(bare), "rev-parse", "v1.0.0^{tree}", cwd=tmp_path)
+        # A lightweight tag naming a tree object, not a commit.
+        self._git("--git-dir", str(bare), "tag", "tree-tag", tree, cwd=tmp_path)
+        result = self._invoke(tmp_path, monkeypatch, bare, tree)
+        assert result.exit_code == 1
+        assert _flat(f"Commit '{tree}' not reachable on remote") in _flat(result.output)
+
+    def test_tag_ref_still_passes(self, tmp_path: Path, monkeypatch):
+        bare, _ = self._remote(tmp_path)
+        result = self._invoke(tmp_path, monkeypatch, bare, "v1.0.0")
+        assert result.exit_code == 0, result.output

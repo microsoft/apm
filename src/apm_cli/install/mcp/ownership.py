@@ -29,6 +29,20 @@ def mcp_native_hash(native: dict) -> str:
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _native_config_key(
+    client: Any,
+    name: str,
+    *,
+    requested_info: dict | None = None,
+    stored_config: dict | None = None,
+) -> str:
+    """Return the native key for *name*; self-defined servers keep their declared name."""
+    info = requested_info
+    if info is None and isinstance(stored_config, dict) and stored_config.get("registry") is False:
+        info = {"name": name, "is_self_defined": True}
+    return client._determine_config_key(name, None, info)
+
+
 def compare_native_mcp_connection(
     client: Any,
     name: str,
@@ -53,7 +67,9 @@ def compare_native_mcp_connection(
         if existing_configs is None
         else existing_configs
     )
-    key = client._determine_config_key(name, None)
+    key = _native_config_key(
+        client, name, requested_info=requested_info, stored_config=stored_config
+    )
     if key not in existing:
         return NativeMcpConnectionState.ABSENT
     native = existing[key]
@@ -153,7 +169,9 @@ def require_removable_mcp_connections(
             "only the entries you intend to retire), then retry the same command. "
             "--force does not take ownership of user connections."
         )
-    return {client._determine_config_key(name, None) for name in names}
+    return {
+        _native_config_key(client, name, stored_config=stored_configs.get(name)) for name in names
+    }
 
 
 def retain_deferred_mcp_claims(
