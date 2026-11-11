@@ -56,6 +56,17 @@ class ResolutionStagingSession:
                 resolved.replace(backup)
             self._backups[resolved] = backup
 
+    def owns_path(self, path: Path) -> bool:
+        """Return whether this session already replaced, or is replacing, *path*.
+
+        Several local sources can share one ``_local/<name>`` slot. The first
+        one refreshes it during resolution; the download callback uses this to
+        let the others reuse that copy instead of staging the slot twice (#3401).
+        """
+        resolved = ensure_path_within(path, self._modules_dir)
+        with self._lock:
+            return resolved in self._backups or resolved in self._replacement_by_destination
+
     def prepare_replacement(self, path: Path) -> Path:
         """Return an isolated download path without disturbing *path*."""
         resolved = ensure_path_within(path, self._modules_dir)

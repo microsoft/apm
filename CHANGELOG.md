@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now resolves a local package's dependencies from the `apm.yml` it copies in that run, so a dependency added to or dropped from a local package is installed or removed (from `apm.lock.yaml`, `apm deps tree` and deployed files) at once, at project and user scope, instead of on the next install. `apm update` and `apm install --update` fetch a dependency pinned to a branch or tag during resolution, so children re-pinned by its new commit are resolved, deployed and locked in the same run; full-SHA pins and plain `apm install` replay are unchanged. -- by @adityaanikam (#3401, #3392, #3501)
 - `apm install` fails before stale cleanup and lockfile replacement when missing local receipts prevent skill deployment, preserving refused files and prior lock contents during cold `--frozen` replay with overlapping dependencies. Files admitted earlier in a failed install may remain; the failure summary counts each refusing package once, and conflicting files can be moved aside before retrying or overwritten with `--force` only intentionally. -- with credit to @TyceHerrman (#3440, #3490)
 
 ### Changed

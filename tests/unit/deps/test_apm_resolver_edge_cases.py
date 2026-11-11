@@ -890,9 +890,9 @@ class TestShouldForceRecheck:
         resolver = APMDependencyResolver(update_refs=True)
         assert resolver._should_force_recheck(self._dep(ref_kind=None)) is True
 
-    def test_false_for_local_dep(self) -> None:
+    def test_true_for_local_dep(self) -> None:
         resolver = APMDependencyResolver(update_refs=True)
-        assert resolver._should_force_recheck(self._dep(is_local=True)) is False
+        assert resolver._should_force_recheck(self._dep(is_local=True)) is True
 
     def test_false_for_artifactory_proxied_dep(self) -> None:
         resolver = APMDependencyResolver(update_refs=True)
