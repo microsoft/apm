@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` and `apm install -g` no longer fail with "installation binding does not match" after a reboot or remount changes only the root's device number on Linux (btrfs subvolumes) and macOS; the receipt is rebound when inode, path, installation identity and recorded creation time still match, and recreated roots stay rejected. -- by @TyceHerrman (#3439)
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
+- Codex compatibility bundles install again with current Codex releases: native registration now requires Codex CLI 0.163.0 or later instead of exactly 0.163.0. Older or unrecognized versions are refused with the minimum named, and unexpected app-server responses still fail before any native write. (#PR)
+- Codex compatibility bundles install again with current Codex releases: native registration now requires Codex CLI 0.163.0 or later instead of exactly 0.163.0. Older or unrecognized versions are refused with the minimum named, and unexpected app-server responses still fail before any native write. (#3529)
 
 ## [0.35.0] - 2026-10-22
 
