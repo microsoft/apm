@@ -1690,11 +1690,20 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 5,
+      "test_count": 14,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_exact_bytes[---\\napplyTo: ['caf\\xe9/**']\\n---\\n\\nBody\\n----\\ntrigger: glob\\nglobs: \"caf\\\\u00e9/**\"\\n---\\n\\nBody\\n]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_exact_bytes[---\\napplyTo:\\n  - '*.py'\\n  - 'src/**'\\n---\\n\\n\\nBody\\n----\\ntrigger: glob\\nglobs: \"*.py, src/**\"\\n---\\n\\nBody\\n]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_exact_bytes[---\\ndescription: General\\n---\\n\\nBody\\n----\\ntrigger: always_on\\n---\\n\\nBody\\n]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: \"a\\\\\\\\,b, c\"\\n---\\n\\nBody\\n-expected7]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: '**/app/services/**, **/app/jobs/**'\\n---\\n\\nBody\\n-expected2]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: '*.py'\\n---\\n\\nBody\\n-expected0]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: ','\\n---\\n\\nBody\\n-expected4]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: 'a, a'\\n---\\n\\nBody\\n-expected9]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: 'a\\\\\\\\b'\\n---\\n\\nBody\\n-expected8]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: 'src/**/*.{ts,tsx}'\\n---\\n\\nBody\\n-expected6]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo: []\\n---\\n\\nBody\\n-expected5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\napplyTo:\\n  - '**/app/services/**'\\n  - '**/app/jobs/**'\\n---\\n\\nBody\\n-expected1]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_antigravity_rule_frontmatter_per_native_schema[---\\ndescription: General development principles\\n---\\n\\nBody\\n-expected3]"
       ]

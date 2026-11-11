@@ -795,6 +795,26 @@ def test_consumer_deploys_antigravity_rules_with_expected_dedup():
             "---\ndescription: General development principles\n---\n\nBody\n",
             {"trigger": "always_on"},
         ),
+        # Zero-pattern boundary: separators-only and empty sequence.
+        ("---\napplyTo: ','\n---\n\nBody\n", {"trigger": "always_on"}),
+        ("---\napplyTo: []\n---\n\nBody\n", {"trigger": "always_on"}),
+        # Brace alternation commas are not separators and stay bare.
+        (
+            "---\napplyTo: 'src/**/*.{ts,tsx}'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "src/**/*.{ts,tsx}"},
+        ),
+        # An author-escaped top-level comma keeps its `\,` escape.
+        (
+            '---\napplyTo: "a\\\\,b, c"\n---\n\nBody\n',
+            {"trigger": "glob", "globs": "a\\,b, c"},
+        ),
+        # An author-escaped literal backslash is re-encoded as two backslashes.
+        (
+            "---\napplyTo: 'a\\\\b'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "a\\\\b"},
+        ),
+        # Duplicates are retained in declaration order.
+        ("---\napplyTo: 'a, a'\n---\n\nBody\n", {"trigger": "glob", "globs": "a, a"}),
     ],
 )
 def test_consumer_emits_antigravity_rule_frontmatter_per_native_schema(source, expected):
@@ -805,6 +825,32 @@ def test_consumer_emits_antigravity_rule_frontmatter_per_native_schema(source, e
 
     assert loads_frontmatter(rendered).metadata == expected
     assert rendered.endswith("\n\nBody\n")
+
+
+@pytest.mark.req("req-tg-005")
+@pytest.mark.parametrize(
+    ("source", "expected_bytes"),
+    [
+        (
+            "---\napplyTo:\n  - '*.py'\n  - 'src/**'\n---\n\n\nBody\n",
+            '---\ntrigger: glob\nglobs: "*.py, src/**"\n---\n\nBody\n',
+        ),
+        (
+            "---\ndescription: General\n---\n\nBody\n",
+            "---\ntrigger: always_on\n---\n\nBody\n",
+        ),
+        (
+            "---\napplyTo: ['caf\u00e9/**']\n---\n\nBody\n",
+            '---\ntrigger: glob\nglobs: "caf\\u00e9/**"\n---\n\nBody\n',
+        ),
+    ],
+)
+def test_consumer_emits_antigravity_rule_exact_bytes(source, expected_bytes):
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+
+    rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
+
+    assert rendered == expected_bytes
 
 
 @pytest.mark.req("req-tg-006")

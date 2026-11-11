@@ -2959,21 +2959,32 @@ bundle serves every harness without per-target duplication.
 target-native per-file instruction rules MUST honour the registered
 rule filename pattern and frontmatter mapping for the active target.
 For the `antigravity` target, instruction rules MUST be written under
-`.agents/rules/<name>.md`; when the source instruction declares
-`applyTo`, the emitted frontmatter MUST represent it as
-`trigger: glob` plus a `globs` field. To reduce sources of divergence
+`.agents/rules/<name>.md`; when the source instruction's `applyTo`
+resolves to one or more patterns, the emitted frontmatter MUST represent
+them as `trigger: glob` plus a `globs` field. To reduce sources of divergence
 in deployed-file content hashes across conforming implementations
 (contributing to the canonical-content equivalence check of
 [req-lk-012](#req-lk-012)), `globs` MUST be
 emitted as a single YAML double-quoted string scalar, whether `applyTo`
 resolves to one glob pattern or to several, whose value joins the
-resolved patterns in declaration order with a comma followed by one
-space (a literal comma inside one pattern keeps its `\,` escape so
-it is not read as a separator); `globs` MUST NOT be emitted as a YAML
-sequence. When `applyTo` is absent or empty the emitted rule file MUST
+resolved patterns in declaration order, duplicates retained, with the
+two-character separator `, ` (comma, space); before joining, each
+resolved pattern is re-encoded so that every backslash outside a bracket
+character class `[...]` is written as two backslashes and every comma
+outside brace alternation `{...}` and outside a bracket character class
+is written as `\,`, and all other characters, including commas inside
+`{...}` or `[...]`, are emitted unchanged; `globs` MUST NOT be emitted as a YAML
+sequence. The emitted frontmatter block MUST consist of exactly a `---`
+line, the `trigger` line, the `globs` line when present (after
+`trigger`), and a closing `---` line, with no other keys, followed by
+one empty line and then the instruction body with its leading line
+breaks removed. Within the `globs` value every code point above U+007F
+MUST be written as a lowercase-hex `\uXXXX` escape (a UTF-16 surrogate
+pair above U+FFFF). When `applyTo` is absent or resolves to zero patterns
+(for example an empty or whitespace-only string, a separators-only
+string such as `,`, or an empty sequence), the emitted rule file MUST
 carry a frontmatter block declaring `trigger: always_on` and no `globs`
-field, because Antigravity discards rule files without a valid
-`trigger`. Compile-time deduplication MUST treat
+field. Compile-time deduplication MUST treat
 only those files whose names derive from the currently-resolved
 instruction primitives (specifically, for each resolved instruction
 primitive of name N the derived filename is `.agents/rules/N.md`; the
@@ -2983,8 +2994,8 @@ first install) as deployed rules; any other `.md` file under
 `.agents/rules/` MUST NOT be treated as a deployed rule and MUST NOT
 suppress instruction content in `AGENTS.md`.
 
-> **Editorial note.** [req-tg-005](#req-tg-005) names the `antigravity` deploy path
-> and frontmatter keys in the normative text rather than delegating
+> **Editorial note.** [req-tg-005](#req-tg-005) names the `antigravity` deploy path,
+> frontmatter keys, `trigger` values and `globs` encoding in the normative text rather than delegating
 > them to the non-normative Target Registry companion (contrast
 > [req-tg-002](#req-tg-002)). This is a deliberate, scoped exception:
 > the `antigravity` rules directory shares the `.agents/` root that
@@ -2994,7 +3005,16 @@ suppress instruction content in `AGENTS.md`.
 > `antigravity` filename pattern and frontmatter mapping to the
 > Registry companion once a cross-target instruction-rule schema is
 > registered, retaining only the target-agnostic honour and dedup
-> MUSTs here.
+> MUSTs here. The `trigger: always_on` block for unscoped rules exists
+> because the target discards rule files without a valid `trigger`
+> (target rule documentation: https://antigravity.google/docs/rules);
+> the single-string `globs` encoding tracks that published schema and
+> is pinned for [req-lk-012](#req-lk-012) hash reproducibility, so a
+> change upstream is handled by amendment under Section 9.
+> The target documents no escape for a comma inside a pattern; patterns
+> containing brace alternation or an escaped literal comma are emitted
+> as specified above, but how the target matches them is not guaranteed
+> by this specification.
 
 #### 8.5.1 Lossy agent conversion
 
@@ -4708,10 +4728,10 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.53 (proposed) | 2026-10-21 | Amendment for accepted issue #3202 in PR #3314. Added [req-pr-008](#req-pr-008) (Section 8.3.1, consumer MUST): default refusal of a differing unmanaged skill file checks the complete effective selected plan before native deployment, success-state persistence or cleanup; preserves prior bytes and ownership; and provides truthful read-only audit and nondestructive correction. Warning/success becomes refusal, a new hard conformance obligation rather than errata. Identical-content recovery, existing explicit destructive replacement, managed-source priority, native-plugin and non-skill/MCP policies remain outside this change. No schema or lockfile-version change. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived; no ratification or release is claimed. Sections 1.3, 8.7, 10.11, 11.3.2, Appendix C, requirements manifest and conformance test binding updated. Statement count: 129 -> 130 (125 MUST, 5 SHOULD). |
 | 0.1.54 (proposed) | 2026-10-21 | Opt-in root source-replacement proposal for #3180 / PR #3309. Added four conditional consumer requirements [req-rpl-001] through [req-rpl-004] for exact root-owned graph binding, original ownership with selected-source lifecycle/security, proposed lock version 3 evidence, and frozen full-table/content verification. Distinct candidate schema identities preserve earlier published bytes; version 1/2 semantics remain unchanged. This is a new opt-in capability and explicit versioned lock extension, not behavior-neutral errata. Section 9.3 review/public comment and first supporting release remain pending; source staging is not adoption. Statement count: 130 -> 134 (129 MUST, 5 SHOULD). |
 | 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
-| 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. Section 9.3 review requirements remain. |
+| 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. The revision also pins the zero-pattern boundary, the per-pattern re-encoding and the frontmatter byte layout. Under Section 9.2 this changes an already-defined emitted target representation, not a manifest, lockfile or policy field; the replaced representations were refused or discarded by the target, so no working deployment relied on them. Migration: deployed bytes, and therefore [req-lk-012] deployed_file_hashes, change for `.agents/rules/*.md` files whose `applyTo` resolves to zero patterns or to two or more patterns, and for single-pattern rules containing a literal backslash or a top-level literal comma; other single-pattern rules are byte-identical. One non-frozen `apm install` re-renders affected files and re-records their hashes; [req-lk-006] and [req-lk-017] are unchanged by this amendment. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived. |
 
 The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one
-MUST; 0.1.54 adds four. Together, this working draft contains 136 statements
+MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place and adds none. Together, this working draft contains 136 statements
 (131 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
