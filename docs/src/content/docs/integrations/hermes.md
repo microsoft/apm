@@ -47,7 +47,7 @@ export HERMES_HOME="$HOME/.config/hermes"
 apm install --target hermes --global
 ```
 
-When `HERMES_HOME` lives under `$HOME`, APM keeps the deploy root home-relative; otherwise it uses the absolute path. The directory does not need to exist yet.
+When `HERMES_HOME` lives under `$HOME`, APM keeps the deploy root home-relative; otherwise it uses the absolute path. The directory does not need to exist yet. Hermes homes share one user lockfile; a global install removes stale skills only under the selected `HERMES_HOME`, leaving skills deployed to other homes in place.
 
 ## MCP servers
 

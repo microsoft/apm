@@ -13,7 +13,7 @@ how to install it:
 | `hooks/*.json` or `.apm/hooks/*.json` only | Harness hook package | Add hook commands to each target's configuration and copy referenced files |
 | `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
-| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0, user scope only; initially disabled, no loose projection or other-target translation |
+| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0 or later, user scope only; initially disabled, no loose projection or other-target translation |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
 An `apm.yml` is eligible when the root also has `.apm/` or the manifest
@@ -516,6 +516,15 @@ Review ${input:pr_url} focusing on ${input:focus_areas}.
 When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
+
+For the `copilot` target, prompts deploy to `.github/prompts/<name>.prompt.md`.
+In VS Code, only Local harness sessions load prompt files; the Copilot harness
+and Copilot CLI do not
+(https://code.visualstudio.com/docs/agent-customization/prompt-files). For
+those harnesses, ship the workflow as a skill (`.apm/skills/<name>/SKILL.md`)
+and add `disable-model-invocation: true` to its frontmatter where the host
+supports it. APM copies skill frontmatter as-is and does not convert prompts
+to skills.
 
 #### Optional workflow frontmatter (GitHub Copilot App, experimental)
 
