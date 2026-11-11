@@ -109,8 +109,13 @@ if [ "$PLATFORM" = "linux" ] && [ -n "${APM_MAX_GLIBC:-}" ]; then
     GLIBC_VIOLATIONS=""
     GLIBC_CHECKED=0
     while IFS= read -r -d '' elf; do
+        if ! symbols=$(objdump -T "$elf" 2>&1); then
+            echo -e "${RED}[x] Cannot inspect bundled ELF file: ${elf}${NC}" >&2
+            printf '%s\n' "$symbols" >&2
+            exit 1
+        fi
         GLIBC_CHECKED=$((GLIBC_CHECKED + 1))
-        required=$(objdump -T "$elf" 2>/dev/null | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+        required=$(printf '%s\n' "$symbols" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
         if [ -n "$required" ] && [ "$(printf '%s\n%s\n' "$APM_MAX_GLIBC" "$required" | sort -V | tail -1)" != "$APM_MAX_GLIBC" ]; then
             GLIBC_VIOLATIONS="${GLIBC_VIOLATIONS}  GLIBC_${required} ${elf}\n"
         fi
