@@ -21,7 +21,7 @@ from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.utils.content_hash import compute_package_hash
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 _LOCKED_SHA = "f1b2ba49d18a3de11f87d8e6dc672dfdaadbff85"
 _ISSUE_CONTENT_HASH = "sha256:4680f02c21d17cb85ce5feff3e1bfbe0966b7c2c42595e27a67c1d3eaecf6e30"
@@ -51,15 +51,17 @@ def _write_issue_fixture(apm_home: Path, *, locked_commit: str, pin_commit: str 
         "    - example/demo/skills/demo\n",
         encoding="utf-8",
     )
-    (package / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+    # newline="\n" keeps the bytes (and the pinned content hash) identical on Windows.
+    (package / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8", newline="\n")
     (package / ".codex-plugin" / "plugin.json").write_text(
-        '{"name":"demo-skill"}\n', encoding="utf-8"
+        '{"name":"demo-skill"}\n', encoding="utf-8", newline="\n"
     )
     if pin_commit is not None:
         (package / ".apm-pin").write_text(
             json.dumps({"schema_version": 1, "resolved_commit": pin_commit}, separators=(",", ":"))
             + "\n",
             encoding="utf-8",
+            newline="\n",
         )
     content_hash = compute_package_hash(package)
     assert content_hash == _ISSUE_CONTENT_HASH
