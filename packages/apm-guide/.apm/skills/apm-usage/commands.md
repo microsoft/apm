@@ -142,8 +142,10 @@ or runtime configuration.
 
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download
-or validation leaves the previous package active. Failed staged activation
-attempts restoration without changing the lockfile. If restoration or cleanup
+or validation leaves the previous package active. Activation and its restore
+retry transient Windows `WinError 5`/`32` holds with bounded backoff. A
+persistent activation failure attempts restoration without changing the
+lockfile. If restoration or cleanup
 also fails, preserve the reported recovery paths: the prior package may be in
 `.apm-resolution-staging/<session>/backups/` rather than active. Close programs
 holding the affected paths and inspect/recover prior data before retrying the
@@ -372,9 +374,9 @@ exclusion, `--dry-run` succeeds as a preview without the per-package recovery
 diagnostic; it does not certify real install success.
 
 Compatibility-only `.codex-plugin/plugin.json` bundles use
-`apm install -g <package> --target codex` with exactly Codex CLI 0.163.0 on
+`apm install -g <package> --target codex` with Codex CLI 0.163.0 or later on
 `PATH`; native qualification was measured on macOS arm64 only.
-Project scope, other versions, skill subsets, and unsupported native
+Project scope, older or unrecognized versions, skill subsets, and unsupported native
 shapes fail explicitly. Approve executable types through `allowExecutables`;
 new native registrations remain disabled. Reinstall/update and
 `apm install -g --frozen --target codex` preserve activation and MCP policy,
