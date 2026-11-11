@@ -662,6 +662,16 @@ def outdated(global_, verbose, parallel_checks):
         )
     elif has_unknown:
         logger.progress("Some dependencies could not be checked")
+    if has_unknown:
+        from ..deps.registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            logger.info(
+                "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
+                "newer versions because the registry proxy exposes no version listing. "
+                "Exact pins still install through the proxy; unset PROXY_REGISTRY_ONLY "
+                "to check against the source host."
+            )
     if any(row.status == "not-comparable" for row in rows):
         logger.progress("Local replacement sources are not remotely comparable")
     if has_outside_constraint:
