@@ -285,7 +285,8 @@ def test_copy_failure_only_rolls_back_new_empty_destination(
         source_plan=plan,
         managed_files=set(),
     )
-    assert result.complete is (not existing and not partial)
+    # #3441: a surviving empty destination tree holds no user content and is deployed into.
+    assert result.complete is (not partial)
     if result.complete:
         assert (target / "SKILL.md").read_bytes() == (
             package.install_path / "skills/s/SKILL.md"

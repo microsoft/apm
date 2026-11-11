@@ -250,7 +250,7 @@ not every file in a skill bundle.
 
 | Target | Prompt documents/fields | Hook definitions |
 |---|---|---|
-| Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt |
+| Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt; flat `sessionStart` prompt handlers' `prompt` field (prompt handlers on other events are unsupported) |
 | Claude | `.claude/rules/*.md`, `agents/*.md`, `commands/*.md`, `skills/**/SKILL.md` | `.claude/hooks/*.json`, `.claude/settings.json`; nested `prompt`/`agent` handlers' `prompt` field |
 | Cursor | `.cursor/rules/*.mdc`, `agents/*.md`, `commands/*.md`; shared skills | `.cursor/hooks/*.json`, `.cursor/hooks.json`; flat command handlers and prompt handlers' `prompt` field; nested handlers are unsupported |
 | Kiro | `.kiro/steering/*.md`, `agents/*.md`, `prompts/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
@@ -320,7 +320,10 @@ clean audit to exit `1`. An advisory cache-miss skip remains non-failing
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
 scratch replay through `install/audit_replay.py`; materialization failures
-fail closed without mutating the checkout.
+fail closed without mutating the checkout. Replay fetches each Git dependency
+over the transport its declaring `apm.yml` states, as install does: a
+`git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
+the usual [transport selection](../../../consumer/manage-dependencies/#transport-selection).
 
 ### Deployment-owner integrity
 
