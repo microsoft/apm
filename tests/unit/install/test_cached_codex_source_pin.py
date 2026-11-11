@@ -21,7 +21,7 @@ from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.utils.content_hash import compute_package_hash
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 _LOCKED_SHA = "f1b2ba49d18a3de11f87d8e6dc672dfdaadbff85"
 _ISSUE_CONTENT_HASH = "sha256:4680f02c21d17cb85ce5feff3e1bfbe0966b7c2c42595e27a67c1d3eaecf6e30"
