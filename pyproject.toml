@@ -75,6 +75,12 @@ include = ["apm_cli*"]
 # .pth inline), but packaging it keeps the source tree and wheel in sync.
 "apm_cli.core._child_tls" = ["*.pth"]
 
+[tool.uv]
+# filelock >=4.2.1 (the first release with the GHSA-v4x8-3wr5-3wq8 family of
+# fixes) requires Python >=3.11. Keep Python 3.10 on the 3.x line already
+# shipped (3.29.0) rather than resolving to the vulnerable 4.1.x releases.
+constraint-dependencies = ["filelock==3.29.0; python_version < '3.11'"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
