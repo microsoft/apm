@@ -12,6 +12,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
+from apm_cli.utils.file_ops import robust_replace
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 
@@ -90,16 +91,16 @@ class ResolutionStagingSession:
                 backup = self._isolated_staging_path("backups", resolved)
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 self._backups[resolved] = backup
-                resolved.replace(backup)
+                robust_replace(resolved, backup)
             else:
                 self._backups[resolved] = None
             try:
                 resolved.parent.mkdir(parents=True, exist_ok=True)
-                staged.replace(resolved)
+                robust_replace(staged, resolved)
             except BaseException as activation_error:
                 if backup is not None and backup.exists() and not resolved.exists():
                     try:
-                        backup.replace(resolved)
+                        robust_replace(backup, resolved)
                     except (OSError, ValueError) as recovery_error:
                         raise OSError(
                             f"Could not activate {staged} at {resolved}: {activation_error}. "
