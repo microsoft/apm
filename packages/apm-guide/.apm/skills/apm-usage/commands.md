@@ -95,6 +95,14 @@ but edited files and legacy files without receipts stay protected. Preserve
 edits and move conflicting files aside before reinstalling. Audit and dry-run
 do not create receipts; frozen install can record local writes without changing
 the manifest or lockfile.
+When a missing local receipt prevents an existing skill from being overwritten,
+install exits nonzero before stale cleanup and lock replacement. The refused
+files and prior lock contents are preserved, including cold `--frozen` replay
+with overlapping dependencies and project/user scope. This is not a full
+rollback: files admitted earlier in the run may remain. Move the conflicting
+file aside and retry; use `--force` only for an intentional overwrite after
+preserving edits. A locally edited file with a valid receipt retains
+warning-only preservation.
 Creating this state requires filesystem hard-link support; unsupported or
 unwritable state paths fail instead of disabling preservation.
 

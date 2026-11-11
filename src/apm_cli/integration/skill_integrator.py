@@ -515,12 +515,11 @@ class SkillIntegrator(BaseIntegrator):
             on_member_skipped=self._skill_member_skipped,
             unchanged=unchanged,
             write_allowed=lambda path: (
-                self._replay_owners is None
-                or self._replay_owners.get(path, self._skill_current_owner)
-                == self._skill_current_owner
+                self._replay_owners is None or self._replay_owners.get(path, owner) == owner
             ),
             force=force or managed_files is None,
             diagnostics=diagnostics,
+            package=owner or "",
         )
         if not unchanged:
             if self.link_resolver is None:
@@ -1111,7 +1110,7 @@ class SkillIntegrator(BaseIntegrator):
                 parent_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
+                diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
                 project_root=project_root,
@@ -1336,7 +1335,7 @@ class SkillIntegrator(BaseIntegrator):
                 current_key or skill_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
+                diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
                 project_root=project_root,
@@ -1446,7 +1445,7 @@ class SkillIntegrator(BaseIntegrator):
                 parent_name,
                 warn=is_primary,
                 owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
+                diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
                 project_root=project_root,
