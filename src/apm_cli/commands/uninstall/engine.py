@@ -1115,6 +1115,7 @@ def _sync_integrations_after_uninstall(
     modules_dir: Path | None = None,
     survivor_plan: list[tuple[DependencyReference, object]] | None = None,
     deployed_file_hashes: dict[str, str] | None = None,
+    excluded_survivor_keys: frozenset[str] = frozenset(),
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1125,6 +1126,9 @@ def _sync_integrations_after_uninstall(
     lockfile (orphans already deleted). The on-disk lockfile is still
     stale at this point in the uninstall pipeline, so Phase 2 must not
     re-read it from disk.
+
+    Survivors in *excluded_survivor_keys* are not re-integrated, such as
+    packages just removed from the selected profile only.
     """
     from ...core.deployment_ledger import DeploymentMaterializationSession
     from ...install.services import (
@@ -1181,6 +1185,8 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
+        if dep_ref.get_unique_key() in excluded_survivor_keys:
+            continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             dep_ref.target_subset,
