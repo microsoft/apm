@@ -517,6 +517,42 @@ class TestDispatchHttpRequest:
                     )
         assert "status=error" in apm_log_home.read_text()
 
+    def test_response_published_during_grace_join_is_closed(self, apm_log_home: Path) -> None:
+        # The worker records a socket, wedges past the total deadline, and only
+        # publishes its response once the deadline abort shuts that socket down
+        # -- i.e. inside the post-abort grace join (#3436).
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.ok = True
+        aborted = threading.Event()
+        published = threading.Event()
+        sock = MagicMock()
+        sock.shutdown.side_effect = lambda *_a: aborted.set()
+
+        def _late_post(*_a, **_kw):
+            se._DISPATCH_SOCK.holder["sock"] = sock
+            assert aborted.wait(5), "deadline abort never reached the worker socket"
+            published.set()
+            return resp
+
+        with patch.object(se, "_get_guarded_session", return_value=None):
+            with patch.object(se, "_get_capturing_session", return_value=None):
+                with patch("requests.post", side_effect=_late_post):
+                    se._dispatch_http_request(
+                        "https://example.com/h",
+                        "{}",
+                        {},
+                        0.05,
+                        "post-install",
+                        "https://example.com/h",
+                    )
+        assert published.is_set()
+        resp.close.assert_called_once()
+        log = apm_log_home.read_text()
+        assert "request exceeded total deadline 0.05s" in log
+        assert "status=error" in log
+        assert "HTTP 200" not in log
+
 
 class TestExecuteHttpThread:
     """_execute_http starts a daemon thread and joins cleanly; gate refusal -> None."""

@@ -401,6 +401,22 @@ def integrate_package_primitives(  # noqa: PLR0913
         "skills": integrators.skill,
     }
 
+    # An unmatched skills: selection fails the package; refuse it before any
+    # primitive kind writes so the failed install leaves every file untouched.
+    preflight_skill_selection = getattr(integrators.skill, "preflight_skill_selection", None)
+    if (
+        codex_native is None
+        and callable(preflight_skill_selection)
+        and not preflight_skill_selection(
+            package_info,
+            skill_subset=skill_subset,
+            source_plan=source_plan,
+            diagnostics=diagnostics,
+            logger=logger,
+        )
+    ):
+        return result
+
     preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
     if _hooks_approved and callable(preflight_hooks) and codex_native is None:
         preflight_hooks(
