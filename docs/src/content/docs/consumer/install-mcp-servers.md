@@ -127,7 +127,8 @@ for the full required-vs-optional runtime config rule.
 
 MCP Registry v0.1 container packages use `registryType: oci`. APM
 selects Docker automatically, keeps Docker run options before the image,
-and places package arguments after the image. Copilot, Codex, Gemini,
+and places package arguments after the image. When `runtimeArguments`
+list only Docker options, APM adds `run -i --rm` ahead of them. Copilot, Codex, Gemini,
 and related adapters prefer packages in `npm`, OCI, then PyPI order.
 VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
 available when the harness starts the server; no per-target launcher
@@ -206,6 +207,16 @@ uses a symlink below the home directory, APM warns and fails without rewriting
 it, even on a no-op reinstall. Fix the reported config and rerun the original
 command with `--global` and the same `--target` selection. A home-directory
 alias itself remains supported.
+
+## MCP servers from Claude plugins
+
+When a dependency is a Claude plugin, APM reads its MCP servers from inline
+`plugin.json` `mcpServers`, from JSON files that field names, or from an
+auto-discovered `mcp.json`, `.mcp.json` or `.github/.mcp.json`. Each file may
+wrap servers as `{"mcpServers": {...}}` or list them as a flat top-level map
+(`{"linear": {...}}`); a flat file counts only when every value is a server
+object. A file with no usable server is skipped with a warning naming the file
+and plugin. Servers then install like `apm.yml`-declared self-defined servers.
 
 ## Resolve a connection name conflict
 

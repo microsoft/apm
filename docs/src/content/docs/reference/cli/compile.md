@@ -415,6 +415,12 @@ in subdirectories, this is the distributed default in effect; see
 for the rationale, or pass `--single-agents` for a single-file
 output.
 
+Placement counts only authored files. `AGENTS.md`, `CLAUDE.md` and
+`GEMINI.md` files that carry the APM-generated marker header (that is,
+output from an earlier compile) do not count as `applyTo` matches, so
+re-running `apm compile` on unchanged sources gives the same layout.
+Hand-authored context files without the marker still count.
+
 ## Exit codes
 
 | Code | Meaning |

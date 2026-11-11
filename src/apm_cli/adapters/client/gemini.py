@@ -240,7 +240,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             config["args"] = ["-y", package_name] + processed_rt + processed_pkg  # noqa: RUF005
         elif registry_name == "docker":
             config["command"] = "docker"
-            runtime_args = processed_rt or ["run", "-i", "--rm"]
+            runtime_args = self._ensure_docker_run_args(processed_rt)
             docker_args = self._inject_env_vars_into_docker_args(
                 self._ensure_docker_image_arg(runtime_args, package_name), resolved_env
             )
