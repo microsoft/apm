@@ -156,6 +156,23 @@ class LockfileConflictError(LockfileFormatError):
         )
 
 
+class LockfileSymlinkError(OSError):
+    """Raised instead of replacing a symlinked lockfile with a regular file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        try:
+            self.target = os.readlink(path)
+        except OSError:
+            self.target = "<unreadable>"
+        super().__init__(
+            f"{path} is a symbolic link to {self.target}. APM does not write "
+            "lockfiles through symbolic links, so the link and its target were "
+            "left unchanged.\nReplace the link with a regular file (for example, "
+            "copy the target over it), then retry your original command."
+        )
+
+
 # Git writes each marker at the start of a line, followed by a space and a label
 # (or nothing, for a bare ``=======`` separator). A separator alone is not
 # evidence of a conflict, so only the labelled markers are matched here.
@@ -1106,6 +1123,15 @@ class LockFile:
             return "3"
         return "2" if self._needs_v2() else "1"
 
+    def sync_lockfile_version(self) -> None:
+        """Re-derive ``lockfile_version`` from current content.
+
+        Callers that mutate content directly (instead of through
+        ``add_dependency``) use this to keep the in-memory version equal to
+        what ``to_yaml`` would emit before comparing locks (issue #3433).
+        """
+        self.lockfile_version = self._required_lockfile_version()
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -1119,7 +1145,7 @@ class LockFile:
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
         # that mutate content directly need the field re-derived here.
-        self.lockfile_version = self._required_lockfile_version()
+        self.sync_lockfile_version()
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
@@ -1283,7 +1309,9 @@ class LockFile:
         if suppressed is not None:
             suppressed.append(self.to_yaml())
             return
-        from ..utils.atomic_io import atomic_write_text
+        if path.is_symlink():
+            raise LockfileSymlinkError(path)
+        from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
 
@@ -1321,7 +1349,7 @@ class LockFile:
             self.generated_at = None
         serialized = self.to_yaml()
         assert_no_staging_paths(serialized, path.name)
-        atomic_write_text(path, serialized)
+        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
@@ -1561,7 +1589,9 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
     """
     new_path = get_lockfile_path(project_root)
     legacy_path = project_root / LEGACY_LOCKFILE_NAME
-    if not new_path.exists() and legacy_path.exists():
+    # A dangling symlink reports exists() == False; renaming onto it would
+    # replace the link, so leave it for the writer to refuse.
+    if not new_path.exists() and not new_path.is_symlink() and legacy_path.exists():
         try:
             legacy_path.rename(new_path)
         except OSError:
