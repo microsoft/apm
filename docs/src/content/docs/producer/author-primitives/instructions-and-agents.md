@@ -74,7 +74,9 @@ When a YAML sequence contains multiple patterns, APM normalizes every
 non-null entry into the same comma-separated OR expression used by
 [distributed compilation](../../compile/) and target-native installation. Use a
 sequence when its source readability matters. To match a literal comma in a
-filename, escape it as `\,`.
+filename, escape it as `\,`. Cursor and Antigravity receive the escape inside
+their joined `globs` string but document no literal-comma matching; verify such
+patterns in your tool version.
 
 ```markdown
 ---
