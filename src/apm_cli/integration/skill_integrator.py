@@ -493,11 +493,13 @@ class SkillIntegrator(BaseIntegrator):
         ):
             raise RuntimeError("Live skill materialization requires an admitted source plan.")
 
-        def managed(path: str) -> bool:
-            return path in self._skill_session_hashes or (
-                managed_files is not None
-                and (path in managed_files or (path == anchor and directory_entry in managed_files))
+        def claimed(path: str) -> bool:
+            return managed_files is not None and (
+                path in managed_files or (path == anchor and directory_entry in managed_files)
             )
+
+        def managed(path: str) -> bool:
+            return path in self._skill_session_hashes or claimed(path)
 
         adopted = (
             adoption_baselines(
@@ -506,7 +508,7 @@ class SkillIntegrator(BaseIntegrator):
                 walk_source=self.walk_source_tree,
                 ignore=ignore,
                 resolve_links=self.resolve_links,
-                owned=lambda path: managed(entry(path)),
+                owned=lambda path: claimed(entry(path)),
             )
             if session is not None
             and not force
