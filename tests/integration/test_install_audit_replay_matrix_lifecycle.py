@@ -244,3 +244,32 @@ def test_install_and_audit_replay_agree_across_lifecycle(
     assert leftovers == []
     assert deployed_files(project) == set()
     world.audit_clean()
+
+
+def _module_bytes(project: Path) -> dict[str, bytes]:
+    base = project / "apm_modules"
+    return {
+        path.relative_to(base).as_posix(): path.read_bytes()
+        for path in sorted(base.rglob("*"))
+        if path.is_file()
+    }
+
+
+@pytest.mark.parametrize("command", [("audit", NO_POLICY), ("export-patch",)])
+def test_read_only_replay_never_rewrites_installed_local_packages(
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+) -> None:
+    """Drift replay writes local package images to scratch, never to apm_modules."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    apm_package(world.sources / "lpkg", "lpkg")
+    claude_plugin(world.sources / "lplug", "lplug")
+    shape = Shape([{"path": "../lpkg"}, {"path": "../lplug"}], "../lpkg", targets=HOOK_TARGETS)
+    world.manifest(shape)
+    world.apm("install", NO_POLICY)
+    installed = _module_bytes(world.project)
+
+    rules = world.sources / "lpkg/.apm/instructions/glob.instructions.md"
+    rules.write_text(rules.read_text(encoding="ascii") + "Edited upstream.\n", encoding="ascii")
+    world.apm(*command, expect=None)
+
+    assert _module_bytes(world.project) == installed

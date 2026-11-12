@@ -198,9 +198,15 @@ class TestMaterializeInstallPath:
 
         local_pkg = tmp_path / "local_pkg"
         local_pkg.mkdir()
+        (local_pkg / "apm.yml").write_text("name: local_pkg\nversion: 1.0.0\n", encoding="ascii")
         dep = LockedDependency(repo_url="./local_pkg", source="local", local_path="./local_pkg")
-        result = _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
-        assert result.exists()
+        modules = tmp_path / "scratch" / "apm_modules"
+        result = _materialize_install_path(
+            dep, tmp_path, tmp_path / "apm_modules", cache_only=True, local_modules_dir=modules
+        )
+        assert result == dep.to_dependency_ref().get_install_path(modules)
+        assert (result / "apm.yml").read_bytes() == (local_pkg / "apm.yml").read_bytes()
+        assert not (tmp_path / "apm_modules").exists()
 
     def test_remote_dep_no_commit_raises_cache_miss(self, tmp_path: Path) -> None:
         from apm_cli.install.drift import _materialize_install_path

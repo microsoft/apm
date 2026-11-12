@@ -193,10 +193,10 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_PROJECTION,
             "src/apm_cli/install/native_plugin_admission.py",
             (
-                "_copy_tree_dereferencing_validated(source, replay_path, source)",
+                "expected_hash = compute_package_hash(replay_path)",
                 "verify_locked_package(candidate, expected_hash, carried)",
             ),
-            "Native cache verification must reuse canonical copying and package hashing",
+            "Native cache verification must hash the canonical replay image",
         )
     )
     return tuple(findings)

@@ -27,6 +27,7 @@ from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
 from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
+from apm_cli.install.phases.local_content import materialize_local_package_for_replay
 from apm_cli.install.pipeline import _preflight_auth_check
 from apm_cli.install.plan import build_update_plan
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
@@ -365,7 +366,10 @@ def test_native_local_replacement_audit_uses_current_selected_source_bytes(tmp_p
     (candidate / "SKILL.md").write_text("old selected content\n", encoding="ascii")
     locked.content_hash = compute_package_hash(candidate)
     scratch = tmp_path / "scratch"
-    replay = selected.get_install_path(scratch / "apm_modules")
+    replay = materialize_local_package_for_replay(
+        locked.to_dependency_ref(), tmp_path, scratch / "apm_modules"
+    )
+    assert replay == selected.get_install_path(scratch / "apm_modules")
     with pytest.raises(AgentPluginDeploymentBoundaryError, match="cache differs"):
         verify_native_plugin_cache(locked, source, replay, modules, scratch)
     (candidate / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
