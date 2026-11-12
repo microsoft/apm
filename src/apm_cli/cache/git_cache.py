@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
@@ -722,7 +723,9 @@ class GitCache:
                 return self._record_checkout_access(
                     self._finalize_sparse_checkout(url, final_dir, sparse_paths, env=env)
                 )
+            remat_started: float | None = None
             if existing_ok:
+                remat_started = time.monotonic()
                 _log.info(
                     "[*] Rematerializing git checkout missing materialization pins: %s @ %s [%s]",
                     _sanitize_url(url),
@@ -893,6 +896,14 @@ class GitCache:
                         f"Race condition: concurrent checkout failed integrity "
                         f"for {_sanitize_url(url)} @ {sha[:12]}"
                     )
+            if remat_started is not None:
+                _log.info(
+                    "[+] Rematerialized git checkout %s @ %s [%s] in %d ms",
+                    _sanitize_url(url),
+                    sha[:12],
+                    variant,
+                    int((time.monotonic() - remat_started) * 1000),
+                )
             return final_dir
 
     def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:

@@ -201,6 +201,20 @@ def test_bare_materialization_ignores_host_eol(
 
     assert resolved == sha
     _assert_repository_bytes(consumer)
+    # The consumer records the pins for later Git commands in it, written by
+    # ``clone --config`` rather than one ``git config`` spawn per key.
+    persisted = {
+        key: _git(
+            "config",
+            "--file",
+            str(consumer / ".git" / "config"),
+            key,
+            cwd=tmp_path,
+            env=_neutral_env(),
+        )
+        for key in ("core.autocrlf", "core.eol")
+    }
+    assert persisted == {"core.autocrlf": "false", "core.eol": "lf"}
 
 
 @pytest.mark.parametrize("source", ["host-default", "global", "env-count"])

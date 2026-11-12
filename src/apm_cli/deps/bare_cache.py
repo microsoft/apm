@@ -655,13 +655,21 @@ def materialize_from_bare(
 
     consumer_dir.parent.mkdir(parents=True, exist_ok=True)
     # --no-checkout because we want to pin line endings and disable
-    # LFS smudge BEFORE checkout writes any file content.
+    # LFS smudge BEFORE checkout writes any file content. ``--config``
+    # persists the line-ending pins in the clone itself (no extra spawn);
+    # the checkout also carries the ``-c`` pins, which outrank env
+    # snapshots. The symlink pin travels only as ``-c``: this consumer is
+    # not a reusable shard validated by ``_checkout_has_materialization_pins``.
+    line_ending_config = [
+        arg for key, val in git_line_ending_pin_entries() for arg in ("--config", f"{key}={val}")
+    ]
     subprocess.run(
         [
             git_exe,
             *git_no_hooks_args(),
             "clone",
             *git_no_templates_args(),
+            *line_ending_config,
             "--local",
             "--shared",
             "--no-checkout",
@@ -674,17 +682,6 @@ def materialize_from_bare(
         env=env,
         check=True,
     )
-    # Line-ending determinism (panel: byte-identical across users). The
-    # checkout also carries the ``-c`` pins, which outrank env snapshots.
-    for key, val in git_line_ending_pin_entries():
-        subprocess.run(
-            [git_exe, "-C", str(consumer_dir), "config", key, val],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=env,
-            check=True,
-        )
     # Disable LFS smudge cross-platform: empty-string smudge is the
     # portable equivalent of `git lfs smudge --skip`. The `cat`
     # alternative is not on Windows PATH.
