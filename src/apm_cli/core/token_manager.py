@@ -26,6 +26,7 @@ import subprocess
 import sys
 from urllib.parse import urlparse
 
+from apm_cli.utils.git_env import get_gh_executable, get_git_executable
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
@@ -189,7 +190,11 @@ class GitHubTokenManager:
 
     @staticmethod
     def resolve_credential_from_git(
-        host: str, port: int | None = None, path: str | None = None
+        host: str,
+        port: int | None = None,
+        path: str | None = None,
+        *,
+        env: dict[str, str] | None = None,
     ) -> str | None:
         """Resolve a credential from the git credential store.
 
@@ -221,14 +226,14 @@ class GitHubTokenManager:
         stdin = "\n".join(stdin_lines) + "\n\n"
         try:
             result = subprocess.run(
-                ["git", "credential", "fill"],
+                [get_git_executable(), "credential", "fill"],
                 input=stdin,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 timeout=GitHubTokenManager._get_credential_timeout(),
                 env={
-                    **os.environ,
+                    **(os.environ if env is None else env),
                     "GIT_TERMINAL_PROMPT": "0",
                     "GIT_ASKPASS": "" if sys.platform != "win32" else "echo",
                 },
@@ -264,7 +269,7 @@ class GitHubTokenManager:
             return None
         try:
             result = subprocess.run(
-                ["gh", "auth", "token", "--hostname", host],
+                [get_gh_executable(), "auth", "token", "--hostname", host],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -327,13 +332,28 @@ class GitHubTokenManager:
         if env is None:
             env = os.environ
 
+        source = self.get_token_env_var_for_purpose(purpose, env)
+        return env[source] if source is not None else None
+
+    def get_token_env_var_for_purpose(
+        self, purpose: str, env: dict[str, str] | None = None
+    ) -> str | None:
+        """Return the selected environment variable name without revealing its value.
+
+        The selected name follows the same precedence as
+        :meth:`get_token_for_purpose`. Caller-specific compatibility sources
+        are selected by AuthResolver, not by this low-level lookup.
+        """
+        if env is None:
+            env = os.environ
+
         if purpose not in self.TOKEN_PRECEDENCE:
             raise ValueError(f"Unknown purpose: {purpose}")
 
         for token_var in self.TOKEN_PRECEDENCE[purpose]:
-            token = env.get(token_var)
-            if token:
-                return token
+            if env.get(token_var):
+                return token_var
+
         return None
 
     def get_token_with_credential_fallback(

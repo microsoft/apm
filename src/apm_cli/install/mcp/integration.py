@@ -6,13 +6,77 @@ with runtime-neutral target selection.
 
 import builtins
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.mcp import MCPDependency
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+@dataclass(frozen=True)
+class PreparedMcpIntegration:
+    """Selected comparison view, filtered declarations, and pre-write omission evidence."""
+
+    dependencies: list["MCPDependency"]
+    current_view: "CurrentMcpConfigView | None"
+    omissions: dict[str, dict[str, str]] | None
+
+
+def prepare_mcp_integration(
+    *,
+    apm_package: "APMPackage",
+    mcp_deps: list["MCPDependency"],
+    apm_modules_path: Path,
+    lock_path: Path,
+    should_install: bool,
+    trust_transitive_mcp: bool,
+    logger: "InstallLogger",
+    diagnostics: "DiagnosticCollector | None" = None,
+    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
+    allow_pending: bool | None = None,
+    active_package_keys: frozenset[str] | None = None,
+) -> PreparedMcpIntegration:
+    """Collect and filter once, without native writes or ownership adoption."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.security.executables import filter_mcp_by_allow_executables
+
+    current_view = None
+    omissions = None
+    if should_install or mcp_deps or apm_modules_path.exists() or lock_path.exists():
+        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
+        current_view = CurrentMcpConfigView.derive(
+            apm_package,
+            lockfile,
+            apm_modules_path,
+            trust_transitive_self_defined=trust_transitive_mcp,
+            diagnostics=diagnostics,
+            logger=logger,
+            trusted_transitive_configs=trusted_transitive_configs,
+            allow_pending=allow_pending,
+            active_package_keys=active_package_keys,
+            include_dependency_mcp=should_install,
+        )
+        omissions = current_view.omission_evidence(lockfile or LockFile())
+    if should_install and current_view is not None:
+        root_count = len(apm_package.get_all_mcp_dependencies())
+        transitive_count = max(0, len(current_view.dependencies) - root_count)
+        if transitive_count:
+            logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
+        mcp_deps = list(current_view.dependencies)
+    return PreparedMcpIntegration(
+        filter_mcp_by_allow_executables(
+            mcp_deps, getattr(apm_package, "allow_executables", None), logger
+        ),
+        current_view if should_install else None,
+        omissions,
+    )
 
 
 def run_owned_mcp_integration(
@@ -27,11 +91,16 @@ def run_owned_mcp_integration(
     verbose: bool = False,
 ) -> int:
     """Reconcile one bundle owner's MCP servers and persist ownership."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.errors import MCPNativeConflictError
+    from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
 
     lockfile = LockFile.read(lock_path) or LockFile()
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+    old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
     owner_token = f"bundle:{owner}"
     old_owned = {
         name
@@ -50,25 +119,35 @@ def run_owned_mcp_integration(
             "Bundle MCP server name conflicts with another owner: " + ", ".join(sorted(conflicts))
         )
 
-    managed_targets = {target: set(names) for target, names in lockfile.mcp_target_servers.items()}
+    previous_targets = {target: set(names) for target, names in lockfile.mcp_target_servers.items()}
+    managed_targets = {target: names & old_owned for target, names in previous_targets.items()}
     count = 0
+    conflict = None
     if dependencies:
-        count = _OwnedMCPIntegrator.install(
-            dependencies,
-            verbose=verbose,
-            stored_mcp_configs=lockfile.mcp_configs,
-            apm_config={"targets": target_runtimes, "scripts": {}},
-            project_root=project_root,
-            user_scope=user_scope,
-            explicit_target=target_runtimes,
-            logger=logger,
-            managed_target_servers=managed_targets,
-            fail_on_write_error=True,
-        )
+        try:
+            count = _OwnedMCPIntegrator.install(
+                dependencies,
+                verbose=verbose,
+                stored_mcp_configs=lockfile.mcp_configs,
+                apm_config={"targets": target_runtimes, "scripts": {}},
+                project_root=project_root,
+                user_scope=user_scope,
+                explicit_target=target_runtimes,
+                logger=logger,
+                managed_target_servers=managed_targets,
+                native_hashes=native_hashes,
+                fail_on_write_error=True,
+            )
+        except MCPNativeConflictError as exc:
+            if not exc.wrote_connections:
+                raise
+            conflict = exc
+    selected_targets = set(managed_targets) if dependencies else set()
+    retain_deferred_mcp_claims(managed_targets, previous_targets, new_names)
     stale = old_owned - new_names
     for target, names in list(managed_targets.items()):
-        stale_for_target = stale & names
-        if stale_for_target:
+        stale_for_target = (stale if target in selected_targets else old_owned) & names
+        if stale_for_target and conflict is None:
             _OwnedMCPIntegrator.remove_stale(
                 stale_for_target,
                 runtime=target,
@@ -76,39 +155,39 @@ def run_owned_mcp_integration(
                 user_scope=user_scope,
                 scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
                 fail_on_write_error=True,
+                stored_configs=lockfile.mcp_configs,
+                native_hashes=old_native_hashes,
             )
             names.difference_update(stale_for_target)
 
-    for name in old_owned:
+    retired = old_owned if conflict is None else set()
+    for name in retired:
         lockfile.mcp_configs.pop(name, None)
         lockfile.mcp_config_provenance.pop(name, None)
-    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - old_owned) | new_names)
+    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - retired) | new_names)
     lockfile.mcp_configs.update(_OwnedMCPIntegrator.get_server_configs(dependencies))
     lockfile.mcp_config_provenance.update(dict.fromkeys(new_names, owner_token))
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         {target: sorted(names) for target, names in managed_targets.items() if names},
+        native_hashes=native_hashes,
     )
     lockfile.write(lock_path)
+    if conflict is not None:
+        raise conflict
     return count
 
 
-def _cleanup_runtimes(
+def _legacy_cleanup_runtimes(
     *,
     runtime: str | None,
     target_decision: "EffectiveTargetDecision | None",
-    owned_targets: builtins.dict | None,
-    user_scope: bool,
 ) -> list[str | None]:
-    """Return only runtimes whose APM-owned MCP state may need cleanup."""
+    """Return the project runtimes a pre-ownership lockfile's stale servers are cleaned from."""
     if runtime is not None:
         return [runtime]
-    if owned_targets:
-        return sorted(owned_targets)
     if target_decision is not None:
-        selected = target_decision.runtime_targets_for_scope(user_scope=user_scope)
+        selected = target_decision.runtime_targets_for_scope(user_scope=False)
         if selected:
             return list(selected)
     return [None]
@@ -139,6 +218,8 @@ def run_mcp_integration(  # noqa: PLR0913
     target_decision: "EffectiveTargetDecision | None" = None,
     scope=None,
     trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
+    prepared: PreparedMcpIntegration | None = None,
+    active_package_keys: frozenset[str] | None = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -188,35 +269,29 @@ def run_mcp_integration(  # noqa: PLR0913
             report the violation, and exit non-zero; already-installed APM
             packages are left in place.
     """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile
-    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.install.errors import MCPNativeConflictError
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.policy.install_preflight import run_policy_preflight
 
-    current_view = None
-    if should_install and (mcp_deps or apm_modules_path.exists()):
-        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
-        current_view = CurrentMcpConfigView.derive(
-            apm_package,
-            lockfile,
-            apm_modules_path,
-            trust_transitive_self_defined=trust_transitive_mcp,
-            diagnostics=diagnostics,
-            logger=logger,
-            trusted_transitive_configs=trusted_transitive_configs,
-        )
-        root_count = len(apm_package.get_all_mcp_dependencies())
-        transitive_count = max(0, len(current_view.dependencies) - root_count)
-        if transitive_count:
-            logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
-        mcp_deps = list(current_view.dependencies)
+    previous_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(previous_lock) if previous_lock else {}
+    old_native_hashes = {target: dict(hashes) for target, hashes in native_hashes.items()}
 
-    # allowExecutables MCP gate.
-    from apm_cli.security.executables import filter_mcp_by_allow_executables
-
-    mcp_deps = filter_mcp_by_allow_executables(
-        mcp_deps, getattr(apm_package, "allow_executables", None), logger
+    prepared = prepared or prepare_mcp_integration(
+        apm_package=apm_package,
+        mcp_deps=mcp_deps,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        should_install=should_install,
+        trust_transitive_mcp=trust_transitive_mcp,
+        logger=logger,
+        diagnostics=diagnostics,
+        trusted_transitive_configs=trusted_transitive_configs,
+        active_package_keys=active_package_keys,
     )
+    mcp_deps, current_view = prepared.dependencies, prepared.current_view
 
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP
@@ -255,20 +330,25 @@ def run_mcp_integration(  # noqa: PLR0913
         raise SystemExit(2) from exc
 
     if should_install and mcp_deps:
-        old_mcp_target_servers = old_mcp_target_servers or {}
-        if not old_mcp_target_servers_present and old_mcp_servers and old_mcp_configs:
-            from apm_cli.install.mcp.ownership import adopt_legacy_mcp_target_servers
+        from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
 
-            old_mcp_target_servers = adopt_legacy_mcp_target_servers(
-                server_names=builtins.set(old_mcp_servers),
-                stored_configs=old_mcp_configs,
-                project_root=project_root,
-                user_scope=user_scope,
-            )
+        old_mcp_target_servers = resolve_mcp_target_servers(
+            recorded_target_servers=old_mcp_target_servers or {},
+            ownership_present=old_mcp_target_servers_present,
+            server_names=builtins.set(old_mcp_servers),
+            stored_configs=old_mcp_configs,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         if target_decision is not None:
             from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
-            active_runtimes = target_decision.runtime_targets_for_scope(user_scope=user_scope)
+            # An explicit --runtime overrides the target decision, as in run_mcp_install.
+            active_runtimes = (
+                [runtime]
+                if runtime is not None
+                else target_decision.runtime_targets_for_scope(user_scope=user_scope)
+            )
             if active_runtimes is not None:
                 migrate_legacy_project_target_servers(
                     old_mcp_target_servers,
@@ -278,25 +358,54 @@ def run_mcp_integration(  # noqa: PLR0913
         managed_target_servers = {
             target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
         }
-        mcp_count = MCPIntegrator.install(
-            mcp_deps,
-            runtime,
-            exclude,
-            verbose,
-            stored_mcp_configs=old_mcp_configs,
-            apm_config=mcp_apm_config,
-            project_root=project_root,
-            user_scope=user_scope,
-            explicit_target=explicit_target,
-            target_decision=target_decision,
-            fail_on_write_error=True,
-            diagnostics=diagnostics,
-            scope=scope,
-            managed_target_servers=managed_target_servers,
-        )
+        conflict = None
+        try:
+            mcp_count = MCPIntegrator.install(
+                mcp_deps,
+                runtime,
+                exclude,
+                verbose,
+                stored_mcp_configs=old_mcp_configs,
+                apm_config=mcp_apm_config,
+                project_root=project_root,
+                user_scope=user_scope,
+                explicit_target=explicit_target,
+                target_decision=target_decision,
+                fail_on_write_error=True,
+                diagnostics=diagnostics,
+                scope=scope,
+                managed_target_servers=managed_target_servers,
+                native_hashes=native_hashes,
+            )
+        except MCPNativeConflictError as exc:
+            if not exc.wrote_connections:
+                raise
+            conflict = exc
         new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
         new_mcp_configs = dict(current_view.configs) if current_view is not None else {}
         new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
+
+        if conflict is not None:
+            from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
+
+            # No cleanup has happened: retain prior declarations and retired targets.
+            retain_deferred_mcp_claims(
+                managed_target_servers, old_mcp_target_servers, new_mcp_servers
+            )
+            new_mcp_servers |= old_mcp_servers
+            new_mcp_configs = {**old_mcp_configs, **new_mcp_configs}
+            new_mcp_provenance = {**old_mcp_provenance, **new_mcp_provenance}
+            MCPIntegrator.update_lockfile(
+                new_mcp_servers,
+                lock_path,
+                mcp_configs=new_mcp_configs,
+                mcp_target_servers=managed_target_servers,
+                mcp_config_provenance=new_mcp_provenance,
+                native_hashes=native_hashes,
+                logger=logger,
+                fail_on_write_error=True,
+            )
+            raise conflict
 
         for removed_target in sorted(
             builtins.set(old_mcp_target_servers) - builtins.set(managed_target_servers)
@@ -308,25 +417,40 @@ def run_mcp_integration(  # noqa: PLR0913
                 user_scope=user_scope,
                 scope=scope,
                 fail_on_write_error=True,
+                stored_configs=old_mcp_configs,
+                native_hashes=old_native_hashes,
             )
 
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
         if stale_servers:
-            for cleanup_runtime in _cleanup_runtimes(
-                runtime=runtime,
-                target_decision=target_decision,
-                owned_targets=managed_target_servers,
-                user_scope=user_scope,
+            cleanup_owners = {
+                target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
+            }
+            if not old_mcp_target_servers_present and not user_scope:
+                # A lockfile written before per-target ownership names no runtime for
+                # its servers, so a project install cleans the runtimes it targets,
+                # as those versions did. User scope stays ownership-only.
+                for legacy_runtime in _legacy_cleanup_runtimes(
+                    runtime=runtime, target_decision=target_decision
+                ):
+                    cleanup_owners.setdefault(legacy_runtime, builtins.set()).update(stale_servers)
+            for cleanup_runtime, owned_servers in sorted(
+                cleanup_owners.items(), key=lambda item: item[0] or ""
             ):
+                scoped_stale = stale_servers.intersection(owned_servers)
+                if not scoped_stale:
+                    continue
                 MCPIntegrator.remove_stale(
-                    stale_servers,
+                    scoped_stale,
                     cleanup_runtime,
                     exclude,
                     project_root=project_root,
                     user_scope=user_scope,
                     scope=scope,
                     fail_on_write_error=True,
+                    stored_configs=old_mcp_configs,
+                    native_hashes=old_native_hashes,
                 )
 
         # Persist the new MCP server set, configs, and transitive provenance.
@@ -336,26 +460,37 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_configs=new_mcp_configs,
             mcp_target_servers=managed_target_servers,
             mcp_config_provenance=new_mcp_provenance,
+            native_hashes=native_hashes,
             logger=logger,
             fail_on_write_error=True,
         )
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
         if old_mcp_servers:
-            for cleanup_runtime in _cleanup_runtimes(
-                runtime=runtime,
-                target_decision=target_decision,
-                owned_targets=old_mcp_target_servers,
+            from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
+
+            cleanup_owners = resolve_mcp_target_servers(
+                recorded_target_servers=old_mcp_target_servers or {},
+                ownership_present=old_mcp_target_servers_present,
+                server_names=builtins.set(old_mcp_servers),
+                stored_configs=old_mcp_configs,
+                project_root=project_root,
                 user_scope=user_scope,
-            ):
+            )
+            for cleanup_runtime, managed_servers in sorted(cleanup_owners.items()):
+                scoped_stale = builtins.set(old_mcp_servers).intersection(managed_servers)
+                if not scoped_stale:
+                    continue
                 MCPIntegrator.remove_stale(
-                    old_mcp_servers,
+                    scoped_stale,
                     cleanup_runtime,
                     exclude,
                     project_root=project_root,
                     user_scope=user_scope,
                     scope=scope,
                     fail_on_write_error=True,
+                    stored_configs=old_mcp_configs,
+                    native_hashes=old_native_hashes,
                 )
             MCPIntegrator.update_lockfile(
                 builtins.set(),
@@ -379,5 +514,12 @@ def run_mcp_integration(  # noqa: PLR0913
             logger=logger,
             fail_on_write_error=True,
         )
+
+    if prepared.omissions is not None and lock_path.exists():
+        lockfile = LockFile.read(lock_path)
+        if lockfile is not None and prepared.omissions != lockfile.mcp_omissions:
+            replace(lockfile, mcp_omissions=prepared.omissions).write(
+                lock_path, existing_lockfile=lockfile
+            )
 
     return mcp_count, mcp_apm_config

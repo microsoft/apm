@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import patch
 
 import yaml
 
@@ -284,6 +285,156 @@ class TestLspServersToApmDeps:
         assert d["startupTimeout"] == 5000
         assert d["restartOnCrash"] is True
         assert d["maxRestarts"] == 3
+
+    def test_fileextensions_alias_accepted(self, tmp_path):
+        """Copilot-dialect ``fileExtensions`` maps onto ``extensionToLanguage`` (#2509)."""
+        servers = {
+            "csharp": {
+                "command": "csharp-ls",
+                "fileExtensions": {".cs": "csharp"},
+            }
+        }
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["extensionToLanguage"] == {".cs": "csharp"}
+        assert "fileExtensions" not in deps[0]
+
+    def test_canonical_spelling_wins_over_alias(self, tmp_path):
+        servers = {
+            "dual": {
+                "command": "lsp",
+                "extensionToLanguage": {".py": "python"},
+                "fileExtensions": {".rb": "ruby"},
+            }
+        }
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["extensionToLanguage"] == {".py": "python"}
+
+    def test_alias_replaces_null_canonical_value(self, tmp_path):
+        """A null canonical value falls back to the Copilot-dialect alias."""
+        servers = {
+            "null-canonical": {
+                "command": "lsp",
+                "extensionToLanguage": None,
+                "fileExtensions": {".py": "python"},
+            }
+        }
+
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert len(deps) == 1
+        assert deps[0]["extensionToLanguage"] == {".py": "python"}
+
+    def test_conflicting_alias_and_canonical_warns(self, tmp_path):
+        """A plugin author can see that the canonical field takes precedence."""
+        servers = {
+            "dual": {
+                "command": "lsp",
+                "extensionToLanguage": {".py": "python"},
+                "fileExtensions": {".rb": "ruby"},
+            }
+        }
+
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert len(deps) == 1
+        warning = rich_warning.call_args.args[0]
+        assert "defines both 'extensionToLanguage' and 'fileExtensions'" in warning
+
+    def test_identical_alias_and_canonical_values_stay_quiet(self, tmp_path):
+        extensions = {".py": "python"}
+        servers = {
+            "dual": {
+                "command": "lsp",
+                "extensionToLanguage": extensions,
+                "fileExtensions": extensions,
+            }
+        }
+
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert len(deps) == 1
+        rich_warning.assert_not_called()
+
+    def test_warmup_timeout_ms_alias_accepted(self, tmp_path):
+        servers = {
+            "slow": {
+                "command": "lsp",
+                "extensionToLanguage": {".py": "python"},
+                "warmupTimeoutMs": 120000,
+            }
+        }
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["startupTimeout"] == 120000
+        assert "warmupTimeoutMs" not in deps[0]
+
+    def test_official_dotnet_plugin_lsp_json_accepted(self, tmp_path):
+        """End-to-end regression for #2509: the exact server config shipped by
+        the official dotnet/skills dotnet plugin must survive intake."""
+        lsp_json = tmp_path / ".lsp.json"
+        lsp_json.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "csharp": {
+                            "command": "dnx",
+                            "args": [
+                                "roslyn-language-server",
+                                "--yes",
+                                "--prerelease",
+                                "--",
+                                "--stdio",
+                                "--autoLoadProjects",
+                            ],
+                            "cwd": "${PLUGIN_ROOT}",
+                            "fileExtensions": {
+                                ".cs": "csharp",
+                                ".razor": "aspnetcorerazor",
+                                ".cshtml": "aspnetcorerazor",
+                            },
+                            "warmupTimeoutMs": 120000,
+                        }
+                    }
+                }
+            )
+        )
+        servers = _extract_lsp_servers(tmp_path, {})
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        d = deps[0]
+        assert d["name"] == "csharp"
+        assert d["command"] == "dnx"
+        assert d["extensionToLanguage"][".razor"] == "aspnetcorerazor"
+        assert d["startupTimeout"] == 120000
+        # Copilot-dialect and unsupported keys must not leak into the dep
+        assert "fileExtensions" not in d
+        assert "warmupTimeoutMs" not in d
+        assert "cwd" not in d
+        warning = rich_warning.call_args.args[0]
+        assert "uses unsupported 'cwd'" in warning
+        assert "consumer runtime chooses the working directory" in warning
+
+    def test_invalid_copilot_alias_keeps_default_warning(self, tmp_path):
+        """Invalid alias values remain visible through the normal warning path."""
+        servers = {
+            "invalid": {
+                "command": "lsp",
+                "fileExtensions": [".cs"],
+            }
+        }
+
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+
+        assert deps == []
+        warning = rich_warning.call_args.args[0]
+        assert "Skipping invalid LSP server 'invalid'" in warning
+        assert "after normalizing 'fileExtensions' to 'extensionToLanguage'" in warning
 
     def test_wrapped_lsp_json_produces_valid_deps(self, tmp_path):
         """End-to-end: .lsp.json with lspServers wrapper yields valid deps."""

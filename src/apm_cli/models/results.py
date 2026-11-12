@@ -35,6 +35,10 @@ class InstallResult:
     committed: bool = False
     error: BaseException | None = field(default=None, repr=False)
     target_decision: EffectiveTargetDecision | None = None
+    exec_allow_map: dict[str, dict[str, bool]] | None = None
+    exec_allow_resolved: bool = False
+    # None is unavailable graph evidence; an empty set is a resolved empty graph.
+    active_package_keys: frozenset[str] | None = None
 
 
 @dataclass

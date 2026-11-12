@@ -21,9 +21,11 @@ from typing import Any
 
 import yaml
 
-from ..utils.atomic_io import write_text_lf
+from ..bundle.plugin_layout import plugin_command_prompt_name
+from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
+from ..utils.paths import portable_relpath
 
 _logger = logging.getLogger(__name__)
 
@@ -36,6 +38,10 @@ _logger = logging.getLogger(__name__)
 # Cap the file size first, then funnel every parse failure into a single
 # ``ValueError`` so callers fail closed with one except type.
 _MAX_PLUGIN_JSON_BYTES = 5 * 1024 * 1024
+_LSP_FIELD_ALIASES = (
+    ("extensionToLanguage", "fileExtensions"),
+    ("startupTimeout", "warmupTimeoutMs"),
+)
 _PLUGIN_SKILL_SOURCES_FILE = ".plugin-skill-sources.json"
 
 
@@ -95,20 +101,11 @@ def _assert_no_symlink_descendants(target: Path) -> None:
 
 
 def _surface_warning(message: str, logger: logging.Logger) -> None:
-    """Emit a warning to both the stdlib logger and the rich console.
-
-    The ``apm`` stdlib logger has no handlers configured by default, so
-    ``logger.warning`` calls are silently dropped in non-debug runs. For
-    user-visible plugin-parse issues (skipped MCP servers, validation
-    failures), also route through ``_rich_warning`` so the user sees them
-    even without ``--verbose``. Falls back gracefully if Rich is unavailable.
-    """
-    logger.warning(message)
-    try:  # noqa: SIM105
+    """Emit one standard user-facing warning, with logging as fallback."""
+    try:
         _rich_warning(message, symbol="warning")
     except Exception:
-        # Console output is best-effort; never mask the underlying warning.
-        pass
+        logger.warning(message)
 
 
 def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> bool:
@@ -357,6 +354,13 @@ def normalized_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, Path],
     return resolved, declared
 
 
+def has_normalized_plugin_skill_sources_receipt(plugin_path: Path) -> bool:
+    """Return whether parser-owned plugin skill membership is present."""
+    apm_dir = plugin_path.resolve() / ".apm"
+    receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+    return not apm_dir.is_symlink() and receipt.is_file() and not receipt.is_symlink()
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,
@@ -484,7 +488,10 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     ):
         manifest = parse_plugin_manifest(plugin_json_path)
         from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
-        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+        from ..install.primitive_classification import (
+            PluginSchemaRoute,
+            classify_plugin_manifest_schema,
+        )
 
         if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
             raise AgentPluginLegacyBoundaryError(
@@ -498,7 +505,13 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
             raise ValueError("Present root plugin.json must declare a non-empty name")
         manifest["name"] = plugin_path.name
 
-    return synthesize_apm_yml_from_plugin(plugin_path, manifest)
+    # Keep the generated manifest portable. APMPackage expands the placeholder
+    # when it loads the manifest, using the package's current published root.
+    return synthesize_apm_yml_from_plugin(
+        plugin_path,
+        manifest,
+        substitute_plugin_root=False,
+    )
 
 
 def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, Any]) -> None:
@@ -537,7 +550,16 @@ def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, An
             )
 
 
-def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) -> Path:
+def synthesize_apm_yml_from_plugin(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    output_path: Path | None = None,
+    map_artifacts: bool = True,
+    merge_existing: bool = True,
+    substitute_plugin_root: bool = True,
+    warn_on_invalid_servers: bool = True,
+) -> Path:
     """Synthesize apm.yml from plugin metadata.
 
     Maps the plugin's agents/, skills/, commands/, hooks/ directories and
@@ -554,6 +576,11 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
         plugin_path: Path to the plugin directory.
         manifest: Plugin metadata dict (only `name` is required; all other
                   fields are optional and default gracefully).
+        output_path: Optional staged manifest destination.
+        map_artifacts: Whether to copy plugin artifacts into ``.apm``.
+        merge_existing: Whether to preserve an existing package manifest.
+        substitute_plugin_root: Whether to resolve plugin-root placeholders.
+        warn_on_invalid_servers: Whether skipped server entries emit warnings.
 
     Returns:
         Path: Path to the generated apm.yml.
@@ -563,36 +590,52 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
 
     _validate_declared_component_paths(plugin_path, manifest)
 
-    # Create .apm directory structure
-    apm_dir = plugin_path / ".apm"
-    apm_dir.mkdir(exist_ok=True)
-
-    # Map plugin structure into .apm/ subdirectories
-    _map_plugin_artifacts(plugin_path, apm_dir, manifest)
+    if map_artifacts:
+        apm_dir = plugin_path / ".apm"
+        apm_dir.mkdir(exist_ok=True)
+        _map_plugin_artifacts(plugin_path, apm_dir, manifest)
 
     # Extract MCP servers from plugin and convert to dependency format
-    mcp_servers = _extract_mcp_servers(plugin_path, manifest)
+    mcp_servers = _extract_mcp_servers(
+        plugin_path,
+        manifest,
+        substitute_plugin_root=substitute_plugin_root,
+        warn_on_invalid=warn_on_invalid_servers,
+    )
     if mcp_servers:
-        mcp_deps = _mcp_servers_to_apm_deps(mcp_servers, plugin_path)
+        mcp_deps = _mcp_servers_to_apm_deps(
+            mcp_servers,
+            plugin_path,
+            warn_on_invalid=warn_on_invalid_servers,
+        )
         if mcp_deps:
             manifest["_mcp_deps"] = mcp_deps
 
     # Extract LSP servers from plugin and convert to dependency format
-    lsp_servers = _extract_lsp_servers(plugin_path, manifest)
+    lsp_servers = _extract_lsp_servers(
+        plugin_path,
+        manifest,
+        substitute_plugin_root=substitute_plugin_root,
+    )
     if lsp_servers:
-        lsp_deps = _lsp_servers_to_apm_deps(lsp_servers, plugin_path)
+        lsp_deps = lsp_servers_to_apm_deps(
+            lsp_servers,
+            plugin_path,
+            warn_on_invalid=warn_on_invalid_servers,
+        )
         if lsp_deps:
             manifest["_lsp_deps"] = lsp_deps
 
     # Load existing apm.yml as base so resolution-critical blocks are not
     # discarded when the synthesized manifest overwrites the file (#1666).
-    apm_yml_path = plugin_path / "apm.yml"
+    source_apm_yml_path = plugin_path / "apm.yml"
+    apm_yml_path = output_path or source_apm_yml_path
     existing_manifest: dict[str, Any] | None = None
-    if apm_yml_path.exists():
+    if merge_existing and source_apm_yml_path.exists():
         try:
             from ..utils.yaml_io import load_yaml
 
-            data = load_yaml(apm_yml_path)
+            data = load_yaml(source_apm_yml_path)
             if isinstance(data, dict):
                 existing_manifest = data
         except (OSError, yaml.YAMLError) as exc:
@@ -613,7 +656,10 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     # platform-native text-mode write (CRLF on Windows) would make the
     # lockfile content_hash diverge across OSes. Mirrors the #2223 fix for
     # download_virtual_file_package().
-    write_text_lf(apm_yml_path, apm_yml_content)
+    if output_path is None:
+        write_text_lf(apm_yml_path, apm_yml_content)
+    else:
+        atomic_write_text(apm_yml_path, apm_yml_content, new_file_mode=0o644)
 
     # The file content just changed: drop stale from_apm_yml cache entries,
     # or a same-process re-download of this package would read the OLD
@@ -626,12 +672,18 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     return apm_yml_path
 
 
-def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def _extract_mcp_servers(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    substitute_plugin_root: bool = True,
+    warn_on_invalid: bool = True,
+) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
 
     Resolves ``mcpServers`` by type (per Claude Code spec):
-    - ``str``  -> read that file path relative to plugin root, parse JSON,
-      extract ``mcpServers`` key.
+    - ``str``  -> read that file path relative to plugin root and parse it
+      as wrapped or flat MCP JSON (see :func:`_read_mcp_json`).
     - ``list`` -> read each file path, merge (last-wins on name conflict).
     - ``dict`` -> use directly as inline server definitions.
 
@@ -648,24 +700,28 @@ def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
     Args:
         plugin_path: Root of the plugin directory.
         manifest: Parsed plugin.json dict.
+        substitute_plugin_root: Whether to resolve plugin-root placeholders.
+        warn_on_invalid: Whether an MCP file with no usable server warns.
 
     Returns:
         dict mapping server name -> server config.  Empty on failure.
     """
     logger = logging.getLogger("apm")
     mcp_value = manifest.get("mcpServers")
+    plugin_name = str(manifest.get("name") or plugin_path.name)
+    read_options: dict[str, Any] = {"plugin_name": plugin_name, "warn": warn_on_invalid}
 
     if mcp_value is not None:
         # Manifest explicitly defines mcpServers
         if isinstance(mcp_value, dict):
             servers = dict(mcp_value)
         elif isinstance(mcp_value, str):
-            servers = _read_mcp_file(plugin_path, mcp_value, logger)
+            servers = _read_mcp_file(plugin_path, mcp_value, logger, **read_options)
         elif isinstance(mcp_value, list):
             servers = {}
             for entry in mcp_value:
                 if isinstance(entry, str):
-                    servers.update(_read_mcp_file(plugin_path, entry, logger))
+                    servers.update(_read_mcp_file(plugin_path, entry, logger, **read_options))
                 else:
                     logger.warning("Ignoring non-string entry in mcpServers array: %s", entry)
         else:
@@ -677,20 +733,27 @@ def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
         for fallback in ("mcp.json", ".mcp.json", ".github/.mcp.json"):
             candidate = plugin_path / fallback
             if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
-                servers = _read_mcp_json(candidate, logger)
+                servers = _read_mcp_json(candidate, logger, plugin_path=plugin_path, **read_options)
                 if servers:
                     break
 
     # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers:
+    if servers and substitute_plugin_root:
         abs_root = str(plugin_path.resolve())
         servers = _substitute_plugin_root(servers, abs_root, logger)
 
     return servers
 
 
-def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> dict[str, Any]:
-    """Read a JSON file relative to *plugin_path* and return its ``mcpServers`` dict."""
+def _read_mcp_file(
+    plugin_path: Path,
+    rel_path: str,
+    logger: logging.Logger,
+    *,
+    plugin_name: str | None = None,
+    warn: bool = True,
+) -> dict[str, Any]:
+    """Read a JSON file relative to *plugin_path* and return its MCP server map."""
     target = (plugin_path / rel_path).resolve()
     # Security: must stay inside plugin_path and not be a symlink
     try:
@@ -705,47 +768,100 @@ def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> 
     if candidate.is_symlink():
         logger.warning("Skipping symlinked MCP file: %s", candidate)
         return {}
-    return _read_mcp_json(candidate, logger)
+    return _read_mcp_json(
+        candidate, logger, plugin_path=plugin_path, plugin_name=plugin_name, warn=warn
+    )
 
 
-def _read_mcp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
-    """Parse a JSON file and return the ``mcpServers`` mapping."""
+def _read_mcp_json(
+    path: Path,
+    logger: logging.Logger,
+    *,
+    plugin_path: Path | None = None,
+    plugin_name: str | None = None,
+    warn: bool = True,
+) -> dict[str, Any]:
+    """Parse an MCP JSON file and return its server mapping.
+
+    Accepts the two shapes Claude Code documents for plugin MCP files:
+    - Wrapped: ``{"mcpServers": {"name": {...}}}``. Returned unchanged.
+    - Flat: ``{"name": {...}}``. Accepted only when every value is a server
+      object, so unrelated top-level keys never become servers.
+
+    A file that yields no server object emits one user-facing warning that
+    names only the file and plugin, never file contents.
+    """
     try:
         data = _bounded_read_json(path)
     except (ValueError, OSError) as exc:
-        logger.warning("Failed to read MCP config %s: %s", path, exc)
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    servers = data.get("mcpServers", {})
-    return dict(servers) if isinstance(servers, dict) else {}
+        logger.debug("Failed to read MCP config %s: %s", path, exc)
+        data = None
+    servers: dict[str, Any] = {}
+    if isinstance(data, dict):
+        if "mcpServers" in data:
+            wrapped = data["mcpServers"]
+            if isinstance(wrapped, dict):
+                servers = dict(wrapped)
+        elif all(isinstance(value, dict) for value in data.values()):
+            servers = dict(data)
+    if warn and not any(isinstance(value, dict) for value in servers.values()):
+        root = plugin_path if plugin_path is not None else path.parent
+        _surface_warning(
+            f"MCP config '{portable_relpath(path, root)}' in plugin "
+            f"'{plugin_name or root.name}' declares no usable MCP servers; expected "
+            '{"mcpServers": {...}} or a top-level map of server objects',
+            logger,
+        )
+    return servers
 
 
 def _substitute_plugin_root(
     servers: dict[str, Any], abs_root: str, logger: logging.Logger
 ) -> dict[str, Any]:
     """Replace ``${CLAUDE_PLUGIN_ROOT}`` in server config string values."""
-    placeholder = "${CLAUDE_PLUGIN_ROOT}"
-    substituted = False
-
-    def _walk(obj: Any) -> Any:
-        nonlocal substituted
-        if isinstance(obj, str) and placeholder in obj:
-            substituted = True
-            return obj.replace(placeholder, abs_root)
-        if isinstance(obj, dict):
-            return {k: _walk(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_walk(item) for item in obj]
-        return obj
-
-    result = {name: _walk(cfg) for name, cfg in servers.items()}
-    if substituted:
+    result = resolve_plugin_root_placeholders(servers, Path(abs_root))
+    if result != servers:
         logger.info("Substituted ${CLAUDE_PLUGIN_ROOT} with %s", abs_root)
     return result
 
 
-def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
+def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
+    """Resolve plugin-root placeholders in an in-memory manifest value."""
+    if isinstance(value, str):
+        return value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_path.resolve()))
+    if isinstance(value, dict):
+        return {
+            key: resolve_plugin_root_placeholders(item, plugin_path) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [resolve_plugin_root_placeholders(item, plugin_path) for item in value]
+    return value
+
+
+def rebase_plugin_root_paths(value: Any, old_root: Path, new_root: Path) -> Any:
+    """Repoint already-substituted plugin-root paths at a new package root.
+
+    Exact inverse of :func:`resolve_plugin_root_placeholders`: the placeholder
+    may sit anywhere in a string and appear more than once, so every occurrence
+    of *old_root* is swapped rather than only a leading path prefix.
+    """
+    if isinstance(value, str):
+        return value.replace(str(old_root), str(new_root))
+    if isinstance(value, dict):
+        return {
+            key: rebase_plugin_root_paths(item, old_root, new_root) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [rebase_plugin_root_paths(item, old_root, new_root) for item in value]
+    return value
+
+
+def _mcp_servers_to_apm_deps(
+    servers: dict[str, Any],
+    plugin_path: Path,
+    *,
+    warn_on_invalid: bool = True,
+) -> list[dict[str, Any]]:
     """Convert raw MCP server configs to ``dependencies.mcp`` dicts.
 
     Transport inference:
@@ -777,7 +893,8 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
 
     for name, cfg in servers.items():
         if not isinstance(cfg, dict):
-            logger.warning("Skipping non-dict MCP server config '%s'", name)
+            if warn_on_invalid:
+                logger.warning("Skipping non-dict MCP server config '%s'", name)
             continue
 
         dep: dict[str, Any] = {"name": name, "registry": False}
@@ -795,11 +912,12 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
             if "headers" in cfg:
                 dep["headers"] = cfg["headers"]
         else:
-            _surface_warning(
-                f"Skipping MCP server '{name}' from plugin "
-                f"'{plugin_path.name}': no 'command' or 'url'",
-                logger,
-            )
+            if warn_on_invalid:
+                _surface_warning(
+                    f"Skipping MCP server '{name}' from plugin "
+                    f"'{plugin_path.name}': no 'command' or 'url'",
+                    logger,
+                )
             continue
 
         if "env" in cfg:
@@ -815,10 +933,11 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
         try:
             MCPDependency.from_dict(dep)
         except (ValueError, Exception) as exc:
-            _surface_warning(
-                f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
-                logger,
-            )
+            if warn_on_invalid:
+                _surface_warning(
+                    f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
+                    logger,
+                )
             continue
 
         deps.append(dep)
@@ -826,7 +945,12 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
     return deps
 
 
-def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def _extract_lsp_servers(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    substitute_plugin_root: bool = True,
+) -> dict[str, Any]:
     """Extract LSP server definitions from a plugin manifest.
 
     Resolves ``lspServers`` by type (per Claude Code spec):
@@ -870,7 +994,7 @@ def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
                     break
 
     # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers:
+    if servers and substitute_plugin_root:
         abs_root = str(plugin_path.resolve())
         servers = _substitute_plugin_root(servers, abs_root, logger)
 
@@ -929,12 +1053,25 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     return dict(data)
 
 
-def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
+def lsp_servers_to_apm_deps(
+    servers: dict[str, Any],
+    plugin_path: Path,
+    *,
+    warn_on_invalid: bool = True,
+) -> list[dict[str, Any]]:
     """Convert raw LSP server configs to ``dependencies.lsp`` dicts.
 
     Required fields per Claude Code spec:
     - ``command``: binary to run
     - ``extensionToLanguage``: mapping of file extensions to language IDs
+
+    Copilot-dialect spellings are accepted as aliases (#2509): plugins
+    authored against the Copilot CLI schema -- including the official
+    ``dotnet/skills`` dotnet plugin -- write the extension map as
+    ``fileExtensions`` and the startup budget as ``warmupTimeoutMs``.
+    APM itself emits ``fileExtensions`` when generating Copilot output,
+    so rejecting it on intake would drop servers that every supported
+    consumer runtime accepts. Canonical names win when both are present.
 
     All resulting entries are routed through ``LSPDependency.from_dict()``
     for validation. Entries that fail validation are skipped with a warning.
@@ -953,10 +1090,12 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
 
     for name, cfg in servers.items():
         if not isinstance(cfg, dict):
-            logger.warning("Skipping non-dict LSP server config '%s'", name)
+            if warn_on_invalid:
+                logger.warning("Skipping non-dict LSP server config '%s'", name)
             continue
 
         dep: dict[str, Any] = {"name": name}
+        aliases_used: list[tuple[str, str]] = []
 
         # Copy all recognized fields
         for key in (
@@ -976,19 +1115,59 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
             if key in cfg:
                 dep[key] = cfg[key]
 
+        # Copilot-dialect aliases; canonical spelling wins when both exist.
+        for canonical, alias in _LSP_FIELD_ALIASES:
+            if dep.get(canonical) is None and alias in cfg:
+                dep[canonical] = cfg[alias]
+                aliases_used.append((alias, canonical))
+                logger.debug(
+                    "Normalizing LSP server '%s' from plugin '%s': '%s' to '%s'",
+                    name,
+                    plugin_path.name,
+                    alias,
+                    canonical,
+                )
+            elif canonical in dep and alias in cfg and dep[canonical] != cfg[alias]:
+                _surface_warning(
+                    f"LSP server '{name}' from plugin '{plugin_path.name}' defines both "
+                    f"'{canonical}' and '{alias}'; using '{canonical}'.",
+                    logger,
+                )
+
+        # ``cwd`` has no LSPDependency equivalent: APM-managed servers are
+        # started by the consumer runtime in its own working directory.
+        # Ignore it explicitly rather than letting it look like a typo.
+        if "cwd" in cfg:
+            _surface_warning(
+                f"LSP server '{name}' from plugin '{plugin_path.name}' uses unsupported "
+                "'cwd'; the consumer runtime chooses the working directory.",
+                logger,
+            )
+
         # Route through the validation chokepoint
         try:
             LSPDependency.from_dict(dep)
         except Exception as exc:
-            _surface_warning(
-                f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
-                logger,
-            )
+            if warn_on_invalid:
+                alias_context = ""
+                if aliases_used:
+                    normalized = ", ".join(
+                        f"'{alias}' to '{canonical}'" for alias, canonical in aliases_used
+                    )
+                    alias_context = f" after normalizing {normalized}"
+                _surface_warning(
+                    f"Skipping invalid LSP server '{name}' from plugin "
+                    f"'{plugin_path.name}'{alias_context}: {exc}",
+                    logger,
+                )
             continue
 
         deps.append(dep)
 
     return deps
+
+
+_lsp_servers_to_apm_deps = lsp_servers_to_apm_deps
 
 
 def _map_plugin_artifacts(
@@ -1150,8 +1329,7 @@ def _map_plugin_artifacts(
                 target_path = dest_dir / relative_path
             else:
                 target_path = dest_dir / source_file.name
-            if not source_file.name.endswith(".prompt.md") and source_file.suffix == ".md":
-                target_path = target_path.with_name(f"{source_file.stem}.prompt.md")
+            target_path = target_path.with_name(plugin_command_prompt_name(source_file.name))
             target_path.parent.mkdir(parents=True, exist_ok=True)
             if _is_same_path(source_file, target_path):
                 return
@@ -1327,14 +1505,35 @@ def _union_dep_list(
 ) -> None:
     """Append *new_entries* into ``merged[key]`` without duplicates.
 
-    Both string entries and dict entries (e.g. ``{git: parent, path: ...}``)
-    are handled.  Equality is checked with ``==`` which works correctly for
-    both types.
+    Both string entries and nested mapping entries are handled. A hashable
+    structural key keeps merging linear while preserving equality semantics.
     """
     existing = merged.setdefault(key, [])
+    seen = {_dependency_entry_key(entry) for entry in existing}
     for entry in new_entries:
-        if entry not in existing:
-            existing.append(entry)
+        entry_key = _dependency_entry_key(entry)
+        if entry_key in seen:
+            continue
+        existing.append(entry)
+        seen.add(entry_key)
+
+
+def _dependency_entry_key(value: Any) -> Any:
+    """Return a hashable structural key for a manifest dependency entry."""
+    if isinstance(value, dict):
+        return (
+            "dict",
+            frozenset((key, _dependency_entry_key(item)) for key, item in value.items()),
+        )
+    if isinstance(value, list):
+        return ("list", tuple(_dependency_entry_key(item) for item in value))
+    if isinstance(value, tuple):
+        return ("tuple", tuple(_dependency_entry_key(item) for item in value))
+    try:
+        hash(value)
+    except TypeError:
+        return ("repr", repr(value))
+    return ("scalar", type(value).__qualname__, value)
 
 
 def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:

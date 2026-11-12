@@ -11,16 +11,20 @@ class PackageRegistryFeatureDisabledError(ValueError):
     """Raised when registries behavior is used without opt-in."""
 
 
-def is_package_registry_enabled() -> bool:
+def is_package_registry_enabled(*, create_config: bool = True) -> bool:
     """Return whether the registries experimental flag is enabled."""
     from apm_cli.core.experimental import is_enabled
 
-    return is_enabled(FLAG_NAME)
+    return is_enabled(FLAG_NAME, create_config=create_config)
 
 
-def require_package_registry_enabled(action: str = "APM package registries") -> None:
+def require_package_registry_enabled(
+    action: str = "APM package registries",
+    *,
+    create_config: bool = True,
+) -> None:
     """Raise a consistent error if REST package registries are disabled."""
-    if is_package_registry_enabled():
+    if is_package_registry_enabled(create_config=create_config):
         return
     raise PackageRegistryFeatureDisabledError(
         f"{action} requires the experimental {DISPLAY_NAME} feature. "

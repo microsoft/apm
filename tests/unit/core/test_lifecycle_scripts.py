@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 from apm_cli.core.lifecycle_scripts import (
@@ -16,6 +18,7 @@ from apm_cli.core.lifecycle_scripts import (
     PackageInfo,
     ScriptEntry,
     _entries_from_lifecycle_map,
+    _get_policy_scripts_dir,
     build_runner_from_context,
     discover_scripts,
     parse_apm_yml_lifecycle,
@@ -151,6 +154,65 @@ class TestParseApmYmlLifecycle:
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo ok"}]}},
         )
         assert parse_project_script_file(path) == parse_apm_yml_lifecycle(path, "project")
+
+
+@pytest.mark.windows_compat
+class TestGetPolicyScriptsDir:
+    def test_windows_honours_programdata_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.setenv("PROGRAMDATA", r"D:\ProgramData")
+        assert _get_policy_scripts_dir() == Path(r"D:\ProgramData") / "APM" / "policy.d"
+
+    def test_windows_falls_back_to_c_drive_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.delenv("PROGRAMDATA", raising=False)
+        assert _get_policy_scripts_dir() == Path(r"C:\ProgramData") / "APM" / "policy.d"
+
+    @pytest.mark.parametrize("program_data", ["", "relative"])
+    def test_windows_falls_back_when_programdata_is_unsafe(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        program_data: str,
+    ) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.setenv("PROGRAMDATA", program_data)
+        assert _get_policy_scripts_dir() == Path(r"C:\ProgramData") / "APM" / "policy.d"
+
+    def test_windows_discovers_policy_scripts_from_programdata(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        if os.name == "nt":
+            program_data = tmp_path / "ProgramData"
+            program_data_value = str(program_data)
+        else:
+            program_data_value = r"D:\ProgramData"
+            program_data = tmp_path / program_data_value
+            monkeypatch.chdir(tmp_path)
+        script_file = program_data / "APM" / "policy.d" / "admin.json"
+        script_file.parent.mkdir(parents=True)
+        script_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "scripts": {"post-install": [{"type": "command", "command": "echo admin"}]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.setenv("PROGRAMDATA", program_data_value)
+
+        entries = discover_scripts(project_root=str(tmp_path / "project"))
+
+        assert [(entry.source, entry.command) for entry in entries] == [("policy", "echo admin")]
+
+    def test_non_windows_uses_etc(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Linux")
+        assert _get_policy_scripts_dir() == Path("/etc/apm/policy.d")
 
 
 class TestDiscoverScripts:

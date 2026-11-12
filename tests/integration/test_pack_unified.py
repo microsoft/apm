@@ -625,6 +625,45 @@ class TestCheckCleanDriftRecipe:
 class TestCheckCleanEffectiveOutputPath:
     """Integration tests: --check-clean uses pack's effective output path."""
 
+    def test_check_clean_preserves_legacy_lockfile_and_reports_read_only(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """The read-only gate must preserve every existing project file."""
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "\nmarketplace:\n", "\ndependencies: {}\n\nmarketplace:\n"
+            ),
+            encoding="utf-8",
+        )
+        _write_minimal_lockfile(tmp_path)
+        packed = runner.invoke(pack_cmd, ["--offline"])
+        assert packed.exit_code == 0, packed.output
+
+        canonical_lock = tmp_path / "apm.lock.yaml"
+        legacy_lock = tmp_path / "apm.lock"
+        canonical_lock.rename(legacy_lock)
+        before = {
+            path.relative_to(tmp_path).as_posix(): path.read_bytes()
+            for path in tmp_path.rglob("*")
+            if path.is_file()
+        }
+
+        checked = runner.invoke(pack_cmd, ["--check-clean", "--offline", "--json"])
+
+        assert checked.exit_code == 0, checked.output
+        assert json.loads(checked.output)["dry_run"] is True
+        after = {
+            path.relative_to(tmp_path).as_posix(): path.read_bytes()
+            for path in tmp_path.rglob("*")
+            if path.is_file()
+        }
+        assert after == before
+        assert legacy_lock.is_file()
+        assert not canonical_lock.exists()
+
     def test_check_clean_uses_marketplace_path_override(self, runner, tmp_path, monkeypatch):
         """The clean gate must compare the artifact selected by the CLI override."""
         monkeypatch.chdir(tmp_path)

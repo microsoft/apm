@@ -3,13 +3,13 @@
 Regression-trap for the worst silent failure the cache layer could
 introduce: lockfile drift between cached and non-cached runs. If
 ``apm install`` produces a different ``apm.lock.yaml`` (modulo the
-``generated_at`` write-timestamp) when ``APM_NO_CACHE=1`` is set vs.
+optional legacy ``generated_at`` write metadata) when ``APM_NO_CACHE=1`` is set vs.
 when the cache is hot, a CI run that ships with a stale cache would
 commit a lockfile that disagrees with the reproducible-from-scratch
 baseline -- and downstream installs would diverge.
 
 The contract: ``apm install`` from the same ``apm.yml`` MUST produce
-a content-identical lockfile (excluding ``generated_at``) regardless
+a content-identical lockfile (excluding legacy ``generated_at`` metadata) regardless
 of cache state. This test asserts it across three regimes:
 
   Run A: cold cache (cache empty)
@@ -61,10 +61,10 @@ def _run_install(
 def _lockfile_sha(project: Path) -> str:
     """Hash the lockfile excluding the `generated_at` line.
 
-    `generated_at` is a wall-clock timestamp captured at write time, so it
-    necessarily differs between independent runs. The parity invariant is
-    about resolution outcome (resolved_commit, content_hash, deployed_files,
-    package_type, ...), not the write timestamp.
+    Legacy lockfiles may carry `generated_at`, a wall-clock timestamp refreshed
+    at write time. The parity invariant is about resolution outcome
+    (resolved_commit, content_hash, deployed_files, package_type, ...), not
+    optional compatibility metadata.
     """
     lock = project / "apm.lock.yaml"
     assert lock.is_file(), "apm.lock.yaml not produced by install"
@@ -95,7 +95,7 @@ def test_lockfile_byte_identical_across_cache_regimes(
     hermetic_packaged_sample: HermeticPackagedSample,
     tmp_path: Path,
 ) -> None:
-    """A, B, C must produce content-identical apm.lock.yaml (modulo `generated_at`).
+    """A, B, C must match after excluding optional legacy `generated_at` metadata.
 
     A: cold cache (fresh APM_CACHE_DIR pointing at empty dir)
     B: warm cache (same dir, second run reuses entries)

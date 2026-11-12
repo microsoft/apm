@@ -1,17 +1,16 @@
-"""Integration tests for the experimental 'hermes' target.
+"""Integration tests for the stable explicit-only 'hermes' target.
 
 Covers:
-  1. Flag OFF  -> parser accepts hermes, enable-hint emitted, exits 0.
-  2. Flag ON + --global -> skill deployed to ~/.hermes/skills/<name>/SKILL.md,
+  1. Parser accepts Hermes without an experimental flag.
+  2. --global -> skill deployed to ~/.hermes/skills/<name>/SKILL.md,
      NOT to ~/.agents/skills/<name>/SKILL.md.
   3. Flag ON + project scope -> skill deployed to <ws>/.agents/skills/<name>/SKILL.md.
-  4. Parser-layer constants: hermes in VALID_TARGET_VALUES / EXPERIMENTAL_TARGETS,
+  4. Parser-layer constants: hermes in VALID_TARGET_VALUES / EXPLICIT_ONLY_TARGETS,
      not in ALL_CANONICAL_TARGETS; TargetParamType accepts single + multi.
   5. compile -t hermes routes to the agents family (AGENTS.md emission).
 
-Mirrors the openclaw E2E idiom (fake_home fixture patching Path.home,
-apm_cli.config.CONFIG_DIR/CONFIG_FILE, and injecting _config_cache for
-experimental flag control).  See tests/integration/test_openclaw_target.py.
+Uses an isolated home by patching Path.home and
+apm_cli.config.CONFIG_DIR/CONFIG_FILE.
 """
 
 from __future__ import annotations
@@ -110,7 +109,7 @@ def _make_plugin_bundle(tmp_path: Path) -> Path:
 class TestHermesParserE2E:
     """CliRunner tests for 'apm install --target hermes'."""
 
-    def test_flag_off_parser_accepts_and_emits_hint(
+    def test_parser_accepts_without_experimental_hint(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         config_file = fake_home / ".apm" / "config.json"
@@ -134,9 +133,7 @@ class TestHermesParserE2E:
             f"Parser rejecting 'hermes' -- VALID_TARGET_VALUES may be wrong.\nOutput:\n{combined}"
         )
         normalized = " ".join(combined.split())
-        assert "apm experimental enable hermes" in normalized, (
-            f"Enable hint not found -- targets phase may not have run.\nOutput:\n{combined}"
-        )
+        assert "apm experimental enable hermes" not in normalized
 
 
 # ===========================================================================
@@ -150,10 +147,6 @@ class TestHermesDeployE2E:
     def test_global_deploys_to_hermes_skills(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import apm_cli.config as _conf
-
-        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"hermes": True}})
-
         user_apm = fake_home / ".apm"
         user_apm.mkdir(parents=True, exist_ok=True)
         _write_minimal_apm_yml(user_apm)
@@ -188,10 +181,6 @@ class TestHermesDeployE2E:
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """$HERMES_HOME redirects the user-scope skills deploy root."""
-        import apm_cli.config as _conf
-
-        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"hermes": True}})
-
         custom = fake_home / "custom-hermes"
         monkeypatch.setenv("HERMES_HOME", str(custom))
 
@@ -221,10 +210,6 @@ class TestHermesDeployE2E:
     def test_project_scope_deploys_to_agents_skills(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import apm_cli.config as _conf
-
-        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"hermes": True}})
-
         bundle = _make_plugin_bundle(tmp_path / "src")
 
         project = tmp_path / "project"
@@ -274,10 +259,11 @@ class TestHermesConstants:
 
         assert "hermes" not in ALL_CANONICAL_TARGETS
 
-    def test_hermes_in_experimental_targets(self) -> None:
-        from apm_cli.core.target_detection import EXPERIMENTAL_TARGETS
+    def test_hermes_is_stable_explicit_only(self) -> None:
+        from apm_cli.core.target_detection import EXPERIMENTAL_TARGETS, EXPLICIT_ONLY_TARGETS
 
-        assert "hermes" in EXPERIMENTAL_TARGETS
+        assert "hermes" not in EXPERIMENTAL_TARGETS
+        assert "hermes" in EXPLICIT_ONLY_TARGETS
 
     def test_hermes_parser_accepts_single(self) -> None:
         from apm_cli.core.target_detection import TargetParamType
@@ -295,11 +281,10 @@ class TestHermesConstants:
         assert "hermes" in result
         assert "claude" in result
 
-    def test_hermes_flag_registered(self) -> None:
+    def test_hermes_flag_removed(self) -> None:
         from apm_cli.core.experimental import FLAGS
 
-        assert "hermes" in FLAGS
-        assert FLAGS["hermes"].default is False
+        assert "hermes" not in FLAGS
 
     def test_hermes_compiles_agents_md(self) -> None:
         from apm_cli.core.target_detection import should_compile_agents_md
@@ -318,10 +303,6 @@ class TestHermesCompileE2E:
     def test_compile_hermes_emits_agents_md(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import apm_cli.config as _conf
-
-        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"hermes": True}})
-
         project = tmp_path / "project"
         instructions = project / ".apm" / "instructions"
         instructions.mkdir(parents=True)
@@ -353,57 +334,89 @@ class TestHermesCompileE2E:
 
 
 # ===========================================================================
-# _hermes_runtime_opted_in -- double gate (flag AND presence)
+# _hermes_runtime_present -- presence gate
 # ===========================================================================
 
 
-class TestHermesMCPOptIn:
-    """MCP writes to ~/.hermes/ require BOTH the flag AND Hermes presence."""
+class TestHermesMCPSelection:
+    """Hermes MCP is explicit-only across discovery and deployment."""
 
-    def test_flag_off_skips_regardless_of_presence(
+    def test_home_directory_does_not_enable_auto_discovery(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         import apm_cli.integration.mcp_integrator_install as mod
 
-        present_home = tmp_path / ".hermes"
-        present_home.mkdir()
-        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: False)
-        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: present_home)
-        assert mod._hermes_runtime_opted_in() is False
-
-    def test_flag_on_no_presence_skips_mcp_write(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        import apm_cli.integration.mcp_integrator_install as mod
-
-        absent_home = tmp_path / "does-not-exist" / ".hermes"
-        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: True)
-        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: absent_home)
+        (tmp_path / ".hermes").mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
         monkeypatch.setattr(mod, "find_runtime_binary", lambda _name: None)
-        assert mod._hermes_runtime_opted_in() is False
+        monkeypatch.setattr(
+            "apm_cli.runtime.manager.RuntimeManager.is_runtime_available",
+            lambda _self, _name: False,
+        )
+        monkeypatch.setattr(
+            "apm_cli.integration.mcp_integrator._is_vscode_available",
+            lambda project_root=None: False,
+        )
 
-    def test_flag_on_with_home_dir_opts_in(
+        assert "hermes" not in mod._discover_installed_runtimes(tmp_path, user_scope=False)
+
+    def test_binary_does_not_enable_fallback_discovery(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         import apm_cli.integration.mcp_integrator_install as mod
 
-        present_home = tmp_path / ".hermes"
-        present_home.mkdir()
-        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: True)
-        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: present_home)
-        monkeypatch.setattr(mod, "find_runtime_binary", lambda _name: None)
-        assert mod._hermes_runtime_opted_in() is True
+        monkeypatch.setattr(
+            mod,
+            "find_runtime_binary",
+            lambda name: "/usr/bin/hermes" if name == "hermes" else None,
+        )
 
-    def test_flag_on_with_binary_only_opts_in(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        assert "hermes" not in mod._discover_installed_runtimes_fallback(
+            tmp_path,
+            lambda project_root=None: False,
+            user_scope=False,
+        )
+
+    def test_explicit_target_deploys_mcp(
+        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        import apm_cli.integration.mcp_integrator_install as mod
+        assert not (fake_home / ".hermes").exists()
+        monkeypatch.setattr(
+            "apm_cli.integration.mcp_integrator_install.find_runtime_binary",
+            lambda _name: None,
+        )
+        manifest = {
+            "name": "hermes-explicit-mcp",
+            "version": "0.0.1",
+            "dependencies": {
+                "mcp": [
+                    {
+                        "name": "explicit-server",
+                        "registry": False,
+                        "transport": "stdio",
+                        "command": "echo",
+                        "args": ["hello"],
+                    }
+                ]
+            },
+        }
+        (fake_home / ".apm" / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
 
-        absent_home = tmp_path / "does-not-exist" / ".hermes"
-        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: True)
-        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: absent_home)
-        monkeypatch.setattr(mod, "find_runtime_binary", lambda _name: "/usr/bin/hermes")
-        assert mod._hermes_runtime_opted_in() is True
+        result = CliRunner().invoke(
+            cli,
+            ["install", "--target", "hermes", "--global", "--no-policy"],
+            env={**_BASE_ENV},
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        config = yaml.safe_load((fake_home / ".hermes" / "config.yaml").read_text(encoding="utf-8"))
+        assert config["mcp_servers"]["explicit-server"] == {
+            "command": "echo",
+            "args": ["hello"],
+            "enabled": True,
+        }
 
 
 # ===========================================================================

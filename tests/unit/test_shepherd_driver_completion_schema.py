@@ -1,4 +1,4 @@
-"""Regression tests for shepherd-driver's version 2 completion evidence."""
+"""Regression tests for merge-worker version 2 completion evidence."""
 
 from __future__ import annotations
 
@@ -10,15 +10,17 @@ import pytest
 from jsonschema import Draft7Validator
 
 ROOT = Path(__file__).parents[2]
-CANONICAL_SCHEMA = ROOT / "packages/shepherd-driver/assets/completion-schema.json"
-MIRROR_SCHEMA = ROOT / ".agents/skills/shepherd-driver/assets/completion-schema.json"
+CANONICAL_SCHEMA = (
+    ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/completion-schema.json"
+)
+MIRROR_SCHEMA = ROOT / ".agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json"
 HEAD_SHA = "a" * 40
 BASE_SHA = "b" * 40
 DECISION = "Accepted target vocabulary"
 
 
 def _validator() -> Draft7Validator:
-    """Load and check the canonical shepherd-driver completion schema."""
+    """Load and check the canonical merge-worker completion schema."""
     schema = json.loads(CANONICAL_SCHEMA.read_text(encoding="utf-8"))
     Draft7Validator.check_schema(schema)
     return Draft7Validator(schema)

@@ -34,6 +34,9 @@ build/<your-package>/
 +-- skills/
 +-- commands/
 +-- hooks/
++-- hooks.json         # first-party hook configuration, when present
++-- .claude-plugin/
+|   +-- plugin.json    # native Claude hook discovery, when hooks are present
 +-- apm.lock.yaml      # embedded: pins every file by SHA-256
 ```
 
@@ -53,8 +56,11 @@ bundle (`plugin.json` + `skills/` + `mcp.json` only, no Claude-specific
 directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
 That format is stricter -- it fails before writing anything if your source
 has agents, commands, instructions, extensions, hooks, or LSP config it
-cannot represent -- and `apm install` does not deploy it yet. Use the
-default Claude plugin bundle above for anything you need to install today.
+cannot represent. To install one, declare it as a dependency in `apm.yml`
+and run `apm install --target copilot`, which registers it natively without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; see
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
 for legacy CI pipelines) instead of a directory; use `-o` to change the output location
@@ -106,6 +112,37 @@ Author your own `plugin.json` at the project root (or under `.github/plugin/`,
 synthesise -- otherwise leave it to `apm pack` and keep `apm.yml` as the
 source of truth. See [Package anatomy](../../concepts/package-anatomy/) for
 the full schema.
+
+### Hook resources in Claude plugin bundles
+
+The legacy Claude plugin format (`--format plugin` or `--claude-plugin`)
+keeps first-party hook configuration in `hooks.json`. When hooks are present,
+both the root `plugin.json` and `.claude-plugin/plugin.json` declare
+`"hooks": "./hooks.json"`, so Claude Code can discover that non-default path.
+The native manifest follows [Claude's plugin layout](https://code.claude.com/docs/en/plugins-reference).
+This does not claim hook compatibility with other hosts or run a native client.
+
+Packing rewrites plugin-root command references to the files' packed locations.
+For example, `${CLAUDE_PLUGIN_ROOT}/.apm/skills/demo/scripts/check.py`
+becomes `${CLAUDE_PLUGIN_ROOT}/skills/demo/scripts/check.py`. A reference to
+`${CLAUDE_PLUGIN_ROOT}/scripts/check.py` can resolve from the source hook
+descriptor's directory; `.apm/hooks/scripts/check.py` is then packed as
+`hooks/scripts/check.py` and the command follows that path. Hook sibling assets
+are preserved, with Node module type retained when needed. No hook or package
+script is executed during packing.
+
+Quoted filenames and split-quoted roots retain their shell meaning.
+References to selected directories, such as `cd "${CLAUDE_PLUGIN_ROOT}/.apm/skills/demo"`,
+follow the packed directory without adding unselected files. The selected files
+must materialize that directory; empty directories fail. Root-level scripts
+retain their Node module type without publishing the rest of the repository.
+
+An explicit `includes` list remains exhaustive: include the hook descriptor
+and its resource directories. Missing, excluded, symlinked, escaping or
+collision-displaced referenced resources fail before replacing the existing
+bundle. `apm pack --dry-run --verbose` checks the same references and lists
+the resource files without writing output. Hook event names and payloads are
+not translated between hosts.
 
 ## Integrity: how install verifies the bundle
 
@@ -295,11 +332,13 @@ the older layout; new bundles should use the default Claude plugin format
 apm pack --archive
 ```
 
-**`apm install` does not deploy Agent Plugin output yet.** `apm pack --format agent-plugin`
-produces a valid, portable Agent Plugins v1 bundle, but installing one with
-`apm install` fails closed today, pending native runtime integration. Use the
-default Claude plugin bundle (or `--format apm` for legacy tooling) for
-anything you need `apm install` to deploy.
+**Install Agent Plugin output through the declarative route.** `apm pack --format agent-plugin`
+produces a valid, portable Agent Plugins v1 bundle. Declare it as a dependency
+in `apm.yml` and run `apm install --target copilot`, which registers it without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; the imperative `apm install <bundle>` route fails
+closed for Agent Plugins. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 **Do not set `--target`.** The flag is deprecated. Bundles are
 target-agnostic: the consumer's project decides which harness layouts

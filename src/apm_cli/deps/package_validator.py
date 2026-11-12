@@ -274,15 +274,15 @@ def stamp_plugin_version(
     of the resolved commit SHA -- both on the in-memory ``package`` object
     and in the on-disk ``apm.yml`` so subsequent reloads agree.
 
-    Native Agent Plugin versions remain owned by ``plugin.identity`` and are
-    never stamped from transport metadata.
+    Native Agent Plugin and opaque Codex versions remain publisher-owned.
+    Their metadata is never stamped from transport metadata.
 
     Idempotent: only acts when ``package_type`` is MARKETPLACE_PLUGIN,
     ``package.version == "0.0.0"``, and a usable commit SHA is provided.
     """
     from ..models.validation import PackageType
 
-    if package is None:
+    if package is None or getattr(package, "codex_plugin", None) is not None:
         return
     if package_type != PackageType.MARKETPLACE_PLUGIN:
         return

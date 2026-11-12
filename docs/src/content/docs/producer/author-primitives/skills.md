@@ -128,6 +128,13 @@ To restore the pre-convergence layout where every harness gets its
 own `.<harness>/skills/` copy, pass `--legacy-skill-paths` or set
 `APM_LEGACY_SKILL_PATHS=1`.
 
+A differing user-owned file at a selected skill destination now refuses the
+whole selected install plan, rather than warning and deploying other copies.
+Choose a distinct skill directory name or a valid existing skill/target
+selection. A shared directory or name alone is not a conflict. This does not
+add namespacing or change native plugin identity or managed-package precedence.
+See [install behavior](../../../reference/cli/install/#behavior).
+
 ## Preview before you commit
 
 Two commands answer "what will this look like once installed?":

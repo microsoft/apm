@@ -11,7 +11,11 @@ from apm_cli.output.script_formatters import ScriptExecutionFormatter
 
 def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):
     """Yield (path_tuple, command) for every command reachable under group."""
-    for name, cmd in group.commands.items():
+    ctx = click.Context(group)
+    for name in group.list_commands(ctx):
+        cmd = group.get_command(ctx, name)
+        if cmd is None:
+            continue
         path = (*prefix, name)
         yield path, cmd
         if isinstance(cmd, click.Group):
@@ -186,17 +190,18 @@ def test_deps_update_target_help_uses_current_catalog():
     assert "apm update" in help_text
 
 
-def test_compile_target_all_exclusion_lists_agent_skills_and_intellij():
-    """Regression for #2451: compile --target help must list agent-skills and intellij
-    as excluded from 'all', consistent with install --target help.
-    """
+def test_compile_target_all_exclusion_lists_explicit_only_targets():
+    """Compile help lists stable explicit-only targets excluded from ``all``."""
     result = CliRunner().invoke(cli, ["compile", "--help"])
 
     assert result.exit_code == 0
     help_text = result.output
     # Assert the full exclusion sentence (normalize whitespace from help-text wrapping)
     normalized = " ".join(help_text.split())
-    assert "excludes agent-skills, antigravity, experimental targets, and intellij" in normalized
+    assert (
+        "excludes agent-skills, antigravity, grok-bot, hermes, experimental targets, and intellij"
+        in normalized
+    )
 
 
 def test_mcp_install_help_lists_target_global_and_trust_transitive():
@@ -283,8 +288,8 @@ def test_deps_update_target_help_values_catalog_sorted():
         )
 
 
-def test_compile_and_deps_exclusion_clause_matches_catalog():
-    """Regression: 'all' exclusion clause in compile and deps help must match
+def test_install_compile_and_deps_exclusion_clause_matches_catalog():
+    """Regression: 'all' exclusion clause in install, compile, and deps help must match
     target_all_exclusion_help(), not a hand-maintained static string.
 
     Adding a new explicit-only or mcp-only target to the catalog must automatically
@@ -293,6 +298,10 @@ def test_compile_and_deps_exclusion_clause_matches_catalog():
     from apm_cli.core.target_catalog import target_all_exclusion_help
 
     expected_clause = target_all_exclusion_help()
+
+    install_result = CliRunner().invoke(cli, ["install", "--help"])
+    assert install_result.exit_code == 0
+    assert expected_clause in " ".join(install_result.output.split())
 
     compile_result = CliRunner().invoke(cli, ["compile", "--help"])
     assert compile_result.exit_code == 0

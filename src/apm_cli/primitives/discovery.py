@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils import perf_stats
 from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.path_security import ensure_path_within
+from ..utils.paths import portable_relpath
 from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
 
@@ -19,7 +21,7 @@ if TYPE_CHECKING:
     from ..compilation.inventory import CompileInventory
 
 logger = logging.getLogger(__name__)
-from ..deps.lockfile import LockFile  # noqa: E402
+from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read  # noqa: E402
 from ..models.apm_package import APMPackage  # noqa: E402
 
 # Common primitive patterns for local discovery (with recursive search)
@@ -314,124 +316,62 @@ def scan_dependency_primitives(
             )
 
 
-def get_dependency_declaration_order(base_dir: str) -> list[str]:
+def get_dependency_declaration_order(
+    base_dir: str, *, installation_root: Path | None = None
+) -> list[str]:
     """Get APM dependency installed paths in their declaration order.
 
     The returned list contains the actual installed path for each dependency,
     combining:
     1. Direct dependencies from apm.yml (highest priority, declaration order)
-    2. Transitive dependencies from apm.lock (appended after direct deps)
+    2. Transitive dependencies from the selected lockfile (after direct deps)
 
     This ensures transitive dependencies are included in primitive discovery
-    and compilation, not just direct dependencies. The installed path differs for:
-    - Regular packages: owner/repo (GitHub) or org/project/repo (ADO)
-    - Virtual packages: owner/virtual-pkg-name (GitHub) or org/project/virtual-pkg-name (ADO)
+    and compilation, not just direct dependencies. Canonical materialization
+    preserves host namespace depth, virtual subdirectories, aliases, and casing.
 
     Args:
         base_dir (str): Base directory containing apm.yml.
+        installation_root: Root containing the installed modules and lockfile.
+            Defaults to base_dir; may differ after ``apm install --root``.
 
     Returns:
         List[str]: List of dependency installed paths in declaration order.
     """
-    try:
-        apm_yml_path = Path(base_dir) / "apm.yml"
-        if not apm_yml_path.exists():
-            return []
-
+    project_root = Path(base_dir)
+    installed_root = installation_root if installation_root is not None else project_root
+    modules_root = installed_root / "apm_modules"
+    ensure_path_within(modules_root, installed_root)
+    apm_yml_path = project_root / "apm.yml"
+    ensure_path_within(apm_yml_path, project_root)
+    dependency_names: list[str] = []
+    if apm_yml_path.exists() or apm_yml_path.is_symlink():
         package = APMPackage.from_apm_yml(apm_yml_path)
-        apm_dependencies = package.get_apm_dependencies()
+        for dep in package.get_apm_dependencies():
+            # Marketplace references acquire their source coordinates at install;
+            # their resolved roots come from the lockfile below.
+            if not dep.is_marketplace:
+                dependency_names.append(
+                    portable_relpath(dep.get_install_path(modules_root), modules_root)
+                )
 
-        # Extract installed paths from dependency references
-        # Virtual file/collection packages use get_virtual_package_name() (flattened),
-        # while virtual subdirectory packages use natural repo/subdir paths.
-        dependency_names = []
-        for dep in apm_dependencies:
-            if dep.alias:
-                dependency_names.append(dep.alias)
-            elif dep.is_virtual:
-                repo_parts = dep.repo_url.split("/")
+    lockfile_path = resolve_lockfile_path_for_read(installed_root, read_only=True)
+    ensure_path_within(lockfile_path, installed_root)
+    lock = LockFile.read(lockfile_path)
+    if lock is not None:
+        dependency_names.extend(lock.get_installed_paths(modules_root))
+        # Local bundles stage primitives without adding a manifest dependency.
+        # Only lockfile-proven staging roots count, never arbitrary directories.
+        local_slugs: set[str] = set()
+        for deployed in lock.local_deployed_files:
+            parts = Path(deployed).parts
+            if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
+                local_slugs.add(parts[1])
+        for slug in sorted(local_slugs):
+            ensure_path_within(modules_root / slug, modules_root)
+            dependency_names.append(slug)
 
-                if dep.is_virtual_subdirectory() and dep.virtual_path:
-                    # Virtual subdirectory packages keep natural path structure.
-                    # GitHub: owner/repo/subdir
-                    # ADO: org/project/repo/subdir
-                    if dep.is_azure_devops() and len(repo_parts) >= 3:
-                        dependency_names.append(
-                            f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}/{dep.virtual_path}"
-                        )
-                    elif len(repo_parts) >= 2:
-                        dependency_names.append(
-                            f"{repo_parts[0]}/{repo_parts[1]}/{dep.virtual_path}"
-                        )
-                    else:
-                        dependency_names.append(dep.virtual_path)
-                else:
-                    # Virtual file/collection packages are flattened by package name.
-                    # GitHub: owner/virtual-pkg-name
-                    # ADO: org/project/virtual-pkg-name
-                    virtual_name = dep.get_virtual_package_name()
-                    if dep.is_azure_devops() and len(repo_parts) >= 3:
-                        dependency_names.append(f"{repo_parts[0]}/{repo_parts[1]}/{virtual_name}")
-                    elif len(repo_parts) >= 2:
-                        dependency_names.append(f"{repo_parts[0]}/{virtual_name}")
-                    else:
-                        dependency_names.append(virtual_name)
-            else:
-                # Regular packages: use full org/repo path
-                # This matches our org-namespaced directory structure
-                dependency_names.append(dep.repo_url)
-
-        # Include transitive dependencies + local-bundle slugs from the
-        # lockfile.  Read it once and reuse the parsed object for both
-        # the transitive-paths walk and the ``local_deployed_files``
-        # slug derivation (issue #1363) to avoid duplicate YAML parses
-        # on every compile.
-        project_root = Path(base_dir)
-        lockfile_path = project_root / "apm.lock.yaml"
-        if not lockfile_path.exists():
-            legacy = project_root / "apm.lock"
-            if legacy.exists():
-                lockfile_path = legacy
-        lock = LockFile.read(lockfile_path) if lockfile_path.exists() else None
-
-        direct_set = set(dependency_names)
-        if lock is not None:
-            for path in lock.get_installed_paths(project_root / "apm_modules"):
-                if path not in direct_set:
-                    dependency_names.append(path)
-
-        # Local-bundle install stages instructions under
-        # ``apm_modules/<slug>/.apm/...`` but intentionally does NOT
-        # mutate ``apm.yml`` (services.py:489-490), so the scan loop
-        # would otherwise never visit those staged dirs and
-        # ``apm compile`` would produce no output for compile-only
-        # targets (opencode, codex, gemini).
-        #
-        # Provenance is anchored to the lockfile record -- a stray
-        # directory under ``apm_modules/`` without a lockfile entry must
-        # not be discovered (defends against phantom-content injection
-        # and stale-debris drift).
-        if lock is not None:
-            local_slugs: set[str] = set()
-            for deployed in lock.local_deployed_files:
-                # Match ``apm_modules/<slug>/.apm/...`` only. Other
-                # deployed files (``.github/instructions/...``,
-                # ``.agents/skills/...``) are not bundle staging
-                # markers and must not produce phantom slugs.
-                parts = Path(deployed).parts
-                if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
-                    local_slugs.add(parts[1])
-            seen = set(dependency_names)
-            for slug in sorted(local_slugs):
-                if slug not in seen:
-                    dependency_names.append(slug)
-                    seen.add(slug)
-
-        return dependency_names
-
-    except Exception as e:
-        print(f"Warning: Failed to parse dependency order from apm.yml: {e}")
-        return []
+    return list(dict.fromkeys(dependency_names))
 
 
 def _matches_any_pattern(rel_path: str, patterns: list[str]) -> bool:
@@ -472,14 +412,11 @@ def _scan_patterns(
     for _primitive_type, type_patterns in patterns.items():
         all_patterns.extend(type_patterns)
 
-    files = inventory.files_within(base_dir) if inventory is not None else None
-    if files is None:
-        base_str = str(base_dir)
-        files = tuple(
-            Path(dirpath) / filename
-            for dirpath, _dirnames, filenames in os.walk(base_str, followlinks=False)
-            for filename in filenames
-        )
+    if inventory is None:
+        from ..compilation.inventory import CompileInventory
+
+        inventory = CompileInventory.collect(base_dir)
+    files = inventory.files_within(base_dir)
 
     for file_path in files:
         rel_path = file_path.relative_to(base_dir).as_posix()
@@ -531,7 +468,12 @@ def scan_directory_with_source(
         )
 
     # Check for SKILL.md in the dependency root
-    _discover_skill_in_directory(directory, collection, source)
+    _discover_skill_in_directory(
+        directory,
+        collection,
+        source,
+        inventory=inventory,
+    )
 
 
 def _discover_local_skill(
@@ -559,7 +501,10 @@ def _discover_local_skill(
 
 
 def _discover_skill_in_directory(
-    directory: Path, collection: PrimitiveCollection, source: str
+    directory: Path,
+    collection: PrimitiveCollection,
+    source: str,
+    inventory: CompileInventory | None = None,
 ) -> None:
     """Discover SKILL.md in a package directory.
 
@@ -568,6 +513,8 @@ def _discover_skill_in_directory(
         collection (PrimitiveCollection): Collection to add skill to.
         source (str): Source identifier for the skill.
     """
+    if inventory is not None and inventory.nested_repository_root_for(directory) is not None:
+        return
     skill_path = directory / "SKILL.md"
     if not skill_path.is_symlink() and skill_path.exists() and _is_readable(skill_path):
         try:
@@ -669,103 +616,20 @@ def find_primitive_files(
 
     started = time.perf_counter()
     base_path = Path(base_dir).resolve()
-    base_str = str(base_path)
-    base_prefix_len = len(base_str) + 1  # +1 for the trailing separator
-    sep = os.sep
-
-    # Pre-split each glob pattern once per call instead of once per file
-    # so a 80k-file walk costs O(patterns) splits, not O(patterns * files).
     pattern_tuples: list[tuple[str, ...]] = [
         tuple(p for p in pat.split("/") if p) for pat in patterns
     ]
+    if inventory is None:
+        from ..compilation.inventory import CompileInventory
 
-    all_files: list[Path] = []
-    files_visited = 0
-
-    if inventory is not None:
-        return _find_primitive_inventory_files(
-            inventory,
-            base_path,
-            pattern_tuples,
-            exclude_patterns,
-            started,
-        )
-
-    for root, dirs, files in os.walk(base_str):
-        # Prune excluded directories BEFORE descending. ``DEFAULT_SKIP_DIRS``
-        # check is a frozenset lookup; the ``_exclude_matches_dir`` call
-        # only fires when the caller actually supplied exclude patterns.
-        if exclude_patterns:
-            current = Path(root)
-            dirs[:] = sorted(
-                d
-                for d in dirs
-                if d not in DEFAULT_SKIP_DIRS
-                and not _exclude_matches_dir(current / d, base_path, exclude_patterns)
-            )
-        else:
-            dirs[:] = sorted(d for d in dirs if d not in DEFAULT_SKIP_DIRS)
-
-        # Compute the relative directory once per ``os.walk`` step using
-        # string slicing on the already-resolved base path. This avoids
-        # the per-component ``stat`` syscalls that ``Path.resolve`` /
-        # ``Path.relative_to`` would issue per FILE under the old
-        # ``portable_relpath(file_path, base_path)`` call site.
-        if root == base_str:
-            rel_root = ""
-            rel_root_parts: tuple[str, ...] = ()
-        else:
-            rel_root = root[base_prefix_len:].replace(sep, "/")
-            rel_root_parts = tuple(p for p in rel_root.split("/") if p)
-
-        # Sort files for deterministic discovery order across platforms.
-        # Defer all Path() construction until AFTER a pattern matches --
-        # in a typical tree most files are non-matches and don't need
-        # the allocation. ``current`` is built lazily on first match.
-        sorted_files = sorted(files)
-        files_visited += len(sorted_files)
-        current_path: Path | None = None
-        for file_name in sorted_files:
-            path_parts = (*rel_root_parts, file_name)
-            matched_pattern = False
-            for pattern_parts in pattern_tuples:
-                if _glob_match_parts(path_parts, pattern_parts):
-                    matched_pattern = True
-                    break
-            if not matched_pattern:
-                continue
-            if current_path is None:
-                current_path = Path(root)
-            file_path = current_path / file_name
-            # File-level exclude: a pattern like "**/*.draft.md" should drop
-            # individual files even when their parent directory is included.
-            if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
-                logger.debug("Excluded by pattern: %s", file_path)
-                continue
-            all_files.append(file_path)
-
-    # Filter out directories and symlinks. We deliberately do NOT
-    # pre-open every match to test readability -- ``parse_primitive_file``
-    # downstream already handles PermissionError / UnicodeDecodeError
-    # gracefully, and the extra open() per match doubled syscall cost
-    # without catching anything new (see #1533 review).
-    valid_files = []
-    for file_path in all_files:
-        if not file_path.is_file():
-            continue
-        if file_path.is_symlink():
-            logger.debug("Rejected symlink: %s", file_path)
-            continue
-        valid_files.append(file_path)
-
-    perf_stats.record_walk(
-        base_dir=str(base_dir),
-        pattern_count=len(patterns),
-        duration_s=time.perf_counter() - started,
-        files_visited=files_visited,
-        files_matched=len(valid_files),
+        inventory = CompileInventory.collect(base_path, exclude_patterns=exclude_patterns)
+    return _find_primitive_inventory_files(
+        inventory,
+        base_path,
+        pattern_tuples,
+        exclude_patterns,
+        started,
     )
-    return valid_files
 
 
 def _find_primitive_inventory_files(

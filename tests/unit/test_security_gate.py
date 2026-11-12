@@ -199,6 +199,29 @@ class TestReport:
         detail = call_args.kwargs.get("detail", call_args[1].get("detail", ""))
         assert "apm audit --strip" in detail
 
+    def test_force_report_accepts_preflight_action(self):
+        diag = MagicMock()
+        verdict = ScanVerdict(
+            findings_by_file={"decoded.yml": [MagicMock(severity="critical")]},
+            has_critical=True,
+            should_block=False,
+            critical_count=1,
+            warning_count=0,
+        )
+
+        SecurityGate.report(
+            verdict,
+            diag,
+            package="pkg",
+            force=True,
+            force_action="Allowed by preflight",
+            force_detail="Edit the escaped value in decoded.yml",
+        )
+
+        message = diag.security.call_args.kwargs["message"]
+        assert message == "Allowed by preflight with --force despite critical hidden characters"
+        assert diag.security.call_args.kwargs["detail"] == "Edit the escaped value in decoded.yml"
+
     def test_warning_only_reports(self):
         diag = MagicMock()
         v = ScanVerdict(

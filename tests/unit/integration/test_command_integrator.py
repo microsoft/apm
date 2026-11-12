@@ -475,6 +475,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             r.files_updated = 0
             r.links_resolved = 0
             r.target_paths = []
+            r.deployed_files = ()
             r.skill_created = False
             r.sub_skills_promoted = 0
             r.bin_deployed = 0
@@ -519,7 +520,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             project_root = Path(temp_dir)
             (project_root / ".github").mkdir()
 
-            package_info = MagicMock()
+            package_info = _make_package(project_root, {})
             integrators = self._make_mock_integrators()
             diagnostics = DiagnosticCollector(verbose=False)
 
@@ -549,7 +550,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             project_root = Path(temp_dir)
             (project_root / ".claude").mkdir()
 
-            package_info = MagicMock()
+            package_info = _make_package(project_root, {})
             integrators = self._make_mock_integrators()
             diagnostics = DiagnosticCollector(verbose=False)
 
@@ -578,7 +579,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             project_root = Path(temp_dir)
             (project_root / ".cursor").mkdir()
 
-            package_info = MagicMock()
+            package_info = _make_package(project_root, {})
             integrators = self._make_mock_integrators()
             diagnostics = DiagnosticCollector(verbose=False)
 

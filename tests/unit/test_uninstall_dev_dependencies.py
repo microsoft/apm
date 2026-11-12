@@ -128,8 +128,7 @@ class TestUninstallDevDependencies:
 
         assert result.exit_code == 0, result.output
         normalized_output = " ".join(result.output.split())
-        assert "MCP cleanup during uninstall failed" in normalized_output
-        assert "run 'apm install' to reconcile stale MCP entries" in normalized_output
+        assert "MCP cleanup" not in normalized_output
         assert "Uninstall complete" in normalized_output
         text = (tmp_path / "apm.yml").read_text(encoding="utf-8")
         assert "# project comment" in text

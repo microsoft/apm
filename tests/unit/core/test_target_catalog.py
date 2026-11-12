@@ -53,10 +53,13 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         == ALL_CANONICAL_TARGETS
     )
     assert (
-        frozenset({"copilot-app", "copilot-cowork", "grok-cloud", "hermes", "openclaw"})
+        frozenset({"copilot-app", "copilot-cowork", "grok-cloud", "openclaw"})
         == EXPERIMENTAL_TARGETS
     )
-    assert frozenset({"agent-skills", "antigravity", "grok-cloud"}) == EXPLICIT_ONLY_TARGETS
+    assert (
+        frozenset({"agent-skills", "antigravity", "grok-bot", "grok-cloud", "hermes"})
+        == EXPLICIT_ONLY_TARGETS
+    )
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
         "agy": "antigravity",
@@ -79,6 +82,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
+                "grok-bot",
                 "grok-build",
                 "grok-cloud",
                 "hermes",
@@ -115,7 +119,45 @@ def test_current_native_profiles_are_characterized() -> None:
         )
         for name, profile in KNOWN_TARGETS.items()
     }
-    assert actual == {
+    expected = {
+        "agent-skills": (
+            ".agents",
+            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
+            None,
+            None,
+        ),
+        "antigravity": (
+            ".agents",
+            {
+                "instructions": ("rules", ".md", "antigravity_rules", None, True),
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+                "hooks": ("", "hooks.json", "antigravity_hooks", None, False),
+            },
+            "agents",
+            None,
+        ),
+        "claude": (
+            ".claude",
+            {
+                "instructions": ("rules", ".md", "claude_rules", None, True),
+                "agents": ("agents", ".md", "claude_agent", None, False),
+                "commands": ("commands", ".md", "claude_command", None, False),
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+                "hooks": ("hooks", ".json", "claude_hooks", None, False),
+            },
+            "claude",
+            None,
+        ),
+        "codex": (
+            ".codex",
+            {
+                "agents": ("agents", ".toml", "codex_agent", None, False),
+                "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
+                "hooks": ("", "hooks.json", "codex_hooks", None, False),
+            },
+            "agents",
+            None,
+        ),
         "copilot": (
             ".github",
             {
@@ -135,17 +177,17 @@ def test_current_native_profiles_are_characterized() -> None:
             "vscode",
             None,
         ),
-        "claude": (
-            ".claude",
-            {
-                "instructions": ("rules", ".md", "claude_rules", None, True),
-                "agents": ("agents", ".md", "claude_agent", None, False),
-                "commands": ("commands", ".md", "claude_command", None, False),
-                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
-                "hooks": ("hooks", ".json", "claude_hooks", None, False),
-            },
-            "claude",
+        "copilot-app": (
+            "copilot-app",
+            {"prompts": ("workflows", ".prompt.md", "prompt_standard", None, False)},
             None,
+            "copilot_app",
+        ),
+        "copilot-cowork": (
+            "copilot-cowork",
+            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
+            None,
+            "copilot_cowork",
         ),
         "cursor": (
             ".cursor",
@@ -159,27 +201,6 @@ def test_current_native_profiles_are_characterized() -> None:
             "agents",
             None,
         ),
-        "kiro": (
-            ".kiro",
-            {
-                "agents": ("agents", ".md", "kiro_agent", None, False),
-                "instructions": ("steering", ".md", "kiro_steering", None, True),
-                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
-                "hooks": ("hooks", ".json", "kiro_hooks", None, False),
-            },
-            "agents",
-            None,
-        ),
-        "opencode": (
-            ".opencode",
-            {
-                "agents": ("agents", ".md", "opencode_agent", None, False),
-                "commands": ("commands", ".md", "opencode_command", None, False),
-                "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
-            },
-            "agents",
-            None,
-        ),
         "gemini": (
             ".gemini",
             {
@@ -188,6 +209,12 @@ def test_current_native_profiles_are_characterized() -> None:
                 "hooks": ("hooks", ".json", "gemini_hooks", None, False),
             },
             "gemini",
+            None,
+        ),
+        "grok-bot": (
+            "agent-data",
+            {"skills": ("workflows", "/SKILL.md", "skill_standard", None, False)},
+            None,
             None,
         ),
         "grok-build": (
@@ -209,22 +236,36 @@ def test_current_native_profiles_are_characterized() -> None:
             None,
             "grok_cloud",
         ),
-        "antigravity": (
+        "hermes": (
             ".agents",
+            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
+            "agents",
+            None,
+        ),
+        "kiro": (
+            ".kiro",
             {
-                "instructions": ("rules", ".md", "antigravity_rules", None, True),
+                "agents": ("agents", ".md", "kiro_agent", None, False),
+                "instructions": ("steering", ".md", "kiro_steering", None, True),
+                "prompts": ("prompts", ".md", "kiro_prompt", None, False),
                 "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
-                "hooks": ("", "hooks.json", "antigravity_hooks", None, False),
+                "hooks": ("hooks", ".json", "kiro_hooks", None, False),
             },
             "agents",
             None,
         ),
-        "codex": (
-            ".codex",
+        "openclaw": (
+            ".agents",
+            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
+            None,
+            "openclaw",
+        ),
+        "opencode": (
+            ".opencode",
             {
-                "agents": ("agents", ".toml", "codex_agent", None, False),
+                "agents": ("agents", ".md", "opencode_agent", None, False),
+                "commands": ("commands", ".md", "opencode_command", None, False),
                 "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
-                "hooks": ("", "hooks.json", "codex_hooks", None, False),
             },
             "agents",
             None,
@@ -240,36 +281,22 @@ def test_current_native_profiles_are_characterized() -> None:
             "agents",
             None,
         ),
-        "agent-skills": (
-            ".agents",
-            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
-            None,
-            None,
-        ),
-        "openclaw": (
-            ".agents",
-            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
-            None,
-            "openclaw",
-        ),
-        "hermes": (
-            ".agents",
-            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
-            "agents",
-            "hermes",
-        ),
-        "copilot-cowork": (
-            "copilot-cowork",
-            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
-            None,
-            "copilot_cowork",
-        ),
-        "copilot-app": (
-            "copilot-app",
-            {"prompts": ("workflows", ".prompt.md", "prompt_standard", None, False)},
-            None,
-            "copilot_app",
-        ),
+    }
+    prompt_fields = {
+        ("gemini", "commands"): ("prompt",),
+        ("codex", "agents"): ("developer_instructions",),
+    }
+    assert actual == {
+        name: (
+            root,
+            {
+                primitive: (*mapping, prompt_fields.get((name, primitive), ()))
+                for primitive, mapping in mappings.items()
+            },
+            family,
+            flag,
+        )
+        for name, (root, mappings, family, flag) in expected.items()
     }
 
 

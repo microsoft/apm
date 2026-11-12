@@ -2,6 +2,7 @@
 
 import unittest
 
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.policy.matcher import (
     check_dependency_allowed,
     check_mcp_allowed,
@@ -29,11 +30,13 @@ class TestFirstMatchingPattern(unittest.TestCase):
     def test_empty_patterns_is_safe(self):
         self.assertIsNone(first_matching_pattern("contoso/repo", ()))
 
-    def test_deny_check_uses_same_matcher(self):
-        # Deny enforcement and unmanaged-files deny-conflict must agree:
-        # both route through first_matching_pattern.
+    def test_dependency_deny_uses_same_glob_semantics(self):
+        # Dependency policy adds identity casing before reusing matches_pattern.
         policy = DependencyPolicy(deny=("contoso/*",))
-        allowed, reason = check_dependency_allowed("contoso/evil", policy)
+        allowed, reason = check_dependency_allowed(
+            DependencyReference.parse("contoso/evil"),
+            policy,
+        )
         self.assertFalse(allowed)
         self.assertIn("contoso/*", reason)
         self.assertEqual(
@@ -99,43 +102,75 @@ class TestCheckDependencyAllowed(unittest.TestCase):
             allow=["contoso/*"],
             deny=["contoso/evil"],
         )
-        allowed, reason = check_dependency_allowed("contoso/evil", policy)
+        allowed, reason = check_dependency_allowed(
+            DependencyReference.parse("contoso/evil"),
+            policy,
+        )
         self.assertFalse(allowed)
         self.assertIn("denied by pattern", reason)
 
     def test_empty_allow_is_deny_only(self):
         policy = DependencyPolicy(deny=["evil-corp/**"])
-        allowed, reason = check_dependency_allowed("contoso/good", policy)
+        allowed, reason = check_dependency_allowed(
+            DependencyReference.parse("contoso/good"),
+            policy,
+        )
         self.assertTrue(allowed)
         self.assertEqual(reason, "")
 
     def test_empty_allow_deny_matches(self):
         policy = DependencyPolicy(deny=["evil-corp/**"])
-        allowed, reason = check_dependency_allowed("evil-corp/bad", policy)  # noqa: RUF059
+        allowed, _reason = check_dependency_allowed(
+            DependencyReference.parse("evil-corp/bad"),
+            policy,
+        )
         self.assertFalse(allowed)
 
     def test_allowlist_mode_ref_allowed(self):
         policy = DependencyPolicy(allow=["contoso/*"])
-        allowed, reason = check_dependency_allowed("contoso/lib", policy)
+        allowed, reason = check_dependency_allowed(
+            DependencyReference.parse("contoso/lib"),
+            policy,
+        )
         self.assertTrue(allowed)
         self.assertEqual(reason, "")
 
     def test_allowlist_mode_ref_blocked(self):
         policy = DependencyPolicy(allow=["contoso/*"])
-        allowed, reason = check_dependency_allowed("other/lib", policy)
+        allowed, reason = check_dependency_allowed(
+            DependencyReference.parse("other/lib"),
+            policy,
+        )
         self.assertFalse(allowed)
         self.assertIn("not in allowed sources", reason)
 
     def test_no_rules_everything_allowed(self):
         policy = DependencyPolicy()
-        allowed, reason = check_dependency_allowed("anything/here", policy)
+        allowed, reason = check_dependency_allowed(
+            DependencyReference.parse("anything/here"),
+            policy,
+        )
         self.assertTrue(allowed)
         self.assertEqual(reason, "")
 
     def test_deny_pattern_with_double_wildcard(self):
         policy = DependencyPolicy(deny=["untrusted/**"])
-        allowed, reason = check_dependency_allowed("untrusted/deep/nested", policy)  # noqa: RUF059
+        allowed, _reason = check_dependency_allowed(
+            DependencyReference.parse("untrusted/deep/nested"),
+            policy,
+        )
         self.assertFalse(allowed)
+
+    def test_exported_string_api_remains_case_sensitive(self):
+        policy = DependencyPolicy(allow=["DevExpGbb/**"])
+
+        allowed, reason = check_dependency_allowed(
+            "devexpgbb/secure-baseline",
+            policy,
+        )
+
+        self.assertFalse(allowed)
+        self.assertIn("not in allowed sources", reason)
 
 
 class TestCheckMcpAllowed(unittest.TestCase):

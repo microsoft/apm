@@ -5,7 +5,14 @@ from pathlib import Path
 from apm_cli.utils.patterns import normalize_apply_to
 from apm_cli.utils.yaml_io import load_frontmatter
 
-from .models import Chatmode, Context, Instruction, Primitive, Skill
+from .models import (
+    Chatmode,
+    Context,
+    Instruction,
+    Primitive,
+    Skill,
+    resolve_user_invocable,
+)
 
 
 def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noqa: RUF013
@@ -131,6 +138,7 @@ def _parse_chatmode(
         version=metadata.get("version"),
         source=source,
         handoffs=handoffs,
+        user_invocable=resolve_user_invocable(metadata),
     )
 
 

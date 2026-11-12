@@ -14,12 +14,41 @@ from apm_cli.primitives.discovery import (
     _exclude_matches_dir,
     _glob_match,
     find_primitive_files,
+    scan_directory_with_source,
 )
+from apm_cli.primitives.models import PrimitiveCollection
 
 
 def _write(path: Path, content: str = "---\ndescription: stub\n---\n\n# Stub\n") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def test_dependency_skill_respects_parent_nested_repository_boundary(tmp_path: Path) -> None:
+    """Direct SKILL.md discovery consumes the parent inventory boundary."""
+    from apm_cli.compilation.inventory import CompileInventory
+
+    dep_dir = tmp_path / "nested-dependency"
+    dep_dir.mkdir()
+    (dep_dir / ".git").write_text(
+        "gitdir: ../.git/worktrees/nested-dependency\n",
+        encoding="utf-8",
+    )
+    (dep_dir / "SKILL.md").write_text(
+        "---\nname: foreign\ndescription: Foreign skill.\n---\n# Foreign\n",
+        encoding="utf-8",
+    )
+    inventory = CompileInventory.collect(tmp_path)
+    collection = PrimitiveCollection()
+
+    scan_directory_with_source(
+        dep_dir,
+        collection,
+        "dependency:nested",
+        inventory=inventory,
+    )
+
+    assert collection.count() == 0
 
 
 # -------------------------------------------------------------------

@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
@@ -118,6 +118,7 @@ class TestLockedDependencyProvenance:
             }
         )
         ctx = SimpleNamespace(
+            existing_lockfile=None,
             marketplace_provenance={
                 "owner/repo": {
                     "discovered_via": "catalog",
@@ -125,7 +126,7 @@ class TestLockedDependencyProvenance:
                     "source_url": "https://catalog.example.com/marketplace.json",
                     "source_digest": "sha256:" + "f" * 64,
                 }
-            }
+            },
         )
         builder = LockfileBuilder(ctx)
 
@@ -141,3 +142,183 @@ class TestLockedDependencyProvenance:
             "/marketplace.json",
         )
         assert dep.source_digest == "sha256:" + "f" * 64
+
+
+class TestRebuiltMarketplaceProvenance:
+    """Rebuilding a lock entry retains discovery, never stale package state."""
+
+    @staticmethod
+    def _discovered(**identity: object) -> LockedDependency:
+        return LockedDependency(
+            repo_url="owner/repo",
+            resolved_commit="a" * 40,
+            content_hash="sha256:old-content",
+            discovered_via="catalog",
+            marketplace_plugin_name="tool",
+            source_url="https://catalog.example.com/marketplace.json",
+            source_digest="sha256:" + "b" * 64,
+            **identity,
+        )
+
+    def test_retains_discovery_when_commit_changes(self) -> None:
+        previous = self._discovered(
+            host="git.example.com", host_type="gitlab", virtual_path="plugins/tool", is_virtual=True
+        )
+        current = LockedDependency(
+            repo_url=previous.repo_url,
+            host=previous.host,
+            host_type=previous.host_type,
+            virtual_path=previous.virtual_path,
+            is_virtual=True,
+            resolved_commit="c" * 40,
+            content_hash="sha256:new-content",
+        )
+        lockfile = LockFile(dependencies={current.get_unique_key(): current})
+        ctx = SimpleNamespace(
+            existing_lockfile=LockFile(dependencies={previous.get_unique_key(): previous}),
+            marketplace_provenance=None,
+        )
+
+        LockfileBuilder(ctx)._attach_marketplace_provenance(lockfile)
+
+        assert current.discovered_via == previous.discovered_via
+        assert current.marketplace_plugin_name == previous.marketplace_plugin_name
+        assert urlparse(current.source_url) == urlparse(previous.source_url)
+        assert current.source_digest == previous.source_digest
+        assert current.resolved_commit == "c" * 40
+        assert current.content_hash == "sha256:new-content"
+        assert current.get_unique_key() == previous.get_unique_key()
+        assert previous.resolved_commit == "a" * 40
+
+    @pytest.mark.parametrize(
+        "changed_identity",
+        [
+            {"host": "other.example.com"},
+            {"port": 8443},
+            {"virtual_path": "plugins/other"},
+            {"repo_url": "owner/other"},
+        ],
+    )
+    def test_does_not_transfer_discovery_to_another_identity(
+        self, changed_identity: dict[str, object]
+    ) -> None:
+        previous = self._discovered(
+            host="git.example.com", virtual_path="plugins/tool", is_virtual=True
+        )
+        identity = {
+            "repo_url": previous.repo_url,
+            "host": previous.host,
+            "virtual_path": previous.virtual_path,
+            "is_virtual": True,
+            **changed_identity,
+        }
+        current = LockedDependency(**identity)
+        lockfile = LockFile(dependencies={current.get_unique_key(): current})
+        ctx = SimpleNamespace(
+            existing_lockfile=LockFile(dependencies={previous.get_unique_key(): previous}),
+            marketplace_provenance=None,
+        )
+
+        LockfileBuilder(ctx)._attach_marketplace_provenance(lockfile)
+
+        assert current.discovered_via is None
+        assert current.marketplace_plugin_name is None
+        assert current.source_url is None
+        assert current.source_digest is None
+        assert set(lockfile.dependencies) == {current.get_unique_key()}
+
+    def test_fresh_discovery_replaces_entire_previous_tuple(self) -> None:
+        previous = self._discovered()
+        current = LockedDependency(repo_url=previous.repo_url)
+        lockfile = LockFile(dependencies={current.get_unique_key(): current})
+        ctx = SimpleNamespace(
+            existing_lockfile=LockFile(dependencies={previous.get_unique_key(): previous}),
+            marketplace_provenance={
+                current.get_unique_key(): {
+                    "discovered_via": "new-catalog",
+                    "marketplace_plugin_name": "new-tool",
+                }
+            },
+        )
+
+        LockfileBuilder(ctx)._attach_marketplace_provenance(lockfile)
+
+        assert current.discovered_via == "new-catalog"
+        assert current.marketplace_plugin_name == "new-tool"
+        assert current.source_url is None
+        assert current.source_digest is None
+        assert previous.discovered_via == "catalog"
+
+    def test_does_not_restore_removed_dependency(self) -> None:
+        previous = self._discovered()
+        lockfile = LockFile()
+        ctx = SimpleNamespace(
+            existing_lockfile=LockFile(dependencies={previous.get_unique_key(): previous}),
+            marketplace_provenance=None,
+        )
+
+        LockfileBuilder(ctx)._attach_marketplace_provenance(lockfile)
+
+        assert lockfile.dependencies == {}
+
+
+class TestLockFileMarketplaceLookup:
+    """Verify LockFile methods for looking up dependencies by marketplace provenance."""
+
+    def test_get_dependency_by_marketplace(self):
+        dep = LockedDependency(
+            repo_url="github/awesome-copilot",
+            virtual_path="plugins/accessibility-kanban",
+            discovered_via="awesome-copilot",
+            marketplace_plugin_name="accessibility-kanban",
+        )
+        lockfile = LockFile(dependencies={dep.get_unique_key(): dep})
+
+        found = lockfile.get_dependency_by_marketplace("awesome-copilot", "accessibility-kanban")
+        assert found is dep
+
+        not_found = lockfile.get_dependency_by_marketplace("other-mkt", "accessibility-kanban")
+        assert not_found is None
+
+    def test_get_dependency_with_marketplace_prefix(self):
+        dep = LockedDependency(
+            repo_url="github/awesome-copilot",
+            virtual_path="plugins/accessibility-kanban",
+            discovered_via="awesome-copilot",
+            marketplace_plugin_name="accessibility-kanban",
+        )
+        lockfile = LockFile(dependencies={dep.get_unique_key(): dep})
+
+        found = lockfile.get_dependency("_marketplace/awesome-copilot/accessibility-kanban")
+        assert found is dep
+        assert lockfile.has_dependency("_marketplace/awesome-copilot/accessibility-kanban")
+
+        not_found = lockfile.get_dependency("_marketplace/awesome-copilot/unknown")
+        assert not_found is None
+        assert not lockfile.has_dependency("_marketplace/awesome-copilot/unknown")
+
+    def test_duplicate_marketplace_provenance_fails_closed(self):
+        dep1 = LockedDependency(
+            repo_url="github/awesome-copilot",
+            virtual_path="plugins/accessibility-kanban",
+            discovered_via="awesome-copilot",
+            marketplace_plugin_name="accessibility-kanban",
+        )
+        dep2 = LockedDependency(
+            repo_url="github/rogue-copilot",
+            virtual_path="plugins/accessibility-kanban",
+            discovered_via="awesome-copilot",
+            marketplace_plugin_name="accessibility-kanban",
+        )
+        lockfile = LockFile(
+            dependencies={
+                dep1.get_unique_key(): dep1,
+                dep2.get_unique_key(): dep2,
+            }
+        )
+
+        assert (
+            lockfile.get_dependency_by_marketplace("awesome-copilot", "accessibility-kanban")
+            is None
+        )
+        assert lockfile.get_dependency("_marketplace/awesome-copilot/accessibility-kanban") is None

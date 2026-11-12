@@ -7,6 +7,6 @@ description: >
   drafting with Copilot, and permission-aware action buttons.
   Scoped to microsoft/apm; not yet configurable for other repositories.
 author: microsoft
-license: MIT
+license: Apache-2.0
 targets:
   - copilot

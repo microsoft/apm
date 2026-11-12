@@ -338,7 +338,7 @@ class TestAuthResolverResolve:
         assert ctx.git_env.get("GIT_TERMINAL_PROMPT") == "0"
         assert ctx.git_env.get("GIT_ASKPASS") == "echo"
 
-    def test_git_env_injects_git_token_for_basic_scheme(self) -> None:
+    def test_git_env_injects_basic_authorization_header(self) -> None:
         with (
             patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_tok"}, clear=True),
             _NO_GIT_CRED,
@@ -346,7 +346,12 @@ class TestAuthResolverResolve:
         ):
             resolver = AuthResolver()
             ctx = resolver.resolve("github.com")
-        assert ctx.git_env.get("GIT_TOKEN") == "ghp_tok"
+        assert "GIT_TOKEN" not in ctx.git_env
+        config_values = [
+            value for key, value in ctx.git_env.items() if key.startswith("GIT_CONFIG_VALUE_")
+        ]
+        assert any(value.startswith("Authorization: Basic ") for value in config_values)
+        assert all("ghp_tok" not in value for value in config_values)
         assert ctx.auth_scheme == "basic"
 
 
@@ -369,6 +374,34 @@ class TestTryWithFallback:
             result = resolver.try_with_fallback("github.com", op, unauth_first=True)
         assert result == "success"
         assert calls == [None]
+
+    def test_github_auth_first_env_skips_anonymous_attempt(self) -> None:
+        """APM_GITHUB_AUTH_FIRST=1 (issue #2545): an unauth_first caller makes
+        no anonymous request when a credential resolves, and the one-time
+        warning names the recovery action."""
+        with (
+            patch.dict(
+                os.environ,
+                {"GITHUB_APM_PAT": "ghp_token", "APM_GITHUB_AUTH_FIRST": "1"},
+                clear=True,
+            ),
+            _NO_GIT_CRED,
+            _NO_GH_CLI,
+            patch("apm_cli.utils.console._rich_warning") as mock_warn,
+        ):
+            resolver = AuthResolver()
+            calls: list = []
+
+            def op(token, git_env):
+                calls.append(token)
+                return "ok"
+
+            result = resolver.try_with_fallback("github.com", op, unauth_first=True)
+            resolver.try_with_fallback("github.com", op, unauth_first=True)
+        assert result == "ok"
+        assert calls == ["ghp_token", "ghp_token"]
+        mock_warn.assert_called_once()
+        assert "apm config unset github-auth-first" in mock_warn.call_args.args[0]
 
     def test_unauth_fails_then_token_used(self) -> None:
         with (

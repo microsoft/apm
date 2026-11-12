@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import os
 import platform as _platform
+import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 import pytest
@@ -230,6 +232,10 @@ def _is_windows() -> bool:
     return _platform.system() == "Windows"
 
 
+def _is_windows_native_standard_user() -> bool:
+    return _is_windows() and os.environ.get("APM_WINDOWS_NATIVE_STANDARD_USER") == "1"
+
+
 def _has_apm_binary() -> bool:
     return _resolve_apm_binary() is not None
 
@@ -257,6 +263,10 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
         "APM_RUN_INTEGRATION_TESTS=1 not set",
     ),
     "requires_windows": (_is_windows, "Windows required"),
+    "requires_windows_native_standard_user": (
+        _is_windows_native_standard_user,
+        "Capability-qualified native Windows standard-user runner required",
+    ),
     "requires_apm_binary": (
         _has_apm_binary,
         "apm binary not found on PATH (set APM_BINARY_PATH or build via scripts/build-binary.sh)",
@@ -280,6 +290,26 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
 }
 
 
+@cache
+def _has_runtime_version(name: str, minimum: str) -> bool:
+    """Require a stable release at or above a marker minimum without starting a session."""
+    executable = shutil.which(name)
+    if executable is None:
+        return False
+    try:
+        result = subprocess.run(
+            [executable, "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    words = result.stdout.split()
+    if result.returncode or not words:
+        return False
+    found = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", words[-1])
+    floor = tuple(int(part) for part in minimum.split("."))
+    return found is not None and tuple(int(part) for part in found.groups()) >= floor
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-skip items whose marker precondition is not met.
 
@@ -289,8 +319,31 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     """
     for item in items:
         for marker_name, (check_fn, reason) in _MARKER_CHECKS.items():
-            if item.get_closest_marker(marker_name) and not check_fn():
+            marker = item.get_closest_marker(marker_name)
+            if marker and not check_fn():
                 item.add_marker(pytest.mark.skip(reason=reason))
+            if (
+                marker
+                and marker_name.startswith("requires_runtime_")
+                and marker.kwargs.get("min_version")
+            ):
+                runtime = marker_name.removeprefix("requires_runtime_")
+                minimum = marker.kwargs["min_version"]
+                if not _has_runtime_version(runtime, minimum):
+                    item.add_marker(
+                        pytest.mark.skip(reason=f"{runtime} {minimum} or later required")
+                    )
+
+
+@pytest.fixture(scope="session")
+def apm_engine_command() -> tuple[str, ...]:
+    """Select the installed Python CLI for engine contracts with boundary faults.
+
+    This is explicitly not a packaged-binary test. Unlike apm_binary_path,
+    engine contracts must retain Python startup instrumentation even when CI
+    also provides a frozen artifact through APM_BINARY_PATH.
+    """
+    return (sys.executable, "-m", "apm_cli.cli")
 
 
 @pytest.fixture(scope="session")

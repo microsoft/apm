@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import dataclass, field
 
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import build_download_ref, detect_ref_change
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -21,27 +22,10 @@ from apm_cli.models.dependency.reference import DependencyReference
 
 
 @dataclass
-class _LockedDep:
-    """Minimal LockedDependency stand-in."""
+class _LockedDep(LockedDependency):
+    """Real locked source evidence with a convenient default identity."""
 
     repo_url: str = "owner/repo"
-    resolved_ref: str | None = None
-    resolved_commit: str | None = None
-    host: str | None = None
-    registry_prefix: str | None = None
-    virtual_path: str | None = None
-    source: str | None = None
-    local_path: str | None = None
-    deployed_files: list[str] = field(default_factory=list)
-    content_hash: str | None = None
-    is_insecure: bool = False
-
-    def get_unique_key(self) -> str:
-        if self.source == "local" and self.local_path:
-            return self.local_path
-        if self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
 
 
 @dataclass

@@ -13,6 +13,7 @@ with no automated signal.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 import types
@@ -26,6 +27,7 @@ from git.exc import GitCommandError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
+from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 from apm_cli.deps.git_reference_resolver import GitReferenceResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.transport_selection import (
@@ -34,6 +36,10 @@ from apm_cli.deps.transport_selection import (
     TransportSelector,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+from tests.utils.git_credential_sentinel import (
+    credential_helper_trap_env,
+    exercise_credential_helper,
+)
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -356,6 +362,56 @@ class TestListRemoteRefs:
         assert len(refs) == 2
         host.auth_resolver.execute_with_bearer_fallback.assert_called_once()
 
+    def test_tokenless_ado_ref_resolution_never_invokes_native_helper(
+        self,
+        tmp_path,
+    ) -> None:
+        """The ADO ref path uses AuthResolver's tokenless helper fence."""
+        base_env, marker = credential_helper_trap_env(tmp_path)
+        auth_resolver = AuthResolver()
+        context = AuthContext(
+            token=None,
+            source="none",
+            token_type="unknown",
+            host_info=HostInfo(
+                host="dev.azure.com",
+                kind="ado",
+                has_public_repos=False,
+                api_base="https://dev.azure.com",
+            ),
+            git_env={},
+        )
+        host = _ctx(token=None)
+        host.auth_resolver = auth_resolver
+        host.git_env = base_env
+        host._resolve_dep_auth_ctx.return_value = context
+        host._build_repo_url.return_value = "https://dev.azure.com/org/project/_git/repo"
+
+        def run_remote(_url: str, *, env: dict[str, str], **_kwargs):
+            exercise_credential_helper(
+                env,
+                host="dev.azure.com",
+                path="org/project/_git/repo",
+            )
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=self.SAMPLE,
+                stderr="",
+            )
+
+        with patch("apm_cli.utils.git_env.git_remote_refs", side_effect=run_remote):
+            refs = GitReferenceResolver(host).list_remote_refs(
+                _dep(
+                    host="dev.azure.com",
+                    repo_url="org/project/_git/repo",
+                    ado=True,
+                )
+            )
+
+        assert len(refs) == 2
+        assert not marker.exists()
+
     def test_unauthenticated_uses_noninteractive_env(self):
         host = _ctx(token=None)
         dep = _dep(host="github.com")
@@ -364,12 +420,18 @@ class TestListRemoteRefs:
             resolver = GitReferenceResolver(host)
             resolver.list_remote_refs(dep)
         host._build_noninteractive_git_env.assert_called_once()
-        host._build_repo_url.assert_called_once_with(
+        host._build_repo_url.assert_any_call(
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token=None,
+            token="",
             auth_scheme="basic",
+        )
+        host._build_repo_url.assert_any_call(
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token="",
         )
 
     def test_ssh_preference_selects_ssh_without_token_auth(self):
@@ -389,7 +451,7 @@ class TestListRemoteRefs:
             resolver = GitReferenceResolver(host)
             resolver.list_remote_refs(dep)
 
-        host._build_repo_url.assert_called_once_with(
+        host._build_repo_url.assert_any_call(
             "owner/repo",
             use_ssh=True,
             dep_ref=dep,

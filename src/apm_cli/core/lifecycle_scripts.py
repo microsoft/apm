@@ -4,7 +4,7 @@ APM supports lifecycle scripts that fire at key moments during install,
 update, and uninstall operations.  Scripts are configured in well-known
 locations discovered from three tiers:
 
-1. Policy  -- /etc/apm/policy.d/*.json (admin-owned, JSON drop-ins, unchanged)
+1. Policy  -- platform-specific admin directory (JSON drop-ins, unchanged)
 2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
 3. Project -- apm.yml lifecycle: key (repo root)
 
@@ -37,8 +37,8 @@ import os
 import platform
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -108,7 +108,7 @@ class LifecycleEvent:
             event=event,
             packages=packages or [],
             scope=scope,
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )
@@ -170,7 +170,12 @@ class ScriptEntry:
         """Return timeout_sec with sensible defaults per type."""
         if self.timeout_sec is not None:
             return self.timeout_sec
-        return 10 if self.script_type == "http" else 30
+        return _default_timeout(self.script_type)
+
+
+def _default_timeout(script_type: str) -> int:
+    """Per-type default timeout in seconds (http 10, command 30)."""
+    return 10 if script_type == "http" else 30
 
 
 # -- Script file parsing ---------------------------------------------------
@@ -184,7 +189,45 @@ def _parse_allowed_env_vars(raw: object) -> list[str] | None:
     return names or None
 
 
-def _build_entry(raw: object, event_name: str, path: Path, source: str) -> ScriptEntry | None:
+_invalid_timeout_warned: set[tuple[str, str, int, str]] = set()
+
+
+def _resolve_timeout(
+    raw: dict, script_type: str, event_name: str, index: int, path: Path
+) -> object:
+    """Read timeoutSec (or its timeout alias), rejecting non-positive numbers.
+
+    A non-positive numeric timeout is invalid under either spelling: it is
+    dropped to None (the per-type default) with one warning naming the script.
+    Commands that rediscover scripts per event (update, uninstall) reparse the
+    same entry, so the warning is emitted once per process (one CLI command).
+    """
+
+    def _is_number(v: object) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    key, value = "timeoutSec", raw.get("timeoutSec")
+    if not (_is_number(value) or value):
+        key, value = "timeout", raw.get("timeout")
+    if _is_number(value) and value <= 0:
+        warn_key = (str(path), event_name, index, key)
+        if warn_key not in _invalid_timeout_warned:
+            _invalid_timeout_warned.add(warn_key)
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"Lifecycle script {event_name}[{index}] ({script_type}) in {path}: "
+                f"{key} must be positive; using the default of "
+                f"{_default_timeout(script_type)}s.",
+                symbol="warning",
+            )
+        return None
+    return value
+
+
+def _build_entry(
+    raw: object, event_name: str, path: Path, source: str, index: int = 0
+) -> ScriptEntry | None:
     """Build a single ScriptEntry from a raw mapping.
 
     Returns None if raw is not a dict or has an unknown type.
@@ -208,7 +251,7 @@ def _build_entry(raw: object, event_name: str, path: Path, source: str) -> Scrip
         command=command_val,
         url=raw.get("url"),
         headers=raw.get("headers"),
-        timeout_sec=raw.get("timeoutSec") or raw.get("timeout"),
+        timeout_sec=_resolve_timeout(raw, script_type, event_name, index, path),
         cwd=raw.get("cwd"),
         env=raw.get("env"),
         allowed_env_vars=_parse_allowed_env_vars(raw.get("allowedEnvVars")),
@@ -243,8 +286,8 @@ def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntr
             continue
         if not isinstance(script_list, list):
             continue
-        for raw in script_list:
-            entry = _build_entry(raw, event_name, path, source)
+        for index, raw in enumerate(script_list):
+            entry = _build_entry(raw, event_name, path, source, index)
             if entry is not None:
                 entries.append(entry)
     return entries
@@ -266,8 +309,8 @@ def _entries_from_lifecycle_map(lifecycle: object, path: Path, source: str) -> l
             continue
         if not isinstance(script_list, list):
             continue
-        for raw in script_list:
-            entry = _build_entry(raw, event_name, path, source)
+        for index, raw in enumerate(script_list):
+            entry = _build_entry(raw, event_name, path, source, index)
             if entry is not None:
                 entries.append(entry)
     return entries
@@ -314,9 +357,9 @@ def parse_apm_yml_lifecycle_with_fingerprint(
 def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
     """Parse a single JSON script file into a list of ScriptEntry.
 
-    Used for JSON-backed sources such as the admin policy tier
-    (/etc/apm/policy.d/*.json). Returns an empty list if the file is
-    malformed or uses an unsupported version.
+    Used for JSON-backed sources such as the platform-specific admin policy
+    tier. Returns an empty list if the file is malformed or uses an unsupported
+    version.
     """
     try:
         with open(path, encoding="utf-8") as f:
@@ -344,10 +387,17 @@ def parse_project_script_file(path: Path) -> list[ScriptEntry]:
 
 
 def _get_policy_scripts_dir() -> Path:
-    """Return the platform-specific policy scripts directory."""
+    """Return the platform-specific policy scripts directory.
+
+    Windows normally supplies an absolute ``ProgramData`` environment value.
+    Fall back to its historical default when that value is missing or unsafe.
+    """
     system = platform.system()
     if system == "Windows":
-        return Path(r"C:\ProgramData\APM\policy.d")
+        program_data = os.environ.get("PROGRAMDATA")
+        if not program_data or not PureWindowsPath(program_data).is_absolute():
+            program_data = r"C:\ProgramData"
+        return Path(program_data) / "APM" / "policy.d"
     return Path("/etc/apm/policy.d")
 
 
@@ -385,7 +435,7 @@ def discover_scripts(
     """Discover and merge scripts from all three sources.
 
     Load order (all additive, policy first):
-      1. Policy  -- /etc/apm/policy.d/*.json (directory, JSON)
+      1. Policy  -- platform-specific admin directory (JSON)
       2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
       3. Project -- apm.yml lifecycle: key (repo root)
     """

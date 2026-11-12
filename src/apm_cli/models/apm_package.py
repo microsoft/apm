@@ -7,9 +7,10 @@ compatibility.
 """
 
 import logging
+import re
 import threading
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -38,7 +39,9 @@ from .validation import (
 
 if TYPE_CHECKING:
     from apm_cli.agent_plugins.ir import AgentPlugin
+    from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.models.dependency.replacement import ReplacementRule
 
 _log = logging.getLogger(__name__)
 
@@ -68,13 +71,14 @@ __all__ = [  # noqa: RUF022
     "surviving_dependency_refs_for_reintegration",
 ]
 
-# Module-level parse cache: (resolved apm.yml path, resolved source dir) ->
-# APMPackage. The source-dir half of the key is part of cache identity (#940)
+# Module-level parse cache: (resolved apm.yml path, resolved source dir,
+# create_config) -> APMPackage. The source-dir half of the key is part of cache
+# identity (#940)
 # because two logical loads of the same apm.yml file can declare different
 # anchors for relative ``local_path`` deps depending on which parent package
 # declared them. Sharing one APMPackage instance across both would let the
 # resolver mutate ``source_path`` and poison the cache for the other consumer.
-_apm_yml_cache: dict[tuple[Path, Path | None], "APMPackage"] = {}
+_apm_yml_cache: dict[tuple[Path, Path | None, bool], "APMPackage"] = {}
 # Guards every structural mutation of ``_apm_yml_cache``. The parallel
 # pre-download executor and the BFS resolver pool both insert entries from
 # worker threads while ``invalidate_apm_yml_cache_entry`` iterates the dict;
@@ -161,7 +165,13 @@ def _parse_v01_registries_block(
     return registries or None, default_name
 
 
-def _parse_registries_block(data: dict, apm_yml_path: Path, manifest_contract):
+def _parse_registries_block(
+    data: dict,
+    apm_yml_path: Path,
+    manifest_contract,
+    *,
+    create_config: bool = True,
+):
     """Parse the top-level ``registries:`` block per design §3.1.
 
     Schema::
@@ -188,7 +198,10 @@ def _parse_registries_block(data: dict, apm_yml_path: Path, manifest_contract):
     if raw != {}:
         from ..deps.registry.feature_gate import require_package_registry_enabled
 
-        require_package_registry_enabled("Top-level 'registries:' blocks")
+        require_package_registry_enabled(
+            "Top-level 'registries:' blocks",
+            create_config=create_config,
+        )
     if not isinstance(raw, dict):
         raise ValueError(
             f"Top-level 'registries:' block in {apm_yml_path} must be a "
@@ -305,6 +318,101 @@ def _route_unscoped_to_default_registry(
                 )
 
 
+# Top-level apm.yml keys this client understands. A key in this set must
+# not produce an unknown-key warning. Includes fields parsed by sibling
+# owners (policy, compilation, marketplace, lifecycle, executables) rather
+# than stored on APMPackage. Keys matching ``x-[a-z][a-z0-9-]*`` are
+# extensions, not members. ``source`` is a runtime field, not a manifest key.
+_KNOWN_TOP_LEVEL_KEYS = frozenset(
+    {
+        "$schema",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "default_host",
+        "target",
+        "targets",
+        "type",
+        "scripts",
+        "includes",
+        "registries",
+        "replace",
+        "dependencies",
+        "devDependencies",
+        "compilation",
+        "policy",
+        "marketplace",
+        "allowExecutables",
+        "executables",
+        "lifecycle",
+        # Consumed by plugin synthesis / Agent Plugin projection, not stored
+        # as first-class APMPackage fields. Still known, so they must not warn.
+        "homepage",
+        "repository",
+        "keywords",
+        "tags",
+        "build",
+        "manifestVersion",
+        "schemaVersion",
+    }
+)
+# OpenAPM req-ext-001. A bare ``x-`` prefix is not an extension.
+_EXTENSION_KEY_RE = re.compile(r"^x-[a-z][a-z0-9-]*$")
+
+
+def _is_extension_key(key: object) -> bool:
+    """True when *key* matches OpenAPM req-ext-001 (``x-[a-z][a-z0-9-]*``)."""
+    return isinstance(key, str) and _EXTENSION_KEY_RE.fullmatch(key) is not None
+
+
+def _ascii_token(value: object) -> str:
+    """Render a diagnostic token as printable ASCII."""
+    text = value if isinstance(value, str) else str(value)
+    return ascii(text)[1:-1]
+
+
+def _warn_unknown_manifest_keys(keys: list[str], manifest_path: Path) -> None:
+    """Warn once, naming every ignored top-level key."""
+    from ..utils.console import _rich_warning
+
+    safe_keys = ", ".join(_ascii_token(key) for key in keys)
+    safe_path = _ascii_token(manifest_path.as_posix())
+    _rich_warning(
+        f"Unknown top-level key(s) in {safe_path}: {safe_keys}. "
+        "These keys were ignored. Rename each to match x-[a-z][a-z0-9-]* "
+        "(for example x-custom-field) to keep it in the parsed manifest "
+        "and the dependency lock entry, or remove it.",
+        symbol="warning",
+    )
+
+
+def _collect_manifest_extensions(
+    data: Mapping[str, Any],
+    manifest_path: Path,
+    warning_handler: Callable[[list[str], Path], None] | None = _warn_unknown_manifest_keys,
+) -> dict[str, Any]:
+    """Return req-ext-001 keys in declaration order and warn on other unknown keys.
+
+    req-ext-003: extension values are not validated. Non-string keys are
+    unknown, not extensions, and must not raise. The warning does not fail
+    parse and does not relax manifest rewrite preservation (req-mf-006).
+    """
+    extensions: dict[str, Any] = {}
+    unknown: list[str] = []
+    for key, value in data.items():
+        if _is_extension_key(key):
+            extensions[str(key)] = value
+            continue
+        if isinstance(key, str) and key in _KNOWN_TOP_LEVEL_KEYS:
+            continue
+        unknown.append(key if isinstance(key, str) else str(key))
+    if unknown and warning_handler is not None:
+        warning_handler(unknown, manifest_path)
+    return extensions
+
+
 def _iter_apm_dependency_lists(
     dependencies: dict[str, Any] | None,
     dev_dependencies: dict[str, Any] | None,
@@ -379,6 +487,17 @@ class APMPackage:
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
     agent_plugin: "AgentPlugin | None" = None
+    codex_plugin: "CodexCompatibilityPlugin | None" = None
+    # Vendor extension keys (``x-*``) from apm.yml, in declaration order.
+    # Empty when the manifest declares none. Values are not interpreted.
+    extensions: dict[str, Any] = field(default_factory=dict)
+
+    # Root-only ``replace:`` block: typed replacement rules that redirect
+    # upstream package identities to local checkouts or forks.  Only the
+    # consumer root manifest owns these rules; dependency manifests must
+    # not declare them (enforced by the resolver, not the parser).
+    # ``None`` means the key was absent; ``[]`` means it was present but empty.
+    replace_rules: "list[ReplacementRule] | None" = None
 
     def __post_init__(self) -> None:
         """Derive the canonical target projection for compatibility callers."""
@@ -460,6 +579,8 @@ class APMPackage:
         package_path: Path,
         source_path: Path | None = None,
         manifest_path: Path | None = None,
+        create_config: bool = True,
+        warning_handler: Callable[[list[str], Path], None] | None = _warn_unknown_manifest_keys,
     ) -> "APMPackage":
         """Construct a package from already interpreted manifest data.
 
@@ -475,6 +596,11 @@ class APMPackage:
                 ``local_path`` dependencies.
             manifest_path: Source manifest path used in diagnostics. Defaults
                 to ``package_path / "apm.yml"``.
+            create_config: When false, missing user config is read as defaults
+                without creating ``~/.apm/config.json``.
+            warning_handler: Receives unknown keys and their manifest path.
+                Defaults to a terminal warning. Use ``None`` for a prospective
+                parse whose source manifest is diagnosed separately.
 
         Returns:
             A package with all compatibility projections populated.
@@ -483,6 +609,14 @@ class APMPackage:
             ValueError: If interpreted manifest fields are invalid.
         """
         data = dict(manifest_data)
+        from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
+
+        for dependency_key in ("dependencies", "devDependencies"):
+            if dependency_key in data:
+                data[dependency_key] = resolve_plugin_root_placeholders(
+                    data[dependency_key],
+                    package_path,
+                )
         source_manifest = manifest_path or package_path / "apm.yml"
         resolved_source = source_path.resolve() if source_path is not None else None
 
@@ -505,6 +639,7 @@ class APMPackage:
             data,
             source_manifest,
             manifest_contract,
+            create_config=create_config,
         )
 
         # Parse dependencies
@@ -540,11 +675,18 @@ class APMPackage:
         # Merge user/policy registry URLs and config.json default routing.
         from ..deps.registry.config_loader import resolve_effective_registries
 
-        registries, default_registry = resolve_effective_registries(registries, default_registry)
+        registries, default_registry = resolve_effective_registries(
+            registries,
+            default_registry,
+            create_config=create_config,
+        )
         if registries or default_registry:
             from ..deps.registry.feature_gate import require_package_registry_enabled
 
-            require_package_registry_enabled("Registry configuration")
+            require_package_registry_enabled(
+                "Registry configuration",
+                create_config=create_config,
+            )
 
         # Route unscoped deps to the effective default registry when configured.
         if default_registry:
@@ -614,6 +756,42 @@ class APMPackage:
                 for name in parsed_target_values
             )
 
+        extensions = _collect_manifest_extensions(data, source_manifest, warning_handler)
+
+        # Parse root-owned ``replace:`` block.  Only present in the consumer
+        # root manifest; dependency manifests should not declare it (enforced
+        # by the resolver, not here).  Parsing errors are raised as ValueError
+        # to match existing manifest-key error handling.
+        #
+        # Contract gate (D3): when ``replace`` is present (including empty list),
+        # require the source-replacements-v1 ``$schema`` so that old readers
+        # (>=v0.33) reject the manifest before touching managed files.
+        # Schema-less/released contracts are unchanged otherwise.
+        replace_rules: list[ReplacementRule] | None = None
+        raw_replace = data.get("replace")
+        if raw_replace is not None:
+            from .manifest_contract import (
+                SOURCE_REPLACEMENTS_V1_SCHEMA_URI,
+                ManifestContract,
+            )
+
+            if manifest_contract not in (ManifestContract.SOURCE_REPLACEMENTS_V1,):
+                raise ValueError(
+                    "'replace' requires the source-replacements-v1 manifest contract. "
+                    "Add this to your apm.yml:\n"
+                    f'  $schema: "{SOURCE_REPLACEMENTS_V1_SCHEMA_URI}"'
+                )
+
+            from .dependency.replacement import (
+                ReplacementConfigError,
+                parse_replace_block,
+            )
+
+            try:
+                replace_rules = parse_replace_block(raw_replace)
+            except ReplacementConfigError as exc:
+                raise ValueError(str(exc)) from exc
+
         result = cls(
             name=data["name"],
             version=data["version"],
@@ -634,6 +812,8 @@ class APMPackage:
             default_registry=default_registry,
             manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
+            extensions=extensions,
+            replace_rules=replace_rules,
         )
         return result
 
@@ -642,21 +822,23 @@ class APMPackage:
         cls,
         apm_yml_path: Path,
         source_path: Path | None = None,
+        *,
+        create_config: bool = True,
     ) -> "APMPackage":
         """Load an APM package from an ``apm.yml`` file.
 
-        Results are cached by ``(resolved apm.yml path, resolved source_path)``
-        for the lifetime of the process. ``source_path`` is part of the cache
-        identity so two logical loads of the same file with different anchors
-        for relative ``local_path`` dependencies each get their own package
-        instance.
+        Results are cached by ``(resolved apm.yml path, resolved source_path,
+        create_config)`` for the lifetime of the process. ``source_path`` is
+        part of the cache identity so two logical loads of the same file with
+        different anchors for relative ``local_path`` dependencies each get
+        their own package instance.
         """
         if not apm_yml_path.exists():
             raise FileNotFoundError(f"apm.yml not found: {apm_yml_path}")
 
         resolved = apm_yml_path.resolve()
         resolved_source = source_path.resolve() if source_path is not None else None
-        cache_key = (resolved, resolved_source)
+        cache_key = (resolved, resolved_source, create_config)
         cached = _apm_yml_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -683,6 +865,7 @@ class APMPackage:
             package_path=apm_yml_path.parent,
             source_path=resolved_source,
             manifest_path=apm_yml_path,
+            create_config=create_config,
         )
         with _apm_yml_cache_lock:
             if _apm_yml_cache_generation == generation_snapshot:

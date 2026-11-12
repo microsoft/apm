@@ -28,6 +28,7 @@ from ..core.experimental import (
 from ..core.experimental import (
     reset as _reset_flags,
 )
+from ..install.locking import serialized_lifecycle
 from ._helpers import _get_console
 
 # ------------------------------------------------------------------
@@ -227,6 +228,7 @@ def list_flags(ctx, filter_enabled: bool, filter_disabled: bool, verbose: bool, 
 @click.argument("name")
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.pass_context
+@serialized_lifecycle
 def enable_flag(ctx, name: str, verbose: bool):
     """Enable an experimental feature flag."""
     verbose = _resolve_verbose(ctx, verbose)
@@ -257,6 +259,7 @@ def enable_flag(ctx, name: str, verbose: bool):
 @click.argument("name")
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.pass_context
+@serialized_lifecycle
 def disable_flag(ctx, name: str, verbose: bool):
     """Disable an experimental feature flag."""
     verbose = _resolve_verbose(ctx, verbose)
@@ -286,6 +289,7 @@ def disable_flag(ctx, name: str, verbose: bool):
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.pass_context
+@serialized_lifecycle
 def reset_flags(ctx, name: str | None, yes: bool, verbose: bool):
     """Reset one or all experimental features to their defaults."""
     verbose = _resolve_verbose(ctx, verbose)

@@ -384,6 +384,20 @@ def test_agent_bundle_dry_run_does_not_claim_default_flip_before_t10(
     assert not any("defaults to Agent Plugin output" in warning for warning in result.warnings)
 
 
+def test_agent_bundle_dry_run_reads_legacy_lockfile_without_migration(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    canonical = project / "apm.lock.yaml"
+    legacy = project / "apm.lock"
+    canonical.rename(legacy)
+    build = tmp_path / "build"
+
+    export_agent_plugin_bundle(project, build, dry_run=True)
+
+    assert legacy.is_file()
+    assert not canonical.exists()
+    assert not build.exists()
+
+
 def test_agent_bundle_dry_run_rejects_nonportable_components(tmp_path: Path) -> None:
     project = _write_agent_project(tmp_path / "project")
     _add_nonportable_components(project, include_lsp=False)
@@ -619,11 +633,24 @@ def test_agent_bundle_nonportable_preflight_preserves_existing_output(
 
 
 @pytest.mark.parametrize("archive_format", ["zip", "tar.gz"])
+@pytest.mark.parametrize(
+    "timestamp_mode",
+    ["legacy-timestamp", "timestamp-free"],
+)
 def test_agent_bundle_archives_are_reproducible(
     tmp_path: Path,
     archive_format: str,
+    timestamp_mode: str,
 ) -> None:
     project = _write_agent_project(tmp_path / "project")
+    if timestamp_mode == "timestamp-free":
+        lockfile_path = project / "apm.lock.yaml"
+        lockfile_data = yaml.safe_load(lockfile_path.read_text(encoding="utf-8"))
+        lockfile_data.pop("generated_at")
+        lockfile_path.write_text(
+            yaml.safe_dump(lockfile_data),
+            encoding="utf-8",
+        )
     first = export_agent_plugin_bundle(
         project,
         tmp_path / "first",

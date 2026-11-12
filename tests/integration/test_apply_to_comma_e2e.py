@@ -5,8 +5,8 @@ glob list and exercises each of the four target converters
 (Copilot / Cursor / Windsurf / Claude), then asserts every segment ends
 up in the rendered artifact in the target's native form.
 
-Copilot must preserve the value verbatim (consuming tool splits it);
-the other three must emit a YAML list under their respective key.
+Copilot preserves the value verbatim; Cursor emits one comma-joined scalar.
+Claude and Windsurf emit YAML lists under their respective keys.
 """
 
 import tempfile
@@ -47,16 +47,21 @@ def test_copilot_preserves_verbatim(source_instruction, tmp_path):
     assert f"applyTo: '{COMMA_APPLY_TO}'" in out
 
 
-def test_cursor_emits_yaml_list(source_instruction, tmp_path):
+def test_cursor_emits_comma_joined_scalar(source_instruction, tmp_path):
+    """Cursor must join multiple globs into one comma-separated scalar (issue #3002).
+
+    Unlike Claude/Windsurf, APM emits Cursor globs as one scalar.
+    """
     dst = tmp_path / "cursor.mdc"
     integrator = InstructionIntegrator()
     integrator.copy_instruction_cursor(source_instruction, dst)
     out = dst.read_text()
-    assert "globs:" in out
-    for seg in SEGMENTS:
-        assert f'  - "{seg}"' in out
-    # Make sure we did NOT emit the legacy literal comma string.
-    assert f'globs: "{COMMA_APPLY_TO}"' not in out
+    joined = ", ".join(SEGMENTS)
+    # Bare/unquoted, even though every segment starts with "**" -- Cursor's
+    # docs never show a quoted globs value, no exceptions.
+    assert f"globs: {joined}" in out
+    # Must NOT emit a YAML list for globs -- that was the #3002 bug.
+    assert "  - " not in out
 
 
 def test_windsurf_emits_yaml_list(source_instruction, tmp_path):

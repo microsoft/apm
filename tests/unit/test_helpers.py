@@ -351,6 +351,7 @@ class TestCoreOperations:
         mock_installer.install_servers.assert_called_once_with(
             ["my-server"],
             replace_existing=False,
+            managed_fields=None,
         )
 
     def test_install_package_exception_returns_false(self, monkeypatch):

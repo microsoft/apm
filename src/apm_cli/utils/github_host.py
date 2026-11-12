@@ -242,24 +242,11 @@ def maybe_raise_bare_fqdn_github_gitlab_conflict(raw: str) -> None:
     are excluded. Only applies when there are at least three path segments after the host
     (same threshold as GitLab direct shorthand probing).
     """
-    s = raw.strip()
-    if "#" in s:
-        s = s.rsplit("#", 1)[0].strip()
-    if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
-        return
-    if "/" not in s:
-        return
-    parts = [p for p in s.split("/") if p]
-    # host + at least three segments → ambiguous nested repo vs repo + virtual path
-    if len(parts) < 4:
-        return
-    host_cand = parts[0]
-    if "." not in host_cand:
-        return
-    if not is_supported_git_host(host_cand):
-        return
-    if has_github_gitlab_host_env_conflict(host_cand):
-        raise ValueError(format_github_gitlab_host_conflict_error(host_cand))
+    from apm_cli.models.dependency.host_virtual import (
+        reject_bare_fqdn_github_gitlab_conflict,
+    )
+
+    reject_bare_fqdn_github_gitlab_conflict(raw)
 
 
 def is_github_hostname(hostname: str | None) -> bool:
@@ -389,7 +376,7 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     This CDN endpoint is not subject to the GitHub REST API rate limit and
     does not require authentication for public repositories.
 
-    Only valid for github.com — GitHub Enterprise Server and GHE Cloud Data
+    Only valid for github.com -- GitHub Enterprise Server and GHE Cloud Data
     Residency hosts do not have a ``raw.githubusercontent.com`` equivalent.
 
     Args:
@@ -453,7 +440,7 @@ def build_ssh_url(
     """Build an SSH clone URL for the given host and repo_ref (owner/repo).
 
     When ``port`` is set, emit the explicit ``ssh://`` form because SCP
-    shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
+    shorthand (``git@host:path``) cannot carry a port -- the ``:`` is the path
     separator. Without a port, keep the compact SCP shorthand (no behavioural
     change for the common case).
 
@@ -606,74 +593,10 @@ def build_ado_bearer_git_env(bearer_token: str) -> dict:
 
 
 def set_authorization_header_git_env(env: dict[str, str], scheme: str, credential: str) -> None:
-    """Make ``Authorization: <scheme> <credential>`` the sole auth header in *env*.
+    """Delegate Git authorization replacement to the child-env owner."""
+    from apm_cli.utils.git_env import set_git_authorization_header
 
-    :func:`build_authorization_header_git_env` returns an overlay whose
-    ``GIT_CONFIG_COUNT`` is hardcoded to ``"1"``.  Dict-merging that overlay
-    onto a base env that already carries indexed git config entries
-    (``GIT_CONFIG_COUNT=N`` with keys ``0..N-1``) resets the count and
-    overwrites index 0, silently dropping non-auth entries such as
-    ``safe.bareRepository=explicit`` or ``http.sslCAInfo`` (#2368).
-
-    This helper instead rewrites the indexed set in place: existing
-    auth-channel entries (any ``*extraheader*`` key, or a value that IS an
-    ``Authorization:`` header -- the same policy as
-    ``AuthResolver._clear_git_auth_env``) are removed so layered callers
-    cannot stack duplicate Authorization headers, every other entry is
-    preserved, and the new header is appended at the end.  Orphaned
-    ``GIT_CONFIG_KEY_/VALUE_`` entries at or beyond the count are also
-    dropped so no stale credential lingers in the child-process env table.
-
-    Note:
-        The retain/reindex predicate below intentionally mirrors
-        ``AuthResolver._clear_git_auth_env`` (``core/auth.py``) rather than
-        delegating to a shared primitive.  Extracting a single owner (e.g.
-        ``utils/git_env.py``) is the right end state -- see PR discussion on
-        #2368 and follow-up #2398 -- but doing so means editing
-        ``_clear_git_auth_env``, a security-critical function this bug does
-        not otherwise touch, which deserves its own focused security review
-        rather than riding along in this fix.
-        TODO(#2398): extract a shared ``_is_auth_channel_entry`` /
-        retain-reindex helper into ``utils/git_env.py``, and delegate both
-        this function and ``AuthResolver._clear_git_auth_env`` to it.
-
-    Args:
-        env: The subprocess env dict to mutate (base env already merged in).
-        scheme: HTTP auth scheme, e.g. ``"Bearer"`` or ``"Basic"``.
-        credential: The credential value (token or base64-encoded user:pass).
-
-    Raises:
-        ValueError: If *scheme* or *credential* contains a carriage-return
-            or newline, which would let the appended git-config value smuggle
-            a second config entry or header (defense-in-depth; no known
-            caller in this codebase can trigger this today).
-
-    Note:
-        Callers MUST NOT log *env* afterwards.  The appended
-        ``GIT_CONFIG_VALUE_N`` contains the credential.
-    """
-    if "\r" in scheme or "\n" in scheme or "\r" in credential or "\n" in credential:
-        raise ValueError("scheme and credential must not contain CR or LF")
-    try:
-        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
-    except ValueError:
-        count = 0
-    retained: list[tuple[str, str]] = []
-    for index in range(count):
-        key = env.get(f"GIT_CONFIG_KEY_{index}", "")
-        value = env.get(f"GIT_CONFIG_VALUE_{index}", "")
-        if "extraheader" in key.lower() or value.strip().lower().startswith("authorization:"):
-            continue
-        if key:
-            retained.append((key, value))
-    for key in tuple(env):
-        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
-            env.pop(key, None)
-    retained.append(("http.extraheader", f"Authorization: {scheme} {credential}"))
-    env["GIT_CONFIG_COUNT"] = str(len(retained))
-    for index, (key, value) in enumerate(retained):
-        env[f"GIT_CONFIG_KEY_{index}"] = key
-        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    set_git_authorization_header(env, scheme, credential)
 
 
 def set_ado_bearer_git_env(env: dict[str, str], bearer_token: str) -> None:
@@ -696,18 +619,22 @@ def set_ado_bearer_git_env(env: dict[str, str], bearer_token: str) -> None:
 # trigger bearer fallback on stale-PAT 403 / interactive-prompt-blocked
 # scenarios). Consolidating here prevents that recurring drift.
 #
-# All five signals are union-required for ADO PAT->bearer eligibility:
-#   "401"                       canonical HTTP auth failure
-#   "403"                       PAT scope/permission rejection (ADO returns 403)
+# Phrase signals plus anchored HTTP 401/403. Bare "401"/"403" substrings
+# would false-positive Azure DevOps work-item codes such as TF401xxx.
+#   HTTP 401                    canonical HTTP auth failure
+#   HTTP 403                    PAT scope/permission rejection (ADO returns 403)
 #   "authentication failed"     git's stderr text on credential rejection
 #   "unauthorized"              libcurl synonym, capitalization varies by version
 #   "could not read username"   GIT_TERMINAL_PROMPT=0 + invalid creds
-_ADO_AUTH_FAILURE_SIGNALS = (
-    "401",
-    "403",
+_ADO_AUTH_FAILURE_PHRASES = (
     "authentication failed",
     "unauthorized",
     "could not read username",
+)
+_ADO_HTTP_AUTH_STATUS_RE = re.compile(
+    r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403)\b"
+    r"|\b(?:401|403)\b",
+    re.IGNORECASE,
 )
 
 # SSH-specific auth failure signals from OpenSSH stderr.
@@ -738,21 +665,52 @@ _SSH_CONNECTIVITY_SIGNALS = (
 )
 
 
-def is_ado_auth_failure_signal(text: str | None) -> bool:
+def _flatten_auth_exception_text(exc: BaseException) -> str:
+    """Collect ``str(exc)``, stderr/stdout, and ``__cause__`` / ``__context__``.
+
+    GitCache wraps ``CalledProcessError`` as ``RuntimeError`` from the
+    original git failure. Callers that pass only ``str(exc)`` drop clone
+    stderr that lives on the cause chain.
+    """
+    parts: list[str] = []
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts.append(str(current))
+        for name in ("stderr", "stdout"):
+            value = getattr(current, name, None)
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            if value:
+                parts.append(str(value))
+        current = current.__cause__ or current.__context__
+    return " ".join(parts)
+
+
+def is_ado_auth_failure_signal(text: str | BaseException | None) -> bool:
     """Return True if ``text`` matches an ADO auth-failure signal.
 
-    Accepts raw stderr from ``subprocess.run`` or ``str(GitCommandError)``.
-    Matches case-insensitively; libcurl error capitalization has changed
-    across versions (curl 7.x vs 8.x), so callers must not rely on case.
+    Accepts raw stderr from ``subprocess.run``, ``str(GitCommandError)``,
+    or an exception (including ``CalledProcessError`` nested as
+    ``__cause__``). Matches case-insensitively; libcurl error
+    capitalization has changed across versions (curl 7.x vs 8.x), so
+    callers must not rely on case.
+
+    HTTP 401/403 are word-anchored so Azure DevOps ``TF401xxx`` codes do
+    not count as auth failures.
 
     Callers MUST gate bearer-fallback eligibility on additional context
     (host is ADO, scheme is "basic", a token was actually presented) --
     this predicate only answers the "looks like an auth failure" question.
     """
-    if not text:
+    blob = _flatten_auth_exception_text(text) if isinstance(text, BaseException) else text or ""
+    if not blob.strip():
         return False
-    lowered = text.lower()
-    return any(signal in lowered for signal in _ADO_AUTH_FAILURE_SIGNALS)
+    lowered = blob.lower()
+    if any(signal in lowered for signal in _ADO_AUTH_FAILURE_PHRASES):
+        return True
+    return _ADO_HTTP_AUTH_STATUS_RE.search(blob) is not None
 
 
 def is_ssh_auth_failure_signal(text: str | None) -> bool:
@@ -1052,6 +1010,13 @@ def build_artifactory_archive_url(
     # project sits inside a subgroup (e.g. ``group/sub/pkg`` becomes
     # ``pkg-{ref}.zip``).  ``rsplit`` keeps the flat case unchanged.
     repo_basename = repo.rsplit("/", 1)[-1]
+    if is_full_commit_sha(ref):
+        return (
+            f"{base}/archive/{ref}.zip",
+            f"{base}/-/archive/{ref}/{repo_basename}-{ref}.zip",
+            f"{base}/zip/{ref}",
+        )
+
     return (
         # GitHub-style: /archive/refs/heads/{ref}.zip
         f"{base}/archive/refs/heads/{ref}.zip",
@@ -1069,6 +1034,11 @@ def build_artifactory_archive_url(
         f"{base}/zip/refs/heads/{ref}",
         f"{base}/zip/refs/tags/{ref}",
     )
+
+
+def is_full_commit_sha(ref: str | None) -> bool:
+    """Return whether *ref* is a complete hexadecimal commit SHA."""
+    return bool(ref and re.fullmatch(r"[0-9a-fA-F]{40}", ref))
 
 
 def is_valid_fqdn(hostname: str) -> bool:

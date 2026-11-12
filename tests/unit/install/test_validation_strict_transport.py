@@ -11,11 +11,16 @@ re-enables the legacy permissive chain (mirroring ``_clone_with_fallback``).
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
+from click.testing import CliRunner
 
+from apm_cli.cli import cli
+from apm_cli.deps.transport_selection import ProtocolPreference
 from apm_cli.install import validation
+from apm_cli.utils.git_env import GitUrlRewriteProbeError
 
 
 def _make_resolver():
@@ -30,6 +35,10 @@ def _make_resolver():
     ctx = MagicMock(source="env", token_type="pat", token=None)
     resolver.resolve.return_value = ctx
     resolver.resolve_for_dep.return_value = ctx
+    resolver.resolve_for_remote.return_value = ctx
+    resolver.git_env_for_remote.return_value = {
+        "GIT_TERMINAL_PROMPT": "0",
+    }
     resolver.build_noninteractive_git_env.return_value = {
         "GIT_TERMINAL_PROMPT": "0",
     }
@@ -109,8 +118,8 @@ class TestStrictTransportValidation:
         assert len(urls) == 1, f"explicit ssh:// must be strict, got {urls!r}"
         assert _scheme_of(urls[0]) == "ssh"
 
-    def test_shorthand_keeps_legacy_ssh_then_https_chain(self, monkeypatch):
-        """No explicit scheme = no user preference; keep SSH-first chain."""
+    def test_shorthand_defaults_to_strict_https(self, monkeypatch):
+        """No explicit scheme or preference uses the selector's HTTPS default."""
         monkeypatch.delenv("APM_ALLOW_PROTOCOL_FALLBACK", raising=False)
         resolver = _make_resolver()
         with patch(
@@ -124,9 +133,56 @@ class TestStrictTransportValidation:
             )
         assert result is False
         urls = self._probe_urls(mock_run)
-        assert len(urls) == 2, f"shorthand should chain both transports, got {urls!r}"
-        assert _scheme_of(urls[0]) == "ssh"
-        assert _scheme_of(urls[1]) == "https"
+        assert len(urls) == 1
+        assert _scheme_of(urls[0]) == "https"
+
+    @pytest.mark.parametrize(
+        ("preference", "expected_scheme"),
+        (
+            (ProtocolPreference.SSH, "ssh"),
+            (ProtocolPreference.HTTPS, "https"),
+        ),
+    )
+    def test_shorthand_uses_resolved_protocol_preference(
+        self,
+        monkeypatch,
+        preference: ProtocolPreference,
+        expected_scheme: str,
+    ) -> None:
+        monkeypatch.delenv("APM_ALLOW_PROTOCOL_FALLBACK", raising=False)
+        resolver = _make_resolver()
+        with patch("subprocess.run", return_value=_failed_run()) as mock_run:
+            result = validation._validate_package_exists(
+                "bitbucket.example.internal/scm/team/example-repo",
+                verbose=False,
+                auth_resolver=resolver,
+                protocol_pref=preference,
+                allow_protocol_fallback=False,
+            )
+
+        assert result is False
+        urls = self._probe_urls(mock_run)
+        assert len(urls) == 1
+        assert _scheme_of(urls[0]) == expected_scheme
+
+    def test_resolved_fallback_preference_chains_from_selected_protocol(
+        self,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.delenv("APM_ALLOW_PROTOCOL_FALLBACK", raising=False)
+        resolver = _make_resolver()
+        with patch("subprocess.run", return_value=_failed_run()) as mock_run:
+            result = validation._validate_package_exists(
+                "bitbucket.example.internal/scm/team/example-repo",
+                verbose=False,
+                auth_resolver=resolver,
+                protocol_pref=ProtocolPreference.SSH,
+                allow_protocol_fallback=True,
+            )
+
+        assert result is False
+        urls = self._probe_urls(mock_run)
+        assert [_scheme_of(url) for url in urls] == ["ssh", "https"]
 
     def test_allow_protocol_fallback_env_restores_legacy_chain(self, monkeypatch):
         """APM_ALLOW_PROTOCOL_FALLBACK=1 re-appends the opposite scheme so the
@@ -163,7 +219,7 @@ class TestPerAttemptVerboseLogging:
         logger.verbose_detail.side_effect = lambda msg: verbose_msgs.append(msg)
 
         with patch(
-            "subprocess.run",
+            "apm_cli.utils.git_env.git_remote_refs",
             side_effect=[
                 _failed_run("fatal: Authentication failed for HTTPS"),
                 _failed_run("ssh: connect to host port 22: Connection timed out"),
@@ -183,3 +239,136 @@ class TestPerAttemptVerboseLogging:
         assert "(ssh)" in joined, f"ssh attempt missing from log: {joined!r}"
         assert "Authentication failed for HTTPS" in joined
         assert "port 22" in joined
+
+
+def _write_cli_manifest(root: Path) -> None:
+    (root / "apm.yml").write_text(
+        "name: transport-test\n"
+        "version: 1.0.0\n"
+        "targets: [copilot]\n"
+        "dependencies:\n"
+        "  apm: []\n"
+        "  mcp: []\n",
+        encoding="ascii",
+    )
+
+
+@pytest.mark.parametrize(
+    ("args", "environment", "saved_pref", "saved_fallback", "expected_pref", "expected_fallback"),
+    (
+        (
+            ("--ssh", "--allow-protocol-fallback"),
+            {},
+            None,
+            False,
+            ProtocolPreference.SSH,
+            True,
+        ),
+        (
+            (),
+            {"APM_GIT_PROTOCOL": "https", "APM_ALLOW_PROTOCOL_FALLBACK": "1"},
+            None,
+            False,
+            ProtocolPreference.HTTPS,
+            True,
+        ),
+        (
+            (),
+            {},
+            "ssh",
+            True,
+            ProtocolPreference.SSH,
+            True,
+        ),
+    ),
+    ids=("cli-flags", "environment", "saved-config"),
+)
+def test_positional_cli_threads_resolved_transport_policy_to_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: tuple[str, ...],
+    environment: dict[str, str],
+    saved_pref: str | None,
+    saved_fallback: bool,
+    expected_pref: ProtocolPreference,
+    expected_fallback: bool,
+) -> None:
+    """Positional validation receives the same resolved policy as clone."""
+    _write_cli_manifest(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+
+    with (
+        patch(
+            "apm_cli.config.get_apm_protocol_pref",
+            return_value=saved_pref or environment.get("APM_GIT_PROTOCOL"),
+        ),
+        patch(
+            "apm_cli.config.get_apm_allow_protocol_fallback",
+            return_value=saved_fallback or bool(environment),
+        ),
+        patch(
+            "apm_cli.commands.install._validate_package_exists",
+            return_value=False,
+        ) as validate,
+        patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
+    ):
+        result = CliRunner().invoke(
+            cli,
+            ["install", *args, "git.example.test/acme/repo"],
+        )
+
+    assert result.exit_code != 0
+    assert validate.call_args.kwargs["protocol_pref"] == expected_pref
+    assert validate.call_args.kwargs["allow_protocol_fallback"] is expected_fallback
+
+
+@pytest.mark.parametrize(
+    ("probe_error", "expected_text"),
+    (
+        (False, "different network host"),
+        (True, "Unable to verify Git URL rewrite safety"),
+    ),
+    ids=("unsafe-rewrite", "probe-failure"),
+)
+def test_positional_cli_preserves_git_rewrite_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    probe_error: bool,
+    expected_text: str,
+) -> None:
+    """Rewrite failures stay actionable instead of becoming parse fallback."""
+    _write_cli_manifest(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv(
+        "GIT_CONFIG_KEY_0",
+        "url.https://mirror.example/.insteadOf",
+    )
+    monkeypatch.setenv(
+        "GIT_CONFIG_VALUE_0",
+        "https://git.example.test/",
+    )
+    load_patch = (
+        patch(
+            "apm_cli.deps.transport_selection.GitConfigInsteadOfResolver._load_rewrites",
+            side_effect=GitUrlRewriteProbeError("fixture probe failure"),
+        )
+        if probe_error
+        else patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
+    )
+
+    with (
+        load_patch,
+        patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
+    ):
+        result = CliRunner().invoke(
+            cli,
+            ["install", "git.example.test/acme/repo"],
+        )
+
+    assert result.exit_code != 0
+    rendered = " ".join(result.output.split())
+    assert expected_text in rendered
+    assert "git config --show-origin --get-regexp" in rendered
