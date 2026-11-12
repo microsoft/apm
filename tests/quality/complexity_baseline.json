@@ -1,0 +1,635 @@
+{
+  "limits": {
+    "max-args": 12,
+    "max-branches": 40,
+    "max-complexity": 35,
+    "max-returns": 8,
+    "max-statements": 120
+  },
+  "rules": [
+    "C901",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915"
+  ],
+  "schema_version": 1,
+  "scope": [
+    "scripts/architecture_linter",
+    "scripts/lint_architecture_boundaries.py",
+    "scripts/windows_native_symlink_probe_entry.py",
+    "src",
+    "tests"
+  ],
+  "violations": {
+    "scripts/architecture_linter/checks/install_package_target_authorization.py": {
+      "_plan_binding_drives_selector_loop": [
+        "PLR0911"
+      ],
+      "_uninstall_collection_drives_dispatch": [
+        "PLR0911"
+      ]
+    },
+    "scripts/architecture_linter/checks/python_semantics.py": {
+      "_constant_truth": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/adapters/client/base.py": {
+      "MCPClientAdapter._infer_registry_name": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/adapters/client/codex.py": {
+      "CodexClientAdapter._format_server_config": [
+        "C901",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/agent_plugins/validation.py": {
+      "_is_valid_http_url": [
+        "PLR0911"
+      ],
+      "_validate_stdio_server": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/bundle/agent_plugin_exporter.py": {
+      "export_agent_plugin_bundle": [
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/bundle/packer.py": {
+      "pack_bundle": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/bundle/unpacker.py": {
+      "unpack_bundle": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/cache/integrity.py": {
+      "_read_head_sha": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/audit.py": {
+      "_audit_ci_gate": [
+        "PLR0915"
+      ],
+      "_audit_content_scan": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ],
+      "audit": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/commands/auth.py": {
+      "run_auth": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/compile/cli.py": {
+      "_resolve_compile_target": [
+        "PLR0911"
+      ],
+      "_run_compilation": [
+        "C901",
+        "PLR0912",
+        "PLR0913",
+        "PLR0915"
+      ],
+      "compile": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/commands/config.py": {
+      "get": [
+        "PLR0911"
+      ],
+      "set": [
+        "PLR0911",
+        "PLR0915"
+      ],
+      "unset": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/deps/cli.py": {
+      "_resolve_scope_deps": [
+        "C901"
+      ]
+    },
+    "src/apm_cli/commands/find.py": {
+      "_format_origin": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/init.py": {
+      "_perform_init": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/commands/install.py": {
+      "_handle_mcp_install": [
+        "PLR0913"
+      ],
+      "_install_apm_packages": [
+        "PLR0915"
+      ],
+      "_resolve_package_references": [
+        "C901",
+        "PLR0912",
+        "PLR0913",
+        "PLR0915"
+      ],
+      "_validate_and_add_packages_to_apm_yml": [
+        "PLR0913"
+      ],
+      "install": [
+        "C901",
+        "PLR0912",
+        "PLR0913",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/commands/lifecycle.py": {
+      "_validate_script_file": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/outdated.py": {
+      "_check_marketplace_ref": [
+        "PLR0911"
+      ],
+      "_check_selected_dep": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/commands/pack.py": {
+      "pack_cmd": [
+        "C901",
+        "PLR0912",
+        "PLR0913",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/commands/prune.py": {
+      "prune": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/commands/uninstall/cli.py": {
+      "uninstall": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/commands/uninstall/engine.py": {
+      "_sync_integrations_after_uninstall": [
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/commands/update.py": {
+      "_run_dep_update_locked": [
+        "C901",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/compilation/agents_compiler.py": {
+      "AgentsCompiler._compile_claude_md": [
+        "PLR0915"
+      ],
+      "AgentsCompiler._maybe_emit_copilot_root_instructions": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/compilation/link_resolver.py": {
+      "UnifiedLinkResolver._resolve_in_package_asset_link": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/compilation/root_context_protection.py": {
+      "hand_authored_root_context_blocks_write": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/core/auth.py": {
+      "AuthResolver._resolve_token": [
+        "PLR0911"
+      ],
+      "AuthResolver.execute_with_bearer_fallback": [
+        "PLR0911"
+      ],
+      "AuthResolver.try_with_fallback": [
+        "C901",
+        "PLR0911",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/core/command_logger.py": {
+      "InstallLogger.policy_discovery_miss": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/core/target_detection.py": {
+      "detect_target": [
+        "C901",
+        "PLR0911",
+        "PLR0912"
+      ]
+    },
+    "src/apm_cli/deps/apm_resolver.py": {
+      "APMDependencyResolver.__init__": [
+        "PLR0913"
+      ],
+      "APMDependencyResolver._try_load_dependency_package": [
+        "PLR0911"
+      ],
+      "APMDependencyResolver.build_dependency_tree": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/deps/bare_cache.py": {
+      "build_clone_failure_message": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/deps/clone_engine.py": {
+      "CloneEngine.execute": [
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/deps/download_strategies.py": {
+      "DownloadDelegate.download_github_file": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/deps/git_reference_resolver.py": {
+      "GitReferenceResolver.resolve_commit_sha_for_ref": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/deps/github_downloader.py": {
+      "GitHubPackageDownloader.download_subdirectory_package": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/deps/github_downloader_validation.py": {
+      "_ref_exists_via_ls_remote": [
+        "PLR0911"
+      ],
+      "validate_virtual_package_exists": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/deps/lockfile.py": {
+      "LockFile.is_semantically_equivalent": [
+        "PLR0911"
+      ],
+      "LockedDependency.to_dict": [
+        "C901",
+        "PLR0912"
+      ]
+    },
+    "src/apm_cli/deps/plugin_parser.py": {
+      "_map_plugin_artifacts": [
+        "C901"
+      ]
+    },
+    "src/apm_cli/deps/registry/outdated.py": {
+      "check_registry_locked_dep": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/drift.py": {
+      "detect_ref_change": [
+        "PLR0911"
+      ],
+      "should_force_ref_recheck": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/install/deployable_source_plan.py": {
+      "DeployableSourcePlan.create": [
+        "C901"
+      ]
+    },
+    "src/apm_cli/install/deployment_plan.py": {
+      "prepare_package_deployment": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/helpers/ref_reuse.py": {
+      "get_shared_ref_resolver": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/local_bundle_handler.py": {
+      "install_local_bundle": [
+        "PLR0913",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/install/lsp/integration.py": {
+      "prepare_lsp_integration": [
+        "PLR0913"
+      ],
+      "run_lsp_integration": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/manifest_reconcile.py": {
+      "reconcile_deployed_block": [
+        "PLR0913"
+      ],
+      "union_preserving": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/mcp/command.py": {
+      "run_mcp_install": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/mcp/conflicts.py": {
+      "validate_mcp_conflicts": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/mcp/integration.py": {
+      "run_mcp_integration": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/phases/resolve.py": {
+      "_resolve_dependencies": [
+        "C901",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/install/pipeline.py": {
+      "run_install_pipeline": [
+        "C901",
+        "PLR0912",
+        "PLR0913",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/install/primitive_classification.py": {
+      "classify_agent_source_file": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/install/service_integration.py": {
+      "run_service_integrations": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/install/services.py": {
+      "integrate_local_bundle": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ],
+      "integrate_local_content": [
+        "PLR0913"
+      ],
+      "integrate_package_primitives": [
+        "C901",
+        "PLR0912",
+        "PLR0913",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/integration/base_integrator.py": {
+      "BaseIntegrator.copy_directory_files": [
+        "PLR0913"
+      ],
+      "BaseIntegrator.validate_deploy_path": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/integration/canvas_integrator.py": {
+      "CanvasIntegrator._deploy_bundle": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/integration/hook_bundle.py": {
+      "copy_deployed_hook_bundle": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/integration/hook_integrator.py": {
+      "HookIntegrator._integrate_merged_hooks": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/integration/mcp_config_view.py": {
+      "_allows_missing_manifest": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/integration/mcp_integrator.py": {
+      "MCPIntegrator.install": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/integration/mcp_integrator_install.py": {
+      "_install_registry_group": [
+        "C901",
+        "PLR0912",
+        "PLR0913"
+      ],
+      "_install_self_defined_deps": [
+        "PLR0913"
+      ],
+      "_resolve_target_runtimes": [
+        "C901",
+        "PLR0912",
+        "PLR0915"
+      ],
+      "run_mcp_install": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/integration/skill_integrator.py": {
+      "SkillIntegrator._integrate_skill_bundle": [
+        "PLR0913"
+      ],
+      "SkillIntegrator._promote_sub_skills": [
+        "PLR0913"
+      ],
+      "SkillIntegrator.integrate_package_skill": [
+        "PLR0913"
+      ],
+      "validate_skill_name": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/marketplace/audit.py": {
+      "fetch_plugin_apm_yml": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/marketplace/models.py": {
+      "_dict_source_error": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/marketplace/ref_resolver.py": {
+      "RefResolver.__init__": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/marketplace/resolver.py": {
+      "_compute_cross_repo_misconfig_risk": [
+        "PLR0911"
+      ],
+      "_extract_in_repo_path_and_ref": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/marketplace/semver.py": {
+      "_satisfies_single": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/marketplace/version_resolver.py": {
+      "resolve_version_constraint": [
+        "PLR0913"
+      ]
+    },
+    "src/apm_cli/models/dependency/reference.py": {
+      "DependencyReference._gitlab_shorthand_repo_segment_count": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/models/format_detection.py": {
+      "NormalizationPlanner.plan": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/models/validation.py": {
+      "validate_apm_package": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/policy/_constraint_pinning.py": {
+      "classify_unbounded_reason": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/policy/ci_checks.py": {
+      "run_baseline_checks": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/policy/discovery.py": {
+      "_fetch_from_ado_repo": [
+        "PLR0911"
+      ],
+      "_fetch_from_repo": [
+        "PLR0911"
+      ],
+      "_fetch_github_contents": [
+        "PLR0911"
+      ],
+      "_parse_remote_url": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/policy/parser.py": {
+      "validate_policy": [
+        "C901",
+        "PLR0912"
+      ]
+    },
+    "src/apm_cli/policy/policy_checks.py": {
+      "_classify_primitive_type": [
+        "PLR0911"
+      ],
+      "run_dependency_policy_checks": [
+        "PLR0911"
+      ],
+      "run_policy_checks": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/primitives/parser.py": {
+      "_extract_primitive_name": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/utils/github_host.py": {
+      "parse_ado_repo_url": [
+        "PLR0911"
+      ]
+    },
+    "tests/integration/test_codex_native_plugin_lifecycle.py": {
+      "test_git_pinned_install_and_missing_apm_cache_restore": [
+        "PLR0915"
+      ]
+    },
+    "tests/integration/test_deps_resolver_resolution.py": {
+      "_make_dep_ref": [
+        "PLR0913"
+      ]
+    },
+    "tests/integration/test_kiro_prompt_lifecycle.py": {
+      "test_kiro_prompt_installed_lifecycle": [
+        "PLR0915"
+      ]
+    },
+    "tests/integration/test_local_package_factory_contract.py": {
+      "test_relative_dependency_uses_portable_manifest_path": [
+        "PLR0915"
+      ]
+    },
+    "tests/integration/test_required_lifecycle_state_machine.py": {
+      "test_required_global_audit_rule_matrix_for_external_roots": [
+        "PLR0915"
+      ]
+    },
+    "tests/unit/test_unix_installer_checksums.py": {
+      "_run_installer": [
+        "PLR0913"
+      ]
+    },
+    "tests/utils/local_github_https_fixture.py": {
+      "_GitHubHandler._api": [
+        "PLR0911"
+      ]
+    },
+    "tests/utils/local_package.py": {
+      "LocalPackageFactory._source_layout": [
+        "PLR0911"
+      ]
+    },
+    "tests/utils/unix_installer_stub.py": {
+      "main": [
+        "PLR0911"
+      ]
+    }
+  }
+}

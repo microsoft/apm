@@ -1,8 +1,9 @@
-"""Shared JSON baseline lifecycle for bounded test-quality ratchets."""
+"""Shared JSON baseline lifecycle for bounded quality ratchets."""
 
 from __future__ import annotations
 
 import json
+import subprocess
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -28,6 +29,48 @@ def load_baseline(path: Path, *, label: str) -> dict[str, object]:
         raise BaselineError(f"invalid {label} baseline {path}: {error}") from error
     if not isinstance(payload, dict):
         raise BaselineError(f"invalid {label} baseline: root must be an object")
+    return payload
+
+
+def load_baseline_at_ref(
+    root: Path,
+    path: Path,
+    ref: str,
+    *,
+    label: str,
+) -> dict[str, object] | None:
+    """Load the committed baseline at a git ref, or None when absent there.
+
+    Shrink-only ratchets compare the working baseline with the base branch
+    copy so a change cannot grandfather new debt by editing the JSON.
+    """
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError as error:
+        raise BaselineError(f"{label} baseline {path} is outside {root}") from error
+    verify = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if verify.returncode != 0:
+        raise BaselineError(f"unknown git ref for {label} baseline: {ref}")
+    shown = subprocess.run(
+        ["git", "-C", str(root), "show", f"{ref}:{relative}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if shown.returncode != 0:
+        return None
+    try:
+        payload = json.loads(shown.stdout)
+    except JSONDecodeError as error:
+        raise BaselineError(f"invalid {label} baseline at {ref}: {error}") from error
+    if not isinstance(payload, dict):
+        raise BaselineError(f"invalid {label} baseline at {ref}: root must be an object")
     return payload
 
 
