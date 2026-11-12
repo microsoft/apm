@@ -253,3 +253,31 @@ class TestLockGlobalScope:
 
         assert result.exit_code == 1
         assert "apm.yml" in result.output
+
+
+def test_global_lock_keeps_relative_apm_home_anchored_after_chdir(runner, tmp_path, monkeypatch):
+    """A relative APM_HOME must not nest once ``lock -g`` changes into it (#2884)."""
+    from apm_cli.core import scope
+
+    monkeypatch.setattr(scope, "_STARTUP_CWD", tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APM_HOME", "metadata")
+    metadata = tmp_path / "metadata"
+    metadata.mkdir()
+    _make_apm_yml(metadata)
+    seen = {}
+
+    def fake_install(_apm, **_kwargs):
+        seen["cwd"] = Path.cwd().resolve()
+        seen["home"] = scope.get_apm_home().resolve()
+        seen["lockfile_dir"] = scope.get_lockfile_dir(scope.InstallScope.USER).resolve()
+        return _make_install_result()
+
+    with patch("apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install):
+        result = runner.invoke(cli, ["lock", "--global"])
+
+    assert result.exit_code == 0, result.output
+    assert seen["cwd"] == metadata.resolve()
+    assert seen["home"] == metadata.resolve()
+    assert seen["lockfile_dir"] == metadata.resolve()

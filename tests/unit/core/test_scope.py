@@ -94,6 +94,25 @@ class TestGetApmDir:
         with patch.object(Path, "home", return_value=tmp_path):
             assert get_apm_home() == tmp_path / USER_APM_DIR
 
+    def test_relative_apm_home_is_anchored_to_startup_cwd(self, tmp_path, monkeypatch):
+        from apm_cli.core import scope
+
+        monkeypatch.setattr(scope, "_STARTUP_CWD", tmp_path)
+        monkeypatch.setenv("APM_HOME", "metadata")
+        later = tmp_path / "metadata"
+        later.mkdir()
+        monkeypatch.chdir(later)
+
+        assert get_apm_home() == tmp_path / "metadata"
+        assert get_manifest_path(InstallScope.USER) == tmp_path / "metadata" / "apm.yml"
+
+    def test_apm_home_expands_leading_tilde(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("APM_HOME", "~/isolated-apm")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+        assert get_apm_home() == tmp_path / "isolated-apm"
+
 
 # ---------------------------------------------------------------------------
 # get_modules_dir
