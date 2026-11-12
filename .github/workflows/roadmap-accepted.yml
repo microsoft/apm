@@ -17,18 +17,19 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: roadmap-accepted-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   set-horizon:
     if: github.event.label.name == 'status/accepted'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Job-level so runs for other labels (skipped by `if`) never take this
+    # issue's slot and replace a pending acceptance run.
+    concurrency:
+      group: roadmap-accepted-${{ github.event.issue.number }}
+      cancel-in-progress: false
     steps:
       - name: Add to Project 2304 with Horizon=Next
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PROJECT_TOKEN: ${{ secrets.APM_ROADMAP_PROJECT_TOKEN }}
         with:
@@ -51,7 +52,11 @@ jobs:
                   }
                 }
               }`, { org, number });
-            const project = organization.projectV2;
+            const project = organization && organization.projectV2;
+            if (!project || !project.field) {
+              core.setFailed('Cannot read Project 2304 or its Horizon field. Check that APM_ROADMAP_PROJECT_TOKEN has read/write access to organization Projects.');
+              return;
+            }
             const next = project.field.options.find((o) => o.name === 'Next');
             if (!next) {
               core.setFailed('Horizon option "Next" not found on Project 2304.');
