@@ -307,6 +307,7 @@ concrete SHA at write time.
 | `--ref` | Pin to a git ref (SHA, tag, or `HEAD`). |
 | `--subdir`, `-s` | Subdirectory inside the source repo. |
 | `--tag-pattern` | Tag pattern (e.g. `v{version}`). |
+| `--category` | Package category (e.g. `developer-tools`). Required for every package when outputs include `codex`. |
 | `--tags` | Comma-separated tags. |
 | `--include-prerelease` | Include prerelease versions. |
 | `--no-verify` | Skip the remote reachability check. |

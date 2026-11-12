@@ -218,6 +218,30 @@ class TestValidateAndLoadPackage:
         assert package is not None
         assert [dependency.name for dependency in package.get_mcp_dependencies()] == ["second"]
 
+    def test_rematerialization_invalidates_cached_manifest(self, tmp_path: Path) -> None:
+        """#3585: replacing the package-tree apm.yml must drop the cached
+        from_apm_yml instance so a same-process reload sees the new bytes."""
+        target = tmp_path / "plugin"
+        target.mkdir()
+        dep_ref = DependencyReference(repo_url="owner/plugins", is_virtual=True)
+        dep_ref.marketplace_manifest = {
+            "name": "catalog-only",
+            "mcpServers": {"first": {"command": "echo"}},
+        }
+        assert materialize_marketplace_manifest(dep_ref, target)
+        first = APMPackage.from_apm_yml(target / "apm.yml")
+        assert [dependency.name for dependency in first.get_mcp_dependencies()] == ["first"]
+
+        dep_ref.marketplace_manifest = {
+            "name": "catalog-only",
+            "mcpServers": {"second": {"command": "echo", "args": ["second"]}},
+        }
+        assert materialize_marketplace_manifest(dep_ref, target)
+
+        reloaded = APMPackage.from_apm_yml(target / "apm.yml")
+        assert reloaded is not first
+        assert [dependency.name for dependency in reloaded.get_mcp_dependencies()] == ["second"]
+
     def test_repairs_tampered_generated_manifest_before_reuse(self, tmp_path: Path) -> None:
         target = tmp_path / "plugin"
         target.mkdir()
