@@ -271,7 +271,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         self._last_legacy_angle_vars = set()
         if not self._supports_runtime_env_substitution:
             return None
-        key = self._determine_config_key(server_url, server_name, server_info)
+        key = self.determine_config_key(server_url, server_name, server_info)
         previous = (self.get_current_config().get(self.mcp_servers_key) or {}).get(key)
         return previous if isinstance(previous, dict) else None
 
@@ -331,7 +331,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         servers = self.get_current_config().get(self.mcp_servers_key) or {}
         # Self-defined servers keep their declared name as the key (#3493);
         # registry servers use the historical short key.
-        native = servers.get(name, servers.get(self._determine_config_key(name, None)))
+        native = servers.get(name, servers.get(self.determine_config_key(name, None)))
         expanded = sorted(_expanded_leaves(native, expected))
         if not expanded:
             return None
@@ -597,7 +597,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry")
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             previously_baked = self._begin_env_tracking(server_url, server_name, server_info)
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)

@@ -102,9 +102,7 @@ class _SourceIndex:
 
     by_digest: dict[str, list[str]]  # sha256(normalized bytes) -> source rel paths
     unindexed: tuple[str, ...]  # rel paths excluded by size cap or read errors
-    # True when the cached tree is a Claude plugin that install normalized:
-    # its ``.apm/`` subtree mirrors upstream plugin files and is not upstream.
-    plugin_normalized: bool = False
+    source_root: Path | None = None  # cached tree root for owner-delegated queries
 
 
 def _filename_segment(value: str, fallback: str) -> str:
@@ -215,25 +213,26 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
             unindexed.append(rel)
             continue
         by_digest.setdefault(digest, []).append(rel)
-    from ..deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
-
     return _SourceIndex(
         by_digest=by_digest,
         unindexed=tuple(unindexed),
-        plugin_normalized=has_normalized_plugin_skill_sources_receipt(source_root),
+        source_root=source_root,
     )
 
 
 def _upstream_candidates(index: _SourceIndex, candidates: list[str]) -> list[str]:
-    """Drop install-generated ``.apm/`` mirrors of a normalized Claude plugin.
+    """Drop install-generated ``.apm/`` mirrors from digest-matched candidates.
 
-    Plugin normalization copies ``skills/``, ``agents/`` and ``commands/``
-    into ``.apm/`` inside the cache; those copies do not exist upstream, so a
-    patch must target the original plugin file instead.
+    Routes through :func:`~apm_cli.deps.plugin_parser.is_install_generated_mirror`
+    (the normalization owner) so mirror classification stays in one place.
     """
-    if not index.plugin_normalized or len(candidates) < 2:
+    if len(candidates) < 2 or index.source_root is None:
         return candidates
-    upstream = [rel for rel in candidates if not rel.startswith(".apm/")]
+    from ..deps.plugin_parser import is_install_generated_mirror
+
+    upstream = [
+        rel for rel in candidates if not is_install_generated_mirror(rel, index.source_root)
+    ]
     return upstream or candidates
 
 

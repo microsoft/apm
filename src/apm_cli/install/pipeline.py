@@ -354,20 +354,16 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
 
 
 def _refuse_unwritable_lockfile_before_update(ctx, lock_path, early_lockfile, update_plan):
-    """Refuse an unwritable lockfile before an update deploys or cleans anything.
+    """Refuse an unwritable lockfile before an update deploys or cleans anything."""
+    from apm_cli.deps.lockfile import refuse_lockfile_before_mutation
 
-    An update that changes the resolved graph rewrites apm.lock.yaml; failing
-    here lets the transaction roll back to an untouched project (#3532).
-    """
-    from apm_cli.deps.lockfile import LockfileSymlinkError, ensure_lockfile_writable
-
-    try:
-        ensure_lockfile_writable(lock_path)
-    except LockfileSymlinkError:
-        if update_plan is None:
-            update_plan = build_resolved_update_plan(ctx, early_lockfile)
-        if update_plan.has_changes:
-            raise
+    if update_plan is None:
+        update_plan = build_resolved_update_plan(ctx, early_lockfile)
+    refuse_lockfile_before_mutation(
+        early_lockfile,
+        lock_path,
+        would_mutate=update_plan.has_changes,
+    )
 
 
 @transactional_pipeline

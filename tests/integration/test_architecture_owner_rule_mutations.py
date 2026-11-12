@@ -509,6 +509,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Read-only lockfile resolution stops guarding the mutating migration path.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-lockfile-symlink-write-guard",
+        rule_id="contracts-tooling-lockfile-symlink-write-guard",
+        path="src/apm_cli/deps/lockfile.py",
+        old="def ensure_lockfile_writable(",
+        new="def _ensure_lockfile_writable(",
+        intent="Lockfile symlink write guard loses its canonical public definition.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-timestamp",
         rule_id="contracts-tooling-lockfile-timestamp",
         path="src/apm_cli/integration/mcp_integrator.py",

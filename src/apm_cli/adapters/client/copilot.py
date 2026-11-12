@@ -209,7 +209,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Update configuration using the chosen key
             self.update_config({config_key: server_config})

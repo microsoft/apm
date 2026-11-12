@@ -185,6 +185,30 @@ def ensure_lockfile_writable(path: Path) -> None:
         raise LockfileSymlinkError(path)
 
 
+def refuse_lockfile_before_mutation(
+    lockfile: LockFile | None,
+    lockfile_path: Path,
+    *,
+    would_mutate: bool,
+) -> None:
+    """Pre-mutation guard: refuse an unwritable lockfile before side effects.
+
+    Commands that rewrite ``apm.lock.yaml`` (install --update, uninstall)
+    must call this *before* scripts, file deletions, or manifest edits so
+    that a symlinked lockfile stops the operation while it is still a no-op.
+
+    Args:
+        lockfile: The loaded lockfile, or ``None`` when no lockfile exists.
+        lockfile_path: On-disk path to be rewritten.
+        would_mutate: ``True`` when the operation will definitely change
+            the lockfile (e.g. at least one locked key is being removed,
+            or the update plan has changes).
+    """
+    if lockfile is None or not would_mutate:
+        return
+    ensure_lockfile_writable(lockfile_path)
+
+
 # Git writes each marker at the start of a line, followed by a space and a label
 # (or nothing, for a bare ``=======`` separator). A separator alone is not
 # evidence of a conflict, so only the labelled markers are matched here.

@@ -40,7 +40,7 @@ def _native_config_key(
     info = requested_info
     if info is None and isinstance(stored_config, dict) and stored_config.get("registry") is False:
         info = {"name": name, "is_self_defined": True}
-    return client._determine_config_key(name, None, info)
+    return client.determine_config_key(name, None, info)
 
 
 def compare_native_mcp_connection(

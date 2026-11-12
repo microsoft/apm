@@ -106,6 +106,7 @@
       "selectors": ["src/apm_cli/deps/lockfile.py"],
       "guards": [
         "contracts-tooling-lockfile-read",
+        "contracts-tooling-lockfile-symlink-write-guard",
         "contracts-tooling-lockfile-timestamp",
         "contracts-tooling-lockfile-timestamp-constructor",
         "contracts-tooling-lockfile-timestamp-fallback",

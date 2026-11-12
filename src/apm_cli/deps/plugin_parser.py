@@ -361,6 +361,21 @@ def has_normalized_plugin_skill_sources_receipt(plugin_path: Path) -> bool:
     return not apm_dir.is_symlink() and receipt.is_file() and not receipt.is_symlink()
 
 
+def is_install_generated_mirror(rel_path: str, plugin_path: Path) -> bool:
+    """Return whether *rel_path* is an install-generated ``.apm/`` mirror.
+
+    Plugin normalization (``_map_plugin_artifacts``) copies ``skills/``,
+    ``agents/``, ``commands/`` and pass-through files into ``.apm/`` inside
+    the cache.  Those copies do not exist upstream, so a consumer that needs
+    the upstream path (e.g. ``export-patch``) should prefer the non-mirror
+    candidate.  Only paths inside the ``.apm/`` subtree of a plugin whose
+    normalization receipt is present are classified as mirrors.
+    """
+    if not rel_path.startswith(".apm/"):
+        return False
+    return has_normalized_plugin_skill_sources_receipt(plugin_path)
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,

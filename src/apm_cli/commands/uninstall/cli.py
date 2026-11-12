@@ -175,16 +175,16 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
 
 
 def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
-    """Refuse before scripts, deletions or apm.yml edits when the lock cannot be rewritten.
+    """Refuse before scripts, deletions or apm.yml edits when the lock cannot be rewritten."""
+    from ...deps.lockfile import refuse_lockfile_before_mutation
 
-    Removing a locked package rewrites apm.lock.yaml, so an unwritable
-    (symlinked) lockfile must stop the uninstall while it is still a no-op.
-    """
-    if lockfile is None or not any(lockfile.get_dependency(key) for key in removed_keys):
-        return
-    from ...deps.lockfile import ensure_lockfile_writable
-
-    ensure_lockfile_writable(lockfile_path)
+    refuse_lockfile_before_mutation(
+        lockfile,
+        lockfile_path,
+        would_mutate=any(lockfile.get_dependency(key) for key in removed_keys)
+        if lockfile
+        else False,
+    )
 
 
 def _cleanup_stale_lsp(

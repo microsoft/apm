@@ -829,7 +829,7 @@ class MCPIntegrator:
             stored = (stored_configs or {}).get(n)
             self_defined = isinstance(stored, dict) and stored.get("registry") is False
             info = {"name": n, "is_self_defined": True} if self_defined else None
-            expanded_stale.add(MCPClientAdapter._determine_config_key(n, None, info))
+            expanded_stale.add(MCPClientAdapter.determine_config_key(n, None, info))
 
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
