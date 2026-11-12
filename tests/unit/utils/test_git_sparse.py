@@ -106,6 +106,9 @@ def test_package_without_links_costs_one_ls_tree(tmp_path: Path) -> None:
         ("../.git/config", RuntimeError, "is not a tracked file or directory"),
         ("missing.md", RuntimeError, "is not a tracked file or directory"),
         ("CLAUDE.md/child", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/../tool.sh", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/.", RuntimeError, "is not a tracked file or directory"),
         (".", RuntimeError, "forms a cycle"),
         ("..", RuntimeError, "forms a cycle"),
         ("bad.md", RuntimeError, "forms a cycle"),
@@ -173,3 +176,35 @@ def test_never_writes_through_a_linked_directory(tmp_path: Path) -> None:
     with pytest.raises(PathTraversalError):
         _materialize(checkout, ["pkg"])
     assert list(outside.iterdir()) == []
+
+
+def test_fan_out_expansion_is_rejected_by_a_shared_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Acyclic links that double per level must not grow exponentially."""
+    monkeypatch.setattr(git_sparse, "_MAX_LINK_WRITES", 200)
+    links = {"pkg/fan/l0/file.md": "../../CLAUDE.md"}
+    for level in range(1, 12):
+        links[f"pkg/fan/l{level}/a"] = f"../l{level - 1}"
+        links[f"pkg/fan/l{level}/b"] = f"../l{level - 1}"
+    checkout = _checkout(tmp_path, links)
+
+    with pytest.raises(RuntimeError, match="expands to more than 200 entries"):
+        validate_materialized_symlinks("git", checkout, ["pkg/fan/l11"], env=neutral_git_env())
+
+
+@pytest.mark.parametrize("name", ["..\\..\\..\\outside.txt", "c:stream.txt"])
+def test_entries_unsafe_on_windows_are_rejected_before_any_write(tmp_path: Path, name: str) -> None:
+    """A directory link must not copy a host-unsafe entry name (``..\\`` or ``:``)."""
+    origin, _ = build_link_origin(tmp_path, {"pkg/assets": "../evil"})
+    oid = git("-C", str(origin), "hash-object", "-w", "--stdin", input="payload")
+    git("-C", str(origin), "update-index", "--add", "--cacheinfo", f"100644,{oid},evil/{name}")
+    git("-C", str(origin), "commit", "-q", "-m", "unsafe entry")
+    checkout = tmp_path / "checkout"
+    git(*_PIN, "clone", "-q", "--no-checkout", str(origin), str(checkout))
+    apply_sparse_cone("git", checkout, ["pkg"], env=neutral_git_env())
+    git(*_PIN, "-C", str(checkout), "checkout", "-q", "main")
+
+    with pytest.raises(PathTraversalError, match="not portable to every host"):
+        _materialize(checkout, ["pkg"])
+    assert not (tmp_path / "outside.txt").exists()

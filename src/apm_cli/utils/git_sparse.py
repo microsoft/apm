@@ -14,10 +14,16 @@ import os
 import shutil
 import stat
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
-from .path_security import PathTraversalError, ensure_path_within, has_symlink_component
+from .path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+    validate_path_segments,
+)
 
 FULL_CHECKOUT_TIMEOUT_SECONDS = 300
 
@@ -33,6 +39,9 @@ _TREE_MODE = "040000"
 # Matches Linux MAXSYMLINKS: bounds link chains and nested directory-link
 # expansion so a cyclic package fails instead of recursing without end.
 _MAX_LINK_HOPS = 40
+# Shared budget across every planned write, so acyclic fan-out (several
+# directory links per level) cannot grow exponentially before rejection.
+_MAX_LINK_WRITES = 100_000
 
 
 @dataclass(frozen=True)
@@ -148,16 +157,51 @@ class _Unresolvable(Exception):
         self.kind = kind
 
 
+def _require_safe_entry_path(path: str) -> None:
+    """Reject Git entry names that are not plain relative paths on every host.
+
+    A POSIX-authored name such as ``a/..\\b`` or ``c:d`` would traverse or
+    address an alternate data stream on Windows.
+    """
+    validate_path_segments(path, context="Git entry path", reject_empty=True)
+    if any(char in path for char in ":\\\0"):
+        raise PathTraversalError(f"Git entry path '{path}' is not portable to every host")
+
+
 class _LinkResolver:
     """Resolve tracked links against one commit tree, never the host filesystem."""
 
-    def __init__(self, entries: dict[str, _TreeEntry], link_texts: dict[str, bytes]) -> None:
+    def __init__(
+        self,
+        entries: dict[str, _TreeEntry],
+        load_texts: Callable[[list[str]], dict[str, bytes]],
+    ) -> None:
         self._entries = entries
         self._paths = sorted(entries)
-        self._texts = link_texts
+        self._load_texts = load_texts
+        self._texts: dict[str, bytes] = {}
+        self._writes = 0
+
+    def preload(self, links: list[str]) -> None:
+        self._texts.update(self._load_texts(sorted({self._entries[link].oid for link in links})))
 
     def _text(self, link: str) -> str:
-        return os.fsdecode(self._texts[self._entries[link].oid])
+        oid = self._entries[link].oid
+        if oid not in self._texts:
+            self._texts.update(self._load_texts([oid]))
+        return os.fsdecode(self._texts[oid])
+
+    def _write(self, dest: str, mode: str, source: str | None = None) -> _LinkWrite:
+        self._writes += 1
+        if self._writes > _MAX_LINK_WRITES:
+            raise _Unresolvable("too-large")
+        try:
+            _require_safe_entry_path(dest)
+            if source is not None:
+                _require_safe_entry_path(source)
+        except PathTraversalError:
+            raise _Unresolvable("unsafe") from None
+        return _LinkWrite(dest, mode, source)
 
     def _resolve(self, link: str) -> tuple[str, _TreeEntry]:
         """Follow every link component like the kernel, contained in the tree."""
@@ -166,6 +210,10 @@ class _LinkResolver:
         hops = 0
         while pending:
             part = pending.pop(0)
+            # Any component after a file, even "", "." or "..", is ENOTDIR.
+            parent = "/".join(resolved)
+            if parent and self._entries[parent].kind != "tree":
+                raise _Unresolvable("broken")
             if part in {"", "."}:
                 continue
             if part == "..":
@@ -173,9 +221,6 @@ class _LinkResolver:
                     raise _Unresolvable("escape")
                 resolved.pop()
                 continue
-            parent = "/".join(resolved)
-            if parent and self._entries[parent].kind != "tree":
-                raise _Unresolvable("broken")
             resolved.append(part)
             entry = self._entries.get("/".join(resolved))
             if entry is None:
@@ -207,13 +252,13 @@ class _LinkResolver:
             raise _Unresolvable("cycle")
         target, entry = self._resolve(source)
         if entry.kind == "blob":
-            return [_LinkWrite(dest, entry.mode, target)]
+            return [self._write(dest, entry.mode, target)]
         if entry.kind != "tree":
             raise _Unresolvable("broken")
         # Expanding a tree that contains a link on the chain never ends.
         if any(_within(link, target) for link in chain):
             raise _Unresolvable("cycle")
-        writes = [_LinkWrite(dest, _TREE_MODE)]
+        writes = [self._write(dest, _TREE_MODE)]
         offset = len(target) + 1 if target else 0
         for path in self._descendants(target):
             child = self._entries[path]
@@ -221,10 +266,10 @@ class _LinkResolver:
             if child.mode == _LINK_MODE:
                 writes.extend(self._expand(path, child_dest, chain))
             elif child.kind == "blob":
-                writes.append(_LinkWrite(child_dest, child.mode, path))
+                writes.append(self._write(child_dest, child.mode, path))
             else:
                 # Trees and submodule gitlinks check out as directories.
-                writes.append(_LinkWrite(child_dest, _TREE_MODE))
+                writes.append(self._write(child_dest, _TREE_MODE))
         return writes
 
     def plan(self, link: str) -> list[_LinkWrite]:
@@ -233,16 +278,19 @@ class _LinkResolver:
             return self._expand(link, link, ())
         except _Unresolvable as outcome:
             text = self._text(link)
-            if outcome.kind == "escape":
+            if outcome.kind in {"escape", "unsafe"}:
+                where = (
+                    "resolves outside the repository's checked-out commit"
+                    if outcome.kind == "escape"
+                    else "reaches a path that is not portable to every host"
+                )
                 raise PathTraversalError(
-                    f"Symlink '{link}' targets '{text}', which resolves outside the "
-                    "repository's checked-out commit."
+                    f"Symlink '{link}' targets '{text}', which {where}."
                 ) from None
-            reason = (
-                "forms a cycle"
-                if outcome.kind == "cycle"
-                else "is not a tracked file or directory in the checked-out commit"
-            )
+            reason = {
+                "cycle": "forms a cycle",
+                "too-large": f"expands to more than {_MAX_LINK_WRITES} entries",
+            }.get(outcome.kind, "is not a tracked file or directory in the checked-out commit")
             raise RuntimeError(
                 f"Symlink '{link}' targets '{text}', which {reason}; "
                 "repair its target in the package repository."
@@ -280,18 +328,15 @@ def _plan_tracked_symlinks(
         timeout=timeout,
         extra_git_args=extra_git_args,
     )
-    link_oids = sorted({entry.oid for entry in entries.values() if entry.mode == _LINK_MODE})
+    # Link blobs load on demand: a partial clone fetches only the links
+    # this scope actually follows.
     resolver = _LinkResolver(
         entries,
-        _link_texts(
-            git_exe,
-            repo_dir,
-            link_oids,
-            env=env,
-            timeout=timeout,
-            extra_git_args=extra_git_args,
+        lambda oids: _link_texts(
+            git_exe, repo_dir, oids, env=env, timeout=timeout, extra_git_args=extra_git_args
         ),
     )
+    resolver.preload(links)
     plans: dict[str, list[_LinkWrite]] = {}
     failures: dict[str, Exception] = {}
     for link in links:
@@ -320,6 +365,7 @@ class _CheckoutBytes:
         self._timeout = timeout
         self._extra_git_args = extra_git_args
         self._cache: dict[str, bytes] = {}
+        self._attr_source = True
 
     def __call__(self, source: str) -> bytes:
         if source not in self._cache:
@@ -331,6 +377,7 @@ class _CheckoutBytes:
         # follows. ``cat-file --filters`` applies the same checkout
         # conversion to targets a sparse cone left out; its ``--batch``
         # form reports unfiltered sizes, so each read is one call.
+        _require_safe_entry_path(source)
         path = self._repo_dir / source
         try:
             regular = stat.S_ISREG(path.lstat().st_mode)
@@ -338,10 +385,21 @@ class _CheckoutBytes:
             regular = False
         if regular and not has_symlink_component(self._repo_dir, path, raise_on_error=True):
             return path.read_bytes()
+        request = ["cat-file", "--filters", f"HEAD:{source}"]
+        if self._attr_source:
+            # Attributes from the commit, not a sparse worktree that may lack
+            # the governing .gitattributes (Git 2.40+).
+            try:
+                return self._output(["--attr-source=HEAD", *request])
+            except subprocess.CalledProcessError:
+                self._attr_source = False
+        return self._output(request)
+
+    def _output(self, args: list[str]) -> bytes:
         return _git_output(
             self._git_exe,
             self._repo_dir,
-            ["cat-file", "--filters", f"HEAD:{source}"],
+            args,
             env=self._env,
             timeout=self._timeout,
             extra_git_args=self._extra_git_args,
@@ -352,6 +410,7 @@ def _write_link_plan(
     repo_dir: Path, writes: list[_LinkWrite], checkout_bytes: _CheckoutBytes
 ) -> None:
     root = writes[0].dest
+    _require_safe_entry_path(root)
     top = repo_dir / root
     ensure_path_within(top.parent, repo_dir)
     if has_symlink_component(repo_dir, top.parent, raise_on_error=True):
