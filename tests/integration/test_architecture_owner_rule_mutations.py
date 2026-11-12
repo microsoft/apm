@@ -706,6 +706,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-codex-agent-link-resolution",
+        rule_id="install-deployment-codex-agent-link-resolution",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="resolve_links=self.resolve_links,",
+        new="resolve_links=None,",
+        intent="Codex agent conversion bypasses the shared link resolver again.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
