@@ -134,6 +134,9 @@ removes a package's files and lockfile rows only under the selected
 `CLAUDE_CONFIG_DIR` (or `~/.claude`). Files deployed to another profile stay.
 If another profile still uses the package, it stays in `~/.apm/apm.yml` and
 `apm_modules/`; uninstall it with that profile selected to remove it everywhere.
+Hermes homes (`HERMES_HOME`) follow the same rule. Only the runtime whose
+profiles share the package loses files: selecting a Claude profile leaves
+`~/.hermes` (and other targets such as `~/.agents`) untouched, and the reverse.
 The selected profile is matched by path; symlinks are not resolved.
 Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
 Codex agents and hooks.

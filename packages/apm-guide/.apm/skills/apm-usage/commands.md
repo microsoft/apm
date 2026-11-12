@@ -371,6 +371,9 @@ replace the link with a regular file or directory before retrying.
 `apm uninstall -g <package>` removes files and lock rows only under the selected
 profile; a package another profile still uses stays in `~/.apm/apm.yml`.
 Codex homes selected by an absolute `CODEX_HOME` follow the same rule.
+profile; a package another profile still uses stays in `~/.apm/apm.yml`. Only
+the runtime whose profiles share the package (Claude or Hermes) loses files;
+the other runtime's default root and non-profile targets keep theirs.
 
 `apm install` prints a one-line provenance summary before any mutation:
 
