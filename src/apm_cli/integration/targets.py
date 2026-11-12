@@ -777,10 +777,13 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         lockfile_uri_schemes=("cowork://",),
         warn_unsupported_primitives=True,
     ),
-    # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
-    # and MCP.  Rules/instructions are managed via Cursor Settings UI only
-    # (not file-based), so "instructions" is excluded from user scope.
+    # Cursor -- at user scope, ~/.cursor/ supports instructions, skills,
+    # agents, commands, hooks, and MCP.  Rules are file-backed at user
+    # scope: Cursor 2.1+ includes ~/.cursor/rules/*.mdc in context; the
+    # Settings UI "User Rules" surface is separate and not managed here.
+    # The same cursor_rules transform applies at both project and user scope.
     # Ref: https://cursor.com/docs/rules
+    # Ref: https://cursor.com/changelog/2-1
     "cursor": TargetProfile(
         capability=TARGET_CAPABILITIES["cursor"],
         root_dir=".cursor",
@@ -814,9 +817,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         },
         auto_create=False,
         detect_by_dir=True,
-        user_supported="partial",
+        user_supported=True,
         user_root_dir=".cursor",
-        unsupported_user_primitives=("instructions",),
         hooks_config_display=".cursor/hooks.json",
     ),
     # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
