@@ -11,6 +11,7 @@ See the [CNCF definition of an adopter](https://github.com/cncf/toc/blob/main/FA
 | Organization | Type | Adoption Level | Description |
 | ------------ | ---- | -------------- | ----------- |
 | EPAM | Consultancy, Contributor, End-User Organization | Production | Uses, actively contributes to, and consults on APM. |
+| Grupo Universal | End-User Organization | Production | Uses APM to package and distribute agent skills, prompts and MCP configurations across internal agent DevOps projects. |
 | Sopra Steria | End-User Organization | Production | Uses APM. |
 
 Type and adoption level are optional. Blank fields mean that the information

@@ -87,6 +87,17 @@ escape the repository, are broken or loop fail the install with an error
 naming the link. See [Install packages: when things go
 wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
+### Line endings in dependency checkouts
+
+APM checks out dependencies with `core.autocrlf=false` and `core.eol=lf` on
+its own Git commands only, so `text` / `text=auto` files keep their committed
+LF bytes on every platform and the `content_hash` matches. Explicit
+`.gitattributes` `eol=` attributes, binary files and blobs committed with CRLF
+keep their repository bytes. A lockfile written by an older APM on Windows may
+hold a CRLF hash that `--frozen` refuses; see [Content hash
+mismatch](https://microsoft.github.io/apm/troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b)
+to recover.
+
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs
