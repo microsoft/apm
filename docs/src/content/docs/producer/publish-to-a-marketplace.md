@@ -169,7 +169,8 @@ precedence over `marketplace.build.tagPattern`. Repack and publish the generated
 metadata after changing either value so consumers receive the new convention.
 `apm install <package>@<marketplace>` accepts both forms, derives the package host from
 the generated entry rather than from the marketplace host, and preserves
-the generated path and ref.
+the generated path and ref. When the entry carries `source.sha`, consumers
+install and record that commit instead of `source.ref`.
 
 For annotated or signed tags, `source.sha` records the peeled checkout
 commit, not the tag object; `source.ref` remains the selected tag. This
@@ -314,7 +315,9 @@ apm marketplace outdated     # packages with newer matching tags
 ```
 
 `check` is the gate to run in CI: a missing tag or unresolvable
-range exits non-zero before you push the release commit.
+range exits non-zero before you push the release commit. A full
+40-character commit SHA `ref` passes when the remote serves that commit;
+abbreviated SHAs are rejected.
 
 ## Pitfalls
 

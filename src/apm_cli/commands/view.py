@@ -597,6 +597,18 @@ def display_versions(
             _display_registry_versions(package, dep_ref, logger, registry_name=_default_reg)
             return
 
+    from ..deps.registry_proxy import is_enforce_only
+
+    if is_enforce_only():
+        logger.error(
+            f"Cannot list versions for '{package}' in registry-only mode: "
+            "the registry proxy exposes no version listing and "
+            "PROXY_REGISTRY_ONLY blocks version enumeration against the source "
+            "host. To list versions, unset PROXY_REGISTRY_ONLY; to install, pin "
+            "an exact version tag in apm.yml."
+        )
+        sys.exit(1)
+
     try:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
         refs: list[RemoteRef] = downloader.list_remote_refs(dep_ref)

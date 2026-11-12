@@ -346,7 +346,7 @@ def add(source, name, ref, branch, host, verbose, offline=False):
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
         from ...marketplace.client import (
-            _auto_detect_path,
+            _auto_detect_path_with_payload,
             fetch_marketplace,
             is_local_authoring_source,
         )
@@ -444,7 +444,7 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
-        # placeholder -- _auto_detect_path only consults url/ref/path/kind.
+        # placeholder -- _auto_detect_path_with_payload only consults url/ref/path/kind.
         probe_name = provisional_label
         probe_source = MarketplaceSource(
             name=probe_name,
@@ -460,8 +460,9 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             sys.exit(1)
         if is_direct_url or _local_source_points_to_file(probe_source):
             detected_path = ""
+            discovered_manifest = None
         else:
-            detected_path = _auto_detect_path(probe_source)
+            detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
 
         if detected_path is None:
             logger.error(
@@ -479,7 +480,12 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             path=detected_path,
         )
         manifest = fetch_marketplace(
-            fetch_source, force_refresh=True, **({"offline": True} if offline else {})
+            fetch_source,
+            force_refresh=True,
+            # Reuse the catalog response the probe above just fetched from
+            # the same url/ref/path instead of re-fetching it (apm#3283).
+            discovery_payload=discovered_manifest,
+            **({"offline": True} if offline else {}),
         )
         plugin_count = len(manifest.plugins)
 

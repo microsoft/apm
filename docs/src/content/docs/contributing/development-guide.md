@@ -10,10 +10,15 @@ for issue-first scope approval, PR eligibility, small corrections, private
 security reporting, and the transition for existing contributions.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
-Its [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
+The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)
+lists names, GitHub IDs, and affiliations. See
+[contributor credit](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#contributors)
+in the contribution guide.
+The [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
 separates priorities from scope approval and release targets. Follow the public
 [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) for current
-Now / Next / Later priorities.
+Now / Next / Later priorities, organized by pillar (Consume, Produce, Govern,
+Open ecosystem, Foundations) and epic.
 Those root documents own contribution policy; this guide covers technical work
 within the approved scope. Reporting and investigation need no prior permission.
 
@@ -62,7 +67,8 @@ No label or milestone migration is performed by the advisory workflow.
 The scheduled Triage Panel (also used by a blank manual dispatch) fetches
 labels and complete comments before selecting at most five issues. It
 excludes accepted/declined issues and any issue with an `apm-scope:v1`
-marker, uses pinned `grok-4.7`, and must account for every selected issue
+marker, uses the repository default Copilot model
+(`GH_AW_MODEL_AGENT_COPILOT`, else `auto`), and must account for every selected issue
 within the 30-minute job timeout. Read failures stop selection rather than
 turning incomplete evidence into an empty queue. Explicit `triage/requested`
 and numbered dispatches retain their existing behavior. Deterministic

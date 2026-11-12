@@ -143,7 +143,7 @@ def test_antigravity_never_auto_detected_from_shared_agents_dir(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
-# Instructions -> .agents/rules/<name>.md (plain markdown, frontmatter stripped)
+# Instructions -> .agents/rules/<name>.md (trigger/globs frontmatter)
 # ---------------------------------------------------------------------------
 
 
@@ -202,12 +202,31 @@ def test_antigravity_instructions_deploy_multi_glob_to_agents_rules(tmp_path: Pa
     assert target.read_text(encoding="utf-8") == (
         "---\n"
         "trigger: glob\n"
-        "globs:\n"
-        '  - "src/**/*.py"\n'
-        '  - "tests/**/*.py"\n'
+        'globs: "src/**/*.py, tests/**/*.py"\n'
         "---\n\n"
         "# Style\n\nUse type hints.\n"
     )
+
+
+def test_antigravity_unscoped_instructions_deploy_always_on_rule(tmp_path: Path) -> None:
+    (tmp_path / ".agents").mkdir()
+    package_dir = tmp_path / "pkg"
+    instructions_dir = package_dir / ".apm" / "instructions"
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "principles.instructions.md").write_text(
+        "---\ndescription: General development principles\n---\n\nFail fast.\n",
+        encoding="utf-8",
+    )
+
+    result = InstructionIntegrator().integrate_instructions_for_target(
+        KNOWN_TARGETS["antigravity"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".agents" / "rules" / "principles.md"
+    assert target.read_text(encoding="utf-8") == "---\ntrigger: always_on\n---\n\nFail fast.\n"
 
 
 # -----------------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Run the native symlink regression under the disposable runner's standard user."""
+"""Run the native link-materialization regression under the runner's standard user."""
 
 from __future__ import annotations
 
@@ -18,9 +18,13 @@ from apm_cli.utils.console import _rich_error, _rich_info
 from apm_cli.utils.git_env import get_git_executable
 
 NATIVE_NODE = (
-    "tests/integration/test_windows_native_symlink.py::test_native_standard_user_symlink_fallback"
+    "tests/integration/test_windows_native_symlink.py::test_native_standard_user_materializes_links"
 )
-MUTATION_FAILURE = "native-symlink-precedence: APM clone failed after native Git fallback succeeded"
+MUTATION_FAILURE = "native-link-materialization: APM installed link text instead of link content"
+# Real-binary install and --frozen replay of a package with links (#3457).
+FROZEN_LIFECYCLE = "tests/integration/test_git_object_links_lifecycle.py"
+# The baseline runs real `apm install` lifecycles on a slow hosted runner.
+PHASE_TIMEOUT_SECONDS = 600
 
 
 def _whoami_rows(option: str) -> list[list[str]]:
@@ -147,12 +151,13 @@ def run_phase(root: Path, scratch: Path, name: str) -> dict[str, object]:
     mutation = name == "mutation"
     env = dict(os.environ)
     if mutation:
-        env["APM_WINDOWS_NATIVE_MUTATION"] = "drop-local-precedence"
+        env["APM_WINDOWS_NATIVE_MUTATION"] = "drop-link-materialization"
     else:
         env.pop("APM_WINDOWS_NATIVE_MUTATION", None)
     report = scratch / f"{name}.xml"
     nodes = [NATIVE_NODE]
     if name == "baseline":
+        nodes.insert(0, FROZEN_LIFECYCLE)
         nodes.insert(0, "tests/unit/cache/test_git_symlink_config.py")
         nodes.insert(0, "tests/integration/test_resolution_failure_lifecycle.py")
         nodes[0:0] = [
@@ -185,7 +190,7 @@ def run_phase(root: Path, scratch: Path, name: str) -> dict[str, object]:
         *nodes,
     ]
     result = subprocess.run(  # noqa: S603 - pinned interpreter and fixed test nodes, no shell
-        command, cwd=root, env=env, check=False, timeout=180
+        command, cwd=root, env=env, check=False, timeout=PHASE_TIMEOUT_SECONDS
     )
     expected_exit = 1 if mutation else 0
     if result.returncode != expected_exit:
@@ -237,7 +242,7 @@ def main() -> int:
         context = probe_native_context(scratch / "initial-capability", args.expected_sid)
         os.environ["APM_WINDOWS_NATIVE_EXPECTED_SID"] = args.expected_sid
         os.environ["APM_WINDOWS_NATIVE_STANDARD_USER"] = "1"
-        _rich_info("Native standard-user token confirmed; running fallback and mutation controls")
+        _rich_info("Native standard-user token confirmed; running link and mutation controls")
         phases = [run_phase(root, scratch, phase) for phase in ("baseline", "mutation", "restored")]
         if source_provenance(root, args.expected_head) != provenance:
             raise RuntimeError("Source/interpreter provenance changed during acceptance")
@@ -245,9 +250,7 @@ def main() -> int:
         (scratch / "native-proof.json").write_text(
             json.dumps(proof, indent=2, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n"
         )
-        _rich_info(
-            "Native fallback passed; the old-precedence mutation failed and restoration passed"
-        )
+        _rich_info("Native links installed; the writer mutation failed and restoration passed")
         return 0
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, ET.ParseError) as error:
         _rich_error(f"Native Windows proof failed: {error}")

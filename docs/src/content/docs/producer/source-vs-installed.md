@@ -41,8 +41,9 @@ dependencies:
       ref: v1.4.0
 ```
 
-This separation makes it clear which files are authored and which files are
-generated from a pinned dependency.
+For sibling dependencies within one repository, use
+[`git: parent` to follow the bundle's ref](../repo-shapes/#make-sibling-dependencies-follow-the-review-branch)
+instead of changing every sibling's `ref:` before review and merge.
 
 ## When authoring and consuming in the same repository
 

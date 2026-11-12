@@ -31,6 +31,17 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked clones carry no Git objects; real-git tests cover link materialization."""
+    with (
+        patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
 # ---------------------------------------------------------------------------
@@ -1145,36 +1156,39 @@ class TestTrySparseCheckout:
             result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
         assert result is True
 
-    def test_repair_logs_via_verbose_channel(
+    def test_sparse_checkout_materializes_links_leniently(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        """Successful widening must use logging configured by --verbose."""
+        """The sparse clone hands its links to the Git-object owner (#3457)."""
         dep = _make_dep()
         downloader._strategies.build_repo_url = MagicMock(return_value="https://github.com/o/r")
         downloader.git_env = {}
         ctx = MagicMock()
         ctx.auth_scheme = "basic"
-        ctx.git_env = {}
+        ctx.git_env = {"MARK": "1"}
         downloader.auth_resolver.resolve_for_dep.return_value = ctx
         downloader.auth_resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: (
             dict(auth_ctx.git_env)
         )
         clone_path = tmp_path / "sparse"
-        dangling = clone_path / "skills" / "foo" / "reference.md"
         ok_result = MagicMock(returncode=0)
 
         with (
             patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result),
             patch(
-                "apm_cli.deps.github_downloader.repair_dangling_cone_symlinks",
-                return_value=dangling,
+                "apm_cli.utils.git_env.init_git_remote_worktree",
+                side_effect=lambda _path, _url, env, **_kw: env,
             ),
-            patch("apm_cli.deps.github_downloader._log.info") as log_info,
+            patch("apm_cli.deps.github_downloader.apply_sparse_cone"),
+            patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks") as materialize,
         ):
             result = downloader._try_sparse_checkout(dep, clone_path, "skills/foo", "main")
 
         assert result is True
-        log_info.assert_called_once()
+        args, kwargs = materialize.call_args
+        assert args[1:] == (clone_path, ["skills/foo"])
+        assert kwargs["strict"] is False
+        assert kwargs["env"]["MARK"] == "1"
 
     def test_bearer_auth_scheme_uses_dep_auth_ctx_git_env(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

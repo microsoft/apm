@@ -42,7 +42,7 @@ from ..utils.git_env import (
 )
 from ..utils.git_sparse import (
     apply_sparse_cone,
-    repair_dangling_cone_symlinks,
+    materialize_tracked_symlinks,
     sparse_checkout_active,
     validate_materialized_symlinks,
 )
@@ -825,7 +825,12 @@ class GitHubPackageDownloader:
         return self._refs.resolve_commit_sha_for_ref(dep_ref, ref)
 
     def download_raw_file(
-        self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Download a single file from repository (GitHub or Azure DevOps).
 
@@ -834,6 +839,10 @@ class GitHubPackageDownloader:
             file_path: Path to file within the repository (e.g., "prompts/code-review.prompt.md")
             ref: Git reference (branch, tag, or commit SHA). Defaults to "main"
             verbose_callback: Optional callable for verbose logging (receives str messages)
+            raw_only: Skip the Contents API fallback on the public-github
+                anonymous-first path and report a miss via ``RuntimeError``
+                when the raw CDN does not have the file (microsoft/apm#3283
+                virtual-package marker sweep).  Ignored everywhere else.
 
         Returns:
             bytes: File content
@@ -875,7 +884,7 @@ class GitHubPackageDownloader:
 
         # GitHub API
         return self._download_github_file(
-            dep_ref, file_path, ref, verbose_callback=verbose_callback
+            dep_ref, file_path, ref, verbose_callback=verbose_callback, raw_only=raw_only
         )
 
     def _download_ado_file(
@@ -906,6 +915,7 @@ class GitHubPackageDownloader:
         file_path: str,
         ref: str = "main",
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
@@ -925,6 +935,7 @@ class GitHubPackageDownloader:
             file_path,
             ref=ref,
             verbose_callback=verbose_callback,
+            raw_only=raw_only,
         )
 
     def validate_virtual_package_exists(
@@ -1108,17 +1119,10 @@ class GitHubPackageDownloader:
             temp_clone_path.mkdir(parents=True, exist_ok=True)
 
             def _repair(repo_env: dict[str, str]) -> bool:
-                dangling = repair_dangling_cone_symlinks(
-                    "git",
-                    temp_clone_path,
-                    [subdir_path],
-                    env=repo_env,
+                # Lenient: download_subdirectory_package rejects what remains.
+                materialize_tracked_symlinks(
+                    "git", temp_clone_path, [subdir_path], env=repo_env, strict=False
                 )
-                if dangling is not None:
-                    _log.info(
-                        "Sparse checkout widened to repair dangling symlink '%s' (#2707).",
-                        dangling.relative_to(temp_clone_path),
-                    )
                 return True
 
             public_github_anonymous_first = (
@@ -1584,6 +1588,13 @@ class GitHubPackageDownloader:
                         except Exception as e:
                             detail = self._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(f"Failed to checkout commit {ref}: {detail}") from e
+                    materialize_tracked_symlinks(
+                        "git",
+                        temp_clone_path,
+                        [subdir_path],
+                        env=self._git_env_dict(),
+                        strict=False,
+                    )
 
                     # Disable progress reporter after clone
                     if progress_reporter:
@@ -1859,6 +1870,9 @@ class GitHubPackageDownloader:
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                 )
+                # A shard keeps unresolvable links as text; the clone path
+                # below then raises the strict diagnostic (#3457).
+                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
                 from ..utils.file_ops import robust_copy2, robust_copytree
 
                 for item in _cached.iterdir():
@@ -1952,6 +1966,9 @@ class GitHubPackageDownloader:
             # Disable progress reporter to prevent late git updates
             if progress_reporter:
                 progress_reporter.disabled = True
+
+            # Links become their Git-object content while .git exists (#3457).
+            materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"

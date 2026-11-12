@@ -1,8 +1,8 @@
 """Lifecycle script models, runner, and discovery.
 
 APM supports lifecycle scripts that fire at key moments during install,
-update, and uninstall operations.  Scripts are configured in well-known
-locations discovered from three tiers:
+update, uninstall, and compile operations.  Scripts are configured in
+well-known locations discovered from three tiers:
 
 1. Policy  -- platform-specific admin directory (JSON drop-ins, unchanged)
 2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
@@ -37,12 +37,15 @@ import os
 import platform
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.core.command_logger import CommandLogger
+    from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ LIFECYCLE_EVENTS = (
     "post-update",
     "pre-uninstall",
     "post-uninstall",
+    "pre-compile",
 )
 
 # Supported script action types.
@@ -108,10 +112,36 @@ class LifecycleEvent:
             event=event,
             packages=packages or [],
             scope=scope,
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )
+
+
+def event_for_dependencies(
+    event_name: str,
+    dependencies: Iterable[DependencyReference],
+    *,
+    scope: str,
+    working_directory: str | None,
+) -> LifecycleEvent:
+    """Build the event payload for a manifest's dependency references.
+
+    The one place that turns dependencies into the payload's package list,
+    shared by install, update and compile.
+    """
+    return LifecycleEvent.create(
+        event=event_name,
+        packages=[
+            PackageInfo(
+                name=getattr(dep, "repo_url", None) or str(dep),
+                reference=getattr(dep, "reference", None),
+            )
+            for dep in dependencies
+        ],
+        scope=scope,
+        working_directory=working_directory,
+    )
 
 
 # -- Script entry (one action inside a script file) ------------------------
@@ -170,7 +200,12 @@ class ScriptEntry:
         """Return timeout_sec with sensible defaults per type."""
         if self.timeout_sec is not None:
             return self.timeout_sec
-        return 10 if self.script_type == "http" else 30
+        return _default_timeout(self.script_type)
+
+
+def _default_timeout(script_type: str) -> int:
+    """Per-type default timeout in seconds (http 10, command 30)."""
+    return 10 if script_type == "http" else 30
 
 
 # -- Script file parsing ---------------------------------------------------
@@ -184,7 +219,45 @@ def _parse_allowed_env_vars(raw: object) -> list[str] | None:
     return names or None
 
 
-def _build_entry(raw: object, event_name: str, path: Path, source: str) -> ScriptEntry | None:
+_invalid_timeout_warned: set[tuple[str, str, int, str]] = set()
+
+
+def _resolve_timeout(
+    raw: dict, script_type: str, event_name: str, index: int, path: Path
+) -> object:
+    """Read timeoutSec (or its timeout alias), rejecting non-positive numbers.
+
+    A non-positive numeric timeout is invalid under either spelling: it is
+    dropped to None (the per-type default) with one warning naming the script.
+    Commands that rediscover scripts per event (update, uninstall) reparse the
+    same entry, so the warning is emitted once per process (one CLI command).
+    """
+
+    def _is_number(v: object) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    key, value = "timeoutSec", raw.get("timeoutSec")
+    if not (_is_number(value) or value):
+        key, value = "timeout", raw.get("timeout")
+    if _is_number(value) and value <= 0:
+        warn_key = (str(path), event_name, index, key)
+        if warn_key not in _invalid_timeout_warned:
+            _invalid_timeout_warned.add(warn_key)
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"Lifecycle script {event_name}[{index}] ({script_type}) in {path}: "
+                f"{key} must be positive; using the default of "
+                f"{_default_timeout(script_type)}s.",
+                symbol="warning",
+            )
+        return None
+    return value
+
+
+def _build_entry(
+    raw: object, event_name: str, path: Path, source: str, index: int = 0
+) -> ScriptEntry | None:
     """Build a single ScriptEntry from a raw mapping.
 
     Returns None if raw is not a dict or has an unknown type.
@@ -208,7 +281,7 @@ def _build_entry(raw: object, event_name: str, path: Path, source: str) -> Scrip
         command=command_val,
         url=raw.get("url"),
         headers=raw.get("headers"),
-        timeout_sec=raw.get("timeoutSec") or raw.get("timeout"),
+        timeout_sec=_resolve_timeout(raw, script_type, event_name, index, path),
         cwd=raw.get("cwd"),
         env=raw.get("env"),
         allowed_env_vars=_parse_allowed_env_vars(raw.get("allowedEnvVars")),
@@ -243,8 +316,8 @@ def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntr
             continue
         if not isinstance(script_list, list):
             continue
-        for raw in script_list:
-            entry = _build_entry(raw, event_name, path, source)
+        for index, raw in enumerate(script_list):
+            entry = _build_entry(raw, event_name, path, source, index)
             if entry is not None:
                 entries.append(entry)
     return entries
@@ -266,8 +339,8 @@ def _entries_from_lifecycle_map(lifecycle: object, path: Path, source: str) -> l
             continue
         if not isinstance(script_list, list):
             continue
-        for raw in script_list:
-            entry = _build_entry(raw, event_name, path, source)
+        for index, raw in enumerate(script_list):
+            entry = _build_entry(raw, event_name, path, source, index)
             if entry is not None:
                 entries.append(entry)
     return entries
@@ -457,7 +530,7 @@ class LifecycleScriptRunner:
         self._skip_notice_emitted = True
         count = self._skipped_project_scripts
         msg = (
-            f"[!] Skipped {count} untrusted project script(s). "
+            f"Skipped {count} untrusted project script(s). "
             "Run 'apm lifecycle trust' to enable them."
         )
         if self._logger is not None:
@@ -534,8 +607,12 @@ def build_runner_from_context(
     logger: CommandLogger | None = None,
     verbose: bool = False,
     project_root: str | None = None,
+    events: tuple[str, ...] | None = None,
 ) -> LifecycleScriptRunner:
     """Create a LifecycleScriptRunner via file-based discovery.
+
+    ``events`` limits the runner to those events, so a command whose events
+    have no scripts returns before org-policy discovery.
 
     Scans policy (JSON), user (apm.yml lifecycle:), and project (apm.yml
     lifecycle:) script sources.
@@ -583,6 +660,8 @@ def build_runner_from_context(
         # abort the install/update/uninstall flow.
         project_entries, project_fp = [], None
     scripts.extend(project_entries)
+    if events is not None:
+        scripts = [script for script in scripts if script.event in events]
 
     if not scripts:
         return LifecycleScriptRunner(
@@ -594,7 +673,11 @@ def build_runner_from_context(
     try:
         from apm_cli.policy.discovery import discover_policy_with_chain
 
-        fetch_result = discover_policy_with_chain(project_root)
+        # Discovery joins paths onto the root, so a str root would raise
+        # TypeError here and the except below would silently skip deny_all.
+        fetch_result = discover_policy_with_chain(
+            Path(project_root) if project_root else Path.cwd()
+        )
         if fetch_result and fetch_result.policy:
             org_deny_all = bool(fetch_result.policy.executables.deny_all)
     except Exception:
@@ -604,7 +687,7 @@ def build_runner_from_context(
         if logger is not None:
             emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if emit is not None:
-                emit("[!] Lifecycle scripts suppressed by org policy (executables.deny_all).")
+                emit("Lifecycle scripts suppressed by org policy (executables.deny_all).")
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )

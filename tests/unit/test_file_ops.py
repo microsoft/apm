@@ -16,6 +16,7 @@ from apm_cli.utils.file_ops import (
     _retry_on_lock,
     robust_copy2,
     robust_copytree,
+    robust_replace,
     robust_rmtree,
 )
 
@@ -474,6 +475,61 @@ class TestRobustCopy2:
 
         with pytest.raises(FileNotFoundError):
             robust_copy2(src, dst)
+
+
+# ---------------------------------------------------------------------------
+# robust_replace
+# ---------------------------------------------------------------------------
+
+
+class TestRobustReplace:
+    """Test the retry-aware atomic rename wrapper (#3386)."""
+
+    def test_renames_directory(self, tmp_path):
+        src = tmp_path / "staged"
+        src.mkdir()
+        (src / "f.txt").write_text("content")
+        dst = tmp_path / "live"
+
+        assert robust_replace(src, dst) == dst
+        assert (dst / "f.txt").read_text() == "content"
+        assert not src.exists()
+
+    @patch("sys.platform", "win32")
+    @pytest.mark.parametrize("winerror", [5, 32])
+    def test_retries_windows_lock_then_renames(self, tmp_path, winerror):
+        src = tmp_path / "staged"
+        src.mkdir()
+        dst = tmp_path / "live"
+        original_replace = Path.replace
+        calls = 0
+
+        def flaky_replace(self, target):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                exc = OSError("held by scanner")
+                exc.winerror = winerror
+                raise exc
+            return original_replace(self, target)
+
+        with (
+            patch.object(Path, "replace", flaky_replace),
+            patch("apm_cli.utils.file_ops.time.sleep") as sleep,
+        ):
+            robust_replace(src, dst)
+
+        assert calls == 2
+        sleep.assert_called_once()
+        assert dst.is_dir()
+
+    def test_non_transient_error_raises_immediately(self, tmp_path):
+        with (
+            patch("apm_cli.utils.file_ops.time.sleep") as sleep,
+            pytest.raises(FileNotFoundError),
+        ):
+            robust_replace(tmp_path / "missing", tmp_path / "dest")
+        sleep.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

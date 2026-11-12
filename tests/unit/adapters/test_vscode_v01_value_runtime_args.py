@@ -425,10 +425,20 @@ class TestDockerRunArgs(unittest.TestCase):
 
     # -- declining cases: the caller keeps its previous launcher --------------
 
-    def test_declines_when_the_run_verb_is_absent(self):
+    def test_normalizes_options_only_runtime_arguments_for_legacy_docker_package(self):
         package = _docker_package(
             {"value": "-v", "type": "positional"},
             {"value": "/w:/w", "type": "positional"},
+        )
+        self.assertEqual(
+            VSCodeClientAdapter._docker_run_args(package),
+            ["run", "-i", "--rm", "-v", "/w:/w", IMAGE],
+        )
+
+    def test_declines_when_non_run_subcommand_is_used(self):
+        package = _docker_package(
+            {"value": "exec", "type": "positional"},
+            {"value": "-it", "type": "positional"},
         )
         self.assertIsNone(VSCodeClientAdapter._docker_run_args(package))
 

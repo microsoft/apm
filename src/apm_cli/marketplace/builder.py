@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import urllib.error
 import urllib.request
@@ -61,7 +60,7 @@ from .output_profiles import (
     MarketplaceOutputProfile,
     resolve_effective_output_path,
 )
-from .ref_resolver import RefResolver
+from .ref_resolver import RefResolver, is_commit_pin_ref
 from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex
 from .yml_schema import (
@@ -463,9 +462,6 @@ class BuildOptions:
 # ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
-
-# 40-char hex SHA pattern
-_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _is_display_version(version: str | None) -> bool:
@@ -875,7 +871,7 @@ class MarketplaceBuilder:
         assert ref_text is not None  # noqa: S101
 
         # If it looks like a 40-char SHA, accept it directly
-        if _SHA40_RE.match(ref_text):
+        if is_commit_pin_ref(ref_text):
             sv = parse_semver(ref_text.lstrip("vV"))
             return ResolvedPackage(
                 name=entry.name,
