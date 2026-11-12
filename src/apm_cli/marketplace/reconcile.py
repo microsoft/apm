@@ -98,6 +98,32 @@ def _report_conflict(name: str, *, report: MarketplaceReconcileReport, logger: C
     )
 
 
+def _load_user_manifest(manifest_path: Path) -> dict:
+    """Return the user manifest mapping; a missing file is an empty manifest.
+
+    Raises:
+        ValueError: The file is not valid YAML or its root is not a mapping,
+            so a malformed manifest can never read as "no marketplaces".
+    """
+    import yaml
+
+    from ..utils.yaml_io import load_yaml
+
+    if not manifest_path.exists():
+        return {}
+    display = manifest_path.as_posix()
+    try:
+        data = load_yaml(manifest_path)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML format in {display}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid user manifest {display}: expected a YAML mapping at the top level, "
+            f"got {type(data).__name__}. Marketplaces were not reconciled."
+        )
+    return data
+
+
 def reconcile_user_marketplaces(
     manifest_path: Path,
     *,
@@ -106,15 +132,17 @@ def reconcile_user_marketplaces(
 ) -> MarketplaceReconcileReport:
     """Bring the registry in line with the user manifest ``marketplaces:`` list.
 
-    Raises:
-        ValueError: The ``marketplaces:`` declaration is malformed.
-    """
-    from ..utils.yaml_io import load_yaml
-    from .registry import get_registered_marketplaces, unregister_manifest_marketplace
+    Nothing is removed while any declared entry failed to register, and a
+    run that changes nothing (including any ``dry_run``) creates no files.
 
-    data = load_yaml(manifest_path) if manifest_path.exists() else None
-    declared = parse_declared_marketplaces(data if isinstance(data, dict) else {}, manifest_path)
-    registered = {s.name.lower(): s for s in get_registered_marketplaces()}
+    Raises:
+        ValueError: The user manifest or its ``marketplaces:`` declaration
+            is malformed. Raised before the registry is read or changed.
+    """
+    from .registry import read_registered_marketplaces, unregister_manifest_marketplace
+
+    declared = parse_declared_marketplaces(_load_user_manifest(manifest_path), manifest_path)
+    registered = {s.name.lower(): s for s in read_registered_marketplaces()}
     owned = [s for s in registered.values() if s.origin == ORIGIN_MANIFEST]
     report = MarketplaceReconcileReport()
     if not declared and not owned:
@@ -138,7 +166,10 @@ def reconcile_user_marketplaces(
         _register(item, parsed, action=action, report=report, logger=logger)
 
     declared_names = {item.name.lower() for item in declared}
-    for stale in owned:
+    # A failed fetch may be the replacement for a stale entry (rename or
+    # source move); keep every existing registration until all succeed.
+    stale_entries = [] if report.failed else owned
+    for stale in stale_entries:
         if stale.name.lower() in declared_names:
             continue
         if dry_run:

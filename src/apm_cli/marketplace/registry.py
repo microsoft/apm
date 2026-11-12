@@ -58,13 +58,19 @@ def _marketplace_mutation():
         yield
 
 
-def _load() -> list[MarketplaceSource]:
-    """Load registered marketplaces from disk (cached per-process)."""
+def _load(*, create: bool = True) -> list[MarketplaceSource]:
+    """Load registered marketplaces from disk (cached per-process).
+
+    With ``create=False`` a missing registry reads as empty and no file or
+    directory is created.
+    """
     global _registry_cache
     with _registry_lock:
         if _registry_cache is not None:
             return list(_registry_cache)
-        path = _ensure_file()
+        if not create and not os.path.exists(_marketplaces_path()):
+            return []
+        path = _ensure_file() if create else _marketplaces_path()
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -100,6 +106,11 @@ def _save(sources: list[MarketplaceSource]) -> None:
 def get_registered_marketplaces() -> list[MarketplaceSource]:
     """Return all registered marketplaces."""
     return _load()
+
+
+def read_registered_marketplaces() -> list[MarketplaceSource]:
+    """Return all registered marketplaces without creating the registry file."""
+    return _load(create=False)
 
 
 def get_marketplace_by_name(name: str) -> MarketplaceSource:

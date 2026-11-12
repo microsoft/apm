@@ -287,6 +287,8 @@ then:
   over to the manifest.
 
 The output lists each marketplace registered, updated, removed or kept.
+If an entry cannot be fetched, or the user manifest is not valid YAML,
+`apm install -g` exits with an error and removes nothing.
 `apm install -g --dry-run` previews the changes without fetching or
 writing. Registering a marketplace only makes it searchable with
 `apm search QUERY@NAME` and installable with `apm install PKG@NAME`. It
