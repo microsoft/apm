@@ -108,7 +108,9 @@ def previous_selected_subtree_keys(
     this run no longer contains, and those it still reaches through another
     retained package. Unrelated lock entries are never candidates. Both
     sets are empty when a candidate carries replacement evidence, whose
-    recorded parent requests only a complete install may rewrite.
+    recorded parent requests only a complete install may rewrite. Nothing is
+    dropped when the graph omits a retained entry, which may still need a
+    candidate.
     """
     from apm_cli.commands.uninstall.engine import _collect_orphan_candidates
     from apm_cli.deps.lockfile import _SELF_KEY
@@ -135,6 +137,12 @@ def previous_selected_subtree_keys(
     ):
         return frozenset(), frozenset()
     complete = frozenset(complete_dep_keys)
+    # A retained entry the graph no longer reaches (e.g. an unselected local
+    # package whose apm.yml changed since it was locked) may still need a
+    # candidate; the graph cannot prove otherwise, so drop nothing.
+    unproven = set(lockfile.dependencies) - candidates - complete - {_SELF_KEY}
+    if unproven:
+        return frozenset(), frozenset(candidates & complete)
     return frozenset(candidates - complete), frozenset(candidates & complete)
 
 
