@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -364,50 +365,86 @@ class _CheckoutBytes:
         self._repo_dir = repo_dir
         self._env = env
         self._timeout = timeout
-        # ``cat-file --filters`` applies checkout conversion, so it needs the
-        # same line-ending pins as the checkout itself; callers that pass no
-        # pins would otherwise inherit the host ``core.eol`` (#3270).
+        # Checkout conversion needs the same line-ending pins as the checkout
+        # itself; callers that pass no pins would otherwise inherit the host
+        # ``core.eol`` (#3270).
         self._extra_git_args = [*(extra_git_args or []), *git_line_ending_pin_args()]
         self._cache: dict[str, bytes] = {}
-        self._attr_source = True
 
     def __call__(self, source: str) -> bytes:
         if source not in self._cache:
-            self._cache[source] = self._read(source)
+            self.prime([source])
         return self._cache[source]
 
-    def _read(self, source: str) -> bytes:
-        # A tracked blob Git already wrote is exactly what a POSIX link
-        # follows. ``cat-file --filters`` applies the same checkout
-        # conversion to targets a sparse cone left out; its ``--batch``
-        # form reports unfiltered sizes, so each read is one call.
-        _require_safe_entry_path(source)
+    def prime(self, sources: list[str]) -> None:
+        """Load every source; Git checks out the missing ones in one batch."""
+        missing: list[str] = []
+        for source in dict.fromkeys(sources):
+            if source in self._cache:
+                continue
+            _require_safe_entry_path(source)
+            content = self._worktree_bytes(source)
+            if content is None:
+                missing.append(source)
+            else:
+                self._cache[source] = content
+        if missing:
+            self._cache.update(self._check_out(missing))
+
+    def _worktree_bytes(self, source: str) -> bytes | None:
+        # A tracked blob Git already wrote is exactly what a POSIX link follows.
         path = self._repo_dir / source
         try:
             regular = stat.S_ISREG(path.lstat().st_mode)
         except FileNotFoundError:
-            regular = False
+            return None
         if regular and not has_symlink_component(self._repo_dir, path, raise_on_error=True):
             return path.read_bytes()
-        request = ["cat-file", "--filters", f"HEAD:{source}"]
-        if self._attr_source:
-            # Attributes from the commit, not a sparse worktree that may lack
-            # the governing .gitattributes (Git 2.40+).
-            try:
-                return self._output(["--attr-source=HEAD", *request])
-            except subprocess.CalledProcessError:
-                self._attr_source = False
-        return self._output(request)
+        return None
 
-    def _output(self, args: list[str]) -> bytes:
-        return _git_output(
-            self._git_exe,
-            self._repo_dir,
-            args,
-            env=self._env,
-            timeout=self._timeout,
-            extra_git_args=self._extra_git_args,
-        )
+    def _check_out(self, sources: list[str]) -> dict[str, bytes]:
+        """Run Git's own checkout for targets a sparse cone left out.
+
+        A throwaway index (``read-tree HEAD``) and work tree let
+        ``checkout-index`` apply exactly the conversion ``git checkout``
+        applies, with ``.gitattributes`` read from the commit through that
+        index. ``cat-file --filters`` reads no index, so in a sparse checkout
+        it silently skipped attributes such as ``eol=crlf`` (#3457).
+        """
+        scratch = Path(tempfile.mkdtemp(prefix="apm-link-"))
+        try:
+            env = dict(self._env if self._env is not None else os.environ)
+            env["GIT_INDEX_FILE"] = str(scratch / "index")
+            tree = scratch / "tree"
+            tree.mkdir()
+            # A full, non-sparse throwaway index: no skip-worktree bits and no
+            # sparse-directory entries can hide a requested path.
+            head = ["-c", "core.sparseCheckout=false", "-c", "index.sparse=false"]
+            for args, stdin in (
+                ([*head, "read-tree", "HEAD"], None),
+                (
+                    [*head, f"--work-tree={tree}", "checkout-index", "--stdin", "-z"],
+                    b"".join(os.fsencode(source) + b"\0" for source in sources),
+                ),
+            ):
+                _git_output(
+                    self._git_exe,
+                    self._repo_dir,
+                    args,
+                    env=env,
+                    timeout=self._timeout,
+                    extra_git_args=self._extra_git_args,
+                    stdin=stdin,
+                )
+            loaded: dict[str, bytes] = {}
+            for source in sources:
+                path = tree / source
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    raise RuntimeError(f"Git did not check out '{source}' as a regular file.")
+                loaded[source] = path.read_bytes()
+            return loaded
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _write_link_plan(
@@ -477,6 +514,9 @@ def materialize_tracked_symlinks(
         env=env,
         timeout=max(timeout, FULL_CHECKOUT_TIMEOUT_SECONDS),
         extra_git_args=extra_git_args,
+    )
+    checkout_bytes.prime(
+        [write.source for writes in plans.values() for write in writes if write.source]
     )
     for link in sorted(plans):
         _write_link_plan(repo_dir, plans[link], checkout_bytes)

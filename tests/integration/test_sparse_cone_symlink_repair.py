@@ -192,6 +192,7 @@ def test_downloader_rejects_real_symlink_into_git_metadata(tmp_path: Path) -> No
     downloader.auth_resolver.uses_public_github_anonymous_first.return_value = False
     downloader.persistent_git_cache = MagicMock()
     downloader.persistent_git_cache.get_checkout.return_value = consumer
+    downloader._persistent_cache_checkout = lambda *args, **kwargs: consumer
     downloader.resolve_git_reference = lambda dep: MagicMock(resolved_commit="a" * 40)
     downloader._cache_git_env = lambda dep: os.environ.copy()
     downloader._git_env_dict = lambda: os.environ.copy()
@@ -229,6 +230,7 @@ def test_downloader_treats_colon_prefixed_package_path_literally(tmp_path: Path)
     downloader.auth_resolver.uses_public_github_anonymous_first.return_value = False
     downloader.persistent_git_cache = MagicMock()
     downloader.persistent_git_cache.get_checkout.return_value = consumer
+    downloader._persistent_cache_checkout = lambda *args, **kwargs: consumer
     downloader.resolve_git_reference = lambda dep: MagicMock(resolved_commit="a" * 40)
     downloader._cache_git_env = lambda dep: os.environ.copy()
     downloader._git_env_dict = lambda: os.environ.copy()
