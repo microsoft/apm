@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from apm_cli.hook_contract import (
@@ -16,6 +18,7 @@ from apm_cli.hook_contract import (
     _thaw,
     hook_handlers,
 )
+from apm_cli.utils.diagnostics import printable_ascii_text
 
 _ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
 
@@ -456,6 +459,44 @@ def _to_claude_hook_entries(entries: list, *, default_handler_type: bool = True)
         _entries_to_ir(entries),
         timeout_milliseconds=False,
         default_matcher="*",
+    )
+
+
+def require_claude_native_events(
+    hook_files: list[Path],
+    parse_hook_json: Callable[[Path], dict | None],
+    event_maps: dict[str, dict[str, str]],
+) -> None:
+    """Refuse Claude output whose events Claude Code rejects (#3226).
+
+    Every documented Claude Code event is PascalCase, and Claude Code rejects
+    unknown events. Copilot names with a documented Claude pair are renamed by
+    the event map; any other lower-case name has no faithful Claude rendering,
+    so fail before settings are replaced instead of writing an invalid event
+    or silently dropping a protective hook.
+    """
+    claude_map = event_maps.get("claude", {})
+    invalid: dict[str, set[str]] = {}
+    for hook_file in hook_files:
+        data = parse_hook_json(hook_file)
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        if not isinstance(hooks, dict):
+            continue
+        for event in hooks:
+            native = claude_map.get(event, event)
+            if not isinstance(native, str) or not native[:1].isupper():
+                invalid.setdefault(hook_file.name, set()).add(str(event))
+    if not invalid:
+        return
+    details = "; ".join(
+        f"{printable_ascii_text(name)}: {', '.join(sorted(printable_ascii_text(e) for e in events))}"
+        for name, events in sorted(invalid.items())
+    )
+    raise HookContractError(
+        f"hook events have no Claude Code equivalent ({details}). "
+        "Claude settings were not changed. Rename them to Claude events such as "
+        "PreToolUse, or limit this package to targets that support them with "
+        "'target:' in its apm.yml or dependency 'targets:' in yours"
     )
 
 

@@ -48,12 +48,31 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
-| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
+| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` |
+| `PreToolUse`, `preToolUse` | `preToolUse` | `PreToolUse` |
+| `PostToolUse`, `postToolUse` | `postToolUse` | `PostToolUse` |
+| `subagentStop` | unchanged | `SubagentStop` |
+| `sessionEnd` | unchanged | `SessionEnd` |
+| `postToolUseFailure` | unchanged | `PostToolUseFailure` |
+| `preCompact` | unchanged | `PreCompact` |
 
-For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
-camelCase or PascalCase name that conflicts with the target convention emits
-an install warning. All-lowercase names such as `stop` pass through silently;
-`stop` is not a native Copilot or Claude event and will not fire.
+The Claude column follows the alias pairs in the
+[Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference)
+and the [Claude Code hook events](https://code.claude.com/docs/en/hooks).
+Claude Code rejects unknown events, so a lower-case event with no Claude
+equivalent (for example `errorOccurred`, `subagentStart`, or `stop`) fails
+the install for that package before `.claude/settings.json` changes. Limit
+such a package to targets that support the event with `target:` or
+dependency `targets:`. PascalCase names absent from the table pass to Claude
+unchanged.
+
+For Copilot, names absent from the table are preserved unchanged; an unmapped
+name whose casing conflicts with the target convention emits an install
+warning.
+
+Equivalent spellings of the same binding, such as `SubagentStop` and
+`subagentStop` with the same handler, are written once. Bindings with
+different matchers, such as `Bash` and `*`, stay separate.
 
 ```json
 {
@@ -125,7 +144,8 @@ available at runtime:
   Copilot or VS Code, use the `.mjs` file extension -- Node.js
   recognises it without a `package.json`.
 
-Use simple hook filenames. APM computes their reach as:
+Use simple hook filenames; names never select targets. APM computes their
+reach as:
 
 ```text
 effective hook targets =
@@ -166,18 +186,11 @@ the target vocabulary in
 [Primitives and targets](../../../concepts/primitives-and-targets/).
 :::
 
-:::caution[Deprecated]
-Hook filename routing (`*-<harness>-hooks.json`) is deprecated and warns
-at install time. When renaming `my-pkg-codex-hooks.json` to generic
-`hooks.json`, preserve package intent with `target: codex` in the package's
-own `apm.yml`. Consumer per-dependency `targets:` may narrow that scope
-further, but cannot expand it.
-
-During migration, suffix routing still filters within the effective target
-set. Multi-target stems such as `claude-codex-hooks.json` match each named
-target. Ambiguous stems such as `codex-launch-hooks.json` use universal
-fallback and warn that the apparent target token was ignored.
-:::
+Every hook file in a package reaches every effective target. To ship
+different hooks for different harnesses,
+publish one package per target set, each with its own `target:`, and keep
+shared content in a common package. Declaring several targets on one package
+does not assign different files to each target.
 
 Supported targets and where the integrator writes:
 
@@ -207,6 +220,27 @@ Kiro trigger names are PascalCase and command timeouts remain in seconds.
 For Claude, Codex, Gemini, and Antigravity, other handler and hook-group
 fields, including nested objects and arrays such as `env`, are written to the
 native JSON unchanged.
+
+### Migrating from filename routing
+
+APM used to route files named `*-<target>-hooks.json` or
+`hooks-<target>.json` (for example `my-pkg-codex-hooks.json`) only to the
+named target, and skipped generic files such as `hooks.json` for a target
+that had its own file. That routing is removed.
+
+If removing it would give a target a hook file the old names kept from it,
+`apm install` fails for that package with a message naming the target and
+files, and installs no hooks from it. APM does not guess the intended target.
+To migrate:
+
+1. Move each target's hook files into a package whose `apm.yml` declares
+   that target, for example `target: codex`.
+2. Or narrow the dependency in your own `apm.yml` with object-form
+   `targets: [codex]`.
+3. Reinstall.
+
+A file whose old name already matched every effective target keeps
+installing unchanged; renaming it to `hooks.json` is optional.
 
 ### Cursor native hooks and Claude import
 
@@ -278,8 +312,8 @@ Reinstall migrates matching APM-owned legacy Cursor entries and keeps unrelated
 user hooks. Switching a dependency to one route can retire its old project
 route; it does not remove user hooks or matching hooks in another scope.
 Invalid or unsupported user configuration is rejected without being
-overwritten. Target-specific files retain the existing filename-routing rules;
-this repair does not add per-file target declarations or dry-run hook previews.
+overwritten. Hook filenames do not select targets; this repair does not add
+per-file target declarations or dry-run hook previews.
 
 These mappings follow the [Cursor hook reference](https://cursor.com/docs/hooks)
 and [third-party hook reference](https://cursor.com/docs/reference/third-party-hooks).
@@ -361,11 +395,11 @@ agent a procedure" fits a skill -- and reaches every harness.
 ## Pitfalls
 
 - **Hook event names.** Use the documented
-  [session lifecycle aliases](#session-lifecycle-event-aliases) for Copilot
-  and Claude. Their unknown names are preserved. An install warning appears
-  only when an unmapped name starts
-  with a capital letter or starts lowercase and contains a later capital
-  letter, and that casing conflicts with the target convention. Cursor
+  [event aliases](#session-lifecycle-event-aliases) for Copilot
+  and Claude. Claude rejects lower-case names without a Claude equivalent
+  before writing settings. For Copilot, unknown names are preserved; an
+  install warning appears only when an unmapped name's casing conflicts with
+  the target convention. Cursor
   instead rejects unsupported events, fields and restrictions; see
   [Cursor native hooks](#cursor-native-hooks-and-claude-import). Diagnostics
   name unsupported source-level, matcher-group and handler fields and identify

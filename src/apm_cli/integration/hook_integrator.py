@@ -46,7 +46,7 @@ from apm_cli.integration.hook_command_paths import (
 )
 from apm_cli.integration.hook_command_warnings import warn_unresolved_plugin_root
 from apm_cli.integration.hook_cursor_preflight import preflight_cursor_hooks
-from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
+from apm_cli.integration.hook_file_routing import hook_package_label
 from apm_cli.integration.hook_native_formats import (
     _legacy_hook_entries,
     _to_antigravity_hook_entries,
@@ -54,6 +54,7 @@ from apm_cli.integration.hook_native_formats import (
     _to_codex_hook_entries,
     _to_cursor_hook_entries,
     _to_gemini_hook_entries,
+    require_claude_native_events,
 )
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
@@ -86,10 +87,6 @@ if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
-
-# Testability seam: tests can patch deprecated filename routing without
-# replacing the imported helper for every call site.
-_filter_hook_files_for_target = filter_hook_files_for_target
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -158,11 +155,16 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postTaskExecution": "postTaskExecution",
     },
     "claude": {
-        # Copilot camelCase and portable lifecycle aliases -> Claude PascalCase
+        # Copilot hooks-reference alias pairs -> documented Claude events.
         "preToolUse": "PreToolUse",
         "postToolUse": "PostToolUse",
+        "postToolUseFailure": "PostToolUseFailure",
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
+        "sessionEnd": "SessionEnd",
+        **dict.fromkeys(("userPromptSubmitted", "userPromptSubmit"), "UserPromptSubmit"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
+        "subagentStop": "SubagentStop",
+        "preCompact": "PreCompact",
     },
     "cursor": {  # Values must stay within CURSOR_NATIVE_EVENTS.
         "PreToolUse": "preToolUse",
@@ -388,11 +390,6 @@ class HookIntegrator(BaseIntegrator):
     #   Claude Code:      https://code.claude.com/docs/en/hooks
     HOOK_COMMAND_KEYS: tuple[str, ...] = _HOOK_COMMAND_KEYS
 
-    def __init__(self) -> None:
-        """Initialize per-install hook integration state."""
-        super().__init__()
-        self._deprecated_hook_routing_warnings: set[str] = set()
-
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
         """Flatten hook payloads into (event_name, entry_dict) pairs."""
@@ -513,17 +510,14 @@ class HookIntegrator(BaseIntegrator):
         package_path: Path,
         target_names: Iterable[str],
         *,
-        package_name: str = "",
-        package_identity: str = "",
-        warned_packages: set[str] | None = None,
         hook_files: list[Path] | None = None,
     ) -> HookSourceSelection:
         """Select hook inputs that each resolved target will materialize.
 
-        This is the sole hook source-selection algorithm.  It applies
-        filename routing before discovering referenced script bundles, excludes
-        Copilot's recursively-scanned JSON assets, and enumerates each source
-        root once per target.
+        This is the sole hook source-selection algorithm.  Filenames never
+        route (#3226); it records retired-routing widening, excludes Copilot's
+        recursively-scanned JSON assets, and enumerates each source root once
+        per target.
         """
         integrator = cls()
         discovered_files = (
@@ -532,12 +526,8 @@ class HookIntegrator(BaseIntegrator):
         return select_hook_sources(
             package_path,
             target_names,
-            package_name=package_name,
-            package_identity=package_identity,
-            warned_packages=warned_packages,
             hook_files=discovered_files,
             parse_hook_json=integrator._parse_hook_json,
-            filter_hook_files=_filter_hook_files_for_target,
             iter_bundle_files=iter_deployable_hook_bundle_files,
             merge_target_names=_MERGE_HOOK_TARGETS,
         )
@@ -549,18 +539,14 @@ class HookIntegrator(BaseIntegrator):
         *,
         source_plan=None,
     ) -> HookSourceSelection:
-        """Read the plan's selection or build the same selection for direct use."""
+        """Read the plan's selection or build it; refuse retired-routing widening."""
         selection = getattr(source_plan, "hook_source_selection", None)
-        if selection is not None:
-            return selection
-        package_name = self._get_package_name(package_info, None)
-        return self.select_deployable_hook_sources(
-            package_info.install_path,
-            (target_name,),
-            package_name=package_name,
-            package_identity=package_info.get_canonical_dependency_string(),
-            warned_packages=self._deprecated_hook_routing_warnings,
-        )
+        if selection is None:
+            selection = self.select_deployable_hook_sources(
+                package_info.install_path, (target_name,)
+            )
+        selection.require_configured_routing(hook_package_label(package_info))
+        return selection
 
     @staticmethod
     def _referenced_hook_source_files(
@@ -1230,6 +1216,8 @@ class HookIntegrator(BaseIntegrator):
         hook_files = hook_sources.descriptors_for(config.target_key)
         if not hook_files:
             return _empty
+        if config.target_key == "claude":
+            require_claude_native_events(hook_files, self._parse_hook_json, _HOOK_EVENT_MAP)
 
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
@@ -1640,9 +1628,10 @@ class HookIntegrator(BaseIntegrator):
         user_scope: bool = False,
         retiring_targets: frozenset[str] = frozenset(),
     ) -> None:
-        """Check authorized Cursor/import sources before any primitive is written."""
+        """Check routing, Claude events and Cursor imports before any primitive write."""
         selection = source_plan.hook_source_selection
         if selection is not None:
+            selection.require_deployable(package_info, _HOOK_EVENT_MAP)
             preflight_cursor_hooks(
                 self,
                 package_info,
@@ -2000,6 +1989,8 @@ class HookIntegrator(BaseIntegrator):
                 list(target_selection.targets),
                 getattr(apm_package, "allow_executables", None),
             )
+            if source_plan.hook_source_selection is not None:
+                source_plan.hook_source_selection.require_deployable(pkg_info, _HOOK_EVENT_MAP)
             rebuild_plan.append((dep_ref, pkg_info, target_selection, source_plan))
 
         # Empty managed_files (not None) skips file-level deletion while

@@ -3,8 +3,9 @@
 import json
 import logging
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from apm_cli.hook_contract import walk_hook_commands
 from apm_cli.integration.hook_bundle import _hook_source_root
@@ -14,7 +15,17 @@ from apm_cli.integration.hook_command_paths import (
     normalize_quoted_plugin_root,
     plugin_root_relative_path,
 )
+from apm_cli.integration.hook_file_routing import (
+    configured_hook_file_selection,
+    hook_package_label,
+    legacy_routing_widening,
+    raise_for_legacy_routing,
+)
+from apm_cli.integration.hook_native_formats import require_claude_native_events
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.paths import portable_relpath
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -23,6 +34,25 @@ class HookSourceSelection:
 
     descriptor_files: dict[str, frozenset[Path]]
     bundle_files: dict[str, frozenset[Path]]
+    # Target -> package-relative files the retired filename convention hid.
+    legacy_routing_conflicts: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def require_configured_routing(self, package_label: str) -> None:
+        """Refuse deployment when removing filename routing would widen reach."""
+        raise_for_legacy_routing(self.legacy_routing_conflicts, package_label)
+
+    def require_deployable(
+        self,
+        package_info: Any,
+        event_maps: dict[str, dict[str, str]],
+    ) -> None:
+        """Refuse retired-routing widening and Claude events without a native pair."""
+        self.require_configured_routing(hook_package_label(package_info))
+        require_claude_native_events(
+            self.descriptors_for("claude"),
+            lambda path: _parse_hook_json(path, logger=_LOG),
+            event_maps,
+        )
 
     def descriptors_for(self, target_name: str) -> list[Path]:
         """Return target-routed descriptors in stable path order."""
@@ -156,17 +186,20 @@ def select_hook_sources(
     package_path: Path,
     target_names: Iterable[str],
     *,
-    package_name: str,
-    package_identity: str,
-    warned_packages: set[str] | None,
     hook_files: list[Path],
     parse_hook_json: Callable[[Path], dict | None],
-    filter_hook_files: Callable[..., list[Path]],
     iter_bundle_files: Callable[..., list[Path]],
     merge_target_names: Iterable[str],
 ) -> HookSourceSelection:
-    """Select descriptors and bundle assets for every supported target."""
+    """Select descriptors and bundle assets for every supported target.
+
+    Filenames never route: each supported target receives every descriptor.
+    Targets where the retired filename convention selected fewer files are
+    recorded so consumers fail closed instead of widening executable reach.
+    """
     all_descriptors = set(hook_files)
+    descriptors = configured_hook_file_selection(hook_files)
+    conflicts: dict[str, tuple[str, ...]] = {}
     descriptors_by_target: dict[str, frozenset[Path]] = {}
     bundles_by_target: dict[str, frozenset[Path]] = {}
     parsed_hooks: dict[Path, dict | None] = {}
@@ -175,13 +208,11 @@ def select_hook_sources(
     for target_name in dict.fromkeys(target_names):
         if target_name not in supported_targets:
             continue
-        descriptors = filter_hook_files(
-            hook_files,
-            target_name,
-            package_name=package_name,
-            package_identity=package_identity,
-            warned_packages=warned_packages,
-        )
+        widened = legacy_routing_widening(hook_files, target_name)
+        if widened:
+            conflicts[target_name] = tuple(
+                sorted(portable_relpath(path, package_path) for path in widened)
+            )
         descriptors_by_target[target_name] = frozenset(descriptors)
         source_roots: set[Path] = set()
         for hook_file in descriptors:
@@ -208,4 +239,4 @@ def select_hook_sources(
             )
         bundles_by_target[target_name] = frozenset(bundle_files)
 
-    return HookSourceSelection(descriptors_by_target, bundles_by_target)
+    return HookSourceSelection(descriptors_by_target, bundles_by_target, conflicts)
