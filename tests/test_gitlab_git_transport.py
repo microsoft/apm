@@ -114,6 +114,12 @@ def _mock_git_transport(*, return_value=None, side_effect=None) -> Mock:
 class TestFetchFileViaGitSparse:
     """Unit tests for the git_file_transport free function."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_git_object_links(self):
+        """Mocked Git carries no objects; test_git_file_transport_links covers links."""
+        with patch("apm_cli.deps.git_file_transport.GitSparseFileTransport._materialize_links"):
+            yield
+
     def test_path_traversal_in_string_rejected_before_git(self) -> None:
         """validate_path_segments() rejects path: containing .. sequences.
 

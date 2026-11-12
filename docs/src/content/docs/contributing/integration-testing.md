@@ -488,15 +488,16 @@ collection alone do not.
 The **Windows Native Symlink Acceptance** job checks out the exact PR head and
 uses a temporary standard account on a disposable hosted runner. It requires
 successful ordinary file I/O, no administrator or symlink privilege, and actual
-Windows error 1314 before running the Git/APM symlink regression. Native Git
-still writes link text there, while APM must fail with its symlink capability
-diagnostic because it pins `core.symlinks=true`.
+Windows error 1314 before running the Git/APM link regression. APM must
+install a package with links as their target content, with the POSIX
+`content_hash`, and `apm install --frozen` must replay that lock.
 
-The job requires a passing native case, failure after inverting the pin in
-memory, and a restored pass. Empty or skipped runs fail.
+The job requires a passing native case, failure after disabling the
+Git-object link writer in memory, and a restored pass. Empty or skipped runs
+fail.
 Account, profile, scratch and any changed Developer Mode value are cleaned up
 independently, with an `always()` cleanup fallback. A restoration failure fails
-the job. This is symlink-capability evidence, not archive-symlink support, and
+the job. This is link-materialization evidence, not archive-symlink support, and
 the job does not change repository protection or replace required SDL scanning.
 
 Plugin sequential-install coverage checks deployed-file removal and lockfile
