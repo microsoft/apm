@@ -394,6 +394,41 @@ This is an explicit engine contract, not packaged-binary coverage, and it is
 independent of `APM_BINARY_PATH` so frozen CI cannot bypass the instrumentation.
 Packaged executable tests must continue to use `apm_binary_path`.
 
+### Claude native command contracts
+
+Run the command routing and installed-Python lifecycle contracts together:
+
+```bash
+uv run --extra dev pytest \
+  tests/unit/install/test_claude_native_command_projection.py \
+  tests/integration/test_claude_native_command_lifecycle.py
+```
+
+The lifecycle suite uses local Git sources and substitutes only
+`ClaudePluginCLI.run`, the external Claude CLI boundary, through the shared
+`tests.utils.claude_native_protocol` helper. It checks selected and
+explicit-empty commands, intact resources, source pins, disabled-by-default
+registration, reinstall/update/removal, and absence of loose duplicates.
+Ordinary and frozen reinstalls preserve both user activation choices in the
+substituted host; removal clears APM's acquired source and final lockfile.
+Pinned updates also switch between selected and explicitly empty commands.
+Two plugins with the same command basename retain separate resources; removing
+one preserves the surviving plugin's activation, source and ownership, plus a
+same-named user command.
+The saved native fingerprint and source pin must match the selected revision.
+Read-only audit rejects modified bundled resources (including `__pycache__` data)
+and, on POSIX, executable-bit changes, even with an empty command selection,
+without repairing files or changing registration, ownership, or the lockfile.
+Unreadable retained hook settings stop native admission without rewriting command
+resources or user commands, including when command selection is explicitly empty.
+Standalone APM commands retain their existing behavior.
+
+These tests do **not** prove native command loading, plugin-root substitution or
+invocation. That requires a separately pinned Claude runtime and a
+human-authorized profile, using the harmless fixture in
+`tests/fixtures/native_claude_commands/`. Do not bypass onboarding, permissions or
+trust to turn registration evidence into a runtime-support claim.
+
 ### Adding an integration test that needs a precondition
 
 1. Apply the marker at module or test level:
