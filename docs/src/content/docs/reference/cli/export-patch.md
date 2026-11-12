@@ -15,13 +15,13 @@ apm export-patch [OPTIONS]
 
 `apm export-patch` turns local edits to APM-managed files into unified diffs against the packages that deployed them, so the edits can be contributed back upstream.
 
-It replays the locked install into a scratch tree (the same machinery as the [`apm audit`](../audit/) drift check) and, for every managed file that was modified locally, maps the change back to the package source file that produced it. Each package with exportable edits gets one `.patch` file, ready for `git apply` in a clone of the package repository. When two packages would sanitize to the same patch filename, the later one gets a short digest suffix so nothing is overwritten.
+It replays the locked install into a scratch tree (the same machinery as the [`apm audit`](../audit/) drift check) and, for every managed file that was modified locally, maps the change back to the package source file that produced it. Each package with exportable edits gets one patch file, `patches/<pkg>@<ref>.patch` (the pnpm and Bun convention), ready for `git apply` in a clone of the package repository. `<pkg>` is the dependency key with `/` written as `__`; `<ref>` is the locked version for registry packages, otherwise the locked git ref (or the short commit when no ref was recorded). For example, `microsoft/apm-sample-package` locked at `v1.2.0` becomes `patches/microsoft__apm-sample-package@v1.2.0.patch`. When two packages would sanitize to the same filename, each gets a short digest suffix so nothing is overwritten.
 
 Every patch file records its base in a leading comment block: the package key, its source, and the exact snapshot the diff applies to (`commit <sha>` for git dependencies, `version <x>` for registry packages). Apply the patch from the package repository root, checked out at that base, then open your upstream pull request from the result:
 
 ```bash
 git -C path/to/package-clone checkout <base-commit>
-git -C path/to/package-clone apply path/to/apm-patches/<package>.patch
+git -C path/to/package-clone apply path/to/patches/<pkg>@<ref>.patch
 ```
 
 Only verbatim-deployed files can be exported: a local edit maps cleanly back to its source only when the deployment copied that source byte-for-byte, ignoring the differences `apm audit` already tolerates (build-id headers, CRLF, a BOM) -- those are normalized away on both sides, so they never reach the patch body. Everything else is listed as skipped with the reason instead of producing a patch that would not apply:
@@ -33,15 +33,17 @@ Only verbatim-deployed files can be exported: a local edit maps cleanly back to 
 
 Findings that belong to local path dependencies or to the project's own `.apm/` content are also skipped: their source already lives on disk, so the edit belongs there directly. A lockfile containing only local dependencies short-circuits before the replay.
 
-The replay is cache-only and read-only: it needs a lockfile and a populated `apm_modules/` (run `apm install` first) and never mutates the project tree. Patch files are the only output, and `--out` may not point inside `apm_modules/`.
+The replay is cache-only and read-only: it needs a lockfile and a populated `apm_modules/` (run `apm install` first) and never modifies the project tree, `apm.lock.yaml`, or `apm.yml`. Patch files are the only output, and `--out` may not point inside `apm_modules/`.
+
+The next `apm install` overwrites local edits to managed files. `apm audit` drift output and `apm install` both point at this command when they find such edits, so export first if you want to keep them.
 
 ## Options
 
 | Flag | Default | Description |
 |---|---|---|
-| `--out`, `-o DIR` | `apm-patches` | Directory to write per-package `.patch` files into. Created if missing; only created when there is something to export. Must not point inside `apm_modules/`. |
+| `--out`, `-o DIR` | `patches` | Directory to write per-package `<pkg>@<ref>.patch` files into. Created if missing; only created when there is something to export. Must not point inside `apm_modules/`. |
 | `--dry-run` | off | List what would be exported (and what gets skipped, with reasons) without writing patch files. |
-| `--verbose`, `-v` | off | Show replay progress and per-file skip details. |
+| `--verbose`, `-v` | off | Show detailed replay progress. Skipped files and their reasons are always listed. |
 
 ## Exit codes
 
@@ -53,7 +55,7 @@ The replay is cache-only and read-only: it needs a lockfile and a populated `apm
 ## Examples
 
 ```bash
-# Export all local edits as per-package patches under ./apm-patches/
+# Export all local edits as per-package patches under ./patches/
 apm export-patch
 
 # Preview what would be exported without writing anything

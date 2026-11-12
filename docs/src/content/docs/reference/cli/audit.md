@@ -38,6 +38,11 @@ selection first. Audit does not adopt, overwrite, or delete either file.
 JSON retains the finding's path and kind; SARIF uses
 `apm/drift/unmanaged-conflict` with error severity.
 
+When `modified` findings belong to dependencies, the text output adds a hint
+such as `[i] 2 local edit(s) to managed files; run 'apm export-patch' to export
+them as upstream patches before the next install overwrites them`. See
+[`apm export-patch`](../export-patch/).
+
 Replay and coverage use the current `apm.yml` target declaration when present,
 otherwise the concrete target identities recorded by install. An unrelated
 `.github/workflows/` file does not add a Copilot deployment to a recorded
