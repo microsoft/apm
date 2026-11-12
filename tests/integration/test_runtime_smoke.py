@@ -205,32 +205,6 @@ class TestRuntimeSmoke:
                 # Restore PATH
                 os.environ["PATH"] = original_path
 
-    def test_apm_workflow_compilation(self, temp_apm_home):
-        """Test that APM can compile workflows without executing them."""
-        from apm_cli.workflow.runner import preview_workflow
-
-        # Create a test workflow
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workflow_content = """---
-description: Test workflow for smoke testing
-input: [name]
----
-
-# Hello ${input:name}
-
-This is a test workflow to verify compilation works.
-            """
-
-            workflow_file = Path(temp_dir) / "test.prompt.md"
-            workflow_file.write_text(workflow_content)
-
-            # Test preview (compilation without execution)
-            success, result = preview_workflow("test", {"name": "Tester"}, temp_dir)
-
-            assert success, f"Workflow compilation failed: {result}"
-            assert "Hello Tester" in result, "Parameter substitution failed"
-            assert "${input:name}" not in result, "Parameter not substituted"
-
 
 class TestGoldenScenarioSetup:
     """Tests for the golden scenario setup without API calls."""

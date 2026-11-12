@@ -142,7 +142,7 @@ def preflight_skill_materializations(
     ctx: InstallContext,
     prepared: list[tuple[DependencySource, Materialization]],
 ) -> tuple[dict[str, PackageDeploymentPlan], PackageDeploymentPlan | None]:
-    """Refuse known unmanaged collisions before any selected package deploys."""
+    """Refuse unmanaged collisions and untrusted replacements before any package deploys."""
     from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.errors import DirectDependencyError
     from apm_cli.install.project_package import build_project_local_package_info
@@ -217,8 +217,16 @@ def preflight_skill_materializations(
             is_first_party=True,
         )
         check(local, local_plan)
-    if conflicts:
-        raise DirectDependencyError(format_skill_conflicts(conflicts))
+    unmanaged = [conflict for conflict in conflicts if not conflict.untrusted]
+    if unmanaged:
+        raise DirectDependencyError(format_skill_conflicts(unmanaged))
+    refused = [conflict for conflict in conflicts if conflict.untrusted]
+    if refused and ctx.diagnostics is None:
+        raise DirectDependencyError("\n".join(conflict.message() for conflict in refused))
+    for conflict in refused:
+        ctx.diagnostics.error(conflict.message(), package=conflict.package)
+    # Receipt-less replacement is all-or-nothing: refuse before any package writes (#3625).
+    ctx.skill_baseline_refused = bool(refused)
     return plans, local_plan
 
 
