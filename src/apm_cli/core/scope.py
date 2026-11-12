@@ -69,7 +69,13 @@ def get_apm_home() -> Path:
     configured = os.environ.get("APM_HOME")
     if configured:
         home = Path(configured).expanduser()
-        if not home.is_absolute() and _STARTUP_CWD is not None:
+        if not home.is_absolute():
+            if _STARTUP_CWD is None:
+                raise ValueError(
+                    f"APM_HOME={configured!r} is relative, but the starting directory is "
+                    "unavailable. Set an absolute APM_HOME or start APM from an existing "
+                    "directory."
+                )
             home = _STARTUP_CWD / home
         return home
     return Path.home() / USER_APM_DIR

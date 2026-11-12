@@ -95,6 +95,8 @@ class DeploymentMaterializationSession:
 
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
         apm_home = get_apm_home()
+        # Containment is anchored one level above APM_HOME (``$HOME`` by
+        # default); for a shallow custom root the symlink check is the guard.
         self._receipts_base = apm_home.parent
         self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
         self.identity_path = self.root / LOCAL_STATE_DIR / "installation"

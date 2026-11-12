@@ -106,6 +106,15 @@ class TestGetApmDir:
         assert get_apm_home() == tmp_path / "metadata"
         assert get_manifest_path(InstallScope.USER) == tmp_path / "metadata" / "apm.yml"
 
+    def test_relative_apm_home_fails_closed_without_startup_cwd(self, monkeypatch):
+        from apm_cli.core import scope
+
+        monkeypatch.setattr(scope, "_STARTUP_CWD", None)
+        monkeypatch.setenv("APM_HOME", "metadata")
+
+        with pytest.raises(ValueError, match="absolute APM_HOME"):
+            get_apm_home()
+
     def test_apm_home_expands_leading_tilde(self, tmp_path, monkeypatch):
         monkeypatch.setenv("APM_HOME", "~/isolated-apm")
         monkeypatch.setenv("HOME", str(tmp_path))

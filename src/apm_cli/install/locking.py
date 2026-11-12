@@ -14,7 +14,6 @@ from typing import Any, TypeVar
 
 from filelock import FileLock, Timeout
 
-from apm_cli.core.deployment_ledger import LOCAL_STATE_DIR
 from apm_cli.core.scope import get_apm_home
 from apm_cli.utils.path_security import has_symlink_component
 
@@ -68,6 +67,8 @@ def deployment_root_lock() -> FileLock:
     so they must not mutate concurrently.  The lock lives beside that identity
     in ``~/.apm-local/`` rather than in any APM home.
     """
+    from apm_cli.core.deployment_ledger import LOCAL_STATE_DIR
+
     home = Path.home()
     lock_path = home / LOCAL_STATE_DIR / _LIFECYCLE_LOCK_NAME
     _reject_symlinked_lock(home.absolute(), lock_path)
@@ -98,7 +99,13 @@ class LifecycleLockHandle:
             self._deployment.release()
 
 
-def _acquire_or_wait(lock: FileLock, timeout: float, validate: Callable[[Path], None]) -> None:
+def _acquire_or_wait(
+    lock: FileLock,
+    timeout: float,
+    validate: Callable[[Path], None],
+    *,
+    hint: str = "",
+) -> None:
     Path(lock.lock_file).parent.mkdir(parents=True, exist_ok=True)
     validate(Path(lock.lock_file))
     try:
@@ -115,7 +122,7 @@ def _acquire_or_wait(lock: FileLock, timeout: float, validate: Callable[[Path], 
         except Timeout as wait_exc:
             raise LifecycleBusyError(
                 f"Another APM operation is still running; waited {timeout:g}s. "
-                "Wait for it to finish or stop it, then retry. "
+                f"Wait for it to finish or stop it, then retry.{hint} "
                 f"Lifecycle lock: {lock.lock_file}"
             ) from wait_exc
 
@@ -125,7 +132,12 @@ def acquire_lifecycle_lock(*, timeout: float = LIFECYCLE_LOCK_TIMEOUT) -> Lifecy
     deployment = deployment_root_lock()
     metadata = lifecycle_lock()
     home = Path.home().absolute()
-    _acquire_or_wait(deployment, timeout, lambda path: _reject_symlinked_lock(home, path))
+    _acquire_or_wait(
+        deployment,
+        timeout,
+        lambda path: _reject_symlinked_lock(home, path),
+        hint=" This lock is shared by every APM_HOME for the current OS user.",
+    )
     try:
         _acquire_or_wait(metadata, timeout, _validate_lifecycle_lock_path)
     except BaseException:
