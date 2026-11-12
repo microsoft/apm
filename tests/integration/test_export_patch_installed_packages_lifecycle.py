@@ -1,4 +1,4 @@
-"""C5: `apm export-patch` against real installs of real package shapes (#2162).
+"""`apm export-patch` emits git-apply-ready patches for really installed packages (#2162, #3649).
 
 The contract (docs/reference/cli/export-patch.md): one ``git apply``-ready
 patch per package, applied "from the package repository root, checked out at
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.redteam_0_36._c5_support import (
-    C5World,
+from tests.integration._marketplace_pack_kit import (
+    MarketplacePackWorld,
     output,
     remote_url,
     skill_md,
@@ -25,10 +25,16 @@ from tests.integration.redteam_0_36._c5_support import (
 )
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.lifecycle_smoke,
+]
 
 
-def _git_apply_check(world: C5World, tmp: Path, name: str, commit: str, patch: Path) -> None:
+def _git_apply_check(
+    world: MarketplacePackWorld, tmp: Path, name: str, commit: str, patch: Path
+) -> None:
     """Apply *patch* from the package repository root at *commit*, as the header says."""
     clone = tmp / f"apply-{name}"
     world.git(tmp, "clone", "-q", remote_url(name), str(clone))
@@ -40,8 +46,8 @@ def _git_apply_check(world: C5World, tmp: Path, name: str, commit: str, patch: P
     )
 
 
-def _build_world(tmp_path: Path, binary: Path) -> tuple[C5World, dict[str, str]]:
-    world = C5World.create(tmp_path, binary)
+def _build_world(tmp_path: Path, binary: Path) -> tuple[MarketplacePackWorld, dict[str, str]]:
+    world = MarketplacePackWorld.create(tmp_path, binary)
     sources = world.isolated.package_root
 
     mono = sources / "mono"

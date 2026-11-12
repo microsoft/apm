@@ -1,4 +1,4 @@
-"""C5: `apm marketplace package add/set --category` (#2637) round trip.
+"""`apm marketplace package add/set --category` (#2637) round-trips into pack outputs (#3649).
 
 Chain: codex-enabled producer -> package add without category is refused with
 apm.yml byte-identical -> add/set --category -> pack writes it to Codex and
@@ -13,16 +13,16 @@ from pathlib import Path
 import pytest
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
-from tests.integration.redteam_0_36._c5_support import C5World, output, skill_md, write
+from tests.integration._marketplace_pack_kit import MarketplacePackWorld, output, skill_md, write
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
 
 
 def test_marketplace_package_category_round_trip(tmp_path: Path, apm_binary_path: Path) -> None:
-    world = C5World.create(tmp_path, apm_binary_path)
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     pkg = world.isolated.package_root / "catpkg"
     write(pkg / "apm.yml", "name: catpkg\nversion: 1.0.0\ndescription: c\n")
-    write(pkg / "skills" / "c1" / "SKILL.md", skill_md("c1"))
+    write(pkg / "skills" / "cat-skill" / "SKILL.md", skill_md("cat-skill"))
     _, commit = world.publish("catpkg", pkg)
 
     producer = world.isolated.work_root / "cat-market"
