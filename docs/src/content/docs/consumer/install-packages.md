@@ -99,8 +99,11 @@ The pipeline is deterministic. Each phase must pass before the next runs.
 
 On a fresh clone or CI runner without local deployment receipts, a committed
 skill is kept and its receipts are recorded when every file in its directory
-matches what the install would write and is recorded in `apm.lock.yaml`. The
-lockfile hashes are not used as proof. If any file differs, or another existing
+matches what the install would write and is recorded in `apm.lock.yaml`. On
+`apm update`, a committed skill that matches what the currently locked version
+renders (fetched from its locked commit) is replaced with the new version; if
+one of its files was edited, the update fails before writing any file or the
+lockfile. The lockfile hashes are not used as proof. If any file differs, or another existing
 skill cannot be overwritten because its local deployment receipt is missing,
 install exits nonzero before stale-file cleanup and lockfile replacement. The
 refused files and prior lock contents are preserved, including during cold
@@ -238,15 +241,18 @@ and the full flag reference, or run `apm install --help`.
 
 ## When things go wrong
 
-- **Package contains symbolic links.** APM always checks out in-repo links
-  in a dependency as real symlinks, so a package records the same
-  `content_hash` on Windows, macOS and Linux and a lockfile from one platform
-  verifies on another. If the host cannot create symlinks, install fails
-  before hashing with `Package <name> contains symbolic links, but this host
-  cannot create them`. On Windows, enable Developer Mode or grant the
-  "Create symbolic links" privilege, then retry. APM sets `core.symlinks=true`
-  only on its own Git commands and does not change your Git configuration.
-  Cached checkouts made by older APM versions are re-created automatically.
+- **Package contains symbolic links.** A link inside a dependency whose
+  target stays in the same repository commit is installed as a copy of the
+  target's content (a link to a directory becomes a copy of that
+  directory). APM reads the target from the locked commit's Git objects, so
+  no host needs symlink privileges (Windows Developer Mode is not required),
+  the package records the same `content_hash` on Windows, macOS and Linux,
+  and a lockfile from one platform verifies with `--frozen` on another.
+  A link that points outside the repository, to a missing path, or in a
+  loop fails the install before hashing with an error naming the link.
+  APM sets `core.symlinks=false` only on its own Git commands and does not
+  change your Git configuration; cached checkouts made by older APM
+  versions are re-created automatically.
 - **Critical security finding.** Install aborts with the offending
   characters and file path. Patch upstream when you can; use
   `--force` only when you can document the exception.

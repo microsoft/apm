@@ -23,7 +23,11 @@ from apm_cli.utils.git_env import (
     git_remote_refs,
     run_git_text,
 )
-from apm_cli.utils.git_sparse import _tracked_symlinks
+from apm_cli.utils.git_sparse import (
+    apply_sparse_cone,
+    materialize_tracked_symlinks,
+    sparse_checkout_active,
+)
 
 pytestmark = pytest.mark.windows_compat
 
@@ -91,8 +95,11 @@ def test_sparse_ls_tree_paths_decode_utf8_under_cp936_locale(
 ) -> None:
     repo = _source_repo(tmp_path)
 
-    # ls-tree output must decode; the file is regular so no symlink is reported.
-    assert _tracked_symlinks("git", repo, ["."], env=None, timeout=30, extra_git_args=None) == []
+    apply_sparse_cone("git", repo, [_UTF8_NAME], env=None)
+
+    assert sparse_checkout_active("git", repo, env=None)
+    # ls-tree -z paths must decode; the file is regular so no link is materialized.
+    assert materialize_tracked_symlinks("git", repo, None, env=None) == []
 
 
 @requires_git

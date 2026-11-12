@@ -161,7 +161,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 )
 from ._helpers import (
     _create_minimal_apm_yml,
-    _get_default_config,
+    _get_bootstrap_config,
 )
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
@@ -850,9 +850,19 @@ def _handle_mcp_install(  # noqa: PLR0913
     initial_manifest_config = None
     if is_user_scope(scope) and not mcp_manifest_path.exists():
         project_name = _resolve_bootstrap_project_name(Path.home().name)
-        initial_manifest_config = _get_default_config(project_name)
+        initial_manifest_config = _get_bootstrap_config(project_name)
         if target is not None or runtime is not None:
             initial_manifest_config["targets"] = supported_runtimes
+    retry_args = []
+    if mcp_version:
+        retry_args.extend(("--mcp-version", mcp_version))
+    retry_target = target or runtime
+    if retry_target is not None:
+        retry_args.extend(
+            ("--target", retry_target if isinstance(retry_target, str) else ",".join(retry_target))
+        )
+    if is_user_scope(scope):
+        retry_args.append("--global")
     _run_mcp_install(
         mcp_name=mcp_name,
         transport=transport,
@@ -874,6 +884,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         registry_allow_http=registry_source == "flag",
         registry_source=registry_source,
         initial_manifest_config=initial_manifest_config,
+        retry_args=builtins.tuple(retry_args),
     )
 
 
@@ -1519,7 +1530,7 @@ def install(  # noqa: PLR0913
                     f'Using default project name "{project_name}" because '
                     f"derived name {derived_project_name!a} is invalid"
                 )
-            config = _get_default_config(project_name)
+            config = _get_bootstrap_config(project_name)
             if manifest_targets := manifest_targets_from_target_option(target):
                 config["targets"] = manifest_targets
             _create_minimal_apm_yml(config, target_path=manifest_path)

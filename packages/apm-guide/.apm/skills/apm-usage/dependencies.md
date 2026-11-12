@@ -79,12 +79,13 @@ See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-se
 
 ### Packages with symbolic links
 
-APM checks out in-repo links in a dependency as real symlinks
-(`core.symlinks=true` on its own Git commands only), so the `content_hash` is
-the same on every platform. A host that cannot create symlinks fails the
-install with a diagnostic naming the package; on Windows enable Developer
-Mode or the "Create symbolic links" privilege. See [Install packages: when
-things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
+A link inside a dependency whose target stays in the same commit installs as
+a copy of the target's content (directory links copy the directory). APM
+resolves it from the locked commit's Git objects, so no host needs symlink
+privileges and the `content_hash` is the same on every platform. Links that
+escape the repository, are broken or loop fail the install with an error
+naming the link. See [Install packages: when things go
+wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
 ### Custom git ports
 
@@ -426,7 +427,7 @@ Object-form fields:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `id` | yes | `owner/repo` identity at the registry |
-| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry. Ranges skip pre-releases unless the range names a pre-release on the same `major.minor.patch` |
 | `registry` | no | Name from the merged registry map; defaults to the effective default |
 | `path` | no | Sub-path to a file or directory within the published package |
 | `alias` | no | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |

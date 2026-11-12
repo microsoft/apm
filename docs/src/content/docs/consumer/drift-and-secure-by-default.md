@@ -135,7 +135,7 @@ reported:
 | Kind | Meaning |
 |---|---|
 | `unintegrated` | A `.apm/` source exists, but its deployed counterpart is missing. Fix: `apm install`. |
-| `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. |
+| `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. For edits to a remote dependency's files, the text output also suggests [`apm export-patch`](../../reference/cli/export-patch/) to export them as upstream patches before the next install overwrites them. |
 | `orphaned` | A deployed file exists with no current source. Fix: `apm install` (orphan cleanup runs automatically). |
 | `unrecorded` | Install replay produces the same normalized bytes as the project, but no exact or directory `deployed_files` claim covers the path. Shared merge-hook configs compare only APM-owned entries, so user hooks do not create drift; the APM-owned sidecar remains byte-for-byte checked. Fix: `apm install`, then commit the regenerated `apm.lock.yaml`. |
 
@@ -163,7 +163,7 @@ For the full flag set, see [CLI audit](../../reference/cli/audit/).
 | `Content hash mismatch` on install | Lockfile-pinned content no longer matches what the source serves | Investigate upstream; if intended, run `apm install --update` |
 | `cache pin mismatch` from `apm audit` | The cache holds content from a different `resolved_commit` than the lockfile records | `apm install` to repopulate the cache, then re-audit |
 | `unintegrated` drift | Source committed without re-running install | `apm install`, then commit the regenerated `apm.lock.yaml` |
-| `modified` drift | Hand-edit to a generated file | Revert, or move the change into the corresponding `.apm/` source |
+| `modified` drift | Hand-edit to a generated file | Revert, or move the change into the corresponding `.apm/` source; for a remote dependency's files, run `apm export-patch` to send the edit upstream |
 | `unrecorded` drift | Deployed targets committed without the regenerated lockfile | `apm install`, then commit `apm.lock.yaml` in the same change |
 | Hidden-Unicode finding from `apm audit` | A primitive file contains invisible characters | `apm audit --strip` to remove them, then re-audit |
 

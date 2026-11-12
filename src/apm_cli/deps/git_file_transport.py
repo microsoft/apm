@@ -41,7 +41,7 @@ from ..utils.git_env import (
     redact_git_diagnostic,
     run_git_text,
 )
-from ..utils.path_security import ensure_path_within, validate_path_segments
+from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -151,6 +151,7 @@ class GitSparseFileTransport:
         try:
             with self._lock:
                 self._ensure_checkout(file_path)
+                self._materialize_links(file_path)
                 target = self._work_dir / file_path
                 ensure_path_within(target, self._work_dir)
                 if not target.exists():
@@ -230,6 +231,25 @@ class GitSparseFileTransport:
         if file_path not in self._sparse_paths:
             self._set_sparse_paths(file_path)
             self._run([get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"])
+
+    def _materialize_links(self, file_path: str) -> None:
+        """Replace a tracked link at *file_path* with its Git-object content (#3457)."""
+        from ..utils.git_env import git_subprocess_env
+        from ..utils.git_sparse import materialize_tracked_symlinks
+
+        try:
+            materialize_tracked_symlinks(
+                get_git_executable(),
+                self._work_dir,
+                [file_path],
+                env=git_subprocess_env(self._git_env),
+                timeout=self._timeout,
+                extra_git_args=list(git_no_hooks_args()),
+            )
+        except (PathTraversalError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise GitFileTransportError(
+                f"git file fetch could not resolve '{file_path}': {exc}"
+            ) from exc
 
     def _set_sparse_paths(self, *file_paths: str) -> None:
         """Apply the accumulated file-level sparse paths."""

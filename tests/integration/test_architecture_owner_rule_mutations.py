@@ -76,6 +76,24 @@ OWNERS_DIR = ROOT / ".apm/architecture/owners"
             'Path("apm_modules")',
             id="canonical-layout",
         ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "lock.dependencies[_SELF_KEY] = lock.project_self_entry()",
+            'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
+            id="replay-inline-self-entry",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "and _project_has_root_primitives(project_root)",
+            'and (project_root / ".apm").is_dir()',
+            id="replay-root-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "lock.dependencies[_SELF_KEY] = lock.project_self_entry()",
+            'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
+            id="load-inline-self-entry",
+        ),
     ],
 )
 def test_audit_replay_scope_projection_cannot_bypass_owner(
@@ -646,6 +664,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="return self.enabled is not _ENABLED_UNSET",
         new="return bool(self.enabled)",
         intent="Explicit false and null become omission instead of manifest intent.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-user-hook-home-reference",
+        rule_id="mutation_writes.user_hook_home_reference",
+        path="src/apm_cli/integration/hook_integrator.py",
+        old="            if home_reference is None:\n",
+        new='            if home_reference is None or os.name == "nt":\n',
+        intent="The hook rewriter gates home anchoring on the host OS, not the capability.",
     ),
     MutationCase(
         guard_id="hooks-integrations-user-root-scope",
@@ -1550,7 +1576,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/deps/github_downloader.py",
         old="            return _repair(env)\n",
         new="            return True\n",
-        intent="Downloader skips the dangling-cone-symlink repair owner.",
+        intent="Downloader skips Git-object link materialization in its sparse clone.",
     ),
     MutationCase(
         guard_id="transport-platform-tls-trust-injection",

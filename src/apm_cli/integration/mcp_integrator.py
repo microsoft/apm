@@ -404,6 +404,7 @@ class MCPIntegrator:
         verbose: bool,
         logger,
         registry_source: str | None = None,
+        retry_args: tuple[str, ...] = (),
     ) -> builtins.dict[str, builtins.dict]:
         """Validate direct-install registry identities before any write."""
         from apm_cli.integration.mcp_integrator_install import (
@@ -416,6 +417,7 @@ class MCPIntegrator:
             verbose=verbose,
             logger=logger,
             registry_source=registry_source,
+            retry_args=retry_args,
         )
 
     @staticmethod

@@ -1,20 +1,30 @@
-"""Shared helper for sparse-checkout cone setup (perf #1433).
+"""Sparse-cone setup (perf #1433) and Git-object link materialization (#3457).
 
-Extracted so the persistent git cache (``cache.git_cache``) and the
-shared-bare materialization path (``deps.bare_cache``) configure
-sparse-cone with identical subprocess semantics. Single place to evolve
-sparse-checkout behavior (timeouts, additional flags, future
-``--no-sparse-index``) without drift between the two call sites.
+Extracted so the persistent git cache (``cache.git_cache``), the
+shared-bare materialization path (``deps.bare_cache``) and the downloader
+configure sparse-cone with identical subprocess semantics, and replace
+tracked links with their target content through one owner
+(:func:`materialize_tracked_symlinks`).
 """
 
 from __future__ import annotations
 
+import bisect
 import os
+import shutil
+import stat
+import subprocess
 from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PureWindowsPath
 
 from .git_env import run_git_text
-from .path_security import PathTraversalError, ensure_path_within
+from .path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+    validate_path_segments,
+)
 
 FULL_CHECKOUT_TIMEOUT_SECONDS = 300
 
@@ -24,150 +34,467 @@ def _literal_pathspec(path: str) -> str:
     return f":(literal){path}"
 
 
-def _tracked_symlinks(
+_LINK_MODE = "120000"
+_EXECUTABLE_MODE = "100755"
+_TREE_MODE = "040000"
+# Matches Linux MAXSYMLINKS: bounds link chains and nested directory-link
+# expansion so a cyclic package fails instead of recursing without end.
+_MAX_LINK_HOPS = 40
+# Shared budget across every planned write, so acyclic fan-out (several
+# directory links per level) cannot grow exponentially before rejection.
+_MAX_LINK_WRITES = 100_000
+
+
+@dataclass(frozen=True)
+class _TreeEntry:
+    mode: str
+    kind: str
+    oid: str
+
+
+@dataclass(frozen=True)
+class _LinkWrite:
+    """One working-tree write: a directory, or the bytes of ``source``."""
+
+    dest: str
+    mode: str
+    source: str | None = None
+
+
+_ROOT_TREE = _TreeEntry(_TREE_MODE, "tree", "")
+
+
+def _git_output(
     git_exe: str,
     repo_dir: Path,
-    paths: list[str],
+    args: list[str],
     *,
     env: dict[str, str] | None,
     timeout: int,
     extra_git_args: list[str] | None,
-) -> list[Path]:
-    """Return materialized tracked symlinks under *paths*.
-
-    Git's index identifies mode-120000 entries without walking every file
-    in the cone. The filesystem check excludes platforms where Git writes
-    symlink entries as plain files because ``core.symlinks`` is disabled.
-    """
-    if not paths:
-        return []
-    head = [git_exe, *(extra_git_args or [])]
-    result = run_git_text(
-        [
-            *head,
-            "-C",
-            str(repo_dir),
-            "ls-tree",
-            "-r",
-            "-z",
-            "HEAD",
-            "--",
-            *(_literal_pathspec(path) for path in paths),
-        ],
+    stdin: bytes | None = None,
+) -> bytes:
+    return subprocess.run(
+        [git_exe, *(extra_git_args or []), "-C", str(repo_dir), *args],
+        input=stdin,
         capture_output=True,
         timeout=timeout,
         env=env,
         check=True,
-    )
-    symlinks: list[Path] = []
-    for record in result.stdout.split("\0"):
-        metadata, separator, relative = record.partition("\t")
-        if separator and metadata.split(maxsplit=1)[0] == "120000":
-            candidate = repo_dir / relative
-            if os.path.islink(candidate):
-                symlinks.append(candidate)
-    return symlinks
+    ).stdout
 
 
-def _first_dangling_tracked_symlink(
+def _tree_entries(
     git_exe: str,
     repo_dir: Path,
-    paths: list[str],
+    paths: list[str] | None,
+    *,
+    with_trees: bool,
+    env: dict[str, str] | None,
+    timeout: int,
+    extra_git_args: list[str] | None,
+) -> dict[str, _TreeEntry]:
+    """Return HEAD tree entries, optionally limited to literal *paths*."""
+    args = ["ls-tree", "-r", "-z", *(["-t"] if with_trees else []), "HEAD"]
+    if paths:
+        args += ["--", *(_literal_pathspec(path) for path in paths)]
+    output = _git_output(
+        git_exe, repo_dir, args, env=env, timeout=timeout, extra_git_args=extra_git_args
+    )
+    entries: dict[str, _TreeEntry] = {}
+    for record in output.split(b"\0"):
+        metadata, separator, relative = record.partition(b"\t")
+        if not separator:
+            continue
+        mode, kind, oid = metadata.decode("ascii").split()
+        entries[os.fsdecode(relative)] = _TreeEntry(mode, kind, oid)
+    return entries
+
+
+def _link_texts(
+    git_exe: str,
+    repo_dir: Path,
+    oids: list[str],
     *,
     env: dict[str, str] | None,
     timeout: int,
     extra_git_args: list[str] | None,
-) -> Path | None:
-    """Validate tracked symlink containment and return the first broken link."""
-    symlinks = _tracked_symlinks(
+) -> dict[str, bytes]:
+    """Read raw link blobs in one ``git cat-file --batch`` call."""
+    if not oids:
+        return {}
+    output = _git_output(
+        git_exe,
+        repo_dir,
+        ["cat-file", "--batch"],
+        env=env,
+        timeout=timeout,
+        extra_git_args=extra_git_args,
+        stdin=b"".join(oid.encode("ascii") + b"\n" for oid in oids),
+    )
+    texts: dict[str, bytes] = {}
+    offset = 0
+    for oid in oids:
+        newline = output.index(b"\n", offset)
+        header = output[offset:newline].split()
+        offset = newline + 1
+        if len(header) != 3:
+            raise RuntimeError(f"Git object {oid} is missing from the checked-out commit.")
+        size = int(header[2])
+        texts[oid] = output[offset : offset + size]
+        offset += size + 1
+    return texts
+
+
+def _within(path: str, tree: str) -> bool:
+    return not tree or path == tree or path.startswith(f"{tree}/")
+
+
+class _Unresolvable(Exception):
+    """Internal resolution outcome, reported against the top-level link."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+def _require_safe_entry_path(path: str) -> None:
+    """Reject Git entry names that are not plain relative paths on every host.
+
+    A POSIX-authored name such as ``a/..\\b`` or ``c:d`` would traverse or
+    address an alternate data stream on Windows.
+    """
+    validate_path_segments(path, context="Git entry path", reject_empty=True)
+    if any(char in path for char in ":\\\0"):
+        raise PathTraversalError(f"Git entry path '{path}' is not portable to every host")
+
+
+class _LinkResolver:
+    """Resolve tracked links against one commit tree, never the host filesystem."""
+
+    def __init__(
+        self,
+        entries: dict[str, _TreeEntry],
+        load_texts: Callable[[list[str]], dict[str, bytes]],
+    ) -> None:
+        self._entries = entries
+        self._paths = sorted(entries)
+        self._load_texts = load_texts
+        self._texts: dict[str, bytes] = {}
+        self._writes = 0
+
+    def preload(self, links: list[str]) -> None:
+        self._texts.update(self._load_texts(sorted({self._entries[link].oid for link in links})))
+
+    def _text(self, link: str) -> str:
+        oid = self._entries[link].oid
+        if oid not in self._texts:
+            self._texts.update(self._load_texts([oid]))
+        return os.fsdecode(self._texts[oid])
+
+    def _write(self, dest: str, mode: str, source: str | None = None) -> _LinkWrite:
+        self._writes += 1
+        if self._writes > _MAX_LINK_WRITES:
+            raise _Unresolvable("too-large")
+        try:
+            _require_safe_entry_path(dest)
+            if source is not None:
+                _require_safe_entry_path(source)
+        except PathTraversalError:
+            raise _Unresolvable("unsafe") from None
+        return _LinkWrite(dest, mode, source)
+
+    def _resolve(self, link: str) -> tuple[str, _TreeEntry]:
+        """Follow every link component like the kernel, contained in the tree."""
+        pending = link.split("/")
+        resolved: list[str] = []
+        hops = 0
+        while pending:
+            part = pending.pop(0)
+            # Any component after a file, even "", "." or "..", is ENOTDIR.
+            parent = "/".join(resolved)
+            if parent and self._entries[parent].kind != "tree":
+                raise _Unresolvable("broken")
+            if part in {"", "."}:
+                continue
+            if part == "..":
+                if not resolved:
+                    raise _Unresolvable("escape")
+                resolved.pop()
+                continue
+            resolved.append(part)
+            entry = self._entries.get("/".join(resolved))
+            if entry is None:
+                raise _Unresolvable("broken")
+            if entry.mode != _LINK_MODE:
+                continue
+            hops += 1
+            if hops > _MAX_LINK_HOPS:
+                raise _Unresolvable("cycle")
+            text = self._text("/".join(resolved))
+            if text.startswith("/") or PureWindowsPath(text).drive:
+                raise _Unresolvable("escape")
+            resolved.pop()
+            pending = text.split("/") + pending
+        target = "/".join(resolved)
+        return target, (self._entries[target] if target else _ROOT_TREE)
+
+    def _descendants(self, tree: str) -> list[str]:
+        if not tree:
+            return self._paths
+        start = bisect.bisect_left(self._paths, f"{tree}/")
+        # "0" sorts right after "/", so this bound ends the subtree.
+        stop = bisect.bisect_left(self._paths, f"{tree}0")
+        return self._paths[start:stop]
+
+    def _expand(self, source: str, dest: str, chain: tuple[str, ...]) -> list[_LinkWrite]:
+        chain = (*chain, source)
+        if len(chain) > _MAX_LINK_HOPS:
+            raise _Unresolvable("cycle")
+        target, entry = self._resolve(source)
+        if entry.kind == "blob":
+            return [self._write(dest, entry.mode, target)]
+        if entry.kind != "tree":
+            raise _Unresolvable("broken")
+        # Expanding a tree that contains a link on the chain never ends.
+        if any(_within(link, target) for link in chain):
+            raise _Unresolvable("cycle")
+        writes = [self._write(dest, _TREE_MODE)]
+        offset = len(target) + 1 if target else 0
+        for path in self._descendants(target):
+            child = self._entries[path]
+            child_dest = f"{dest}/{path[offset:]}"
+            if child.mode == _LINK_MODE:
+                writes.extend(self._expand(path, child_dest, chain))
+            elif child.kind == "blob":
+                writes.append(self._write(child_dest, child.mode, path))
+            else:
+                # Trees and submodule gitlinks check out as directories.
+                writes.append(self._write(child_dest, _TREE_MODE))
+        return writes
+
+    def plan(self, link: str) -> list[_LinkWrite]:
+        """Plan the writes that replace *link* with its target's content."""
+        try:
+            return self._expand(link, link, ())
+        except _Unresolvable as outcome:
+            text = self._text(link)
+            if outcome.kind in {"escape", "unsafe"}:
+                where = (
+                    "resolves outside the repository's checked-out commit"
+                    if outcome.kind == "escape"
+                    else "reaches a path that is not portable to every host"
+                )
+                raise PathTraversalError(
+                    f"Symlink '{link}' targets '{text}', which {where}."
+                ) from None
+            reason = {
+                "cycle": "forms a cycle",
+                "too-large": f"expands to more than {_MAX_LINK_WRITES} entries",
+            }.get(outcome.kind, "is not a tracked file or directory in the checked-out commit")
+            raise RuntimeError(
+                f"Symlink '{link}' targets '{text}', which {reason}; "
+                "repair its target in the package repository."
+            ) from None
+
+
+def _plan_tracked_symlinks(
+    git_exe: str,
+    repo_dir: Path,
+    paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+    timeout: int,
+    extra_git_args: list[str] | None,
+) -> tuple[dict[str, list[_LinkWrite]], dict[str, Exception]]:
+    """Plan link materialization; the common no-link case costs one ``ls-tree``."""
+    scoped = _tree_entries(
         git_exe,
         repo_dir,
         paths,
+        with_trees=False,
         env=env,
         timeout=timeout,
         extra_git_args=extra_git_args,
     )
-    targets: list[tuple[Path, Path]] = []
-    for link in symlinks:
+    links = sorted(path for path, entry in scoped.items() if entry.mode == _LINK_MODE)
+    if not links:
+        return {}, {}
+    entries = _tree_entries(
+        git_exe,
+        repo_dir,
+        None,
+        with_trees=True,
+        env=env,
+        timeout=timeout,
+        extra_git_args=extra_git_args,
+    )
+    # Link blobs load on demand: a partial clone fetches only the links
+    # this scope actually follows.
+    resolver = _LinkResolver(
+        entries,
+        lambda oids: _link_texts(
+            git_exe, repo_dir, oids, env=env, timeout=timeout, extra_git_args=extra_git_args
+        ),
+    )
+    resolver.preload(links)
+    plans: dict[str, list[_LinkWrite]] = {}
+    failures: dict[str, Exception] = {}
+    for link in links:
         try:
-            raw_target = Path(os.readlink(link))
-        except OSError:
-            if not os.path.exists(link):
-                return link
-            continue
-        target = raw_target if raw_target.is_absolute() else link.parent / raw_target
-        resolved_target = ensure_path_within(target, repo_dir)
-        targets.append((link, resolved_target))
+            plans[link] = resolver.plan(link)
+        except (PathTraversalError, RuntimeError) as exc:
+            failures[link] = exc
+    return plans, failures
 
-    if targets:
-        head = [git_exe, *(extra_git_args or [])]
-        relative_targets = [
-            target.relative_to(repo_dir.resolve()).as_posix() for _, target in targets
-        ]
-        result = run_git_text(
-            [
-                *head,
-                "-C",
-                str(repo_dir),
-                "ls-tree",
-                "-r",
-                "-z",
-                "HEAD",
-                "--",
-                *(_literal_pathspec(path) for path in relative_targets),
-            ],
-            capture_output=True,
-            timeout=timeout,
-            env=env,
-            check=True,
+
+class _CheckoutBytes:
+    """Return the bytes Git checks out for a tracked blob path."""
+
+    def __init__(
+        self,
+        git_exe: str,
+        repo_dir: Path,
+        *,
+        env: dict[str, str] | None,
+        timeout: int,
+        extra_git_args: list[str] | None,
+    ) -> None:
+        self._git_exe = git_exe
+        self._repo_dir = repo_dir
+        self._env = env
+        self._timeout = timeout
+        self._extra_git_args = extra_git_args
+        self._cache: dict[str, bytes] = {}
+        self._attr_source = True
+
+    def __call__(self, source: str) -> bytes:
+        if source not in self._cache:
+            self._cache[source] = self._read(source)
+        return self._cache[source]
+
+    def _read(self, source: str) -> bytes:
+        # A tracked blob Git already wrote is exactly what a POSIX link
+        # follows. ``cat-file --filters`` applies the same checkout
+        # conversion to targets a sparse cone left out; its ``--batch``
+        # form reports unfiltered sizes, so each read is one call.
+        _require_safe_entry_path(source)
+        path = self._repo_dir / source
+        try:
+            regular = stat.S_ISREG(path.lstat().st_mode)
+        except FileNotFoundError:
+            regular = False
+        if regular and not has_symlink_component(self._repo_dir, path, raise_on_error=True):
+            return path.read_bytes()
+        request = ["cat-file", "--filters", f"HEAD:{source}"]
+        if self._attr_source:
+            # Attributes from the commit, not a sparse worktree that may lack
+            # the governing .gitattributes (Git 2.40+).
+            try:
+                return self._output(["--attr-source=HEAD", *request])
+            except subprocess.CalledProcessError:
+                self._attr_source = False
+        return self._output(request)
+
+    def _output(self, args: list[str]) -> bytes:
+        return _git_output(
+            self._git_exe,
+            self._repo_dir,
+            args,
+            env=self._env,
+            timeout=self._timeout,
+            extra_git_args=self._extra_git_args,
         )
-        tracked_files = {
-            relative
-            for record in result.stdout.split("\0")
-            if record
-            for _, separator, relative in (record.partition("\t"),)
-            if separator
-        }
-    else:
-        tracked_files = set()
 
-    for link, resolved_target in targets:
-        relative_target = resolved_target.relative_to(repo_dir.resolve()).as_posix()
-        if relative_target not in tracked_files:
-            relative_link = link.relative_to(repo_dir)
-            raise PathTraversalError(
-                f"Symlink '{relative_link}' targets '{relative_target}', which is not "
-                "a tracked file in the checked-out commit."
-            )
-        if not os.path.exists(link):
-            return link
-    return None
+
+def _write_link_plan(
+    repo_dir: Path, writes: list[_LinkWrite], checkout_bytes: _CheckoutBytes
+) -> None:
+    root = writes[0].dest
+    _require_safe_entry_path(root)
+    top = repo_dir / root
+    ensure_path_within(top.parent, repo_dir)
+    if has_symlink_component(repo_dir, top.parent, raise_on_error=True):
+        raise PathTraversalError(f"Refusing to materialize '{root}' through a linked directory.")
+    if os.path.islink(top) or top.is_file():
+        top.unlink()
+    elif top.is_dir():
+        shutil.rmtree(top)
+    for write in writes:
+        dest = repo_dir / write.dest
+        if write.source is None:
+            dest.mkdir(parents=True, exist_ok=True)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(checkout_bytes(write.source))
+        if write.mode == _EXECUTABLE_MODE:
+            mode = dest.stat().st_mode
+            dest.chmod(mode | ((mode & 0o444) >> 2))
+
+
+def materialize_tracked_symlinks(
+    git_exe: str,
+    repo_dir: Path,
+    paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+    timeout: int = 30,
+    extra_git_args: list[str] | None = None,
+    strict: bool = True,
+) -> list[str]:
+    """Replace each tracked link in *paths* with its target content (#3457).
+
+    Dependency checkouts pin link text (``git_env.git_symlink_pin_args``),
+    so Git writes every link as a file holding its target and never needs OS
+    symlink capability. This owner resolves each mode-120000 entry under
+    *paths* (``None`` = whole repository) against the checked-out commit's
+    tree, following links in every component with POSIX semantics, and
+    writes the target's checkout bytes and executable bit, or expands a
+    directory link recursively. Every host therefore produces the
+    tree a POSIX checkout yields when its links are followed, so the package
+    ``content_hash`` is identical on Linux, macOS and Windows. Targets come
+    from Git objects, so links that leave a sparse cone resolve without
+    widening it (#2707); a partial clone lazily fetches only those blobs.
+
+    Links that escape the commit tree, are broken, or loop are not written.
+    With ``strict`` the first one raises before any write; otherwise they
+    stay as Git link text for :func:`validate_materialized_symlinks` to
+    reject when a package is selected from a shared checkout.
+
+    Returns the repository-relative links that were materialized.
+    """
+    plans, failures = _plan_tracked_symlinks(
+        git_exe, repo_dir, paths, env=env, timeout=timeout, extra_git_args=extra_git_args
+    )
+    if strict and failures:
+        raise failures[min(failures)]
+    checkout_bytes = _CheckoutBytes(
+        git_exe,
+        repo_dir,
+        env=env,
+        timeout=max(timeout, FULL_CHECKOUT_TIMEOUT_SECONDS),
+        extra_git_args=extra_git_args,
+    )
+    for link in sorted(plans):
+        _write_link_plan(repo_dir, plans[link], checkout_bytes)
+    return sorted(plans)
 
 
 def validate_materialized_symlinks(
     git_exe: str,
     repo_dir: Path,
-    paths: list[str],
+    paths: list[str] | None,
     *,
     env: dict[str, str] | None,
     timeout: int = 30,
     extra_git_args: list[str] | None = None,
 ) -> None:
-    """Reject broken or checkout-escaping symlinks before package copy."""
-    dangling = _first_dangling_tracked_symlink(
-        git_exe,
-        repo_dir,
-        paths,
-        env=env,
-        timeout=timeout,
-        extra_git_args=extra_git_args,
+    """Reject escaping, broken or cyclic tracked links in *paths* before copy."""
+    _, failures = _plan_tracked_symlinks(
+        git_exe, repo_dir, paths, env=env, timeout=timeout, extra_git_args=extra_git_args
     )
-    if dangling is not None:
-        relative = dangling.relative_to(repo_dir)
-        raise RuntimeError(
-            f"Symlink '{relative}' is unresolved after materializing the repository; "
-            "repair its target in the package repository."
-        )
+    if failures:
+        raise failures[min(failures)]
 
 
 def sparse_checkout_active(
@@ -188,72 +515,6 @@ def sparse_checkout_active(
         check=False,
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
-
-
-def repair_dangling_cone_symlinks(
-    git_exe: str,
-    repo_dir: Path,
-    paths: list[str],
-    *,
-    env: dict[str, str] | None,
-    timeout: int = FULL_CHECKOUT_TIMEOUT_SECONDS,
-    extra_git_args: list[str] | None = None,
-    repair_env_factory: Callable[[], dict[str, str]] | None = None,
-) -> Path | None:
-    """Widen a cone checkout to a full tree if it left a dangling symlink.
-
-    Call AFTER the cone checkout (``apply_sparse_cone`` + ``git
-    checkout``) completes. Queries the Git index for tracked symlinks in
-    the requested ``paths`` and checks whether a target was excluded by
-    the cone. If one is found,
-    falls back to ``git sparse-checkout disable`` so every symlink
-    target that exists anywhere in the tree resolves (#2707). In a plain
-    clone the full tree repopulates from objects already fetched; in a
-    partial clone (``--filter=blob:none`` promisor remotes) the disable
-    fetches the missing blobs from the remote at repair time.
-
-    This trades the perf-#1433 disk savings for correctness on the repos
-    that need it -- a dependency whose payload is mostly symlinks into
-    the repo root loses the sparse win on every install. The common case
-    (no cross-cone symlinks) checks only mode-120000 index entries and
-    never disables sparse-checkout.
-
-    ``repair_env_factory`` defers remote validation and credential setup until
-    the uncommon widening path can fetch promised blobs.
-
-    Returns:
-        The first dangling symlink found (repo-relative resolution
-        already applied by the caller's ``repo_dir``), or ``None`` if
-        the cone had no dangling symlinks and no repair was needed.
-    """
-    dangling = _first_dangling_tracked_symlink(
-        git_exe,
-        repo_dir,
-        paths,
-        env=env,
-        timeout=timeout,
-        extra_git_args=extra_git_args,
-    )
-    if dangling is None:
-        return None
-    repair_env = repair_env_factory() if repair_env_factory is not None else env
-    head = [git_exe, *(extra_git_args or [])]
-    run_git_text(
-        [*head, "-C", str(repo_dir), "sparse-checkout", "disable"],
-        capture_output=True,
-        timeout=timeout,
-        env=repair_env,
-        check=True,
-    )
-    validate_materialized_symlinks(
-        git_exe,
-        repo_dir,
-        paths,
-        env=repair_env,
-        timeout=timeout,
-        extra_git_args=extra_git_args,
-    )
-    return dangling
 
 
 def apply_sparse_cone(

@@ -83,7 +83,7 @@ def materialize_marketplace_manifest(dep_ref: DependencyReference, target_path: 
         return False
 
     from apm_cli.deps.plugin_parser import synthesize_apm_yml_from_plugin
-    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.apm_package import APMPackage, invalidate_apm_yml_cache_entry
     from apm_cli.utils.atomic_io import atomic_write_text
     from apm_cli.utils.file_ops import robust_rmtree
     from apm_cli.utils.yaml_io import load_yaml
@@ -159,6 +159,10 @@ def materialize_marketplace_manifest(dep_ref: DependencyReference, target_path: 
             stage_path.unlink()
             return False
         os.replace(stage_path, apm_yml_path)
+        # The package-tree apm.yml just changed: drop stale from_apm_yml
+        # cache entries so a same-process re-materialization re-reads it
+        # (#3585).
+        invalidate_apm_yml_cache_entry(apm_yml_path)
     except Exception as exc:
         stage_cleanup_error: OSError | None = None
         if stage_path.exists() or stage_path.is_symlink():

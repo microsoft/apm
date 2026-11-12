@@ -99,6 +99,11 @@ apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/serve
 apm install -g --target claude --mcp io.github.github/github-mcp-server
 ```
 
+Registry names resolve against one MCP registry, the curated GitHub MCP
+Registry by default. If a name is not found, APM names the registry it
+searched and never switches registries on its own; see
+[Choosing an MCP registry](../choosing-an-mcp-registry/).
+
 `apm mcp install NAME ...` is an alias that forwards to the same code
 path. The `apm mcp` group also provides `search`, `list`, and `show`
 for discovery -- see the [CLI reference](../../reference/cli/install/).

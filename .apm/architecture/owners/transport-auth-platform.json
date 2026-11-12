@@ -113,7 +113,7 @@
     },
     {
       "id": "sparse-cone-symlink-validation",
-      "decision": "Sparse-cone setup, dangling-symlink repair, and materialized symlink validation",
+      "decision": "Sparse-cone setup and Git-object symlink materialization and validation",
       "owner": "utils/git_sparse.py",
       "selectors": ["src/apm_cli/utils/git_sparse.py"],
       "guards": ["transport-platform-sparse-symlink-validation"]
