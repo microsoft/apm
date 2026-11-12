@@ -247,6 +247,21 @@ tokens, authorization headers, askpass programs, or registry credentials to
 that subprocess. See
 [Authentication](../../getting-started/authentication/).
 
+**Several catalogs in one repository.** Without `--path`, `apm marketplace add`
+reads the first catalog it finds at `marketplace.json`,
+`.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json`.
+To register a catalog stored elsewhere, pass its repository-relative path:
+
+```bash
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json --name acme-backend
+```
+
+APM saves the path with the registration, so `browse`, `update`, and
+`apm install pkg@acme-frontend` keep reading that catalog. Paths that leave
+the repository or do not exist fail before anything is registered. Separate
+catalogs are not access control: repository read access covers all of them.
+
 **Lockfile note.** Relative package sources from a local marketplace record a
 local-path source in `apm.lock.yaml`; lockfiles produced this way are
 machine-specific -- do not commit them into a shared repo. Remote

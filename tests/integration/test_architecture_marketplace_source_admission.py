@@ -46,3 +46,24 @@ def test_marketplace_source_admission_guard_rejects_client_host_parser() -> None
 
     assert report.failures == ()
     assert any(violation.rule_id == _RULE_ID for violation in report.violations)
+
+
+def test_marketplace_source_admission_guard_rejects_unrouted_catalog_path() -> None:
+    """Persisted catalog paths must route through the admission owner (#3319)."""
+    root = Path(__file__).parents[2]
+    path = "src/apm_cli/marketplace/models.py"
+    original = (root / path).read_text(encoding="utf-8")
+    assert "admit_marketplace_catalog_path(self.path)" in original
+    mutated = original.replace(
+        "admit_marketplace_catalog_path(self.path)",
+        "self.path",
+    )
+
+    report = run_selected_rules(
+        root,
+        (_RULE_ID,),
+        source_overrides={path: mutated},
+    )
+
+    assert report.failures == ()
+    assert any(violation.rule_id == _RULE_ID for violation in report.violations)

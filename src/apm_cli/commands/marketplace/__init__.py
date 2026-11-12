@@ -306,6 +306,7 @@ Examples:
   apm marketplace add git@gitea.example.com:org/repo.git --name custom
   apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
   apm marketplace add /srv/marketplaces/agent-forge --name agent-forge
+  apm marketplace add acme/skills --path catalogs/frontend/marketplace.json --name acme-frontend
 """
 
 
@@ -324,9 +325,19 @@ Examples:
     default=None,
     help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
 )
+@click.option(
+    "--path",
+    "catalog_path",
+    default=None,
+    metavar="PATH",
+    help=(
+        "Repository-relative path to the marketplace JSON file, for "
+        "catalogs outside the default locations. Skips auto-discovery."
+    ),
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @serialized_lifecycle
-def add(source, name, ref, branch, host, verbose):
+def add(source, name, ref, branch, host, catalog_path, verbose):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
@@ -335,16 +346,24 @@ def add(source, name, ref, branch, host, verbose):
     ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git`` or
     ``ssh://git@host:2222/org/repo.git``),
     a local filesystem path, or a ``file://`` URI.
+
+    Without --path, APM looks for marketplace.json at the repository root,
+    then .github/plugin/, then .claude-plugin/. Use --path to select another
+    catalog in the same repository, for example one per audience.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
         from ...marketplace.client import (
             _auto_detect_path_with_payload,
+            _fetch_file,
             fetch_marketplace,
         )
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
-        from ...marketplace.source_identity import parse_marketplace_source
+        from ...marketplace.source_identity import (
+            admit_marketplace_catalog_path,
+            parse_marketplace_source,
+        )
 
         source_arg, fragment_ref = _split_source_fragment_ref(source)
 
@@ -404,6 +423,26 @@ def add(source, name, ref, branch, host, verbose):
                 symbol="warning",
             )
 
+        explicit_path = None
+        if catalog_path is not None:
+            if is_direct_url:
+                logger.error(
+                    "--path is not supported for hosted marketplace.json URLs; "
+                    "the URL already names the catalog file. Remove --path.",
+                    symbol="error",
+                )
+                sys.exit(1)
+            try:
+                explicit_path = admit_marketplace_catalog_path(catalog_path)
+            except ValueError as exc:
+                logger.error(
+                    f"Invalid --path '{catalog_path}': {exc}. Use a path relative to the "
+                    "repository root that names a marketplace JSON file, "
+                    "for example catalogs/frontend/marketplace.json.",
+                    symbol="error",
+                )
+                sys.exit(1)
+
         if name is not None and not _is_valid_alias(name):
             logger.error(
                 f"Invalid marketplace name: '{name}'. "
@@ -445,8 +484,27 @@ def add(source, name, ref, branch, host, verbose):
             path="" if is_direct_url else "marketplace.json",
         )
         if is_direct_url or _local_source_points_to_file(probe_source):
+            if explicit_path is not None:
+                logger.error(
+                    "--path is not supported when SOURCE is a marketplace.json file. "
+                    "Pass the repository directory as SOURCE instead.",
+                    symbol="error",
+                )
+                sys.exit(1)
             detected_path = ""
             discovered_manifest = None
+        elif explicit_path is not None:
+            discovered_manifest = _fetch_file(probe_source, explicit_path)
+            if discovered_manifest is None:
+                at_ref = "" if kind == "local" else f" at ref '{effective_ref}'"
+                logger.error(
+                    f"No marketplace.json found at '{explicit_path}' in "
+                    f"'{probe_source.display_source}'{at_ref}. Check that --path is "
+                    "relative to the repository root and that the file exists.",
+                    symbol="error",
+                )
+                sys.exit(1)
+            detected_path = explicit_path
         else:
             detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
 
@@ -504,7 +562,9 @@ def add(source, name, ref, branch, host, verbose):
         )
         if not is_direct_url:
             logger.verbose_detail(f"    Ref: {effective_ref}")
-        if detected_path:
+        if explicit_path is not None:
+            logger.verbose_detail(f"    Catalog path: {detected_path} (--path)")
+        elif detected_path:
             logger.verbose_detail(f"    Detected path: {detected_path}")
         elif not is_direct_url:
             logger.verbose_detail("    Detected path: direct local file")

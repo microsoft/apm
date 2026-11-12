@@ -266,14 +266,23 @@ def _check_marketplace_source_admission(
     inventory = frozenset(provider.inventory)
     findings: list[Violation] = []
     required = (
-        (_SOURCE_IDENTITY, ("def parse_marketplace_source(",)),
+        (
+            _SOURCE_IDENTITY,
+            ("def parse_marketplace_source(", "def admit_marketplace_catalog_path("),
+        ),
         (
             _MARKETPLACE_COMMAND,
-            ("identity = parse_marketplace_source(source, host_flag)",),
+            (
+                "identity = parse_marketplace_source(source, host_flag)",
+                "explicit_path = admit_marketplace_catalog_path(catalog_path)",
+            ),
         ),
         (
             _MARKETPLACE_MODEL,
-            ("identity = parse_marketplace_source(self.url)",),
+            (
+                "identity = parse_marketplace_source(self.url)",
+                "admit_marketplace_catalog_path(self.path)",
+            ),
         ),
         (_MARKETPLACE_CLIENT, ("host = source.host",)),
     )
