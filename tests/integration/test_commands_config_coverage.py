@@ -162,6 +162,15 @@ class TestConfigHelpers:
         data = json.loads(isolated_config.read_text(encoding="utf-8"))
         assert data["allow_protocol_fallback"] is True
 
+    def test_set_github_auth_first_persists(self, isolated_config: Path) -> None:
+        """set_github_auth_first() should persist to disk."""
+        import apm_cli.config as _conf
+
+        _conf.set_github_auth_first(True)
+        _conf._invalidate_config_cache()
+        data = json.loads(isolated_config.read_text(encoding="utf-8"))
+        assert data["github_auth_first"] is True
+
     def test_registry_url_round_trip(self, isolated_config: Path) -> None:
         """set_registry_url / get_registry_config / unset_registry_url round-trip."""
         import apm_cli.config as _conf
@@ -246,6 +255,17 @@ class TestConfigHelpers:
         for unknown in (None, "", "maybe"):
             assert _conf._parse_allow_protocol_fallback_env(unknown) is None
 
+    def test_parse_github_auth_first_env(self) -> None:
+        """_parse_github_auth_first_env() handles all recognised values (issue #2545)."""
+        import apm_cli.config as _conf
+
+        for truthy in ("1", "true", "yes", "on", "TRUE", "YES"):
+            assert _conf._parse_github_auth_first_env(truthy) is True
+        for falsy in ("0", "false", "no", "off"):
+            assert _conf._parse_github_auth_first_env(falsy) is False
+        for unknown in (None, "", "maybe"):
+            assert _conf._parse_github_auth_first_env(unknown) is None
+
 
 # ---------------------------------------------------------------------------
 # apm config set
@@ -284,6 +304,13 @@ class TestConfigSet:
         """apm config set allow-protocol-fallback true."""
         result = runner.invoke(cli, ["config", "set", "allow-protocol-fallback", "true"])
         assert result.exit_code == 0
+
+    def test_set_github_auth_first_true(self, runner: CliRunner, isolated_config: Path) -> None:
+        """apm config set github-auth-first true persists the opt-out."""
+        result = runner.invoke(cli, ["config", "set", "github-auth-first", "true"])
+        assert result.exit_code == 0
+        data = json.loads(isolated_config.read_text(encoding="utf-8"))
+        assert data["github_auth_first"] is True
 
     def test_set_allow_protocol_fallback_invalid_value(
         self, runner: CliRunner, isolated_config: Path
@@ -470,6 +497,11 @@ class TestConfigUnset:
     def test_unset_prefer_ssh(self, runner: CliRunner, isolated_config: Path) -> None:
         """apm config unset prefer-ssh succeeds."""
         result = runner.invoke(cli, ["config", "unset", "prefer-ssh"])
+        assert result.exit_code == 0
+
+    def test_unset_github_auth_first(self, runner: CliRunner, isolated_config: Path) -> None:
+        """apm config unset github-auth-first succeeds."""
+        result = runner.invoke(cli, ["config", "unset", "github-auth-first"])
         assert result.exit_code == 0
 
     def test_unset_mcp_registry_url(self, runner: CliRunner, isolated_config: Path) -> None:

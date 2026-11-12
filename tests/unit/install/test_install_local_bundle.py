@@ -344,6 +344,7 @@ _REJECTED_FLAGS: list[tuple[str, str | None]] = [
     ("--ssh", None),
     ("--https", None),
     ("--allow-protocol-fallback", None),
+    ("--auth-first", None),
     ("--mcp", "io.github.test/test"),
     ("--registry", "https://example.com"),
     ("--skill", "my-skill"),
