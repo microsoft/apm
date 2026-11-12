@@ -665,9 +665,15 @@ for supported fields and literal-value handling.
 For OpenCode, top-level `enabled` passes the supplied value and JSON type
 unchanged, including `false`, `null`, and non-boolean values. Only omission
 defaults to `true`; OpenCode interprets the value, not APM. Reinstall applies
-changes to this field. See the
+changes to this field. When `opencode.json` declares `mcp.servers` (the
+OpenCode 2 layout), APM writes there instead: `false` becomes
+`disabled: true`, `true` or omission writes no field, and other values warn
+and leave the file unchanged. Set `codemode: false` as an extra field to
+bypass Code Mode. See the
 [manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
-for the dependency contract.
+for the dependency contract and
+[OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
+for format selection.
 
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker
