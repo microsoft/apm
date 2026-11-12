@@ -26,7 +26,8 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import replace
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
         DeploymentIntent,
         DeploymentLedger,
     )
-    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -744,6 +745,46 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     return files, hashes
 
 
+@dataclass
+class SelectedCleanupOutcome:
+    """What a selected-owner removal left on disk, for a truthful lockfile on failure.
+
+    ``claims`` maps each selected dependency to the files and hashes it still
+    owns after cleanup, including preserved rows that never entered cleanup;
+    ``retained_paths`` lists the cleaned files that no non-selected package
+    claims, which block the removal (#3656).
+    """
+
+    claims: dict[str, tuple[list[str], dict[str, str]]] = field(default_factory=dict)
+    retained_paths: set[str] = field(default_factory=set)
+
+    def record(
+        self,
+        dep_key: str,
+        dependency: LockedDependency,
+        files: list[str],
+        hashes: dict[str, str],
+        *,
+        survivors: AbstractSet[str],
+        preserved: AbstractSet[str],
+    ) -> None:
+        kept = [path for path in dependency.deployed_files if path in preserved]
+        recorded = dependency.deployed_file_hashes
+        self.claims[dep_key] = (
+            [*files, *kept],
+            {**{path: recorded[path] for path in kept if path in recorded}, **hashes},
+        )
+        self.retained_paths.update(
+            path for path in files if path not in survivors and "://" not in path
+        )
+
+    def apply_to(self, lockfile: LockFile) -> None:
+        """Make the selected dependencies claim only the files still on disk."""
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.replace_legacy_owners(lockfile, self.claims)
+
+
 def reconcile_target_deployed_files(
     *,
     project_root: Path,
@@ -753,7 +794,7 @@ def reconcile_target_deployed_files(
     diagnostics: DiagnosticCollector,
     dependency_keys: set[str] | None = None,
     remove_selected_ownership: bool = False,
-    retained_selected_paths: set[str] | None = None,
+    selected_outcome: SelectedCleanupOutcome | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
     preserved_selected_values: frozenset[str] = frozenset(),
@@ -770,7 +811,8 @@ def reconcile_target_deployed_files(
 
     With *remove_selected_ownership*, *preserved_selected_values* lists rows
     of the selected dependencies that must stay on disk, such as rows a
-    selected-profile uninstall keeps for another profile.
+    selected-profile uninstall keeps for another profile, and
+    *selected_outcome* collects what each selected dependency still owns.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import DeploymentLedger
@@ -865,9 +907,14 @@ def reconcile_target_deployed_files(
             user_scope=user_scope,
         )
         if selected_owner_removal:
-            if retained_selected_paths is not None:
-                retained_selected_paths.update(
-                    path for path in files if path not in survivor_files and "://" not in path
+            if selected_outcome is not None:
+                selected_outcome.record(
+                    dep_key,
+                    dependency,
+                    files,
+                    hashes,
+                    survivors=survivor_files,
+                    preserved=preserved_selected_values,
                 )
             continue
         if files != prior_files or hashes != prior_hashes:

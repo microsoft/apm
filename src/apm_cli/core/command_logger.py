@@ -167,7 +167,10 @@ class CommandLogger:
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
-        _rich_warning(f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.")
+        _rich_warning(
+            f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.",
+            symbol="warning",
+        )
 
     def tree_item(self, message: str):
         """Log a tree sub-item (└─ line) under a package block.

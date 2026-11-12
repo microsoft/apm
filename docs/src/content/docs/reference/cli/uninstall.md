@@ -162,10 +162,11 @@ command; `--verbose` includes the underlying error. Earlier deletions in a
 multi-package request are not rolled back.
 
 If a target-scoped file owned only by a removed package was edited or cannot be
-deleted, uninstall lists the retained paths and exits before changing `apm.yml`
-or the on-disk `apm.lock.yaml`. Direct and orphan directories run first and may
-already be gone; declarations and deployed ownership remain. Resolve the listed
-files and retry the same uninstall command.
+deleted, uninstall lists the retained paths and exits before changing `apm.yml`.
+Files it already removed are dropped from `apm.lock.yaml`, so the lockfile
+claims only what is still on disk. Direct and orphan directories run first and
+may already be gone; declarations remain. Resolve the listed files and retry the
+same uninstall command.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the

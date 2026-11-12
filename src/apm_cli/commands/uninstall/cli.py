@@ -222,17 +222,30 @@ def _cleanup_stale_lsp(
         return False, cleanup_error
 
 
-def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], logger: Any) -> None:
-    """Stop before ownership release when owned target files remain."""
-    if retained_cleanup_paths:
-        logger.error(
-            "Uninstall could not remove tracked target files; manifest and lockfile "
-            "ownership were preserved. Package directories may already have been removed."
-        )
-        for path in sorted(retained_cleanup_paths):
-            logger.error(f"  - {path}")
-        logger.error("Resolve or remove the listed files, then retry uninstall.")
-        sys.exit(1)
+def _abort_if_retained_target_cleanup_paths(
+    outcome: Any, lockfile: Any, lockfile_path: Any, logger: Any
+) -> None:
+    """Stop before ownership release when owned target files remain.
+
+    Files already removed are dropped from the lockfile so it records exactly
+    what is still on disk; apm.yml keeps the package for the retry (#3656).
+    """
+    if not outcome.retained_paths:
+        return
+    outcome.apply_to(lockfile)
+    try:
+        lockfile.write(lockfile_path)
+        lock_state = "apm.lock.yaml now records only the files still on disk"
+    except OSError as exc:
+        lock_state = f"apm.lock.yaml could not be updated ({exc}) and may list removed files"
+    logger.error(
+        "Uninstall could not remove tracked target files; apm.yml still declares the "
+        f"package and {lock_state}. Package directories may already have been removed."
+    )
+    for path in sorted(outcome.retained_paths):
+        logger.error(f"  - {path}")
+    logger.error("Resolve or remove the listed files, then retry uninstall.")
+    sys.exit(1)
 
 
 def _report_package_removal_failure(
@@ -678,7 +691,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # still recoverable. The post-removal manifest can omit a removed
         # package's target, so its target must not be reconstructed from it.
         if lockfile and (removed_keys or profile_keys):
-            from ...install.manifest_reconcile import reconcile_target_deployed_files
+            from ...install.manifest_reconcile import (
+                SelectedCleanupOutcome,
+                reconcile_target_deployed_files,
+            )
             from ...integration.targets import resolve_targets
             from ...utils.diagnostics import DiagnosticCollector
 
@@ -689,7 +705,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 explicit_target=cleanup_target_names or None,
             )
             cleanup_keys = removed_keys | builtins.set(projected_orphans) | profile_keys
-            retained_cleanup_paths = builtins.set()
+            cleanup_outcome = SelectedCleanupOutcome()
             reconcile_target_deployed_files(
                 project_root=deploy_root,
                 lockfile=lockfile,
@@ -698,12 +714,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 diagnostics=DiagnosticCollector(verbose=verbose),
                 dependency_keys=cleanup_keys,
                 remove_selected_ownership=True,
-                retained_selected_paths=retained_cleanup_paths,
+                selected_outcome=cleanup_outcome,
                 user_scope=scope is InstallScope.USER,
                 logger=logger,
                 preserved_selected_values=profile_survivors,
             )
-            _abort_if_retained_target_cleanup_paths(retained_cleanup_paths, logger)
+            _abort_if_retained_target_cleanup_paths(
+                cleanup_outcome, lockfile, lockfile_path, logger
+            )
 
         profile_lock_updated = _retire_selected_profile_packages(
             lockfile, profile_keys, profile_survivors, retained_packages, logger

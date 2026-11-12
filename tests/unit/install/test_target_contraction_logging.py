@@ -13,7 +13,10 @@ from __future__ import annotations
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
+from apm_cli.install.manifest_reconcile import (
+    SelectedCleanupOutcome,
+    reconcile_target_deployed_files,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -200,6 +203,93 @@ def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
 
     assert survivor_abs.exists()
     assert not removed_abs.exists()
+
+
+def test_selected_cleanup_outcome_keeps_lock_truthful_after_partial_removal(tmp_path):
+    """A refused removal records only the files still on disk (#3656)."""
+    target = KNOWN_TARGETS["opencode"]
+    kept_rel = ".config/opencode/agents/kept.md"
+    gone_rel = ".config/opencode/agents/gone.md"
+    kept_abs = tmp_path / kept_rel
+    gone_abs = tmp_path / gone_rel
+    for path in (kept_abs, gone_abs):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# managed\n", encoding="utf-8")
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[kept_rel, gone_rel],
+        deployed_file_hashes={
+            kept_rel: compute_file_hash(kept_abs),
+            gone_rel: compute_file_hash(gone_abs),
+        },
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(removed)
+    kept_abs.write_text("# edited\n", encoding="utf-8")
+    key = removed.get_unique_key()
+    outcome = SelectedCleanupOutcome()
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[target],
+        declared_targets=[target],
+        diagnostics=DiagnosticCollector(),
+        dependency_keys={key},
+        remove_selected_ownership=True,
+        selected_outcome=outcome,
+        user_scope=True,
+    )
+
+    assert kept_abs.exists() and not gone_abs.exists()
+    assert outcome.retained_paths == {kept_rel}
+    assert lockfile.get_dependency(key).deployed_files == [kept_rel, gone_rel]
+    outcome.apply_to(lockfile)
+    dependency = lockfile.get_dependency(key)
+    assert dependency.deployed_files == [kept_rel]
+    assert set(dependency.deployed_file_hashes) == {kept_rel}
+
+
+def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
+    """Rows another profile keeps stay claimed when the removal is refused."""
+    target = KNOWN_TARGETS["opencode"]
+    kept_rel = ".config/opencode/agents/kept.md"
+    shared_rel = ".config/opencode/agents/shared.md"
+    for rel in (kept_rel, shared_rel):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("# managed\n", encoding="utf-8")
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[kept_rel, shared_rel],
+        deployed_file_hashes={
+            rel: compute_file_hash(tmp_path / rel) for rel in (kept_rel, shared_rel)
+        },
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(removed)
+    (tmp_path / kept_rel).write_text("# edited\n", encoding="utf-8")
+    key = removed.get_unique_key()
+    outcome = SelectedCleanupOutcome()
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[target],
+        declared_targets=[target],
+        diagnostics=DiagnosticCollector(),
+        dependency_keys={key},
+        remove_selected_ownership=True,
+        selected_outcome=outcome,
+        user_scope=True,
+        preserved_selected_values=frozenset({shared_rel}),
+    )
+
+    assert (tmp_path / shared_rel).exists()
+    assert outcome.retained_paths == {kept_rel}
+    outcome.apply_to(lockfile)
+    dependency = lockfile.get_dependency(key)
+    assert sorted(dependency.deployed_files) == sorted([kept_rel, shared_rel])
+    assert set(dependency.deployed_file_hashes) == {kept_rel, shared_rel}
 
 
 if __name__ == "__main__":
