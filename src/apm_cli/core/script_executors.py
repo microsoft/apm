@@ -29,7 +29,7 @@ import stat
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlsplit, urlunsplit
@@ -556,7 +556,7 @@ def _append_to_script_log(
         log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         _rotate_log_if_large(log_path)
 
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         safe_target = _escape_header_field(_neutralize_newlines(_redact_secrets(target)))
         lines = [
             f"[{ts}] event={event_name} type={script_type} target={safe_target} status={status}"
