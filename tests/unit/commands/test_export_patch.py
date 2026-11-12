@@ -449,6 +449,36 @@ def test_ambiguous_source_is_skipped(trees, monkeypatch):
     assert "ambiguous" in result.skipped[0].reason
 
 
+def test_subdirectory_package_patch_paths_are_repository_relative(trees, monkeypatch):
+    """The cache holds only the package subdirectory; the patch header says to
+    apply from the repository root, so diff paths carry the subdirectory."""
+    _write(trees["source"] / _SOURCE_REL, _ORIGINAL)
+    _write(trees["scratch"] / _DEPLOYED, _ORIGINAL)
+    _write(trees["project"] / _DEPLOYED, _EDITED)
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="testorg/mono",
+            resolved_commit=_COMMIT,
+            resolved_ref="main",
+            is_virtual=True,
+            virtual_path="packages/tool",
+            deployed_files=[_DEPLOYED],
+        )
+    )
+    _patch_materialize(monkeypatch, trees["source"])
+    key = _remote_key(lock)
+    findings = [DriftFinding(path=_DEPLOYED, kind="modified", package=key)]
+
+    result = build_patch_export(trees["project"], trees["scratch"], lock, findings)
+
+    assert result.skipped == []
+    assert result.exported == [ExportedEdit(_DEPLOYED, _SOURCE_REL, key)]
+    patch = result.patches[key]
+    assert f"--- a/packages/tool/{_SOURCE_REL}\n" in patch
+    assert f"+++ b/packages/tool/{_SOURCE_REL}\n" in patch
+
+
 def test_local_package_is_skipped(trees, monkeypatch):
     lock = LockFile()
     lock.add_dependency(
