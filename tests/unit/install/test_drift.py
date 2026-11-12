@@ -856,6 +856,8 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     lock.add_dependency(dep)
     # Create the local package dir so path resolution succeeds.
     (project_root / "my-skill").mkdir()
+    # Replay admits the source as install does, so it must be a package.
+    (project_root / "my-skill" / "apm.yml").write_text("name: my-skill\n", encoding="utf-8")
     lockfile_path = project_root / "apm.lock.yaml"
     lock.write(lockfile_path)
 
@@ -930,6 +932,8 @@ def test_run_replay_threads_locked_skill_subset(
     )
     lock.add_dependency(dep)
     (project_root / "skill-bundle").mkdir()
+    # Replay admits the source as install does, so it must be a package.
+    (project_root / "skill-bundle" / "apm.yml").write_text("name: skill-bundle\n", encoding="utf-8")
     lockfile_path = project_root / "apm.lock.yaml"
     lock.write(lockfile_path)
 
