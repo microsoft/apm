@@ -123,7 +123,8 @@ not a separate planning committee.
 Preview (experimental or behind a flag), or GA.
 
 Accepted issues enter the Project with Horizon `Next` until a maintainer
-moves them. Leave Horizon empty for untriaged intake. Roadmap placement, ordering, and
+moves them; `.github/workflows/roadmap-accepted.yml` sets it when
+`status/accepted` is applied and never overwrites an existing Horizon. Leave Horizon empty for untriaged intake. Roadmap placement, ordering, and
 reactions neither authorize implementation nor guarantee delivery. Moving
 or removing an issue from a Horizon does not revoke its human approval.
 Record any change to approved scope or review support explicitly on the
