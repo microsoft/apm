@@ -97,11 +97,15 @@ The pipeline is deterministic. Each phase must pass before the next runs.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
 
-If an existing skill cannot be overwritten because its local deployment receipt
-is missing, install exits nonzero before stale-file cleanup and lockfile
-replacement. The refused files and prior lock contents are preserved, including
-during cold `--frozen` replay and when dependencies deliver the same skill. This
-is not a full rollback: files admitted earlier in the run may remain. Move the
+On a fresh clone or CI runner without local deployment receipts, a committed
+skill is kept and its receipts are recorded when every file in its directory
+matches what the install would write and is recorded in `apm.lock.yaml`. The
+lockfile hashes are not used as proof. If any file differs, or another existing
+skill cannot be overwritten because its local deployment receipt is missing,
+install exits nonzero before stale-file cleanup and lockfile replacement. The
+refused files and prior lock contents are preserved, including during cold
+`--frozen` replay and when dependencies deliver the same skill. This is not a
+full rollback: files admitted earlier in the run may remain. Move the
 conflicting file aside and retry, or use `--force` only when you intend to
 overwrite it. Files edited since a valid recorded deployment remain protected
 with a warning.
