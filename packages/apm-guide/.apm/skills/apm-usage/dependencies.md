@@ -356,7 +356,9 @@ tag lookup and installation; none inherit the catalog's authority, even when
 hostname and repository path match. Explicit dictionary `repo` URLs follow
 the same rule; bare external entries keep their normal dependency defaults.
 `git-subdir.path` owns the contained package path. These survive into the concrete `git:`, `path:`, and `ref:` manifest
-entry and the lockfile. Invalid URLs or unsafe paths fail before durable
+entry and the lockfile. A full 40-character source `sha` (on `github`, `url`
+or `git-subdir`) wins over `ref` and is the commit APM installs and writes as
+`ref:`. Invalid URLs, unsafe paths, or a malformed `sha` fail before durable
 project writes.
 
 Catalog-only entries with inline `lspServers` or `mcpServers` remain valid
