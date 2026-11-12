@@ -37,7 +37,7 @@ def _compile_hint_targets(
     seen: set[str] = set()
     for target in ctx.targets:
         scoped = target.for_scope(user_scope=user_scope)
-        if scoped is None:
+        if scoped is None or (user_scope and not scoped.user_root_context_supported):
             continue
         if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
             continue

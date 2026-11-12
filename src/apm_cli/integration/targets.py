@@ -199,6 +199,9 @@ class TargetProfile:
     or via a *different* transform at user scope than at project scope.
     """
 
+    user_root_context_supported: bool = True
+    """Whether the target reads a user-scope compiled root context file."""
+
     include_scoped_in_user_root_context: bool = False
     """Whether user-root compilation preserves ``applyTo`` instructions.
 
@@ -846,6 +849,16 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".gemini",
         hooks_config_display=".gemini/settings.json",
+    ),
+    # Genie Code CLI reads shared project skills and has its own user skills root.
+    "genie": TargetProfile(
+        capability=TARGET_CAPABILITIES["genie"],
+        root_dir=".agents",
+        primitives={"skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard")},
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".genie",
+        user_root_context_supported=False,
     ),
     # Grok Bot -- stable, explicit-only, skills-only target for the Grok Bot
     # agent runtime.  Grok Bot reads SKILL.md directories from

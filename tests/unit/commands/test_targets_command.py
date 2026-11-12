@@ -364,6 +364,7 @@ class TestTargetsJsonOutput:
         expected = {
             "agent-skills": (".agents/", True),
             "antigravity": (".agents/", False),
+            "genie": (".agents/", False),
             "grok-bot": ("agent-data/", False),
             "hermes": (".agents/", False),
         }

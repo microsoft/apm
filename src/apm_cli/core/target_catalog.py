@@ -174,6 +174,14 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="gemini",
         ),
         _capability(
+            "genie",
+            "Databricks Genie Code CLI skills and project instructions",
+            explicit_only=True,
+            primitive_profile="genie",
+            compile_family="agents",
+            accepts_agent_skills_packages=True,
+        ),
+        _capability(
             "grok-bot",
             "Grok Bot native agent-data/workflows skills configuration",
             explicit_only=True,

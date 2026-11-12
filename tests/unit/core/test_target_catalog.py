@@ -57,7 +57,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         == EXPERIMENTAL_TARGETS
     )
     assert (
-        frozenset({"agent-skills", "antigravity", "grok-bot", "grok-cloud", "hermes"})
+        frozenset({"agent-skills", "antigravity", "genie", "grok-bot", "grok-cloud", "hermes"})
         == EXPLICIT_ONLY_TARGETS
     )
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
@@ -82,6 +82,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "copilot-cowork",
                 "cursor",
                 "gemini",
+                "genie",
                 "grok-bot",
                 "grok-build",
                 "grok-cloud",
@@ -209,6 +210,12 @@ def test_current_native_profiles_are_characterized() -> None:
                 "hooks": ("hooks", ".json", "gemini_hooks", None, False),
             },
             "gemini",
+            None,
+        ),
+        "genie": (
+            ".agents",
+            {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
+            "agents",
             None,
         ),
         "grok-bot": (

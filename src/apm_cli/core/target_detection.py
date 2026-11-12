@@ -69,6 +69,7 @@ TargetType = Literal[
     "codex",
     "cursor",
     "gemini",
+    "genie",
     "grok-bot",
     "grok-build",
     "hermes",
@@ -113,6 +114,7 @@ UserTargetType = Literal[
     "copilot",
     "cursor",
     "gemini",
+    "genie",
     "grok-bot",
     "grok-build",
     "hermes",
@@ -171,8 +173,8 @@ def detect_target(  # noqa: PLR0911
             return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
-        elif explicit_target == "hermes":
-            return "hermes", "explicit --target flag"
+        elif explicit_target in ("genie", "hermes"):
+            return explicit_target, "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -202,8 +204,8 @@ def detect_target(  # noqa: PLR0911
             return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
-        elif config_target == "hermes":
-            return "hermes", "apm.yml target"
+        elif config_target in ("genie", "hermes"):
+            return config_target, "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -265,7 +267,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
     AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
-    windsurf, kiro, antigravity, grok-build, hermes, all, and minimal targets.
+    windsurf, kiro, antigravity, genie, grok-build, hermes, all, and minimal targets.
     Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
@@ -284,6 +286,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "codex",
         "gemini",
         "antigravity",
+        "genie",
         "grok-build",
         "windsurf",
         "kiro",
@@ -421,6 +424,7 @@ def get_target_description(target: UserTargetType) -> str:
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "genie": "AGENTS.md + .agents/skills/ (project), ~/.genie/skills/ (global)",
         "grok-bot": "agent-data/workflows/ (project) or ~/agent-data/workflows/ (--global) -- skills only, explicit --target only",
         "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",

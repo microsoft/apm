@@ -31,6 +31,7 @@ def _make_target(name, compile_family, *, user_supported=True):
     that does not support user scope.
     """
     profile = SimpleNamespace(name=name, compile_family=compile_family)
+    profile.user_root_context_supported = True
     profile.include_scoped_in_user_root_context = False
     profile.for_scope = MagicMock(return_value=profile if user_supported else None)
     return profile

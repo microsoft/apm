@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from apm_cli.core.apm_yml import parse_targets_field
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
@@ -78,8 +79,7 @@ def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]
 
     A declaration of ``agent-skills`` describes cross-client skills, so it also
     admits targets whose catalog capability sets ``accepts_agent_skills_packages``
-    (currently ``grok-bot``): only the skills primitive deploys there, which is
-    exactly what the package declared.
+    because they deploy only the skills primitive.
     """
     if target.name in package_allowed:
         return True
@@ -94,7 +94,10 @@ def _no_target_hint(declared: list[str], requested: str) -> str:
     names = ", ".join(sorted(declared))
     hint = f"Install with --target {sorted(declared)[0]}, or ask the package author to add {requested} to its targets (declared: {names})."
     if CROSS_CLIENT_SKILLS_TARGET in declared:
-        hint += f" The grok-bot target accepts packages that declare {CROSS_CLIENT_SKILLS_TARGET}."
+        compatible = ", ".join(
+            cap.name for cap in TARGET_CAPABILITIES.values() if cap.accepts_agent_skills_packages
+        )
+        hint += f" Targets accepting {CROSS_CLIENT_SKILLS_TARGET} packages include {compatible}."
     return hint
 
 

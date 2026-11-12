@@ -163,7 +163,7 @@ def compile_user_root_contexts(
     """Compile user-scope root context files from global (apply_to-less) instructions.
 
     Iterates over *targets*, skipping any that:
-    * do not support user scope (for_scope returns None)
+    * do not support user scope or user-scope root context
     * have no recognised compile_family root-file mapping
 
     For each remaining target the function discovers global instructions from
@@ -225,6 +225,8 @@ def compile_user_root_contexts(
         scoped = target.for_scope(user_scope=True)
         if scoped is None:
             log.debug("user_root_context: %s does not support user scope -- skipping", target.name)
+            continue
+        if not scoped.user_root_context_supported:
             continue
 
         family = scoped.compile_family

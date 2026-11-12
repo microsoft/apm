@@ -17,9 +17,8 @@ apm targets [OPTIONS]
 ## Description
 
 `apm targets` prints the canonical target table for the current
-directory: every supported harness, whether APM considers it active,
-the filesystem signal that activated it, and where compiled output
-will land.
+directory, including whether each listed harness is active, the manifest
+or filesystem signal that activated it, and where APM deploys files.
 
 Resolution order matches `apm compile`:
 
@@ -49,7 +48,7 @@ future use. They are not implemented yet.
 | Flag | Description |
 |------|-------------|
 | `--json` | Emit machine-readable JSON instead of the table. One object per canonical target with `target`, `status`, `source`, `deploy_dir`, `needs`. |
-| `--all` | In `--json` mode, include the stable explicit-only target rows (`agent-skills`, `antigravity`, `grok-bot`, `hermes`; excluded by default). No effect on table output. |
+| `--all` | In `--json` mode, include the stable explicit-only target rows (`agent-skills`, `antigravity`, `genie`, `grok-bot`, `hermes`; excluded by default). No effect on table output. |
 
 The `agent-skills` meta-target is a multi-harness fan-out for shared
 `.agents/skills/` output. It is not a harness and is excluded from the

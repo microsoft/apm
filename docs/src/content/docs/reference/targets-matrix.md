@@ -31,13 +31,15 @@ see [Primitive types](../primitive-types/).
 | kiro            | `.kiro/`               |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
+| genie           | `.agents/` (`~/.genie/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [ ] |
 | hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
 | grok-bot        | `agent-data/` (`~/agent-data/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [ ] |
 
-Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
-[Skills convergence](#skills-convergence) below). Claude, Grok Build, Kiro, and
-Hermes user scope keep target-native skill directories.
+Skills deploy to `.agents/skills/` by default for Copilot, Cursor, OpenCode,
+Gemini, Antigravity, Codex, and Windsurf (see [Skills convergence](#skills-convergence)).
+Genie and Hermes use this path for project skills and use target-specific
+directories for user skills. Claude, Grok Build, and Kiro also use
+target-specific skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
@@ -51,7 +53,7 @@ stable but explicit-only. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
+separate root-context compile for `codex`, `gemini`, `genie`, `opencode`, and `hermes`.
 It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
@@ -98,7 +100,7 @@ user-scope `mcp.json`. That global signal does not auto-select file-primitive
 deployment. When `intellij` is selected explicitly, package file primitives use
 the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
-`agent-skills`, `antigravity`, `hermes` and `grok-bot` are stable explicit-only
+`agent-skills`, `antigravity`, `genie`, `grok-bot`, and `hermes` are stable explicit-only
 targets: never auto-detected and excluded from `all`. Select them with
 `--target` or list them in a project's `apm.yml` `targets:` field so
 contributors running plain `apm install` pick them up automatically.
@@ -316,6 +318,20 @@ Cross-client shared skills directory.
 - **Supported primitives.** skills only.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
+
+## genie
+
+[Databricks Genie Code CLI](https://docs.databricks.com/aws/en/genie-code/genie-code-cli).
+
+- **Selection.** Set `targets: [genie]` in `apm.yml` or pass `--target genie`.
+- **Skills.** `apm install --target genie` deploys to `.agents/skills/`.
+  Add `--global` to deploy to `~/.genie/skills/`. Packages declaring
+  `agent-skills` are compatible.
+- **Project instructions.** Run `apm compile --target genie --single-agents`
+  to combine instructions in the root `AGENTS.md`. Global APM installs
+  deploy skills for Genie.
+- **MCP.** Configure servers directly with
+  [`genie mcp add`](https://docs.databricks.com/aws/en/genie-code/genie-code-cli#connect-mcp-servers).
 
 ## hermes
 

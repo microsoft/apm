@@ -18,6 +18,7 @@ import json as _json
 from pathlib import Path
 
 import click
+import yaml
 
 
 @click.group(
@@ -48,7 +49,9 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     if ctx.invoked_subcommand is not None:
         return  # delegate to sub-command
 
+    from apm_cli.core.apm_yml import read_declared_target_names
     from apm_cli.core.errors import AmbiguousHarnessError, NoHarnessError
+    from apm_cli.core.target_catalog import normalize_target_name
     from apm_cli.core.target_detection import (
         CANONICAL_DEPLOY_DIRS,
         CANONICAL_SIGNAL,
@@ -58,6 +61,16 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     )
 
     project_root = Path.cwd()
+    try:
+        declared = read_declared_target_names(project_root)
+    except (OSError, yaml.YAMLError) as exc:
+        raise click.UsageError(
+            f"Could not read apm.yml. Fix the manifest and retry. {exc}"
+        ) from exc
+    manifest_targets = (
+        list(dict.fromkeys(map(normalize_target_name, declared))) if declared else None
+    )
+
     # Explicit-only targets (agent-skills, grok-bot, ...) are never
     # auto-detected, so they are excluded from the apm targets table and
     # visible only in JSON output with --all (convergence item 13).
@@ -67,7 +80,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     # ``apm targets`` precisely to see what's there).
     # On no-harness error, report empty active list.
     try:
-        resolved = resolve_targets(project_root)
+        resolved = resolve_targets(project_root, yaml_targets=manifest_targets)
         active = resolved.targets
     except AmbiguousHarnessError:
         signals = detect_signals(project_root)
@@ -83,7 +96,11 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     # Build per-target row data from canonical tables.
     def _row(name: str) -> dict:
         is_active = name in active
-        active_source = next((s.source for s in all_signals if s.target == name), None)
+        active_source = (
+            "apm.yml"
+            if manifest_targets
+            else next((s.source for s in all_signals if s.target == name), None)
+        )
         return {
             "target": name,
             "status": "active" if is_active else "inactive",
@@ -117,7 +134,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
                     {
                         "target": name,
                         "status": "active" if name in active else "inactive",
-                        "source": None,
+                        "source": "apm.yml" if manifest_targets and name in active else None,
                         "deploy_dir": f"{profile.root_dir}/",
                         "needs": None,
                         "meta_target": capability.meta_target,

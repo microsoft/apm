@@ -1,5 +1,6 @@
 """Regression tests for CLI help and output consistency."""
 
+import re
 from unittest.mock import patch
 
 import click
@@ -182,9 +183,10 @@ def test_deps_update_target_help_uses_current_catalog():
     result = CliRunner().invoke(cli, ["deps", "update", "--help"])
 
     assert result.exit_code == 0
-    help_text = result.output
+    help_text = re.sub(r"(?<=\w)-\n\s+(?=\w)", "-", result.output)
     # Targets absent from the old hardcoded string
     assert "grok-build" in help_text
+    assert "genie" in help_text
     assert "agents" in help_text
     # Deprecation note directing users to apm update
     assert "apm update" in help_text
@@ -199,7 +201,7 @@ def test_compile_target_all_exclusion_lists_explicit_only_targets():
     # Assert the full exclusion sentence (normalize whitespace from help-text wrapping)
     normalized = " ".join(help_text.split())
     assert (
-        "excludes agent-skills, antigravity, grok-bot, hermes, experimental targets, and intellij"
+        "excludes agent-skills, antigravity, genie, grok-bot, hermes, experimental targets, and intellij"
         in normalized
     )
 
@@ -259,7 +261,8 @@ def test_deps_update_target_help_values_catalog_sorted():
     """
     result = CliRunner().invoke(cli, ["deps", "update", "--help"])
     assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
+    unwrapped = re.sub(r"(?<=\w)-\n\s+(?=\w)", "-", result.output)
+    normalized = " ".join(unwrapped.split())
 
     # Locate the Values: ... fragment in the help text and check ordering within it
     values_start = normalized.find("Values:")
@@ -272,6 +275,7 @@ def test_deps_update_target_help_values_catalog_sorted():
     ordering_pairs = [
         ("claude", "codex"),
         ("codex", "copilot"),
+        ("genie", "grok-build"),
         ("grok-build", "intellij"),
         ("intellij", "kiro"),
         ("kiro", "opencode"),

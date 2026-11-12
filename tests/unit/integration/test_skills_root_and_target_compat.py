@@ -226,4 +226,4 @@ class TestAllTargetsFilteredOut:
         message = explicit_target_failure(_profiles("claude"), [_node("pkg", ["agent-skills"])], [])
 
         assert message is not None
-        assert "The grok-bot target accepts packages that declare agent-skills" in message
+        assert "Targets accepting agent-skills packages include genie, grok-bot." in message

@@ -162,8 +162,8 @@ actionable nudge (the authoring path only).
 |---|---|
 | **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect from filesystem signals (see below). [`apm compile -g`](../cli/compile/#global-compilation) instead writes every supported user-scope target when both fields are omitted. |
-| **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
+| **Default** | Auto-detect from filesystem signals (see below). [`apm compile -g`](../cli/compile/#global-compilation) instead writes every target that supports user-scope root context when both fields are omitted. |
+| **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `genie`, `grok-bot`, `hermes` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
@@ -207,6 +207,7 @@ form and normalized to `copilot`; `agents` remains a CLI-only alias.
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
 | `agent-skills` | Deploys Agent Skills under `.agents/skills/`. |
+| `genie` | Deploys skills to `.agents/skills/` in the project or `~/.genie/skills/` at user scope. Compiles project instructions to `AGENTS.md`. |
 
 :::tip[Deterministic committed output]
 Teams that commit the files `apm compile` generates face a consistency problem:
@@ -507,7 +508,11 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`, `grok-bot`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list; `agent-skills` is also accepted by the `grok-bot` target. |
+| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `genie`, `grok-bot`, `hermes`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+
+The `genie` and `grok-bot` targets accept packages whose own manifest declares
+`agent-skills`. The consuming project's per-dependency `targets:` still limits
+deployment to the listed targets.
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs

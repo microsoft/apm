@@ -54,7 +54,7 @@ for what those files are) even though compile does not itself *deploy* hooks.
 `.github/instructions/*.instructions.md` (with their `applyTo:`
 frontmatter) that `apm install` already deploys. Compile is
 **recommended for every other context-producing target** (`claude`, `cursor`, `codex`,
-`gemini`, `grok-build`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
+`gemini`, `genie`, `grok-build`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
 root context file or harness-specific rules folder that compile
 generates.
 
@@ -89,9 +89,12 @@ Every accepted project target is also accepted by `compile`. `grok-build`
 produces `AGENTS.md`. Targets without root-context output, including
 `agent-skills`, `grok-bot`, and the experimental `grok-cloud` target, are
 successful no-ops.
-`antigravity`, `hermes`, and `grok-bot` are explicit-only, while `intellij`
+`antigravity`, `genie`, `grok-bot`, and `hermes` are explicit-only, while `intellij`
 is MCP-only.
 None is included in `all`.
+For Genie Code CLI, run `apm compile --target genie --single-agents` to put all
+project instructions in the root `AGENTS.md`. Genie instruction compilation is
+project-scoped.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
 `apm deps update` when you want shared `.agents/skills/` output.
@@ -363,6 +366,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `codex` | `AGENTS.md` |
 | `opencode` | `AGENTS.md` |
 | `gemini` | `AGENTS.md`, `GEMINI.md` |
+| `genie` | `AGENTS.md` (project) |
 | `antigravity` | `AGENTS.md` |
 | `windsurf` | `AGENTS.md` |
 | `kiro` | `AGENTS.md` |

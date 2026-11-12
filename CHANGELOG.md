@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--target genie` installs Databricks Genie Code CLI skills to `.agents/skills/` or, with `--global`, to `~/.genie/skills/`. Compile project instructions with `apm compile --target genie --single-agents`.
+
 ## [0.35.1] - 2026-11-11
 
 ### Changed

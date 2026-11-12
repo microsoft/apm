@@ -78,7 +78,7 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`, `grok-bot`). `agent-skills`, `antigravity`, `hermes`, and `grok-bot` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `genie`, `grok-bot`, `hermes`). `agent-skills`, `antigravity`, `genie`, `grok-bot`, and `hermes` can be selected explicitly or listed in `apm.yml`, but they are not auto-detected or included in `all`. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
@@ -92,6 +92,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
+| `genie` | `.agents/` (project), `~/.genie/` (user) | agents (project only) |
 | `hermes` | `.agents/` (project), `~/.hermes/` (user) | agents |
 | `grok-bot` | `agent-data/` (project and user) | none |
 

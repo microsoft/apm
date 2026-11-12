@@ -369,7 +369,7 @@ registered **auto-detectable** target (see
 least one detection predicate for it; a target registered without a
 detection predicate is **explicit-only** and MUST be selected
 explicitly. At v0.1 the explicit-only targets are `agent-skills`,
-`antigravity`, `hermes`, and `grok-bot`, so `all` excludes them.
+`antigravity`, `genie`, `grok-bot`, and `hermes`, so `all` excludes them.
 
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
@@ -2920,8 +2920,8 @@ A target registered without a detection predicate
 MUST NOT be auto-detected and MUST be excluded from the expansion of
 `all`; such an **explicit-only** target MUST be selected explicitly
 via `--target <name>` or via the manifest's `target:` field. At v0.1
-the explicit-only targets are `agent-skills`, `antigravity`, `hermes`,
-and `grok-bot`. When no detection signal fires, the consumer MAY fall
+the explicit-only targets are `agent-skills`, `antigravity`, `genie`,
+`grok-bot`, and `hermes`. When no detection signal fires, the consumer MAY fall
 back to a `minimal` profile that emits `AGENTS.md` only.
 
 ### 8.5 Deploy directory contract (normative)
