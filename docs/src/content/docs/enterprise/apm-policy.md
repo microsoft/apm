@@ -74,11 +74,36 @@ On GitHub and GitHub API-compatible hosts, the `.github-private` repo is preferr
 
 ```
 <top-level-group>/
-  apm-policy/
-    apm-policy.yml         # auto-discovered by projects whose remote starts with <top-level-group>/
+  [<subgroups>/]           # optional -- apm-policy may sit at any level
+    apm-policy/
+      apm-policy.yml       # discovered by projects under this group or any descendant
 ```
 
-GitLab discovery uses only the top-level group: APM takes the first path segment from the project remote and looks for `<top-level-group>/apm-policy`. It does not search nested subgroup scopes. Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project without `apm-policy` (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+GitLab discovery looks for `apm-policy` at every namespace from the top-level group down to the project's own subgroup, and **combines** every policy it finds with the same tighten-only merge `extends:` uses. For a project remote `gitlab.com/acme/dept-a/team-x/my-project`, APM checks:
+
+1. `acme/apm-policy` (company)
+2. `acme/dept-a/apm-policy` (department)
+3. `acme/dept-a/team-x/apm-policy` (team)
+
+The effective policy is company, then department, then team. A team can add restrictions under its own subgroup, but it cannot drop a company or department restriction -- an empty or weaker team policy, or one without `extends:`, still inherits every ancestor rule. A team policy also works on its own when no ancestor publishes one. A namespace without `apm-policy` is skipped. A flat `<group>/<project>` remote (including a personal namespace like `gitlab.com/<user>/<project>`) checks only `<group>/apm-policy`, as before.
+
+`apm install`, `apm audit --ci` (the `policy.chain` field in JSON and SARIF output) and `apm policy status` (the extends chain) show the ordered, redacted list of sources. Up to five distinct policies can be combined, counting both discovered namespaces and `extends:` parents; a policy that two levels both reach is used once.
+
+The **nearest** discovered policy is the one that `policy.hash` in `apm.yml` pins -- the pin covers that policy's bytes, not the combined result. If a closer team policy is published (or the pinned one is removed), the nearest policy changes and a pinned project fails closed until you update `policy.hash`. APM never re-pins on its own. Changes to farther ancestor policies are not covered by the pin: they apply through the normal cache refresh and the tighten-only merge. Run `apm policy status` in CI to see the composed chain.
+
+If any namespace returns an error other than 404 (an access error, a server or network failure, or an invalid policy) while another level has a policy, discovery fails closed instead of applying a partial chain, even when `fetch_failure_default` is `warn`. A complete cached chain from a previous run can still be used under the normal stale-cache rules, and offline (cache-only) installs use only that complete cached chain.
+
+`extends:` still works and is resolved inside the combined chain. Reference an ancestor explicitly (`extends: "acme/dept-a/apm-policy"`) or use the `extends: "org"` shorthand, which on GitLab always resolves to the **top-level** group's policy (`<top-level-group>/apm-policy`) -- not the nearest ancestor.
+
+:::note[Host-qualified `extends:` on GitLab]
+A bare nested `extends:` ref whose first segment contains a dot (e.g. a group named `acme.tools`) is read as a host, so `extends: "acme.tools/team/apm-policy"` is rejected as cross-host. Spell it host-qualified instead -- `extends: "gitlab.com/acme.tools/team/apm-policy"` (or `<GITLAB_HOST>/...` on self-managed) -- so the leaf host is matched and stripped. When the project's remote uses an explicit port, the host-qualified ref must carry the exact `host:port` authority (e.g. `gitlab.example.com:8443/acme/team/apm-policy`); `GITLAB_HOST` is only the hostname, so a ref without the matching port is rejected.
+:::
+
+Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project with no `apm-policy` at any level (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+
+:::caution[GitLab conceals private projects with 404]
+GitLab returns HTTP 404 both for a missing `apm-policy` project and for a private one the token cannot read, so APM cannot tell them apart and treats both as "no policy at this level." A policy the CI token cannot read is therefore left out of the chain. Governed CI must use a token with read access to every `apm-policy` project in the project's namespace ancestry.
+:::
 
 :::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]
 An arbitrary FQDN is never auto-classified as GitLab -- the same domain shape could be Bitbucket, Gitea, or a plain git server. `gitlab.com` is recognised automatically, but a self-managed instance (e.g. `gitlab.example.com`) is only recognised once you set `GITLAB_HOST=gitlab.example.com` (or `APM_GITLAB_HOSTS` for more than one instance). Without it, APM falls through to the GitHub-style cascade above, which is invalid on GitLab and behaves exactly like the unfixed discovery this section describes. This mirrors `GITHUB_HOST` for GitHub Enterprise Server and `ADO_HOST` for on-prem Azure DevOps Server -- see [Environment Variables](../../reference/environment-variables/).

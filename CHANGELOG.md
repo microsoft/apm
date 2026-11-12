@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitLab policy discovery now combines the `apm-policy` projects from the top-level group down to the project's subgroup with the tighten-only merge, so a team policy adds rules without dropping company ones; `policy.hash` pins the nearest policy, and CI needs read access to every ancestor `apm-policy` (GitLab answers 404 when it cannot read one). -- by @rrazvd (#2933)
 - Licence files now travel with subdirectory installs: APM copies the repository's nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` byte-for-byte into the package in `apm_modules/` and next to each deployed skill without one (also for skills below a whole-repo package root), and records each copy under `carried_licenses` in `apm.lock.yaml`. `apm uninstall` removes the copies and `apm audit` reports a missing or edited one; existing lockfiles keep verifying. (#3646)
 - `apm marketplace package add` and `apm marketplace package set` accept `--category` to set a package's marketplace category, which Codex output requires, without hand-editing `apm.yml`. -- by @WilliamK112 (#2637)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
