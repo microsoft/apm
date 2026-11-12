@@ -767,6 +767,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             package="lockfile",
                         )
 
+        from .local_edits import hint_local_edits_before_install
+
+        hint_local_edits_before_install(ctx, existing_lockfile)
+
         # Normalize path separators once for O(1) lookups in check_collision
         from ..integration.base_integrator import BaseIntegrator
 
