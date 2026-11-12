@@ -302,8 +302,14 @@ def cli(ctx, verbose: bool) -> None:
     # Check for updates only for known commands; skip on invalid input to fail fast.
     # Discovery must not initialize caches or contact the update service.
     raw_args = ctx.meta.get("apm_raw_args", sys.argv[1:])
-    discovering = ctx.invoked_subcommand == "discover" or (
-        ctx.invoked_subcommand == "init" and "--discover" in raw_args
+    discovering = (
+        ctx.invoked_subcommand == "discover"
+        or (ctx.invoked_subcommand == "init" and "--discover" in raw_args)
+        # Read-only file provenance (#739) must not write caches either.
+        or (
+            ctx.invoked_subcommand in ("view", "info")
+            and any(arg == "--file" or arg.startswith("--file=") for arg in raw_args)
+        )
     )
     if (
         not ctx.resilient_parsing

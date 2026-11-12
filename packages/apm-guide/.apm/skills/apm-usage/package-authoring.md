@@ -713,6 +713,13 @@ my-skill/
   resource2.md
 ```
 
+APM preserves each skill's declared `name` and folder, per the Agent Skills
+spec; it never prefixes or renames skills. Disambiguating same-named skills
+from different packages comes from native plugin namespacing
+(`<plugin>:<skill>`) and the shared specs
+(https://github.com/agentplugins/agent-plugins-spec/discussions/95). Use
+`apm view --file <deployed-path>` to see which package deployed a skill file.
+
 ### 7. Marketplace Plugin (`plugin.json`)
 
 For loose skill deployment, a differing unmanaged destination file refuses the

@@ -135,6 +135,25 @@ selection. A shared directory or name alone is not a conflict. This does not
 add namespacing or change native plugin identity or managed-package precedence.
 See [install behavior](../../../reference/cli/install/#behavior).
 
+### Skill names and provenance
+
+APM keeps each skill's declared `name` and folder, as the
+[Agent Skills spec](https://agentskills.io/specification) requires. It never
+prefixes or renames skills. Telling same-named skills from different packages
+apart is left to native plugin namespacing (`<plugin>:<skill>`) and the shared
+specs; see
+[agent-plugins-spec discussion #95](https://github.com/agentplugins/agent-plugins-spec/discussions/95).
+
+To see which package deployed a skill file, ask for its recorded owner:
+
+```bash
+apm view --file .agents/skills/<name>/SKILL.md
+```
+
+If the owner is a dependency, edit that package's source rather than the
+deployed copy. Teams that want agents to follow this can add that instruction
+to their own agent guidance. See [`apm view --file`](../../../reference/cli/view/#apm-view---file-path).
+
 ## Preview before you commit
 
 Two commands answer "what will this look like once installed?":

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm view --file PATH` (with `-g` for user scope) reports which package deployed one installed file, such as a skill's `SKILL.md` or a bundled resource: recorded owners (active writer and surviving owners), project-self or local-bundle ownership, and dependency source, ref and commit, matched by exact path from the lockfile's deployment records. Whether the file still matches its recorded hash is shown separately. Unrecorded files exit `1`. It is read-only: no network, no writes, no lockfile migration. The skills guide now states that APM keeps skill names and folders unchanged and never prefixes them. (#PRNUM)
+
 ### Changed
 
 - Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
