@@ -50,9 +50,14 @@ def unrecorded_deployed_paths(ctx: InstallContext) -> list[str]:
 
 
 def report_failed_install_residue(ctx: InstallContext) -> None:
-    """Name the native target files a failed install attempt left on disk."""
+    """Name the native target files a failed install attempt left on disk.
+
+    Runs while the original failure propagates, so it never raises: a
+    rendering error must not replace the install error.
+    """
     if ctx.logger is None or ctx.dry_run or ctx.lockfile_only:
         return
-    paths = unrecorded_deployed_paths(ctx)
-    if paths:
-        ctx.logger.failed_install_residue(paths)
+    with contextlib.suppress(Exception):
+        paths = unrecorded_deployed_paths(ctx)
+        if paths:
+            ctx.logger.failed_install_residue(paths)
