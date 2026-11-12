@@ -362,7 +362,8 @@ def _released_and_retained_install_paths(
     from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.utils.path_security import PathTraversalError
 
-    apm_modules_dir = ctx.apm_modules_dir
+    # Partial contexts (tests, embedders) may omit apm_modules_dir entirely.
+    apm_modules_dir = getattr(ctx, "apm_modules_dir", None)
     if (
         ctx.existing_lockfile is None
         or not isinstance(apm_modules_dir, Path)
