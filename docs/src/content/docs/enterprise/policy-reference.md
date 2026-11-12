@@ -186,9 +186,9 @@ dependencies:
 
 ### `require_pinned_constraint`
 
-Default: `false`. When `true`, every direct APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (`v1.5.3`, or `pkg-a-v1.5.3` / `pkg-a--v1.5.3` for a package named `pkg-a`, the layouts APM resolves ranges against), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+Default: `false`. When `true`, every direct APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (`v1.5.3`, or `pkg-a-v1.5.3` / `pkg-a--v1.5.3` for a package named `pkg-a`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
 
-The check judges the constraint as declared. A range such as `pkg-a#^1.0.0` passes as a bounded choice even though the install selects a concrete release tag for it, and a bare branch stays a violation however it resolves. Fresh installs, locked reinstalls, updates, and `apm audit` agree.
+The check judges the constraint as declared in `apm.yml`, not the tag a range resolves to; fresh installs, locked reinstalls, updates, and `apm audit` agree.
 
 ```yaml
 dependencies:
