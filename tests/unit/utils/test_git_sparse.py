@@ -197,13 +197,18 @@ def test_fan_out_expansion_is_rejected_by_a_shared_budget(
 def test_entries_unsafe_on_windows_are_rejected_before_any_write(tmp_path: Path, name: str) -> None:
     """A directory link must not copy a host-unsafe entry name (``..\\`` or ``:``)."""
     origin, _ = build_link_origin(tmp_path, {"pkg/assets": "../evil"})
-    oid = git("-C", str(origin), "hash-object", "-w", "--stdin", input="payload")
-    git("-C", str(origin), "update-index", "--add", "--cacheinfo", f"100644,{oid},evil/{name}")
-    git("-C", str(origin), "commit", "-q", "-m", "unsafe entry")
+    # mktree bypasses index path checks, so a POSIX-authored name can be
+    # committed even where Git for Windows refuses to stage it.
+    blob = git("-C", str(origin), "hash-object", "-w", "--stdin", input="payload")
+    evil = git("-C", str(origin), "mktree", input=f"100644 blob {blob}\t{name}\n")
+    root = git("-C", str(origin), "ls-tree", "HEAD") + f"\n040000 tree {evil}\tevil\n"
+    tree = git("-C", str(origin), "mktree", input=root)
+    commit = git("-C", str(origin), "commit-tree", tree, "-p", "HEAD", "-m", "unsafe entry")
+    git("-C", str(origin), "update-ref", "refs/heads/main", commit)
+    # Planning reads only the commit tree, so no checkout is needed (Git for
+    # Windows would refuse to check this tree out at all).
     checkout = tmp_path / "checkout"
     git(*_PIN, "clone", "-q", "--no-checkout", str(origin), str(checkout))
-    apply_sparse_cone("git", checkout, ["pkg"], env=neutral_git_env())
-    git(*_PIN, "-C", str(checkout), "checkout", "-q", "main")
 
     with pytest.raises(PathTraversalError, match="not portable to every host"):
         _materialize(checkout, ["pkg"])

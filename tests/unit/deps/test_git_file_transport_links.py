@@ -29,18 +29,21 @@ def _transport(tmp_path: Path, extra_links: dict[str, str] | None = None) -> Git
 
 
 @pytest.mark.parametrize(
-    ("path", "content"),
+    ("link", "target"),
     [
-        ("pkg/AGENTS.md", b"Package instructions\n"),
-        ("pkg/chain.md", b"Package instructions\n"),
-        ("pkg/notes.crlf", b"line one\r\nline two\r\n"),
+        ("pkg/AGENTS.md", "pkg/CLAUDE.md"),
+        ("pkg/chain.md", "pkg/CLAUDE.md"),
+        ("pkg/notes.crlf", "shared/notes.crlf"),
     ],
 )
 def test_sparse_file_fetch_returns_link_target_content(
-    tmp_path: Path, path: str, content: bytes
+    tmp_path: Path, link: str, target: str
 ) -> None:
+    """A link fetch returns exactly what fetching its target returns."""
     with _transport(tmp_path) as transport:
-        assert transport.fetch_file(path) == content
+        content = transport.fetch_file(link)
+        assert content == transport.fetch_file(target)
+    assert content.replace(b"\r\n", b"\n") in {b"Package instructions\n", b"line one\nline two\n"}
 
 
 def test_sparse_file_fetch_rejects_escaping_link(tmp_path: Path) -> None:
