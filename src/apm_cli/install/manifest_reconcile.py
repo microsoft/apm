@@ -709,6 +709,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         diagnostics=diagnostics,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
+        live_paths=files,
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)

@@ -227,3 +227,19 @@ class TestIntegrateInstructionsNoneManagedFiles:
         assert deployed in result.target_paths
         assert result.files_integrated == 1
         assert result.files_skipped == 0
+
+
+def test_case_only_spelling_of_managed_file_is_not_a_collision(tmp_path: Path) -> None:
+    """On case-insensitive filesystems the old spelling is the same APM-owned entry."""
+    target_dir = tmp_path / ".github" / "agents"
+    target_dir.mkdir(parents=True)
+    (target_dir / "Helper.agent.md").write_text("v1")
+    managed = {".github/agents/Helper.agent.md"}
+
+    assert not BaseIntegrator.check_collision(
+        target_dir / "helper.agent.md", ".github/agents/helper.agent.md", managed, force=False
+    )
+    (target_dir / "user.agent.md").write_text("mine")
+    assert BaseIntegrator.check_collision(
+        target_dir / "user.agent.md", ".github/agents/user.agent.md", managed, force=False
+    )

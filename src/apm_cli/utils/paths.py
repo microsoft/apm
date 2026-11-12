@@ -7,7 +7,8 @@ call site gets Windows-safe, forward-slash relative paths by default.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+import unicodedata
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 
@@ -64,3 +65,28 @@ def resolve_base_and_source_dirs(
     resolved_base = _resolve(base_dir)
     resolved_source = resolved_base if source_dir is None else _resolve(source_dir)
     return resolved_base, resolved_source
+
+
+def _spelling_key(rel_path: str) -> str:
+    return unicodedata.normalize("NFC", rel_path.replace("\\", "/")).casefold()
+
+
+def physical_alias(rel_path: str, root: Path, candidates: Iterable[str]) -> str | None:
+    """Return the candidate naming the same entry as *rel_path* under another spelling.
+
+    On case- or Unicode-normalization-insensitive filesystems (macOS,
+    Windows) ``Guide.md`` and ``guide.md`` are one directory entry. Only a
+    candidate whose spelling differs from *rel_path* solely in case or
+    normalization, and that ``os.path.samefile`` confirms on this
+    filesystem, is returned; case-sensitive filesystems never alias.
+    """
+    key = _spelling_key(rel_path)
+    for candidate in candidates:
+        if candidate == rel_path or "://" in candidate or _spelling_key(candidate) != key:
+            continue
+        try:
+            if os.path.samefile(root / rel_path, root / candidate):
+                return candidate
+        except OSError:
+            continue
+    return None

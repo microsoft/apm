@@ -76,6 +76,7 @@ class CornerWorld:
     runner: ApmLifecycleRunner
     rewrites: list[tuple[LocalGitRepository, str]]
     env: dict[str, str]
+    origins: dict[str, LocalGitRepository]
 
     @classmethod
     def create(cls, root: Path, binary: Path) -> CornerWorld:
@@ -85,7 +86,7 @@ class CornerWorld:
         runner = ApmLifecycleRunner(
             (str(binary),), timeout_seconds=180, scenario_timeout_seconds=900
         )
-        return cls(isolated=isolated, repos=repos, runner=runner, rewrites=[], env=env)
+        return cls(isolated=isolated, repos=repos, runner=runner, rewrites=[], env=env, origins={})
 
     @property
     def home(self) -> Path:
@@ -94,6 +95,7 @@ class CornerWorld:
     def publish(self, name: str, tree: Path) -> GitCommit:
         repository = self.repos.create(name, source_tree=tree)
         commit = self.repos.commit(repository, message=f"seed {name}")
+        self.origins[name] = repository
         self.rewrites.append((repository, remote_url(name)))
         self.env = self.repos.url_rewrite_subprocess_env_many(self.rewrites)
         return commit

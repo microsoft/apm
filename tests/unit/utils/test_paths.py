@@ -218,3 +218,35 @@ class TestPortableRelpath:
         # Must fall back to unresolved as_posix
         assert "f.txt" in result
         assert "\\" not in result
+
+
+def _case_insensitive(root: Path) -> bool:
+    probe = root / "CaseProbe"
+    probe.write_text("x")
+    try:
+        return (root / "caseprobe").exists()
+    finally:
+        probe.unlink()
+
+
+class TestPhysicalAlias:
+    def test_same_spelling_and_different_names_never_alias(self, tmp_path: Path) -> None:
+        from apm_cli.utils.paths import physical_alias
+
+        (tmp_path / "rules").mkdir()
+        (tmp_path / "rules" / "Guide.md").write_text("g")
+        (tmp_path / "rules" / "other.md").write_text("o")
+        candidates = ["rules/Guide.md", "rules/other.md", "mcp://x"]
+        assert physical_alias("rules/Guide.md", tmp_path, candidates) is None
+        assert physical_alias("rules/missing.md", tmp_path, ["rules/MISSING.md"]) is None
+
+    def test_case_only_spelling_aliases_only_on_case_insensitive_fs(self, tmp_path: Path) -> None:
+        from apm_cli.utils.paths import physical_alias
+
+        (tmp_path / "rules").mkdir()
+        (tmp_path / "rules" / "Guide.md").write_text("g")
+        result = physical_alias("rules/Guide.md", tmp_path, ["rules/guide.md"])
+        if _case_insensitive(tmp_path):
+            assert result == "rules/guide.md"
+        else:
+            assert result is None

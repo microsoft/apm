@@ -34,12 +34,14 @@ takes no logger.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from apm_cli.security.gate import is_python_bytecode_cache_path
+from apm_cli.utils.paths import physical_alias
 
 from .base_integrator import BaseIntegrator
 
@@ -66,6 +68,11 @@ class CleanupResult:
     deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
+
+    aliased: list[str] = field(default_factory=list)
+    """Stale spellings that name the same physical entry as a live path on a
+    case- or normalization-insensitive filesystem; renamed to the live
+    spelling instead of deleted, and no longer owned."""
 
     @property
     def retained(self) -> list[str]:
@@ -279,6 +286,7 @@ def remove_stale_deployed_files(
     user_scope: bool = False,
     allow_final_symlink: bool = False,
     receipt_retirements: list[Path] | None = None,
+    live_paths: Iterable[str] = (),
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -311,6 +319,9 @@ def remove_stale_deployed_files(
         receipt_retirements: Optional batch accumulator for confirmed physical
             removals or absence. The caller must retire it through the receipt
             owner in a finally block; omitted callers retire immediately.
+        live_paths: Paths still deployed after this run. A stale path that is
+            only another spelling of one of them on this filesystem is renamed
+            to the live spelling (``aliased``) instead of deleted.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -339,6 +350,7 @@ def remove_stale_deployed_files(
     # files (safe rmtree).
     _deferred_dirs: list[tuple[str, Path]] = []
     absent_targets: list[Path] = []
+    live_paths = tuple(live_paths)
 
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
@@ -412,6 +424,23 @@ def remove_stale_deployed_files(
         if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).
             absent_targets.append(stale_target)
+            continue
+
+        # A case/normalization-only rename upstream makes the old and new
+        # spellings one entry on macOS and Windows: adopt the live spelling
+        # on disk instead of deleting the file this install just wrote.
+        live_alias = physical_alias(stale_path, project_root, live_paths)
+        if live_alias is not None:
+            try:
+                os.rename(stale_target, project_root / live_alias)
+                result.aliased.append(stale_path)
+                absent_targets.append(stale_target)
+            except OSError as exc:
+                result.failed.append(stale_path)
+                diagnostics.warn(
+                    f"Could not rename {stale_path} to {live_alias}: {exc}.",
+                    package=dep_key,
+                )
             continue
 
         # Gate 2: directory handling. APM-managed primitives are
