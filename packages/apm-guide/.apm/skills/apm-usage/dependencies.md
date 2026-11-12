@@ -79,12 +79,13 @@ See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-se
 
 ### Packages with symbolic links
 
-APM checks out in-repo links in a dependency as real symlinks
-(`core.symlinks=true` on its own Git commands only), so the `content_hash` is
-the same on every platform. A host that cannot create symlinks fails the
-install with a diagnostic naming the package; on Windows enable Developer
-Mode or the "Create symbolic links" privilege. See [Install packages: when
-things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
+A link inside a dependency whose target stays in the same commit installs as
+a copy of the target's content (directory links copy the directory). APM
+resolves it from the locked commit's Git objects, so no host needs symlink
+privileges and the `content_hash` is the same on every platform. Links that
+escape the repository, are broken or loop fail the install with an error
+naming the link. See [Install packages: when things go
+wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
 ### Custom git ports
 
@@ -665,9 +666,15 @@ for supported fields and literal-value handling.
 For OpenCode, top-level `enabled` passes the supplied value and JSON type
 unchanged, including `false`, `null`, and non-boolean values. Only omission
 defaults to `true`; OpenCode interprets the value, not APM. Reinstall applies
-changes to this field. See the
+changes to this field. When `opencode.json` declares `mcp.servers` (the
+OpenCode 2 layout), APM writes there instead: `false` becomes
+`disabled: true`, `true` or omission writes no field, and other values warn
+and leave the file unchanged. Set `codemode: false` as an extra field to
+bypass Code Mode. See the
 [manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
-for the dependency contract.
+for the dependency contract and
+[OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
+for format selection.
 
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker

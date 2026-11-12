@@ -82,7 +82,9 @@ class TestCacheHitDiagnostics:
         checkout.mkdir(parents=True)
         (checkout / ".git").mkdir()
         (checkout / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
         )
 
         with (

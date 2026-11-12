@@ -56,7 +56,7 @@ fi
 
 echo "Installing APM CLI (version: ${VERSION})..."
 
-# -- Ensure Python 3.10+ is available -----------------------------------------
+# -- Ensure Python 3.11+ is available -----------------------------------------
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Python 3 not found -- installing via system package manager..."
     if command -v apt-get >/dev/null 2>&1; then
@@ -68,7 +68,7 @@ if ! command -v python3 >/dev/null 2>&1; then
         dnf install -y python3 python3-pip git
     else
         echo "[x] Python 3 is not installed and the package manager is not recognised." >&2
-        echo "Please use a base image that includes Python 3.10+, or install it manually." >&2
+        echo "Please use a base image that includes Python 3.11+, or install it manually." >&2
         exit 1
     fi
 fi
@@ -89,13 +89,13 @@ if ! command -v git >/dev/null 2>&1; then
     fi
 fi
 
-# Validate Python version meets apm-cli requirement (>=3.10)
+# Validate Python version meets apm-cli requirement (>=3.11)
 PYTHON_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
 PYTHON_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]; }; then
+if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]; }; then
     PYTHON_VER=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:3])))")
-    echo "[x] apm-cli requires Python 3.10+, found Python ${PYTHON_VER}." >&2
-    echo "Use a base image with Python 3.10+ (e.g. ubuntu:22.04) or include the Python devcontainer feature." >&2
+    echo "[x] apm-cli requires Python 3.11+, found Python ${PYTHON_VER}." >&2
+    echo "Use a base image with Python 3.11+ (e.g. ubuntu:24.04 or debian:12) or include the Python devcontainer feature." >&2
     exit 1
 fi
 

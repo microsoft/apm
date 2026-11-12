@@ -1,13 +1,14 @@
 ---
 title: "Lifecycle Scripts"
-description: "Run custom actions (shell commands, HTTP webhooks) at install, update, and uninstall time."
+description: "Run custom actions (shell commands, HTTP webhooks) at install, update, uninstall, and compile time."
 sidebar:
   order: 12
 ---
 
 APM supports **lifecycle scripts** -- custom actions that fire automatically
-at key moments during install, update, and uninstall operations. Scripts live
-inside `apm.yml` under a `lifecycle:` key -- no separate config files to manage.
+at key moments during install, update, uninstall, and compile operations.
+Scripts live inside `apm.yml` under a `lifecycle:` key -- no separate config
+files to manage.
 
 ```yaml
 # apm.yml
@@ -46,6 +47,7 @@ fleet-managed deployment.
 | `post-update`    | After a successful update completes  |
 | `pre-uninstall`  | Before uninstall begins              |
 | `post-uninstall` | After a successful uninstall         |
+| `pre-compile`    | Before `apm compile` reads sources; not with `--dry-run`, `--validate`, `--watch`, `--root`, or `--global` |
 
 ## Script file format
 
@@ -128,6 +130,27 @@ If both `bash` and `command` are present, `bash` takes priority.
 Timeouts must be positive. A zero or negative `timeoutSec` (or `timeout`) is
 ignored with a warning naming the script, and the default applies.
 
+### Generating sources before compile
+
+A `pre-compile` script can generate instructions from the project's own
+toolchain, for example a framework that composes guidance from installed
+dependencies. Point it at a source under `.apm/`, such as
+`.apm/instructions/framework.instructions.md` with its own `applyTo`
+frontmatter, never at `AGENTS.md` or `CLAUDE.md`, which compile owns:
+
+```yaml
+lifecycle:
+  pre-compile:
+    - type: command
+      run: "./scripts/generate-guidelines.sh"
+```
+
+A failure does not stop the compile; it continues with what is under `.apm/`
+(see [Security considerations](#security-considerations) for when a failure
+warns). The script runs while compile holds
+APM's lifecycle lock, so an `apm` command it starts that changes state waits
+for that lock and fails after its timeout.
+
 ### HTTP
 
 Send a JSON POST to an HTTPS endpoint:
@@ -200,6 +223,9 @@ POST body.
 }
 ```
 
+For `pre-compile`, `packages` lists the dependencies declared in `apm.yml`
+(not resolved versions) and `scope` is `project`.
+
 ## Trust model
 
 Lifecycle scripts from different sources are subject to different trust rules:
@@ -213,11 +239,15 @@ Lifecycle scripts from different sources are subject to different trust rules:
   Run without a gate.
 - **Project scripts** (`apm.yml` `lifecycle:`) -- committed into the repo and
   **skipped by default.** Cloning an untrusted repo and running
-  `apm install` would otherwise execute attacker-controlled shell commands.
+  `apm install` or `apm compile` would otherwise execute attacker-controlled
+  shell commands.
   Trust is explicit, lifecycle-subtree-bound, and revocable:
   - Run `apm lifecycle trust` to record trust for the current `lifecycle:` block.
   - Any edit to `lifecycle:` revokes trust and requires re-approval.
   - Editing other `apm.yml` keys does not revoke trust.
+  - A block that names `pre-compile` needs fresh trust after upgrading from a
+    version that did not know the event, so a record given while the key was
+    inert does not start covering it.
   - Run `apm lifecycle untrust` to revoke without editing the file.
   - Trust records are stored in `~/.apm/scripts-trust.json` (or
     `$APM_HOME/scripts-trust.json`).
@@ -289,8 +319,9 @@ trends -- without any changes to individual project configurations.
 - Scripts have configurable timeouts (10s for HTTP, 30s for commands by
   default). HTTP scripts dispatch in the background; command scripts run
   synchronously and can delay the operation up to their timeout.
-- A script failure never aborts the CLI operation; failures are logged in
-  verbose mode (`--verbose`).
+- A script failure never aborts the CLI operation. A command script that
+  exits non-zero or times out prints a warning naming the event; output is in
+  `~/.apm/logs/scripts.log`. Other failures are logged in verbose mode (`--verbose`).
 
 ## Script output log
 
