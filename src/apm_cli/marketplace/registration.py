@@ -33,11 +33,17 @@ PROBED_MANIFEST_PATHS = (
 class MarketplaceManifestNotFoundError(MarketplaceError):
     """Raised when no ``marketplace.json`` exists at any probed location."""
 
-    def __init__(self, display_source: str):
+    def __init__(self, display_source: str, *, local: bool = False):
         self.display_source = display_source
+        hint = (
+            " To register a local authoring catalog, pass the apm.yml file "
+            "itself (for example ./my-catalog/apm.yml)."
+            if local
+            else ""
+        )
         super().__init__(
             f"No marketplace.json found in '{display_source}'. "
-            f"Checked: {', '.join(PROBED_MANIFEST_PATHS)}"
+            f"Checked: {', '.join(PROBED_MANIFEST_PATHS)}.{hint}"
         )
 
 
@@ -102,17 +108,19 @@ def parse_registration_source(
 
 
 def local_source_points_to_file(source: MarketplaceSource) -> bool:
-    """Return True when a local marketplace source points directly to a file."""
+    """Return True when a local source names a file (incl. an authoring apm.yml)."""
     if source.kind != "local":
         return False
+    from .client import is_local_authoring_source
+
     try:
-        return Path(source.local_path).expanduser().is_file()
+        return Path(source.local_path).expanduser().is_file() or is_local_authoring_source(source)
     except OSError:
         return False
 
 
 def probe_registration(
-    name: str, url: str, ref: str, *, is_direct_url: bool
+    name: str, url: str, ref: str, *, is_direct_url: bool, offline: bool = False
 ) -> tuple[MarketplaceSource, MarketplaceManifest]:
     """Locate and fetch the marketplace manifest behind a parsed source.
 
@@ -138,7 +146,9 @@ def probe_registration(
     else:
         detected_path, discovered_manifest = client._auto_detect_path_with_payload(probe_source)
     if detected_path is None:
-        raise MarketplaceManifestNotFoundError(probe_source.display_source)
+        raise MarketplaceManifestNotFoundError(
+            probe_source.display_source, local=probe_source.kind == "local"
+        )
 
     fetch_source = MarketplaceSource(name=name, url=url, ref=effective_ref, path=detected_path)
     manifest = client.fetch_marketplace(
@@ -147,5 +157,6 @@ def probe_registration(
         # Reuse the catalog response the probe just fetched from the same
         # url/ref/path instead of re-fetching it (apm#3283).
         discovery_payload=discovered_manifest,
+        offline=offline,
     )
     return fetch_source, manifest

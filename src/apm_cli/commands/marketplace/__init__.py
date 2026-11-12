@@ -297,6 +297,7 @@ _ADD_EPILOG = """
 \b
 Examples:
   apm marketplace add owner/repo
+  apm marketplace add ./apm.yml --name alice-dev
   apm marketplace add github.com/owner/repo
   apm marketplace add https://github.com/owner/repo#v1.0.0
   apm marketplace add https://catalog.example.com/marketplace.json --name catalog
@@ -324,8 +325,13 @@ Examples:
     help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Read local apm.yml without network (remote entries need commit SHAs)",
+)
 @serialized_lifecycle
-def add(source, name, ref, branch, host, verbose):
+def add(source, name, ref, branch, host, verbose, offline=False):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
@@ -333,10 +339,12 @@ def add(source, name, ref, branch, host, verbose):
     Gitea, Bitbucket Server, or any self-hosted git server), a hosted
     ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git`` or
     ``ssh://git@host:2222/org/repo.git``),
-    a local filesystem path, or a ``file://`` URI.
+    a local filesystem path (including an explicitly selected ``apm.yml``),
+    or a ``file://`` URI.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
+        from ...marketplace.client import is_local_authoring_source
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registration import (
             MarketplaceManifestNotFoundError,
@@ -435,9 +443,17 @@ def add(source, name, ref, branch, host, verbose):
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- the probe only consults url/ref/path/kind.
         probe_name = provisional_label
+        if offline and not is_local_authoring_source(
+            MarketplaceSource(name=probe_name, url=url, ref=effective_ref)
+        ):
+            logger.error(
+                "--offline requires an explicitly selected local apm.yml. "
+                "Omit --offline to register a JSON or repository source."
+            )
+            sys.exit(1)
         try:
             fetch_source, manifest = probe_registration(
-                probe_name, url, effective_ref, is_direct_url=is_direct_url
+                probe_name, url, effective_ref, is_direct_url=is_direct_url, offline=offline
             )
         except MarketplaceManifestNotFoundError as exc:
             logger.error(str(exc), symbol="error")
@@ -646,7 +662,12 @@ def list_cmd(verbose):
 @marketplace.command(help="Browse plugins in a marketplace")
 @click.argument("name", required=True)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def browse(name, verbose):
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Read local apm.yml without network (remote entries need commit SHAs)",
+)
+def browse(name, verbose, offline=False):
     """Show available plugins in a marketplace."""
     logger = CommandLogger("marketplace-browse", verbose=verbose)
     try:
@@ -656,7 +677,7 @@ def browse(name, verbose):
         source = get_marketplace_by_name(name)
         logger.start(f"Fetching plugins from '{name}'...", symbol="search")
 
-        manifest = fetch_marketplace(source, force_refresh=True)
+        manifest = fetch_marketplace(source, force_refresh=True, offline=offline)
 
         if not manifest.plugins:
             logger.warning(f"Marketplace '{name}' has no plugins")

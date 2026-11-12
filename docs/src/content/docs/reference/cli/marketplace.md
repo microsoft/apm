@@ -14,9 +14,9 @@ validating it, and preparing artifacts for consumer repositories).
 
 ```bash
 # Consume
-apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN]
+apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--offline]
 apm marketplace list
-apm marketplace browse NAME
+apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
 apm marketplace remove NAME
 apm marketplace validate NAME
@@ -79,8 +79,44 @@ Accepted forms:
   select a branch, tag, or commit.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
-  direct `marketplace.json` file.
+  direct `marketplace.json` file, or an explicitly selected local `apm.yml`.
 - `file://` URI -- `file:///srv/marketplaces/agent-forge.git`.
+
+#### Live local authoring catalogs
+
+```bash
+apm marketplace add ./apm.yml --name alice-dev
+apm marketplace browse alice-dev
+apm view my-tool@alice-dev
+apm install my-tool@alice-dev
+```
+
+SOURCE must be a path to a file named `apm.yml` that contains a valid
+`marketplace:` declaration; a directory is still probed for `marketplace.json`. APM uses
+the existing authoring parser, ref resolver and catalog composer in memory;
+it does not run `apm pack` or write generated catalogs. Relative package
+sources are anchored to the authoring file's directory, with the existing
+path containment checks. Native `metadata.pluginRoot` layout hints do not
+rebase authored package paths. Each invocation reads one configuration
+snapshot; later explicit browse, view, update or selected-install operations
+reread the file. A failed registration leaves an existing registration unchanged.
+
+Registration and browsing do not install inventory, activate plugins, execute
+package hooks or publish packages. APM does not download remote package
+manifests to fill in descriptions. Remote tags and version ranges need Git
+network access to resolve. `add --offline` and `browse --offline` work only for
+this source type: local entries and remote entries pinned to full commit SHAs
+resolve without network, and tags or ranges fail with an actionable error.
+JSON, Git and HTTPS catalog sources reject `--offline`.
+
+Installing a remote entry records its actual package dependency and existing
+locked resolution. Locked replay does not require the preview file or its
+registration. Local entries remain local filesystem dependencies: their
+paths and hashes do not distribute files to another machine. Publishing and
+selecting a distributed source remain explicit operations. Remote YAML
+catalog URLs, automatic watching and automatic source promotion are unsupported.
+
+Generated JSON catalogs and repository registration continue to work as before.
 
 ```bash
 # GitHub shorthand
