@@ -376,6 +376,59 @@ def test_hook_path_install_restore_update_remove(
             assert not control_ref.get_install_path(control.root / "apm_modules").exists()
 
 
+def test_untyped_flat_codex_hook_denied_consent_blocks_deployment(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Denied consent still gates untyped flat Codex hooks before any rendering."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
+    repository = repositories.create("hook-packages")
+    hooks = repository.worktree / _SUBPATH / "hooks"
+    hooks.mkdir(parents=True)
+    command = 'python "${CLAUDE_PLUGIN_ROOT}/hooks/run.py"'
+    (hooks / "lint.json").write_text(
+        json.dumps({"hooks": {"PostToolUse": [{"matcher": "Write", "command": command}]}}),
+        encoding="utf-8",
+    )
+    (hooks / "run.py").write_text(
+        'from pathlib import Path\nPath("hook-ran.txt").write_text("ran")\n',
+        encoding="utf-8",
+    )
+    repositories.commit(repository, message="seed untyped flat hook")
+    repositories.install_url_rewrite(repository, _REMOTE)
+    dependency = {"git": _REMOTE, "type": "gitlab", "path": _SUBPATH, "ref": "main"}
+    consumers = LocalPackageFactory(isolated.work_root)
+    gated = consumers.create("gated", dependencies=(dependency,), targets=("codex",))
+    manifest = load_yaml(gated.manifest_path)
+    manifest["allowExecutables"] = {}
+    dump_yaml(manifest, gated.manifest_path)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=300)
+    ref = DependencyReference.parse_from_dict(dependency)
+    codex_config = gated.root / ".codex/hooks.json"
+
+    _run(runner, gated.root, environment, _INSTALL, "codex-untyped-unapproved")
+    assert not codex_config.exists()
+    assert not (gated.root / "hook-ran.txt").exists()
+    gated_lock = LockFile.read(gated.root / "apm.lock.yaml")
+    assert gated_lock is not None
+    assert next(iter(gated_lock.dependencies.values())).exec_status == "gated_pending_approval"
+
+    _run(
+        runner,
+        gated.root,
+        environment,
+        ("approve", ref.get_unique_key()),
+        "codex-untyped-approve",
+    )
+    _run(runner, gated.root, environment, _INSTALL, "codex-untyped-approved")
+    groups = json.loads(codex_config.read_text(encoding="utf-8"))["hooks"]["PostToolUse"]
+    assert len(groups) == 1
+    assert groups[0]["matcher"] == "Write"
+    assert [handler["type"] for handler in groups[0]["hooks"]] == ["command"]
+    assert not (gated.root / "hook-ran.txt").exists()
+
+
 @pytest.mark.parametrize("layout", ["hooks", ".apm/hooks"])
 @pytest.mark.parametrize("unselected_malformed", [False, True])
 @pytest.mark.parametrize("selection_route", ["direct", "parent", "shared-child", "refresh"])

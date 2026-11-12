@@ -996,6 +996,13 @@ def _handle_mcp_install(  # noqa: PLR0913
     help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1). Caveat: fallback reuses the same port across schemes; on servers that use different SSH and HTTPS ports, omit this flag and pin the dependency with an explicit ssh:// or https:// URL.",
 )
 @click.option(
+    "--auth-first",
+    "auth_first",
+    is_flag=True,
+    default=False,
+    help="Skip the anonymous-first HTTPS attempt for github.com and use your resolved credentials immediately (also: APM_GITHUB_AUTH_FIRST=1, apm config set github-auth-first true). Escape hatch for TLS-inspecting proxies the isolated anonymous attempt cannot pass. Trade-off: forwards credentials on the first attempt.",
+)
+@click.option(
     "--mcp",
     "mcp_name",
     default=None,
@@ -1161,6 +1168,7 @@ def install(  # noqa: PLR0913
     use_ssh,
     use_https,
     allow_protocol_fallback,
+    auth_first,
     mcp_name,
     transport,
     url,
@@ -1309,6 +1317,7 @@ def install(  # noqa: PLR0913
                         "--ssh": use_ssh,
                         "--https": use_https,
                         "--allow-protocol-fallback": allow_protocol_fallback,
+                        "--auth-first": auth_first,
                         "--mcp": mcp_name,
                         "--registry": registry_url,
                         "--skill": bool(skill_names),
@@ -1482,7 +1491,9 @@ def install(  # noqa: PLR0913
 
         # Create shared auth resolver for all downloads in this CLI invocation
         # to ensure credentials are cached and reused (prevents duplicate auth popups)
-        auth_resolver = AuthResolver()
+        # issue #2545: --auth-first is CLI-scoped here; AuthResolver falls back to
+        # APM_GITHUB_AUTH_FIRST / apm config github-auth-first when not passed.
+        auth_resolver = AuthResolver(github_auth_first=auth_first)
         # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
         # auth-source line and the deferred stale-PAT [!] warning route through
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
