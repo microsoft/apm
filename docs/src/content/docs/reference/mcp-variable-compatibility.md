@@ -12,7 +12,9 @@ This page records, for each supported harness, the native contract, what APM
 writes, and the gaps that remain.
 
 The results were checked on 2026-10-24 with the change for
-[#3252](https://github.com/microsoft/apm/issues/3252). Evidence is marked as:
+[#3252](https://github.com/microsoft/apm/issues/3252); the Codex CLI rows were
+updated on 2026-11-12 for [#3393](https://github.com/microsoft/apm/issues/3393).
+Evidence is marked as:
 
 - **client**: checked against the native client.
 - **docs**: taken from the harness's official documentation only.
@@ -50,7 +52,8 @@ an unset one (`${DEMO_MISSING}`) and a static value (`debug`):
 | Copilot CLI, project and user | `${DEMO_TOKEN}` | `env`: replaced by `${KEY}`; other fields kept | `env`: replaced by `${KEY}` | No |
 | VS Code, project | `env`, `headers`: `${env:DEMO_TOKEN}`; `args`: bare `${DEMO_TOKEN}` | Kept | Kept | No |
 | Cursor, project and user | `${env:DEMO_TOKEN}` in `env`, `args`, `headers`; `command` and `url` copied | Kept | Kept | No |
-| Codex CLI, project and user | `env`: resolved; `Authorization`: `bearer_token_env_var` | Kept | Kept | Yes |
+| Codex CLI, project | `env` written as `KEY: ${KEY}`: `env_vars = ["KEY"]`; other `env` references and `args`: resolved; `Authorization`: `bearer_token_env_var` | Kept | Kept | Only for references not written as `KEY: ${KEY}` |
+| Codex CLI, user | `env`: resolved; `Authorization`: `bearer_token_env_var` | Kept | Kept | Yes |
 | Gemini CLI, project and user | Resolved at install time | Kept | Kept | Yes |
 | Antigravity, project and user | Resolved at install time | Kept | Kept | Yes |
 | Hermes Agent, user | Resolved at install time | Kept | Kept | Yes |
@@ -63,12 +66,13 @@ an unset one (`${DEMO_MISSING}`) and a static value (`debug`):
 
 These existed before #3252 and are recorded here rather than changed by it:
 
-- **Codex CLI, Gemini CLI, Antigravity, Hermes Agent and Windsurf** write the
-  resolved value into their configuration.
+- **Codex CLI user scope (and Codex project `env` references not written as
+  `KEY: ${KEY}`), Gemini CLI, Antigravity, Hermes Agent and Windsurf** write
+  the resolved value into their configuration.
 - **Claude Code user scope** resolves at install time although Claude Code
   expands references in `~/.claude.json` too.
-- **Targets that resolve at install time** (Claude Code user scope, Codex CLI,
-  Gemini CLI, Antigravity, Hermes Agent, Windsurf) resolve `env` and `headers`
+- **Targets that resolve at install time** (Claude Code user scope, Codex CLI
+  user scope, Gemini CLI, Antigravity, Hermes Agent, Windsurf) resolve `env` and `headers`
   but copy references in `command`, `args` and `url` unchanged, including
   spellings such as `${env:VAR}` that the harness may not read.
 - **Cursor and OpenCode** copy references in `url` (and Cursor in `command`)

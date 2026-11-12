@@ -118,12 +118,15 @@ Headers and env values are never shell-expanded by APM. For harnesses
 that support runtime env placeholders (for example VS Code, Kiro, and
 Claude Code's project `.mcp.json`), APM preserves the placeholder so the
 harness resolves it when the server starts or the request is made. For
-harnesses that require literal values (for example Codex self-defined
-stdio env) and for Claude Code's user-scope `~/.claude.json`, APM
+harnesses that require literal values (for example Codex user scope, or a
+Codex project `env` value not written as `KEY: ${KEY}`) and for Claude
+Code's user-scope `~/.claude.json`, APM
 resolves `${VAR}` from the install process environment,
 prompts interactively when the terminal is attached, and leaves
 unresolved placeholders unchanged in non-interactive installs. Keep the
-real secret in the consumer's environment (or their secret manager).
+real secret in the consumer's environment (or their secret manager). See
+[MCP variable compatibility](../../../reference/mcp-variable-compatibility/)
+for each harness.
 
 The `github-mcp-server` is a special case: APM injects an
 `Authorization: Bearer <token>` header automatically when it writes

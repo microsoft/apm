@@ -512,7 +512,8 @@ For Claude Code at project scope, the next `apm install` replaces values in
 `.mcp.json` that APM wrote earlier, either because APM recorded writing that
 exact entry or because the entry matches the declaration expanded from the
 current environment. It prints the affected variable names. An entry APM
-cannot confirm it wrote is kept, and install reports which fields hold values.
+cannot confirm it wrote is kept, and install exits with an error that names
+each field holding a value and the reference it should hold.
 Replace those yourself with `${NAME}` references, for example
 `Bearer ${GITHUB_TOKEN}`. Export the variables before starting `claude`.
 Claude Code still asks you to approve project servers; APM does not change

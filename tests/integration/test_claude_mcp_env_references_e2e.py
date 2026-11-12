@@ -296,7 +296,7 @@ def test_reinstall_replaces_values_apm_wrote_earlier(
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
     assert _servers(project) == {"refs-stdio": EXPECTED_STDIO, "refs-http": EXPECTED_HTTP}
-    assert "previously stored as plaintext in .mcp.json" in _flat(output)
+    assert "previously stored as plaintext in the project .mcp.json" in _flat(output)
     assert "Affected: E2E_TOKEN" in _flat(output)
     assert "rotate these credentials" in _flat(output)
     _assert_no_value([output, (project / "apm.lock.yaml").read_text()], SECRET)
