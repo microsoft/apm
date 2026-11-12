@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml, yaml_to_str
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult

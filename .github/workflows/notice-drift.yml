@@ -84,7 +84,7 @@ jobs:
       # Pinned to the same Python version as ci.yml. NOTICE content
       # depends on which dist-info layout the installed wheels use, and
       # different interpreters can resolve different conditional deps
-      # (e.g. tomli is only installed under python_version<'3.11').
+      # (e.g. a dependency gated by a python_version marker).
       # Locking to 3.12 keeps the rendered output deterministic across
       # CI runs and developer machines.
       - name: Set up Python
@@ -93,7 +93,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
