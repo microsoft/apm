@@ -1318,6 +1318,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Bare AAD bearer JWTs stop being redacted from Git diagnostics.",
     ),
     MutationCase(
+        guard_id="transport-platform-git-output-decoding",
+        rule_id="transport-platform-git-child-environment",
+        path="src/apm_cli/deps/git_file_transport.py",
+        old="            result = run_git_text(\n                cmd,\n",
+        new="            result = subprocess.run(\n                cmd,\n                text=True,\n",
+        intent="Sparse Git output decodes with the locale codec and crashes on cp936.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-semver-preflight",
         rule_id="transport-platform-git-semver-preflight",
         path="src/apm_cli/install/helpers/ref_reuse.py",

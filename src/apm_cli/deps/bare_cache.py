@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 from git import Repo
 
 from ..models.dependency.host_virtual import dependency_repository_owner
+from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 
 if TYPE_CHECKING:
@@ -257,7 +258,7 @@ def bare_clone_with_fallback(
             # would set resolved_commit to the abbreviation and lockfile
             # comparisons against `head.commit.hexsha` (always 40-char)
             # would never match. Copilot review finding (#1135).
-            full_sha_result = subprocess.run(
+            full_sha_result = run_git_text(
                 [
                     git_exe,
                     "--git-dir",
@@ -269,7 +270,6 @@ def bare_clone_with_fallback(
                 env=env,
                 check=True,
                 capture_output=True,
-                text=True,
             )
             full_sha = full_sha_result.stdout.strip()
             subprocess.run(
@@ -639,10 +639,9 @@ def materialize_from_bare(
     if known_sha:
         resolved_sha = known_sha
     else:
-        sha_result = subprocess.run(
+        sha_result = run_git_text(
             [git_exe, "--git-dir", str(bare_path), "rev-parse", "HEAD"],
             capture_output=True,
-            text=True,
             timeout=10,
             env=env,
             check=True,
@@ -652,7 +651,7 @@ def materialize_from_bare(
     consumer_dir.parent.mkdir(parents=True, exist_ok=True)
     # --no-checkout because we want to set core.autocrlf and disable
     # LFS smudge BEFORE checkout writes any file content.
-    subprocess.run(
+    run_git_text(
         [
             git_exe,
             *git_no_hooks_args(),
@@ -665,16 +664,14 @@ def materialize_from_bare(
             str(consumer_dir),
         ],
         capture_output=True,
-        text=True,
         timeout=60,
         env=env,
         check=True,
     )
     # CRLF determinism (panel: byte-identical across users).
-    subprocess.run(
+    run_git_text(
         [git_exe, "-C", str(consumer_dir), "config", "core.autocrlf", "false"],
         capture_output=True,
-        text=True,
         timeout=10,
         env=env,
         check=True,
@@ -688,10 +685,9 @@ def materialize_from_bare(
         ("filter.lfs.process", ""),
         ("filter.lfs.required", "false"),
     ):
-        subprocess.run(
+        run_git_text(
             [git_exe, "-C", str(consumer_dir), "config", key, val],
             capture_output=True,
-            text=True,
             timeout=10,
             env=env,
             check=False,
@@ -702,7 +698,7 @@ def materialize_from_bare(
             apply_sparse_cone(
                 git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
             )
-        checkout = subprocess.run(
+        checkout = run_git_text(
             [
                 git_exe,
                 *git_no_hooks_args(),
@@ -713,7 +709,6 @@ def materialize_from_bare(
                 checkout_target,
             ],
             capture_output=True,
-            text=True,
             timeout=60,
             env=env,
             check=True,

@@ -34,6 +34,7 @@ import subprocess
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
+from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
@@ -552,10 +553,9 @@ class GitCache:
                 # all blobs must be present locally. The partial path
                 # relies on the consumer being configured as a promisor
                 # so missing blobs trigger an on-demand fetch.
-                subprocess.run(
+                run_git_text(
                     clone_args,
                     capture_output=True,
-                    text=True,
                     timeout=300,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
@@ -580,7 +580,7 @@ class GitCache:
                     staged.mkdir(parents=True, exist_ok=True)
                     os.chmod(str(staged), 0o700)
                     try:
-                        subprocess.run(
+                        run_git_text(
                             [
                                 git_exe,
                                 *_safe_git_args(),
@@ -593,7 +593,6 @@ class GitCache:
                                 str(staged),
                             ],
                             capture_output=True,
-                            text=True,
                             timeout=300,
                             env=subprocess_env,
                             stdin=subprocess.DEVNULL,
@@ -751,7 +750,7 @@ class GitCache:
                 # needs a separate post-clone ``git config`` because git
                 # clone always rewrites it to the clone source after
                 # applying ``-c`` overrides.
-                subprocess.run(
+                run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -775,7 +774,6 @@ class GitCache:
                         str(staged),
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
@@ -786,10 +784,9 @@ class GitCache:
                 # ``_safe_git_args`` because env-frozen host config outranks
                 # these local values.
                 for key, value in (("core.autocrlf", "false"), git_symlink_pin_entry()):
-                    subprocess.run(
+                    run_git_text(
                         [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
                         capture_output=True,
-                        text=True,
                         timeout=10,
                         env=subprocess_env,
                         stdin=subprocess.DEVNULL,
@@ -799,7 +796,7 @@ class GitCache:
                     # Point origin at the real upstream (clone set it to the
                     # local bare). Single config call; the other two promisor
                     # keys were already applied via ``-c`` above.
-                    subprocess.run(
+                    run_git_text(
                         [
                             git_exe,
                             *_safe_git_args(),
@@ -810,7 +807,6 @@ class GitCache:
                             promisor_url,
                         ],
                         capture_output=True,
-                        text=True,
                         timeout=10,
                         env=subprocess_env,
                         stdin=subprocess.DEVNULL,
@@ -835,7 +831,7 @@ class GitCache:
                     )
                 # Checkout the specific SHA. Git reports a link it could not
                 # create on stderr but still exits 0.
-                checkout = subprocess.run(
+                checkout = run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -845,7 +841,6 @@ class GitCache:
                         sha,
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
@@ -902,10 +897,9 @@ class GitCache:
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 [git_exe, *_safe_git_args(), "--git-dir", str(bare_dir), "cat-file", "-t", sha],
                 capture_output=True,
-                text=True,
                 timeout=10,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -951,10 +945,9 @@ class GitCache:
             fetch_args += ["--filter=blob:none"]
         fetch_args += [url, sha]
         try:
-            subprocess.run(
+            run_git_text(
                 fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -973,10 +966,9 @@ class GitCache:
             if is_partial:
                 fallback_fetch_args += ["--filter=blob:none"]
             fallback_fetch_args += [url, *_FALLBACK_REFSPECS]
-            subprocess.run(
+            run_git_text(
                 fallback_fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,

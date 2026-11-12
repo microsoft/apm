@@ -10,10 +10,10 @@ sparse-checkout behavior (timeouts, additional flags, future
 from __future__ import annotations
 
 import os
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from .git_env import run_git_text
 from .path_security import PathTraversalError, ensure_path_within
 
 FULL_CHECKOUT_TIMEOUT_SECONDS = 300
@@ -42,7 +42,7 @@ def _tracked_symlinks(
     if not paths:
         return []
     head = [git_exe, *(extra_git_args or [])]
-    result = subprocess.run(
+    result = run_git_text(
         [
             *head,
             "-C",
@@ -55,7 +55,6 @@ def _tracked_symlinks(
             *(_literal_pathspec(path) for path in paths),
         ],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=True,
@@ -105,7 +104,7 @@ def _first_dangling_tracked_symlink(
         relative_targets = [
             target.relative_to(repo_dir.resolve()).as_posix() for _, target in targets
         ]
-        result = subprocess.run(
+        result = run_git_text(
             [
                 *head,
                 "-C",
@@ -118,7 +117,6 @@ def _first_dangling_tracked_symlink(
                 *(_literal_pathspec(path) for path in relative_targets),
             ],
             capture_output=True,
-            text=True,
             timeout=timeout,
             env=env,
             check=True,
@@ -182,10 +180,9 @@ def sparse_checkout_active(
 ) -> bool:
     """Return whether Git still considers *repo_dir* a sparse checkout."""
     head = [git_exe, *(extra_git_args or [])]
-    result = subprocess.run(
+    result = run_git_text(
         [*head, "-C", str(repo_dir), "config", "--bool", "core.sparseCheckout"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=False,
@@ -241,10 +238,9 @@ def repair_dangling_cone_symlinks(
         return None
     repair_env = repair_env_factory() if repair_env_factory is not None else env
     head = [git_exe, *(extra_git_args or [])]
-    subprocess.run(
+    run_git_text(
         [*head, "-C", str(repo_dir), "sparse-checkout", "disable"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=repair_env,
         check=True,
@@ -291,18 +287,16 @@ def apply_sparse_cone(
     if not paths:
         return
     head = [git_exe, *(extra_git_args or [])]
-    subprocess.run(
+    run_git_text(
         [*head, "-C", str(repo_dir), "sparse-checkout", "init", "--cone"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=True,
     )
-    subprocess.run(
+    run_git_text(
         [*head, "-C", str(repo_dir), "sparse-checkout", "set", *paths],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         check=True,

@@ -68,6 +68,7 @@ _RID_GIT_DIAGNOSTIC_OWNER = "transport-platform-git-diagnostic-sanitizer-ownersh
 _RID_GIT_DIAGNOSTIC_DELEGATE = "transport-platform-git-diagnostic-sanitizer-ownership-downloader"
 _RID_GIT_DIAGNOSTIC_TOKENS = "transport-platform-git-diagnostic-token-shapes"
 _RID_GIT_DIAGNOSTIC_JWT = "transport-platform-git-diagnostic-token-shapes-jwt"
+_RID_GIT_OUTPUT_DECODING = "transport-platform-git-output-decoding"
 _RID_GIT_SINGLE_REMOTE = "transport-platform-git-single-remote-fetch"
 _RID_GIT_URL_CREDENTIALS = "transport-platform-git-url-credentials-out-of-argv"
 _RID_GIT_URL_HEADER = "transport-platform-git-url-header-specificity"
@@ -1361,6 +1362,54 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
             "Positional validation must reuse canonical transport and rewrite policy",
         )
     )
+    findings.extend(_check_git_output_decoding(provider, inv))
+    return tuple(findings)
+
+
+_GIT_TEXT_OUTPUT_CONSUMERS: tuple[str, ...] = (
+    "src/apm_cli/cache/git_cache.py",
+    "src/apm_cli/deps/bare_cache.py",
+    "src/apm_cli/deps/git_file_transport.py",
+    "src/apm_cli/deps/github_downloader.py",
+    "src/apm_cli/deps/github_downloader_validation.py",
+    "src/apm_cli/deps/tiered_ref_resolver.py",
+    "src/apm_cli/marketplace/ref_resolver.py",
+    "src/apm_cli/utils/git_sparse.py",
+)
+
+
+def _check_git_output_decoding(
+    provider: FactsProvider, inv: frozenset[str]
+) -> tuple[Violation, ...]:
+    """Install-path Git text output decodes as UTF-8 via run_git_text (#3056)."""
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            "src/apm_cli/utils/git_env.py",
+            (
+                'GIT_OUTPUT_ENCODING = "utf-8"',
+                "def run_git_text(",
+                'errors="surrogateescape",',
+                "result.stdout = _strict_git_text(command, result.stdout)",
+                'errors="backslashreplace",',
+            ),
+            "utils/git_env.py must own locale-independent Git output decoding",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _GIT_TEXT_OUTPUT_CONSUMERS,
+            re.compile(r"\b(?:text|universal_newlines)\s*=\s*True\b"),
+            "Install-path Git text output must use run_git_text, not the locale codec",
+            exempt=False,
+        )
+    )
     return tuple(findings)
 
 
@@ -1778,6 +1827,7 @@ RULES: tuple[Rule, ...] = (
             _RID_GIT_DIAGNOSTIC_DELEGATE,
             _RID_GIT_DIAGNOSTIC_TOKENS,
             _RID_GIT_DIAGNOSTIC_JWT,
+            _RID_GIT_OUTPUT_DECODING,
             _RID_GIT_SINGLE_REMOTE,
             _RID_GIT_URL_CREDENTIALS,
             _RID_GIT_URL_HEADER,

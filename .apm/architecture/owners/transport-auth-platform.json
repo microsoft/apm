@@ -96,6 +96,7 @@
         "transport-platform-git-diagnostic-sanitizer-ownership-downloader",
         "transport-platform-git-diagnostic-token-shapes",
         "transport-platform-git-diagnostic-token-shapes-jwt",
+        "transport-platform-git-output-decoding",
         "transport-platform-git-single-remote-fetch",
         "transport-platform-git-url-credentials-out-of-argv",
         "transport-platform-git-url-header-specificity",
