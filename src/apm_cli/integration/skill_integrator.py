@@ -17,10 +17,10 @@ from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_adoption import (
-    adoption_baselines,
     dircmp_equal,
     is_skill_dir_identical_to_source,
     render_skill_markdown,
+    skill_tree_baselines,
 )
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
@@ -102,6 +102,12 @@ def _build_deployable_copy_ignore(
             ignored.update(source_plan.copy_ignore(directory, contents))
         return list(ignored)
 
+    _combined.rebased = lambda plan: _build_deployable_copy_ignore(  # type: ignore[attr-defined]
+        skip_bin=skip_bin,
+        source_plan=plan,
+        exclude_apm=exclude_apm,
+        exclude_apm_yml=exclude_apm_yml,
+    )
     return _combined
 
 
@@ -501,19 +507,8 @@ class SkillIntegrator(BaseIntegrator):
         def managed(path: str) -> bool:
             return path in self._skill_session_hashes or claimed(path)
 
-        adopted = (
-            adoption_baselines(
-                source,
-                destination,
-                walk_source=self.walk_source_tree,
-                ignore=ignore,
-                resolve_links=self.resolve_links,
-                owned=lambda path: claimed(entry(path)),
-            )
-            if session is not None
-            and not force
-            and not session.has_receipt(destination / "SKILL.md")
-            else {}
+        adopted = skill_tree_baselines(
+            self, source, destination, ignore=ignore, owned=lambda p: claimed(entry(p)), force=force
         )
         unchanged = unchanged and not adopted
         copied = self.copy_directory_files(
