@@ -32,6 +32,12 @@ def _should_skip_redownload(locked_dep: Any, install_path: Path) -> bool:
     if not install_path.is_dir():
         return False
 
-    from apm_cli.utils.content_hash import verify_package_hash
+    from apm_cli.deps.carried_license import verify_locked_package
 
-    return verify_package_hash(install_path, locked_dep.content_hash)
+    # Carried licence copies (#3556) are excluded from content_hash and must
+    # still match their own recorded hash, else re-download re-carries them.
+    return verify_locked_package(
+        install_path,
+        locked_dep.content_hash,
+        getattr(locked_dep, "carried_licenses", ()) or (),
+    )

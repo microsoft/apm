@@ -110,8 +110,10 @@ author:
 Author your own `plugin.json` at the project root (or under `.github/plugin/`,
 `.claude-plugin/`, or `.cursor-plugin/`) when you need fields APM does not
 synthesise -- otherwise leave it to `apm pack` and keep `apm.yml` as the
-source of truth. See [Package anatomy](../../concepts/package-anatomy/) for
-the full schema.
+source of truth. The bundled `plugin.json` always takes its `version` from
+`apm.yml`; if your authored file declares a different version, `apm pack`
+warns and names the file so you can update it, but never edits it. See
+[Package anatomy](../../concepts/package-anatomy/) for the full schema.
 
 ### Hook resources in Claude plugin bundles
 

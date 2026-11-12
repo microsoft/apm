@@ -203,6 +203,13 @@ source identity or local `../sibling` source anchors. After upgrading an older
 aliased install, run `apm install` and review the updated lockfile; use the
 updated CLI for subsequent replay and cleanup.
 
+Licence files travel with `path:` subdirectories: APM copies the nearest
+`LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` (subdirectory up to repo root)
+into the package and next to each deployed skill lacking one, byte-for-byte,
+and records each copy under `carried_licenses` in `apm.lock.yaml`. Whole-repo
+skills below the root get the root licence the same way. Uninstall removes the
+copies; `apm audit` flags missing or edited ones.
+
 Git [skill collections](../../../../../docs/src/content/docs/reference/package-types.md)
 with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or `SKILL.md`.
 
