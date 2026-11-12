@@ -17,7 +17,7 @@ import pytest
 
 from tests.workflow_contracts import load_workflow
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 PR_ONLY_CANCEL = "${{ github.event_name == 'pull_request' }}"

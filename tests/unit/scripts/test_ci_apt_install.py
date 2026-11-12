@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -27,7 +28,6 @@ pytestmark = [
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "ci-apt-install.sh"
 PRIMARY_SOURCES = "Types: deb\nURIs: http://azure.archive.ubuntu.com/ubuntu/\nSuites: noble\n"
-FALLBACK_URI = "URIs: http://mirrors.edge.kernel.org/ubuntu/"
 
 STUBS = {
     "sudo": '#!/bin/sh\nexec "$@"\n',
@@ -74,6 +74,12 @@ def _run(tmp_path: Path, hang_pattern: str) -> tuple[subprocess.CompletedProcess
     return result, time.monotonic() - started
 
 
+def _active_uris(tmp_path: Path) -> list[tuple[str | None, str | None, str]]:
+    lines = (tmp_path / "ubuntu.sources").read_text(encoding="utf-8").splitlines()
+    urls = [line.split(":", 1)[1].strip() for line in lines if line.startswith("URIs:")]
+    return [(urlparse(url).scheme, urlparse(url).hostname, urlparse(url).path) for url in urls]
+
+
 def _calls(tmp_path: Path) -> list[str]:
     return (tmp_path / "calls.log").read_text(encoding="utf-8").splitlines()
 
@@ -91,7 +97,7 @@ def test_stalled_primary_is_time_boxed_and_falls_over(tmp_path: Path) -> None:
     result, elapsed = _run(tmp_path, hang_pattern="azure.archive")
     assert result.returncode == 0, result.stderr
     assert elapsed < 20, f"stalled mirror was not time-boxed ({elapsed:.1f}s)"
-    assert FALLBACK_URI in (tmp_path / "ubuntu.sources").read_text(encoding="utf-8")
+    assert _active_uris(tmp_path) == [("http", "mirrors.edge.kernel.org", "/ubuntu/")]
     calls = _calls(tmp_path)
     assert "dpkg --configure -a" in calls
     assert calls[-1].endswith("install -y fish zsh")
