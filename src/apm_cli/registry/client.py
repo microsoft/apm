@@ -84,7 +84,6 @@ def _decode_registry_json(raw: bytes) -> Any:
 
 
 _DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
-OFFICIAL_MCP_REGISTRY_URL = "https://registry.modelcontextprotocol.io"
 
 # Human-readable name of each ambient precedence layer, for the one-line
 # "Using MCP registry: <url> (<label>)" diagnostic. Callers label their own
