@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- When `apm install` fails after deploying files to harness directories such as `.claude/agents/`, the failure output now lists each file `apm.lock.yaml` does not track and says to remove them or re-run `apm install` (with `--force` if they are skipped as not managed by APM), instead of reporting that no changes were committed; the files are not removed. (#3641)
 - `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses and forms keep absolute paths. -- by @Bronyal-lzx (#2944)
 - `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; the field is omitted. `apm init` still fills it in. (#3630)
 - HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells), instead of connecting without the pin that guards against DNS rebinding; an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
