@@ -197,10 +197,8 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
     directory after `apm install`.
 
     These tests do not exercise the higher-level integrator pipeline;
-    they validate the contract by importing
-    `apm_cli.security.gate.ignore_symlinks` and confirming each call
-    site invokes ``shutil.copytree`` with that callback (or a
-    composition that includes it).
+    they validate the canonical symlink filter and confirm each skill
+    member-copy call uses the composed deployable-source filter.
     """
 
     def setUp(self):
@@ -241,29 +239,39 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         self.assertNotIn("evil.txt", copied)
         self.assertNotIn("agents/evil-nested.txt", copied)
 
-    def test_skill_integrator_native_skill_copytree_uses_deployable_copy_filter(self):
-        """Every skill copytree uses the canonical deployable copy filter.
+    def test_skill_member_copies_use_deployable_copy_filter(self):
+        """Every skill member-copy call uses the canonical deployable copy filter.
 
         The filter composes ``ignore_non_content`` through
         ``build_copy_ignore`` with ``DeployableSourcePlan.copy_ignore``. This
         keeps cache markers and symlinks out while also rejecting any
         source-only content that the deployment plan did not authorize.
         """
+        import ast
         import inspect
 
         from apm_cli.integration import skill_integrator
 
         source = inspect.getsource(skill_integrator)
-        copytree_count = source.count("shutil.copytree(")
-        self.assertGreaterEqual(
-            copytree_count,
-            3,
-            f"Expected >=3 copytree calls in skill_integrator, found {copytree_count}",
-        )
-        self.assertGreaterEqual(
-            source.count("ignore=_build_deployable_copy_ignore("),
-            copytree_count,
-            "Every skill copytree must use the canonical deployable copy filter",
+        calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)]
+        member_copies = [
+            node
+            for node in calls
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "_copy_skill_bundle"
+        ]
+        self.assertTrue(member_copies, "Skill deployment must use canonical member copying")
+        for call in member_copies:
+            with self.subTest(line=call.lineno):
+                ignore = next((kw.value for kw in call.keywords if kw.arg == "ignore"), None)
+                self.assertIsInstance(ignore, ast.Call)
+                self.assertIsInstance(ignore.func, ast.Name)
+                self.assertEqual(ignore.func.id, "_build_deployable_copy_ignore")
+        self.assertFalse(
+            any(
+                isinstance(node.func, ast.Attribute) and node.func.attr == "copytree"
+                for node in calls
+            ),
+            "Skill deployment must not bypass the canonical member-copy owner",
         )
         self.assertIn("base_ignore = build_copy_ignore(", source)
         self.assertIn("source_plan.copy_ignore(directory, contents)", source)

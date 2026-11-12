@@ -20,8 +20,13 @@ from pathlib import Path
 import pytest
 
 from apm_cli.cache.url_normalize import normalize_repo_url
-from apm_cli.deps.git_remote_ops import RemoteRefParseError, validate_ls_remote_tag_output
+from apm_cli.deps.git_remote_ops import (
+    RemoteRefParseError,
+    parse_ls_remote_output,
+    validate_ls_remote_tag_output,
+)
 from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+from apm_cli.deps.registry.semver import pick_best
 from apm_cli.deps.revision_pins import (
     RevisionPinResolutionError,
     RevisionPinResolutionResult,
@@ -40,6 +45,12 @@ from apm_cli.deps.tiered_ref_resolver import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.utils.yaml_io import load_yaml
+from tests.integration.test_immutable_requirements_install import (
+    test_frozen_install_checks_short_pin_without_ref_discovery as _run_frozen_short_pin_contract,
+)
+from tests.integration.test_immutable_requirements_install import (
+    test_install_checks_every_immutable_requirement as _run_immutable_install_contract,
+)
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -48,7 +59,15 @@ from tests.spec_conformance._helpers import (
     load_json_fixture,
     load_schema,
 )
+from tests.unit.adopt.test_native_skill_collision import (
+    test_native_skill_preserves_unowned_directory as _native_skill_collision_contract,
+)
+from tests.unit.deps.test_immutable_requirement_conflicts import (
+    test_conflicting_commit_requirements_fail_with_both_chains as _run_immutable_chain_contract,
+)
+from tests.unit.install.test_dry_run_graph import _preview
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
+from tests.utils.local_package import LocalPackageFactory
 
 # --- req-rs-001..014 ---------------------------------------------------
 
@@ -62,12 +81,96 @@ def test_resolver_walks_dependency_graph_deterministically():
     )
 
 
+@pytest.mark.req("req-rs-001")
+def test_offline_preview_preserves_breadth_first_declaration_order(tmp_path: Path) -> None:
+    """The preview consumer preserves the existing resolution traversal contract."""
+    factory = LocalPackageFactory(tmp_path)
+    factory.create("left-child")
+    factory.create("right-child")
+    factory.create("left", dependencies=("../left-child",))
+    factory.create("right", dependencies=("../right-child",))
+    consumer = factory.create("consumer", dependencies=("../left", "../right"))
+    plan = _preview(consumer.root)
+    assert not plan.dependency_preview_errors
+    assert [dependency.local_path for dependency in plan.selected_apm_dependencies] == [
+        "../left",
+        "../right",
+        "../left-child",
+        "../right-child",
+    ]
+
+
+@pytest.mark.req("req-rs-001")
+@pytest.mark.parametrize("compatible", [False, True])
+@pytest.mark.parametrize("frozen", [False, True])
+def test_immutable_diamond_constraints_reach_install_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool, frozen: bool
+) -> None:
+    """Fail empty immutable intersections and accept proven equivalent refs."""
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, True, compatible, True, False)
+
+
+@pytest.mark.req("req-rs-010")
+@pytest.mark.parametrize("transitive", [False, True])
+def test_immutable_conflicts_name_ordered_constraint_chains(
+    tmp_path: Path, transitive: bool
+) -> None:
+    """Bind immutable conflict diagnostics to both complete ordered paths."""
+    _run_immutable_chain_contract(tmp_path, transitive, 4)
+
+
+@pytest.mark.req("req-lk-003")
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("compatible", [False, True])
+def test_frozen_short_pin_checks_recorded_commit_without_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compatible: bool
+) -> None:
+    """Replay only a recorded commit that actually matches its short pin."""
+    _run_frozen_short_pin_contract(tmp_path, monkeypatch, compatible)
+
+
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("frozen", [False, True])
+def test_locked_literal_equivalence_requires_no_remote_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frozen: bool
+) -> None:
+    """Unchanged lock evidence survives a deleted remote tag."""
+    _run_immutable_install_contract(tmp_path, monkeypatch, frozen, False, True, True, True)
+
+
 @pytest.mark.req("req-rs-002")
 def test_resolver_emits_lockfile_after_successful_resolution():
     assert_spec_contains(
         "MUST emit",
         "apm.lock.yaml",
     )
+
+
+@pytest.mark.req("req-rs-002")
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize("peeled_first", [False, True])
+def test_peeled_tag_identity_survives_shared_parser(peeled_first: bool) -> None:
+    """Both record orders preserve the peeled commit and annotated-only selection."""
+    tag_lines = [
+        f"{'a' * 40}\trefs/tags/v1.0.0",
+        f"{'b' * 40}\trefs/tags/v1.0.0^{{}}",
+    ]
+    if peeled_first:
+        tag_lines.reverse()
+    output = "\n".join(
+        [*tag_lines, f"{'c' * 40}\trefs/tags/v2.0.0", f"{'d' * 40}\trefs/heads/v3.0.0"]
+    )
+    refs = parse_ls_remote_output(output)
+
+    candidate = find_latest_annotated_tag(refs, package_name="tagged-package")
+
+    assert candidate.tag == "v1.0.0"
+    assert candidate.commit_sha == "b" * 40
+    assert {ref.name: ref.annotated for ref in refs} == {
+        "v1.0.0": True,
+        "v2.0.0": False,
+        "v3.0.0": False,
+    }
 
 
 @pytest.mark.req("req-rs-003")
@@ -187,7 +290,7 @@ def test_resolver_fails_closed_on_ambiguous_resolution():
     )
     # Schema enum pin (round-3 fold): the manifest schema MUST admit
     # only `intersection-pick` in v0.1; `nest` is reserved for v0.2.
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     enum = schema["$defs"]["depsBlock"]["properties"]["conflict_resolution"]["enum"]
     assert enum == ["intersection-pick"], (
         f"manifest schema conflict_resolution enum MUST be exactly "
@@ -200,6 +303,35 @@ def test_resolver_honours_prerelease_inclusion_rules():
     oracle = load_json_fixture("resolution", "semver-dialect.json")
     pr = [c for c in oracle["cases"] if "prerelease" in c["id"] or "build" in c["id"]]
     assert pr, "oracle MUST exercise pre-release / build-metadata cases"
+
+
+# Oracle cases whose range grammar (partial versions, comma AND, `||`
+# OR, X-ranges) the registry parse-time gate `is_semver_range` does not
+# accept yet. Widening that shared gate is outside the #3466 scope.
+_REGISTRY_GRAMMAR_GAPS = frozenset({"tilde-0_x", "comma-and", "or-union"})
+
+
+def _registry_oracle_cases(*, grammar_gaps: bool) -> list:
+    oracle = load_json_fixture("resolution", "semver-dialect.json")
+    return [
+        pytest.param(case, id=case["id"])
+        for case in oracle["cases"]
+        if not case["prerelease_optin"] and (case["id"] in _REGISTRY_GRAMMAR_GAPS) == grammar_gaps
+    ]
+
+
+@pytest.mark.req("req-rs-007")
+@pytest.mark.req("req-rs-014")
+@pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=False))
+def test_registry_picker_matches_semver_dialect_oracle(case):
+    """Registry version selection honours section 7.3.1 pre-release opt-in."""
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
+
+
+@pytest.mark.xfail(strict=True, reason="registry range grammar does not accept this form yet")
+@pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=True))
+def test_registry_picker_range_grammar_gaps(case):
+    assert pick_best(case["range"], case["tags"]) == case["expected"]
 
 
 @pytest.mark.req("req-rs-015")
@@ -520,6 +652,12 @@ def test_consumer_rejects_primitive_collisions():
         "first declared",
         "MUST NOT replace",
     )
+
+
+@pytest.mark.req("req-pr-002")
+def test_local_native_skill_overrides_dependency_and_reports_conflict(tmp_path: Path) -> None:
+    """Bind existing local-priority semantics to native skill collision admission."""
+    _native_skill_collision_contract(tmp_path, managed=None)
 
 
 @pytest.mark.req("req-pr-007")

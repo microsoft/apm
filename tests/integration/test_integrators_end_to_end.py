@@ -1189,14 +1189,28 @@ class TestMCPIntegratorRemoveStale:
         assert "stale-gem" not in config["mcpServers"]
 
     def test_removes_from_claude_project_mcp_json(self, tmp_path: Path) -> None:
+        from apm_cli.install.errors import RequiredIntegrationError
+        from tests.utils.managed_mcp import install_managed_mcp
+
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         mcp_json = tmp_path / ".mcp.json"
-        mcp_json.write_text(json.dumps({"mcpServers": {"stale-cl": {}, "keep-cl": {}}}))
-        MCPIntegrator.remove_stale({"stale-cl"}, runtime="claude", project_root=tmp_path)
+        mcp_json.write_text(json.dumps({"mcpServers": {"keep-cl": {}}}))
+        stored, hashes = install_managed_mcp(tmp_path, "claude", "stale-cl")
+        before = mcp_json.read_bytes()
+        with pytest.raises(RequiredIntegrationError, match="managed baseline"):
+            MCPIntegrator.remove_stale({"stale-cl"}, runtime="claude", project_root=tmp_path)
+        assert mcp_json.read_bytes() == before
+        MCPIntegrator.remove_stale(
+            {"stale-cl"},
+            runtime="claude",
+            project_root=tmp_path,
+            stored_configs=stored,
+            native_hashes=hashes,
+        )
         config = json.loads(mcp_json.read_text())
         assert "stale-cl" not in config["mcpServers"]
-        assert "keep-cl" in config["mcpServers"]
+        assert config["mcpServers"] == {"keep-cl": {}}
 
     def test_empty_stale_set_is_noop(self, tmp_path: Path) -> None:
         MCPIntegrator.remove_stale(set(), project_root=tmp_path)

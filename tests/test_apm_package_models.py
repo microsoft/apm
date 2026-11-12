@@ -94,12 +94,16 @@ class TestDependencyReference:
         with pytest.raises(ValueError):
             DependencyReference.parse("user/repo@myalias")
 
-    def test_parse_with_reference_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias -- @ is no longer parsed as alias separator."""
-        dep = DependencyReference.parse("user/repo#main@myalias")
+    def test_parse_with_reference_and_alias_requires_object_form(self):
+        """Reject shorthand aliases while preserving explicit ref and alias fields."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("user/repo#main@myalias")
+        dep = DependencyReference.parse_from_dict(
+            {"git": "https://github.com/user/repo.git", "ref": "main", "alias": "myalias"}
+        )
         assert dep.repo_url == "user/repo"
-        assert dep.reference == "main@myalias"  # @ treated as part of ref
-        assert dep.alias is None
+        assert dep.reference == "main"
+        assert dep.alias == "myalias"
 
     def test_parse_github_urls(self):
         """Test parsing various GitHub URL formats."""
@@ -703,7 +707,7 @@ class TestAPMPackage:
             f.flush()
 
             package = APMPackage.from_apm_yml(Path(f.name))
-            assert package.target == ["opencode", "claude", "vscode"]
+            assert package.target == ["opencode", "claude", "copilot"]
 
         Path(f.name).unlink()
 
@@ -745,7 +749,7 @@ class TestAPMPackage:
             f.flush()
 
             package = APMPackage.from_apm_yml(Path(f.name))
-            assert package.target == ["claude", "vscode"]
+            assert package.target == ["claude", "copilot"]
 
         Path(f.name).unlink()
 

@@ -40,13 +40,12 @@ winget install --id Microsoft.APM --exact --source winget
 ```
 
 ```powershell
-# Scoop (Windows)
-scoop bucket add apm https://github.com/microsoft/scoop-apm
+# Scoop (Windows, default main bucket)
 scoop install apm
 ```
 
 ```bash
-# pip (all platforms, requires Python 3.10+)
+# pip (all platforms, requires Python 3.11+)
 python3 -m pip install apm-cli
 ```
 

@@ -14,10 +14,11 @@ incorrect attribution -- a real legal/compliance risk.
 The generator combines two trusted inputs:
 
   1. `pyproject.toml` `[project] dependencies` -- the *direct* runtime
-     deps. Industry-standard NOTICE scope: transitive deps inherit
-     attribution via their parents and are typically covered by their
-     own NOTICE files (or are build-only, like `setuptools`/`wheel`,
-     which we explicitly exclude in the preamble).
+     deps. The generator does not enumerate transitive, vendored, native,
+     website or build-tool components. Their attribution obligations
+     require separate review of the actual distribution. For example,
+     setuptools is also a runtime dependency through llm, not universally
+     build-only; its nested components are not covered by this enumeration.
 
   2. `scripts/notice-metadata.yaml` -- curated overrides authored by a
      human reviewer the first time a dep is added. Holds the SPDX
@@ -63,16 +64,9 @@ import importlib.metadata as ilmd
 import re
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-
-# tomllib is stdlib in 3.11+; this script requires Python 3.10+ runtime
-# but pyproject.toml parsing only needs to work on the developer / CI
-# machine (3.12 per pyproject.toml). On 3.10 we fall back to `tomli`.
-try:
-    import tomllib  # type: ignore[import-not-found]
-except ModuleNotFoundError:  # pragma: no cover -- 3.10 path
-    import tomli as tomllib  # type: ignore[no-redef]
 
 from ruamel.yaml import YAML
 
@@ -103,14 +97,14 @@ class DepSpec:
     """A single entry parsed from `[project] dependencies`.
 
     `raw_specifier` preserves everything after the package name -- including
-    PEP 508 environment markers (e.g. `; python_version<'3.11'`). We keep
+    PEP 508 environment markers (e.g. `; sys_platform == 'win32'`). We keep
     it verbatim because the NOTICE "Version requirement" line is meant
     to communicate *intent* (what the project asks for), not the resolved
     version (which lives in `uv.lock` / GitHub's dependency graph).
     """
 
     name: str
-    raw_specifier: str  # e.g. ">=8.0.0" or ">=1.2.0; python_version<'3.11'"
+    raw_specifier: str  # e.g. ">=8.0.0" or ">=1.0; sys_platform == 'win32'"
 
 
 @dataclass

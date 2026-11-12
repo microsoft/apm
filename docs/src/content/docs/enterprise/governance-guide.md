@@ -340,7 +340,7 @@ Cache freshness follows the effective policy's `cache.ttl` (default `3600` secon
 
 Workarounds when the network is unreliable:
 
-- **Audit in CI is fully offline-capable** with `apm audit --ci --policy /path/to/vendored-policy.yml`. The `--policy` argument accepts a local file path and bypasses GitHub discovery entirely. Vendor your org policy into the repo (or a sidecar mount) and audit works in any air-gapped environment.
+- **Audit in CI is fully offline-capable** with `apm audit --ci --policy /path/to/vendored-policy.yml`. The `--policy` argument accepts a local file path and bypasses GitHub discovery entirely. Vendor your org policy into the repo (or a sidecar mount) and audit works in any air-gapped environment. If the file is missing or malformed, audit exits 1 rather than passing without policy checks.
 - **Install does not have a `--policy <path>` flag.** This is a known gap (section 14). The current workaround is `extends: <internal-mirror-url>` from a reachable `<org>/.github/apm-policy.yml`, but the leaf is still fetched via the GitHub API.
 - **Cache prewarm** for repeatable offline builds. The cache lives in the platform user cache at `apm/policy_v1/<project-key>/<key>.yml`, where `<project-key>` identifies the resolved project path and `<key>` is `sha256(repo_ref)[:16]`. Prewarming means stashing valid `<key>.yml` and `<key>.meta.json` files in that directory before install runs.
 - **Make policy fail-closed offline.** Set `policy.fetch_failure_default: block` in your project `apm.yml`. With this set, network failure or a malformed policy aborts install instead of warning. Combine with `policy.hash` to detect a tampered mirror.
@@ -357,6 +357,7 @@ Workarounds when the network is unreliable:
 | **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
 | Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
+| **Explicit `apm audit --ci --policy <path\|url\|owner/repo>` cannot be loaded** (missing file, unreachable, malformed, garbage, not found) | **Always fail-CLOSED** (`[x]`, exit 1) | n/a -- `policy.fetch_failure_default` does not apply; `--policy org` keeps discovery semantics | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed project manifest (`manifest_parse`) | **Always fail-CLOSED** | n/a (cannot be relaxed) | `policy/policy_checks.py`, `policy/ci_checks.py` |
 | `extends:` cycle detected | Fail-CLOSED, raises `PolicyInheritanceError` | n/a | `policy/inheritance.py` |
 | Cross-host `extends:` rejected | Fail-CLOSED, raises before any fetch | n/a (security mitigation, cannot be relaxed) | `policy/discovery.py` |

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from apm_cli.deps.bare_cache import fetch_sha_into_bare
+import pytest
+
+from apm_cli.deps.bare_cache import bare_clone_with_fallback, fetch_sha_into_bare
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -37,6 +40,46 @@ def _make_execute(src: Path) -> Callable[..., None]:
         clone_action(url=str(src), env={}, target=target)
 
     return execute_transport_plan
+
+
+@pytest.mark.parametrize("ref", ["refs/heads/release", "missing-reference"])
+def test_bare_clone_verifies_named_ref_and_scrubs_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref: str
+) -> None:
+    """Full-clone fallback pins the requested ref or fails with its remote redacted."""
+    config = tmp_path / "gitconfig"
+    config.write_text("[safe]\n\tbareRepository = explicit\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    src = tmp_path / "source"
+    src.mkdir()
+    _git(src, "init", "--initial-branch=main")
+    _git(src, "config", "user.email", "test@test.com")
+    _git(src, "config", "user.name", "Test")
+    (src / "file.txt").write_text("release content\n", encoding="utf-8")
+    _git(src, "add", ".")
+    _git(src, "commit", "-m", "release")
+    release_sha = _git(src, "rev-parse", "HEAD")
+    _git(src, "branch", "release")
+    (src / "file.txt").write_text("newer main content\n", encoding="utf-8")
+    _git(src, "commit", "-am", "advance main")
+    bare = tmp_path / "bare"
+    missing = ref == "missing-reference"
+    expected = pytest.raises(subprocess.CalledProcessError) if missing else nullcontext()
+    with expected:
+        bare_clone_with_fallback(
+            _make_execute(src),
+            src.as_uri(),
+            bare,
+            dep_ref=DependencyReference.parse(f"owner/repo/sub#{ref}"),
+            ref=ref,
+            is_commit_sha=False,
+        )
+    assert (
+        _git(bare, "--git-dir", str(bare), "config", "--get", "remote.origin.url") == "redacted://"
+    )
+    if not missing:
+        assert _git(bare, "--git-dir", str(bare), "rev-parse", "HEAD") == release_sha
+        assert _git(bare, "--git-dir", str(bare), "show", "HEAD:file.txt") == "release content"
 
 
 class TestFetchShaIntoBareIntegration:

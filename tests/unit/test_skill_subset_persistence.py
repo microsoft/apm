@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 
@@ -494,10 +494,8 @@ class TestSkillSubsetConsistencyCheck:
         return manifest
 
     def _make_lock_mock(self, locked_deps):
-        """Create a lock mock: get_dependency(key) → locked_dep."""
-        lock = Mock()
-        lock.get_dependency = lambda key: locked_deps.get(key)
-        return lock
+        """Use the real lookup owner so fixtures follow the lockfile contract."""
+        return LockFile(dependencies=locked_deps)
 
     def _make_dep_ref(self, repo_url, skill_subset=None):
         ref = Mock()
@@ -506,10 +504,11 @@ class TestSkillSubsetConsistencyCheck:
         return ref
 
     def _make_locked_dep(self, package_type="skill_bundle", skill_subset=None):
-        dep = Mock()
-        dep.package_type = package_type
-        dep.skill_subset = skill_subset if skill_subset else []
-        return dep
+        return LockedDependency(
+            repo_url="owner/repo",
+            package_type=package_type,
+            skill_subset=skill_subset or [],
+        )
 
     def _package_with_skills(self, tmp_path: Path, *names: str) -> Path:
         package = tmp_path / "pkg"

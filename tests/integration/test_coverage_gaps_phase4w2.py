@@ -1626,7 +1626,7 @@ class TestFileScannerScanLockfilePackages:
             patch("apm_cli.security.file_scanner.ContentScanner") as mock_scanner,
         ):
             mock_lf.read.return_value = mock_lock
-            mock_scanner.scan_file.return_value = [finding]
+            mock_scanner.scan_text.return_value = [finding]
             findings, scanned = scan_lockfile_packages(tmp_path)
 
         assert scanned == 1

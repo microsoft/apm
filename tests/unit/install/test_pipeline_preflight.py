@@ -19,8 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.install.errors import AuthenticationError
 from apm_cli.install.pipeline import _preflight_auth_check, _run_phase
+from apm_cli.models.dependency.materialization import MaterializationPathCollisionError
 
 # ---------------------------------------------------------------------------
 # Helpers shared across tests
@@ -43,6 +45,7 @@ def _make_dep(
     dep.ado_organization = "myorg"
     dep.ado_project = "myproject"
     dep.ado_repo = "myrepo"
+    dep.source_reference = dep
     return dep
 
 
@@ -427,17 +430,15 @@ class TestRunInstallPipelineExceptionContracts:
             with pytest.raises(RuntimeError, match="Failed to resolve APM dependencies"):
                 run_install_pipeline(pkg, target="claude")
 
-    def test_materialization_collision_is_not_double_wrapped(self) -> None:
-        """Actionable package-directory collisions propagate unchanged."""
+    @pytest.mark.parametrize("error_type", [MaterializationPathCollisionError, CodexNativeError])
+    def test_materialization_collision_is_not_double_wrapped(
+        self, error_type: type[Exception]
+    ) -> None:
+        """Actionable materialization and native errors propagate unchanged."""
         from apm_cli.install.pipeline import run_install_pipeline
-        from apm_cli.models.dependency.materialization import (
-            MaterializationPathCollisionError,
-        )
 
         pkg = self._make_pkg_with_deps()
-        collision = MaterializationPathCollisionError(
-            "Found multiple package directories; inspect duplicates."
-        )
+        collision = error_type("Found multiple package directories; inspect duplicates.")
 
         with (
             patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls,
@@ -452,6 +453,6 @@ class TestRunInstallPipelineExceptionContracts:
             patch("apm_cli.utils.install_tui.InstallTui"),
         ):
             mock_lf_cls.read.return_value = None
-            with pytest.raises(MaterializationPathCollisionError) as raised:
+            with pytest.raises(error_type) as raised:
                 run_install_pipeline(pkg, target="claude")
         assert raised.value is collision

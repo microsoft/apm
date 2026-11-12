@@ -462,7 +462,15 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
                 f"lockfile resolved_commit '{'0' * 40}'"
             ]
         else:
-            assert set(failed_checks) == {"ref-consistency"}
+            assert set(failed_checks) == {"ref-consistency", "drift"}
+            assert payload["drift"]["drift"] == [
+                {
+                    "path": ".agents/skills/skill-source-identity/SKILL.md",
+                    "kind": "orphaned",
+                    "package": "attacker.invalid/attacker/other",
+                    "inline_diff": "",
+                }
+            ]
             assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: not found in lockfile"

@@ -250,7 +250,7 @@ registry's published version list:
 | Selector | Behavior |
 |---|---|
 | `1.0.0`, `1.4.2` | Exact semver -- resolves to exactly that version |
-| `^1.0.0`, `~1.2.3`, `>=1.2.0 <2.0.0` | Semver range -- APM picks the highest matching version |
+| `^1.0.0`, `~1.2.3`, `>=1.2.0 <2.0.0` | Semver range -- APM picks the highest matching version; pre-releases are skipped unless the range names a pre-release on the same `major.minor.patch` |
 | `stable`, `latest`, `v1.4.2`, or any opaque string | Exact match -- matched literally against the registry's published version list |
 | `^1.0`, `~2`, `>=1.0` (range operator, malformed) | Rejected -- looks like a semver range but is invalid (e.g. missing patch); fix the range or drop the operator |
 | unset (no `#<ref>`) | Rejected -- a version selector is always required for registry-routed dependencies |
@@ -441,6 +441,11 @@ Env var names derive from the registry name by uppercasing and mapping `-` and `
 Do not configure two different registries whose names sanitize identically -- they would share one token slot. Prefer hyphenated names (`corp-main`) and avoid dots in registry names when multiple registries coexist.
 
 ## Full example
+
+This schema-less example uses the CLI's working-draft contract. The older
+published manifest schemas reject `id` plus `registry`; see
+[explicit schema adoption](../../reference/manifest-schema/#2-document-structure)
+for the corrected candidate, publication status and supporting-CLI requirement.
 
 ```yaml
 # apm.yml

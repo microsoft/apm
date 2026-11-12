@@ -46,6 +46,7 @@ from click.testing import CliRunner
 from apm_cli.policy import install_preflight as install_preflight_module
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+from tests.utils.materialized_downloader import stub_materialized_downloader
 
 # ---------------------------------------------------------------------------
 # Paths to real fixtures from W1
@@ -1138,13 +1139,19 @@ class TestI20WarnModeAllViolations:
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
 
+        modules = project_dir / "apm_modules"
+        for name in ("evil-pkg-1", "evil-pkg-2", "evil-pkg-3"):
+            package_root = modules / "test-blocked" / name
+            package_root.mkdir(parents=True)
+            _write_apm_yml(package_root / "apm.yml", name=name)
+        stub_materialized_downloader(mock_dl, modules)
+
         result = _invoke_install(runner)
 
         out = result.output
         # Should NOT block (warn mode)
         assert "blocked by org policy" not in out.lower(), f"Warn-mode should NOT block:\n{out}"
-        # Install should proceed (exit 0 or exit due to mock errors,
-        # but NOT due to policy)
+        assert result.exit_code == 0, out
         # The 3 deps should all be attempted (not short-circuited
         # after the first policy check failure)
         for dep_name in ["evil-pkg-1", "evil-pkg-2", "evil-pkg-3"]:

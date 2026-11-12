@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/lockfile-source-replacements-v1.schema.json",
+  "title": "Proposed OpenAPM source replacement lockfile version 3",
+  "description": "Unratified opt-in capability proposal 0.1.54. Structural validation supplements req-rpl-003/004; normalized table agreement and graph/request identity require consumer validation. Earlier schemas are unchanged.",
+  "type": "object",
+  "required": ["lockfile_version", "dependencies", "replacements"],
+  "properties": {
+    "lockfile_version": { "const": "3" },
+    "generated_at": { "type": "string" },
+    "apm_version": { "type": "string" },
+    "replacements": {
+      "type": "array",
+      "items": { "$ref": "manifest-source-replacements-v1.schema.json#/$defs/rule" }
+    },
+    "dependencies": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "mcp_servers": { "type": "array" },
+    "mcp_configs": { "type": "object" },
+    "local_deployed_files": { "$ref": "lockfile-v0.1.46.schema.json#/properties/local_deployed_files" },
+    "local_deployed_file_hashes": { "$ref": "lockfile-v0.1.46.schema.json#/properties/local_deployed_file_hashes" },
+    "attestations": { "type": "object" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "nullableText": { "type": ["string", "null"], "minLength": 1 },
+    "selection": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "request": {
+      "type": "object",
+      "required": ["parent", "ref", "skills", "targets", "dev", "alias"],
+      "properties": {
+        "parent": { "$ref": "#/$defs/nullableText" },
+        "ref": { "$ref": "#/$defs/nullableText" },
+        "skills": { "$ref": "#/$defs/selection" },
+        "targets": { "$ref": "#/$defs/selection" },
+        "dev": { "type": "boolean" },
+        "alias": { "$ref": "#/$defs/nullableText" }
+      },
+      "additionalProperties": false
+    },
+    "entry": {
+      "allOf": [
+        { "$ref": "lockfile-v0.1.46.schema.json#/$defs/entry" },
+        {
+          "if": { "required": ["replacement"] },
+          "then": {
+            "not": { "anyOf": [{ "required": ["source"] }, { "required": ["local_path"] }] }
+          }
+        }
+      ],
+      "type": "object",
+      "required": ["repo_url"],
+      "properties": {
+        "replacement": {
+          "type": "object",
+          "required": ["source", "requests"],
+          "properties": {
+            "source": { "$ref": "manifest-source-replacements-v1.schema.json#/$defs/source" },
+            "requests": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/request" }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

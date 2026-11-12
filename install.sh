@@ -1234,14 +1234,14 @@ check_python_requirements() {
         PYTHON_CMD="python"
     fi
     
-    # Check Python version (need 3.10+)
+    # Check Python version (need 3.11+)
     PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
     if [ -z "$PYTHON_VERSION" ]; then
         return 1
     fi
     
-    # Compare version (need >= 3.10)
-    REQUIRED_VERSION="3.10"
+    # Compare version (need >= 3.11)
+    REQUIRED_VERSION="3.11"
     if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$PYTHON_VERSION" | sort -V | head -n1)" = "$REQUIRED_VERSION" ]; then
         return 0  # Python version is sufficient
     else
@@ -1264,9 +1264,9 @@ print_selected_pip_install_command() {
 print_pip_recovery_guidance() {
     case "${PIP_FALLBACK_FAILURE:-python-unavailable}" in
         python-unavailable)
-            apm_echo "${YELLOW}Python 3.10+ is not available on this system.${NC}"
+            apm_echo "${YELLOW}Python 3.11+ is not available on this system.${NC}"
             echo ""
-            echo "Install Python 3.10+ first, then rerun this installer:"
+            echo "Install Python 3.11+ first, then rerun this installer:"
             echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
             echo "  CentOS/RHEL: sudo yum install python3 python3-pip"
             echo "  Alpine: apk add python3 py3-pip"
@@ -1360,14 +1360,14 @@ apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/li
 if [ "$PLATFORM" = "linux" ]; then
     # Get glibc version
     GLIBC_VERSION=$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    REQUIRED_GLIBC="2.35"
+    REQUIRED_GLIBC="2.28"
     
     if [ -n "$GLIBC_VERSION" ]; then
         # Compare versions
         if [ "$(printf '%s\n' "$REQUIRED_GLIBC" "$GLIBC_VERSION" | sort -V | head -n1)" != "$REQUIRED_GLIBC" ]; then
             apm_echo "${YELLOW}[!] Compatibility Issue Detected${NC}"
             apm_echo "${YELLOW}Your glibc version: $GLIBC_VERSION${NC}"
-            apm_echo "${YELLOW}Required version: $REQUIRED_GLIBC or newer${NC}"
+            apm_echo "${YELLOW}Required version: glibc $REQUIRED_GLIBC+${NC}"
             echo ""
             echo "The prebuilt binary will not work on your system."
             echo ""
@@ -1378,7 +1378,7 @@ if [ "$PLATFORM" = "linux" ]; then
             print_pip_recovery_guidance
             echo ""
             echo "Other installation options:"
-            echo "  1. Use a system with glibc 2.35+ for the prebuilt binary"
+            echo "  1. Use a system with glibc $REQUIRED_GLIBC+ for the prebuilt binary"
             echo "  2. Build from source: git clone $GITHUB_URL/$APM_REPO.git && cd apm && uv sync && uv run pip install -e ."
             exit 1
         fi
@@ -1812,7 +1812,7 @@ else
     if echo "$BINARY_TEST_OUTPUT" | grep -q "GLIBC"; then
         apm_echo "${YELLOW}[!] glibc version incompatibility detected${NC}"
         if [ -n "$GLIBC_VERSION" ]; then
-            echo "Your system has glibc $GLIBC_VERSION but the binary requires glibc 2.35+"
+            echo "Your system has glibc $GLIBC_VERSION but the binary requires glibc $REQUIRED_GLIBC+"
         fi
         echo ""
     fi

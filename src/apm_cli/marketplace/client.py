@@ -566,12 +566,17 @@ def _fetch_git(
     """Fetch marketplace.json from a generic git URL via subprocess + GitCache.
 
     Sparse-cone clones only the requested manifest path. AuthResolver owns
-    remote-aware credential selection and Git environment policy.
+    remote-aware credential selection and Git environment policy. ADO hosts
+    route the checkout through ``AuthResolver.try_with_fallback`` with the
+    repository path so path-scoped ``git credential fill`` can run after PAT
+    and bearer authentication fail, while retaining the hardened Git base
+    environment.
     """
     _validate_ref(source.ref, source.name)
 
     from ..cache.git_cache import GitCache
     from ..cache.paths import get_cache_root
+    from ..core.auth import AdoAuthChainExhaustedError
     from ..utils.git_env import GitUrlRewriteError, GitUrlRewriteProbeError
 
     org = source.owner or None
@@ -602,14 +607,33 @@ def _fetch_git(
             ),
         )
 
-    try:
-        auth_ctx = (
-            auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
-            if source.port is not None
-            else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
+    cache = GitCache(get_cache_root(), refresh=False)
+
+    def _checkout(_token, git_env):
+        return cache.get_checkout(
+            source.url,
+            source.ref,
+            env=git_env,
+            sparse_paths=[file_path] if "/" in file_path else None,
         )
-        git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
-    except ValueError as exc:
+
+    ado_host = getattr(host_info, "kind", "") == "ado"
+    git_env: dict | None = None
+    ado_base_env: dict | None = None
+    try:
+        if ado_host:
+            from ..utils.git_env import validate_git_url_rewrite_safety
+
+            ado_base_env = auth_resolver.hardened_git_base_env()
+            validate_git_url_rewrite_safety(source.url, ado_base_env)
+        else:
+            auth_ctx = (
+                auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
+                if source.port is not None
+                else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
+            )
+            git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
+    except (GitUrlRewriteError, GitUrlRewriteProbeError, ValueError) as exc:
         logger.debug(
             "Generic-git policy rejected '%s': %s",
             source.name,
@@ -617,18 +641,34 @@ def _fetch_git(
         )
         raise _rewrite_policy_error(exc) from exc
 
-    cache = GitCache(get_cache_root(), refresh=False)
     try:
-        # Sparse-cone clone -- only the marketplace.json directory tree is fetched.
-        checkout_dir = cache.get_checkout(
-            source.url,
-            source.ref,
-            env=git_env,
-            sparse_paths=[file_path] if "/" in file_path else None,
-        )
+        if ado_host:
+            fallback_kwargs = {
+                "org": org,
+                "path": urlsplit(source.url).path.lstrip("/"),
+                "unauth_first": False,
+            }
+            if source.port is not None:
+                fallback_kwargs["port"] = source.port
+            fallback_kwargs["base_env"] = ado_base_env
+            checkout_dir = auth_resolver.try_with_fallback(
+                host_info.host,
+                _checkout,
+                **fallback_kwargs,
+            )
+        else:
+            checkout_dir = _checkout(None, git_env)
     except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
         logger.debug("Generic-git rewrite policy rejected '%s'", source.name)
         raise _rewrite_policy_error(exc) from exc
+    except AdoAuthChainExhaustedError as exc:
+        raise MarketplaceFetchError(
+            source.name,
+            str(exc),
+            retry_hint=(
+                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
+            ),
+        ) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
         # caller's _auto_detect_path probe can try the next candidate path.
@@ -1138,6 +1178,26 @@ def _fetch_file(
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
+def _auto_detect_path_with_payload(
+    source: MarketplaceSource,
+    auth_resolver: object | None = None,
+) -> tuple[str | None, dict | None]:
+    """Probe candidate locations and return the first that exists.
+
+    Returns ``(path, data)`` where ``data`` is the successfully fetched
+    catalog JSON for the winning candidate, so callers can reuse the
+    response instead of immediately re-fetching the same URL
+    (microsoft/apm#3283).  Returns ``(None, None)`` if no location
+    contains a marketplace.json.  Raises ``MarketplaceFetchError`` on
+    non-404 failures (auth errors, etc.).
+    """
+    for candidate in _MARKETPLACE_PATHS:
+        data = _fetch_file(source, candidate, auth_resolver=auth_resolver)
+        if data is not None:
+            return candidate, data
+    return None, None
+
+
 def _auto_detect_path(
     source: MarketplaceSource,
     auth_resolver: object | None = None,
@@ -1147,11 +1207,8 @@ def _auto_detect_path(
     Returns ``None`` if no location contains a marketplace.json.
     Raises ``MarketplaceFetchError`` on non-404 failures (auth errors, etc.).
     """
-    for candidate in _MARKETPLACE_PATHS:
-        data = _fetch_file(source, candidate, auth_resolver=auth_resolver)
-        if data is not None:
-            return candidate
-    return None
+    detected, _payload = _auto_detect_path_with_payload(source, auth_resolver=auth_resolver)
+    return detected
 
 
 # ---------------------------------------------------------------------------
@@ -1164,6 +1221,7 @@ def fetch_marketplace(
     *,
     force_refresh: bool = False,
     auth_resolver: object | None = None,
+    discovery_payload: dict | None = None,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -1175,6 +1233,12 @@ def fetch_marketplace(
         source: Marketplace source to fetch.
         force_refresh: Skip cache and re-fetch from network.
         auth_resolver: Optional ``AuthResolver`` instance (created if None).
+        discovery_payload: Optional catalog JSON already fetched during
+            path discovery in the same invocation (microsoft/apm#3283).
+            When provided, the network fetch of ``source.path`` is skipped
+            and the discovery response is parsed and cached instead.  The
+            payload MUST come from the same source URL and ref; callers
+            that cannot guarantee that must pass ``None``.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -1240,7 +1304,15 @@ def fetch_marketplace(
                 source_digest=result.digest,
             )
 
-        data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
+        if discovery_payload is not None:
+            # Reuse the catalog response already fetched by path discovery
+            # in this same invocation instead of re-fetching the identical
+            # URL (microsoft/apm#3283).  The payload is still written to
+            # the sidecar cache below, so later invocations see the same
+            # freshness behavior as a network fetch.
+            data = discovery_payload
+        else:
+            data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
         if data is None:
             raise MarketplaceFetchError(
                 source.name,

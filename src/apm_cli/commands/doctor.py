@@ -12,8 +12,6 @@ import sys
 
 import click
 
-from .marketplace.doctor import run_doctor
-
 
 @click.command(
     help=(
@@ -25,6 +23,8 @@ from .marketplace.doctor import run_doctor
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Top-level diagnostic entry point."""
+    from .marketplace.doctor import run_doctor
+
     exit_code = run_doctor(verbose, logger_name="doctor")
     if exit_code != 0:
         sys.exit(exit_code)

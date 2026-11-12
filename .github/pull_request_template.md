@@ -2,7 +2,24 @@
 
 Brief description of changes and motivation.
 
-Fixes # (issue)
+## Issue and approved scope
+
+Issue: Fixes #N | Refs #N (required; keep one; use the canonical issue or a
+bounded child issue)
+
+Human scope-approval comment: (link, state the trivial-documentation
+standing-preapproval case, or indicate private security coordination without
+disclosing report details)
+
+Does this PR complete the issue, or what remains?
+
+<!-- Use "Fixes #N" or "Closes #N" only for an issue this PR completes, so
+     GitHub closes it on merge. For partial or related work use "Refs #N"
+     and say what remains. A related issue,
+     automated recommendation, or label alone is not scope approval.
+     Routine automated maintenance needs a bounded, human-approved issue.
+     Security changes may use private tracking: do not disclose report details.
+     Existing PRs follow the transition guidance in CONTRIBUTING.md. -->
 
 ## Type of change
 
@@ -20,8 +37,8 @@ Fixes # (issue)
 ## Spec conformance (OpenAPM v0.1)
 
 If this PR changes behaviour that an OpenAPM v0.1 `req-XXX` covers,
-confirm the three-step ritual (see CONTRIBUTING.md "Adding or
-changing a normative requirement"):
+confirm the three-step ritual in the
+[development guide](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/contributing/development-guide.md#adding-or-changing-a-normative-requirement-openapm-v01):
 
 - [ ] Spec edit: `docs/src/content/docs/specs/openapm-v0.1.md` updated
       (new/changed `<a id="req-XXX"></a>` anchor + prose + Appendix C

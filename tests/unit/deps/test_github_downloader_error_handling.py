@@ -28,6 +28,17 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked clones carry no Git objects; real-git tests cover link materialization."""
+    with (
+        patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
 # ---------------------------------------------------------------------------

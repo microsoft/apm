@@ -45,6 +45,10 @@ For the full manifest schema (every field, every type), see
 For MCP server entries (`dependencies.mcp`), see
 [Install MCP servers](../install-mcp-servers/).
 
+For the distinction between the source repository and the installed copy
+under `apm_modules/`, see
+[Source packages and installed copies](../../producer/source-vs-installed/).
+
 ## Reference formats
 
 Every entry under `dependencies.apm` is parsed by the same reference
@@ -61,7 +65,7 @@ parser. The supported forms:
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
-| Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
+| Local path | `./packages/shared` or `./ai/agents/xyz.agent.md` | Directory package or one `.agent.md`, `.instructions.md`, or `.prompt.md` file on disk. |
 | Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name>, type: gitlab }` | Aliases, nested groups, monorepo subpaths, bespoke GitLab hosts, or anything string forms cannot express. |
 | Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). The publisher controls the tag naming convention. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
@@ -97,6 +101,7 @@ dependencies:
 
     # Local: filesystem path (development only)
     - path: ./packages/shared-skills
+    - path: ./ai/agents/xyz.agent.md
 
     # Remote monorepo sibling: inside owner/mono/packages/frontend/apm.yml
     - path: ../shared
@@ -135,6 +140,17 @@ host/repo/ref and downloads the sibling from the same origin. Absolute paths,
 paths that escape the repo root, and cross-repo local paths are rejected.
 This is for same-repo monorepo siblings, not general workspace semantics.
 
+Local single-file entries also work as strings, for example
+`- ./ai/agents/xyz.agent.md`. The file is copied, not linked; sibling assets
+and dependencies mentioned in prose are not collected. Use a directory package
+for bundles. Normal install accepts deliberate source edits and records the
+copied package's content hash. `apm install --frozen` verifies that same image
+against the locked hash; changed bytes fail without replacing the deployment
+or rewriting the lockfile. A missing, unreadable, unsupported, or invalid source
+also fails rather than removing its previously deployed output.
+Use normal `apm install` to refresh local edits. `apm update` compares dependency
+refs; do not use it as a local-content refresh.
+
 Use `type: gitlab` only on `git` object entries for self-managed GitLab
 instances whose hostname does not make the platform obvious:
 
@@ -152,9 +168,8 @@ the HTTP file-read path. If a private host fails with 401/403, use a whole-repo
 git dependency for full clone auth support, or choose the supported HTTP backend
 signal (`type: gitlab` for GitLab-compatible hosts, `GITHUB_HOST` for GHES).
 
-**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over
-git transport (not the REST API), so self-hosted instances with the API disabled
-still install. See [Authentication](../authentication/#gitlab-saas-or-self-managed).
+**GitLab `path:` files** use Git first, with
+[restricted REST fallback](../authentication/#gitlab-saas-or-self-managed).
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
@@ -171,10 +186,112 @@ object form instead:
 
 Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
 `@` for git usernames and future package-manager-compatible version syntax.
+
+For reserved aliases `.` and `..`, see [Rejected dependency aliases](../../troubleshooting/migration/#rejected-dependency-aliases).
 :::
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).
+
+## Replace a source (candidate)
+
+:::caution[Development-build contract]
+Root source replacement is an unratified implementation candidate, not a
+released OpenAPM contract. It requires a build containing this feature and the
+explicit schema selector below; a first supported release has not been assigned.
+The selector is not yet a published JSON Schema.
+
+Verified older clients v0.25.0, v0.32.0 and v0.33.0 reject this selector and
+replacement lock version `"3"`. v0.24.1 can ignore them and install upstream
+instead. These observations do not establish feature support or a safe minimum
+client version. Do not share replacement manifests or locks with unqualified
+clients.
+:::
+
+Keep the dependency declaration unchanged. In the consumer's root `apm.yml`,
+redirect its exact Git identity to a local checkout:
+
+```yaml
+$schema: https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json
+replace:
+  - for:
+      git: https://github.com/example/catalog.git
+      path: packages/base
+    with:
+      path: ../catalog/packages/base
+```
+
+Run `apm install`. The rule applies to direct and transitive requirements,
+including shared dependencies. Only root rules apply; dependency-owned rules
+cannot redirect the consumer. Matching includes the normalized host, endpoint,
+repository and optional subdirectory, not a package name or wildcard.
+Local paths are relative to the consumer manifest, even for a transitive
+requirement. Keep the same sibling-checkout layout on other machines.
+
+For a fork, replace the `with` mapping with an explicit source and ref:
+
+```yaml
+with:
+  git: https://github.com/my-org/catalog-fork.git
+  path: packages/base
+  ref: patched-base
+```
+
+This substitutes the complete source and ref. An omitted fork `path` selects
+the repository root, not the original subdirectory. Original refs remain
+provenance, not constraints on the replacement. Rules do not chain through the
+selected source, but that source's own dependencies can match root rules.
+The original identity still owns one installed slot and its deployed files.
+Authentication, policy, integrity and executable approval use the selected
+source; replacement is not a trust grant. HTTP replacement sources are rejected,
+including with `--allow-insecure`.
+
+Ordinary installs replay a matching fork pin. `apm update` refreshes mutable fork
+refs but retains an explicitly selected SHA. `apm outdated` checks the fork;
+local sources are shown as not remotely comparable. Its table shows original
+and selected sources; `--verbose` also prints per-dependency replacement details.
+`apm deps why` shows source
+provenance and original request paths. Missing or invalid selected sources fail
+without falling back upstream.
+
+`apm install --dry-run` previews locally available replacement dependencies
+without changing installed outputs. Transitive local replacements keep the
+consumer-root anchor; unavailable selected sources make the preview incomplete.
+
+`--frozen` compares the complete rule table, including unused rules, and verifies
+local content against its recorded baseline before deployment. Changed, added
+or removed files, missing sources and missing content hashes are refused.
+Review changes and run a normal install to accept a new baseline.
+
+Ordinary `apm install` persists the entire normalized root replacement table in
+`apm.lock.yaml`, even after the last dependency is removed. This includes
+clearing it with `replace: []` or removing `replace`. Recording dormant rules
+does not read or fetch their sources, even if a local path is absent.
+
+Delete a matching rule and run `apm install` to return to upstream requirements
+and reconcile owned outputs. Shared replacements remain until their last parent
+is removed. If reachability cannot be verified, uninstall names the affected
+dependencies so you can restore their missing or invalid manifests and retry.
+Uninstall retains dormant rules; remove them explicitly if no longer
+needed. See the [candidate manifest contract](../../reference/manifest-schema/#313-replace-candidate)
+and [lock evidence](../../reference/lockfile-spec/#root-source-replacement-evidence-candidate).
+
+## Incompatible immutable requirements
+
+APM installs one version per package identity. If two dependency paths require
+tags or commit SHAs that resolve to different commits, install fails with both
+root-to-package paths and requested refs. Different tag names, or a tag and its
+commit SHA, are compatible when they identify the same commit. Errors show
+ordered `owner/repo@ref -> owner/repo@ref` chains; manifests still use `#ref`.
+Unchanged locked refs use their recorded commits without Git ref discovery.
+New named refs may need a lookup; a failed lookup is not proof of compatibility.
+
+Align the refs in your `apm.yml`, or select a parent package release that requires
+the same commit. Then run `apm install` to regenerate the lockfile. Do not edit
+`apm.lock.yaml` to hide a conflict. `--frozen` also rejects a locked commit that
+drops an immutable requirement discovered in a dependency manifest, including
+on a cold cache after the parent package is fetched. Short SHA pins must match
+the prefix of the recorded full commit. Side-by-side versions are not supported.
 
 ## Add a dependency
 
@@ -209,15 +326,19 @@ Git-hook isolation guarantee.
 
 ## Transport selection
 
-APM selects one initial transport per dependency. Git then applies any matching
-safe `url.<base>.insteadOf` rule to that selected URL.
+APM selects one initial transport per dependency, including GitLab `path:`
+single-file sparse fetches. Git then applies matching safe
+`url.<base>.insteadOf` rules.
 
 | Dependency form | Initial transport |
 |---|---|
-| `ssh://...` or `git@host:...` | SSH |
+| `ssh://...` or `user@host:...` (SCP-style) | SSH |
 | `https://...` or `http://...` | The explicit HTTP(S) scheme |
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Other shorthand | HTTPS |
+
+`apm audit --ci` cold replay uses the same declared transport, so an SSH
+dependency does not need `APM_GIT_PROTOCOL` for audit.
 
 An explicit scheme prevents APM from choosing another protocol unless
 cross-protocol fallback is enabled, but it does not disable your Git `insteadOf`
@@ -231,6 +352,13 @@ Cross-protocol retry is off by default. Use `--allow-protocol-fallback` or
 preference with `apm config set prefer-ssh true`, or save the retry escape hatch
 with `apm config set allow-protocol-fallback true`. See the
 [`apm config` reference](../../reference/cli/config/).
+
+Opt-in SSH/HTTPS fallback warns when a failed attempt switches protocol.
+It reuses the declared custom port and warns about that port once; it does
+not map an SSH alias to a web hostname. If protocols use different endpoints,
+declare the intended URL instead. GitLab REST additionally requires an
+executed same-origin HTTPS attempt; see
+[GitLab authentication](../authentication/#gitlab-saas-or-self-managed).
 
 If Git reports an HTTPS `Failed to connect...` / `Couldn't connect to server`
 error for the requested remote, APM retries that Git action once after 1 second
@@ -352,14 +480,20 @@ apm prune --dry-run   # preview what gets deleted
 apm prune             # delete orphaned packages from apm_modules/
 ```
 
-`apm prune` removes any directory in `apm_modules/` that no longer
-corresponds to a declared dependency or a transitive dependency still
-required by another package. It does not touch your manifest.
+`apm prune` removes unneeded recognized package roots in `apm_modules/`,
+including manifestless `SKILL.md` installs whose lock entries are already gone.
+It preserves declared direct/dev and retained transitive packages, bundled
+skills, and entire roots containing needed nested packages. Personal files
+inside a removable root are also removed; keep personal source outside
+`apm_modules/`. It does not touch your manifest.
 Lockfile entries, deployed harness files (`.github/`, `.claude/`, etc.),
 and merged hook configuration owned by the pruned package are all
 reconciled immediately by `apm prune` itself -- remaining direct and
 transitive packages keep their hooks; no follow-up `apm install` is
 required.
+
+See [`apm prune`](../../reference/cli/prune/) for the managed-root boundary
+and the separate ownership protections for deployed files.
 
 If you also want to refresh remaining deps to their latest versions or refs, see
 [Update and refresh](../update-and-refresh/).

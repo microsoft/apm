@@ -24,6 +24,7 @@ def _make_dep(
     dep.ado_organization = "myorg"
     dep.ado_project = "myproject"
     dep.ado_repo = "myrepo"
+    dep.source_reference = dep
     return dep
 
 
@@ -181,6 +182,7 @@ def _make_generic_dep(host="gitlab.internal.corp", repo_url="org/repo"):
     dep.is_azure_devops.return_value = False
     dep.explicit_scheme = None
     dep.is_insecure = False
+    dep.source_reference = dep
     return dep
 
 
@@ -421,6 +423,7 @@ def _make_ssh_dep(host="git.corp.internal", repo_url="org/repo", explicit_scheme
     dep.explicit_scheme = explicit_scheme
     dep.is_insecure = False
     dep.ssh_user = None
+    dep.source_reference = dep
     return dep
 
 

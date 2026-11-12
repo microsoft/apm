@@ -8,6 +8,8 @@ the ``--target copilot`` selection and no real ``copilot`` binary ever runs.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -543,12 +545,14 @@ def test_deps_list_reports_the_natively_registered_plugin_with_its_version(
 
 def _forbid_copilot_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail loudly if the lifecycle path ever probes for a Copilot binary."""
+    from apm_cli.integration import mcp_integrator_install
     from apm_cli.runtime import utils as runtime_utils
 
     def _boom(name: str) -> str | None:
         raise AssertionError(f"unexpected runtime binary discovery for {name!r}")
 
     monkeypatch.setattr(runtime_utils, "find_runtime_binary", _boom)
+    monkeypatch.setattr(mcp_integrator_install, "find_runtime_binary", _boom)
     import subprocess as _subprocess
 
     def _subprocess_boom(*args, **kwargs):
@@ -556,6 +560,36 @@ def _forbid_copilot_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for attr in ("run", "Popen", "check_output", "check_call"):
         monkeypatch.setattr(_subprocess, attr, _subprocess_boom)
+
+
+def test_discovery_guard_restores_cold_imported_runtime_alias() -> None:
+    """A lifecycle guard must not leak through a first import on an xdist worker."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import pytest
+from tests.unit.copilot_plugins.test_pr2705_folds import _forbid_copilot_discovery
+from apm_cli.runtime import utils
+
+original = utils.find_runtime_binary
+with pytest.MonkeyPatch.context() as monkeypatch:
+    _forbid_copilot_discovery(monkeypatch)
+    from apm_cli.integration import mcp_integrator_install
+    with pytest.raises(AssertionError, match="unexpected runtime binary discovery"):
+        mcp_integrator_install.find_runtime_binary("copilot")
+
+assert utils.find_runtime_binary is original
+assert mcp_integrator_install.find_runtime_binary is original
+""",
+        ],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_zero_plugin_install_never_discovers_a_copilot_binary(

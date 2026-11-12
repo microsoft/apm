@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
-from collections.abc import MutableSequence, MutableSet
+from collections.abc import Callable, MutableSequence, MutableSet
 from pathlib import Path
 
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.primitives.models import Instruction, PrimitiveCollection
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
+from .build_id import has_valid_build_id
 from .claude_formatter import CLAUDE_HEADER
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
@@ -29,6 +31,111 @@ _ROOT_CONTEXT_BY_COMPILE_FAMILY = {
     "gemini": ("GEMINI.md", (GEMINI_MD_GENERATED_MARKER,)),
     "vscode": ("AGENTS.md", _AGENTS_ROOT_GENERATED_MARKERS),
 }
+
+
+def _get_deployed_instruction_filenames(
+    rules_dir: Path,
+    base_dir: Path,
+    warn_fn: Callable[[str], None],
+    expected_filenames: set[str] | None = None,
+) -> set[str]:
+    """Return safely contained deployed rule names from a target rules directory."""
+    if not rules_dir.is_dir():
+        return set()
+    try:
+        ensure_path_within(rules_dir, base_dir)
+    except PathTraversalError:
+        warn_fn(f"{rules_dir} is a symlink outside the project root -- ignoring")
+        return set()
+    candidates = (
+        (rules_dir / name for name in expected_filenames)
+        if expected_filenames is not None
+        else rules_dir.glob("*.md")
+    )
+    deployed: set[str] = set()
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            ensure_path_within(candidate, base_dir)
+        except PathTraversalError:
+            warn_fn(f"{candidate} is a symlink outside the project root -- ignoring")
+            continue
+        deployed.add(candidate.name)
+    return deployed
+
+
+def _instruction_rule_filename(target_key: str, instruction: Instruction) -> str | None:
+    """Return the target-native filename for one instruction, when supported."""
+    target_profile = KNOWN_TARGETS.get(target_key)
+    if not target_profile or "instructions" not in target_profile.primitives:
+        return None
+    stem = instruction.file_path.name
+    if stem.endswith(".instructions.md"):
+        stem = stem[: -len(".instructions.md")]
+    return f"{stem}{target_profile.primitives['instructions'].extension}"
+
+
+def _build_expected_rule_filenames(
+    target_key: str,
+    primitives: PrimitiveCollection,
+    instructions: list[Instruction] | None = None,
+) -> set[str]:
+    """Return the native rule filenames used to decide root-context coverage.
+
+    Args:
+        target_key: Canonical target profile key.
+        primitives: Collection whose instructions supply expected filenames.
+        instructions: Optional subset replacing primitives.instructions when
+            only selected instructions contribute expected filenames.
+    """
+    source_instructions = primitives.instructions if instructions is None else instructions
+    return {
+        filename
+        for instruction in source_instructions
+        if (filename := _instruction_rule_filename(target_key, instruction)) is not None
+    }
+
+
+def root_context_filename(compile_family: str | None) -> str | None:
+    """Return the known context filename for one catalog compile family."""
+    contract = _ROOT_CONTEXT_BY_COMPILE_FAMILY.get(compile_family)
+    return contract[0] if contract is not None else None
+
+
+def protected_user_root_status(path: Path, content: str) -> str | None:
+    """Protect user-authored or edited compiled roots before replacement/cleanup."""
+    if path.is_symlink():
+        return "skipped-symlink"
+    if not content.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):
+        return "skipped-hand-authored"
+    if not has_valid_build_id(content):
+        return "skipped-modified"
+    return None
+
+
+def clean_redundant_user_root(
+    path: Path, deploy_root: Path, expected: str, *, dry_run: bool
+) -> str:
+    """Remove only a regular, unchanged, currently redundant compiled user root.
+
+    Compiled roots are not deployed primitives tracked by the install lockfile.
+    The reproducible legacy root is their ownership and native-coverage proof.
+    Recheck it immediately before deletion; never follow a final symlink.
+    """
+    if path.is_symlink():
+        return "skipped-symlink"
+    ensure_path_within(path, deploy_root)
+    existing = path.read_text(encoding="utf-8")
+    protected = protected_user_root_status(path, existing)
+    if protected is not None:
+        return protected
+    if existing != expected:
+        return "skipped-modified"
+    if dry_run:
+        return "would-remove"
+    path.unlink()
+    return "removed"
 
 
 def catalog_root_context_markers() -> dict[str, tuple[str, ...]]:

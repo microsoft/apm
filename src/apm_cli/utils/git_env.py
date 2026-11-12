@@ -24,6 +24,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,11 +136,10 @@ _SCP_HOST_RE = re.compile(r"^(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:@\s]+):")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _GIT_CONFIG_PROBE_TIMEOUTS = (10, 30)
 
-_URL_REWRITE_RECOVERY = (
-    "inspect matching rules with "
-    "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$' "
-    "and remove the unsafe rule"
+_URL_REWRITE_INSPECTION = (
+    "inspect matching rules with 'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'"
 )
+_URL_REWRITE_RECOVERY = f"{_URL_REWRITE_INSPECTION} and remove the unsafe rule"
 
 
 class GitUrlRewriteError(ValueError):
@@ -159,7 +160,7 @@ class GitUrlRewriteProbeError(ValueError):
         self.category = category
         super().__init__(
             f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_RECOVERY}"
+            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
         )
 
 
@@ -244,7 +245,19 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
+        # A qualified lookup never searches the implicit Windows cwd. Python
+        # before 3.12 needs explicit PATHEXT candidates for qualified commands.
         candidate = shutil.which(str(directory / name))
+        if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
+            extensions = os.environ.get("PATHEXT") or (
+                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+            )
+            for extension in extensions.split(os.pathsep):
+                if not extension.startswith(".") or any(c in extension for c in "/\\:"):
+                    continue
+                candidate = shutil.which(str(directory / f"{name}{extension}"))
+                if candidate is not None:
+                    break
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
@@ -478,6 +491,45 @@ def git_no_templates_args() -> tuple[str]:
     return ("--template=",)
 
 
+_SYMLINK_PIN_KEY = "core.symlinks"
+_SYMLINK_PIN_VALUE = "false"
+
+
+def git_symlink_pin_entry() -> tuple[str, str]:
+    """Return the canonical ``(key, value)`` that APM pins for package links."""
+    return _SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE
+
+
+def git_symlink_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin that writes links as link text.
+
+    Git then writes each in-repo link as a small file holding its target on
+    every host, so a checkout never needs OS symlink capability (Windows
+    without Developer Mode). ``utils/git_sparse.materialize_tracked_symlinks``
+    replaces that text with the target's content from the commit's objects,
+    so the package hash is the same on every platform (#3457). ``-c``
+    outranks every config file and ``GIT_CONFIG_KEY_n`` entry, so the pin
+    holds regardless of caller config.
+    """
+    key, value = git_symlink_pin_entry()
+    return "-c", f"{key}={value}"
+
+
+def git_autocrlf_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin against host CRLF conversion.
+
+    ``core.autocrlf`` snapshots frozen into ``GIT_CONFIG_KEY_n`` by
+    :func:`git_clone_env` (apm#2971) outrank repository-local config, so on a
+    host whose system gitconfig sets ``core.autocrlf=true`` a working-tree
+    clone rewrites LF-committed blobs as CRLF. A checkout that runs without
+    the snapshot then compares that CRLF worktree against the LF index and
+    refuses the switch with "local changes would be overwritten" (apm#3368).
+    ``-c`` outranks the snapshots, so clone and checkout agree and the
+    materialized bytes are the committed bytes.
+    """
+    return "-c", "core.autocrlf=false"
+
+
 class _GitProgress(Protocol):
     """Git progress callback consumed by the clone subprocess adapter."""
 
@@ -597,7 +649,13 @@ def _has_applicable_http_authorization(
     headers: Sequence[GitConfigEntry],
     env: dict[str, str],
 ) -> bool:
-    """Ask Git which URL-scoped extra headers apply to one remote."""
+    """Ask Git which URL-scoped extra headers apply to one HTTP(S) remote."""
+    try:
+        scheme = urlsplit(remote_url).scheme.lower()
+    except ValueError:
+        return False
+    if scheme not in {"http", "https"}:
+        return False
     direct_header = env.get("GIT_HTTP_EXTRAHEADER", "")
     if _is_valid_http_extraheader_value(direct_header) and _is_credential_bearing_http_header(
         direct_header
@@ -657,7 +715,7 @@ def _urlmatched_header_group(
     if result.returncode == 1:
         return ()
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git URL-match probe failed")
+        raise GitUrlRewriteProbeError(f"Git URL-match probe exited with status {result.returncode}")
     selected = result.stdout.rstrip(b"\0\n")
     prefix = b"X-Apm-Config-Probe: "
     if not selected.startswith(prefix):
@@ -731,6 +789,95 @@ def configured_git_url_policy(
     """Return repository-neutral rewrites and config authorization state."""
     snapshot = _read_effective_git_config(git_subprocess_env(env))
     return snapshot.rewrites, snapshot.http_headers
+
+
+# issue #2545: the only keys inherited from the ambient (non-isolated) git
+# config into APM's isolated github.com environments. Deliberately narrow --
+# credential.helper and other auth-bearing config are never read here, so the
+# credential-leakage boundary the isolated environment exists for is
+# unaffected.
+_TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset(
+    {"http.sslbackend", "http.sslcainfo", "http.sslcapath"}
+)
+
+# Module-level cache for the ambient (env=None) TLS probe -- see
+# real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
+# cached "no ambient TLS config" answer, not a retry signal. Guarded by
+# _real_git_tls_config_lock: parallel installs call this once per
+# dependency, and the probe spawns a `git config` child with its own
+# 10s/30s retry budget, so an unguarded check-then-probe race could let
+# several workers pay that cost concurrently before either stores a result.
+_real_git_tls_config_cache: dict[str, str] | None = None
+_real_git_tls_config_lock = threading.Lock()
+
+
+def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
+    """Return the ambient ``http.sslBackend``/``sslCAInfo``/``sslCAPath`` config.
+
+    Reads the *non-isolated* config a plain ``git clone`` would see -- the
+    settings that let it succeed behind a TLS-inspecting proxy whose
+    intercepting CA chain carries no revocation info, while APM's
+    anonymous-first isolated environment (``GIT_CONFIG_NOSYSTEM=1`` + empty
+    ``GIT_CONFIG_GLOBAL``) cannot complete the same handshake. Keys are
+    returned lower-cased, matching Git's own ``--list`` normalization and
+    this codebase's existing indexed-config convention (see
+    ``AuthResolver._append_git_config`` callers using ``credential.helper``
+    / ``http.extraheader``).
+
+    Best-effort: any probe failure (missing ``git``, malformed output,
+    timeout) yields an empty mapping rather than raising, so a broken
+    ambient config never blocks the anonymous attempt it is meant to help.
+
+    ``entries`` is ordered lowest-to-highest precedence (system, global,
+    local, worktree, command/env), matching Git's own resolution. An
+    explicit higher-precedence empty value (``git config --unset``-like
+    override) must win over an earlier non-empty one, so every value for a
+    tracked key is recorded during the scan and only the final, possibly
+    empty, values are filtered out afterward.
+
+    Cached for the default ``env=None`` case after the first probe: the
+    ambient config a plain ``git clone`` sees is stable for the life of the
+    process, and both ``AuthResolver.build_public_github_anonymous_git_env``
+    and ``AuthResolver.git_env_for_context`` call this once per attempt, so
+    an uncached probe would spawn one extra ``git config`` child process
+    (with its own retry/timeout budget) per dependency in a large install.
+    Callers that pass an explicit ``env`` (tests) always re-probe. Use
+    :func:`reset_git_cache` to clear it (tests only).
+
+    Parallel installs call this from multiple worker threads: the cache is
+    populated under ``_real_git_tls_config_lock`` with a double-checked read
+    (fast, lock-free hit once warm; re-checked inside the lock before
+    probing) so concurrent workers racing the very first call share one
+    probe instead of each paying its own retry/timeout budget.
+    """
+    global _real_git_tls_config_cache
+    if env is None and _real_git_tls_config_cache is not None:
+        return dict(_real_git_tls_config_cache)
+
+    def _probe() -> dict[str, str]:
+        try:
+            snapshot = _read_effective_git_config(git_subprocess_env(env))
+            values: dict[str, str] = {}
+            for entry in snapshot.entries:
+                # Defense in depth: repository config is never a trust source.
+                if entry.scope in {"local", "worktree"}:
+                    continue
+                normalized = entry.key.lower()
+                if normalized in _TLS_TRANSPORT_CONFIG_KEYS:
+                    values[normalized] = entry.value
+            return {key: value for key, value in values.items() if value}
+        except (GitUrlRewriteProbeError, OSError):
+            return {}
+
+    if env is not None:
+        return _probe()
+
+    with _real_git_tls_config_lock:
+        if _real_git_tls_config_cache is not None:
+            return dict(_real_git_tls_config_cache)
+        result = _probe()
+        _real_git_tls_config_cache = result
+        return dict(result)
 
 
 def validate_resolved_git_url_rewrite(
@@ -989,6 +1136,10 @@ def _materialize_git_config_snapshot(
     retained: list[tuple[str, str]] = []
     for entry in snapshot.entries:
         normalized = entry.key.lower()
+        if normalized == git_symlink_pin_entry()[0]:
+            # Replaced by the pin below so every host writes link text
+            # that the Git-object link resolver can replace (#3457).
+            continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
         if normalized == "include.path" or (
@@ -1011,6 +1162,8 @@ def _materialize_git_config_snapshot(
             if auth_fence.suppress_helpers and _is_credential_helper_key(normalized):
                 continue
         retained.append((entry.key, entry.value))
+
+    retained.append(git_symlink_pin_entry())
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:
@@ -1358,6 +1511,7 @@ def clone_git_worktree(
     args = [
         get_git_executable(),
         *git_no_hooks_args(),
+        *git_autocrlf_pin_args(),
         "clone",
         *git_no_templates_args(),
     ]
@@ -1431,11 +1585,13 @@ def checkout_git_worktree(
     *,
     env: dict[str, object] | None = None,
 ) -> None:
-    """Check out a ref in an explicitly located worktree."""
+    """Check out a ref in an explicitly located worktree, links as link text."""
     subprocess.run(
         [
             get_git_executable(),
             *git_no_hooks_args(),
+            *git_symlink_pin_args(),
+            *git_autocrlf_pin_args(),
             "-C",
             str(worktree),
             "checkout",
@@ -1463,12 +1619,13 @@ def git_resolve_commit(
     ref: str,
     *,
     env: dict[str, object] | None = None,
+    bare: bool = False,
 ) -> str:
-    """Resolve a ref to a commit in an explicitly located worktree."""
+    """Resolve a ref in a worktree or an explicitly selected bare repository."""
     result = subprocess.run(
         [
             get_git_executable(),
-            "-C",
+            "--git-dir" if bare else "-C",
             str(worktree),
             "rev-parse",
             "--verify",
@@ -1501,10 +1658,11 @@ def git_current_branch(
 
 
 def reset_git_cache() -> None:
-    """Reset the cached git executable (for testing purposes only)."""
-    global _gh_executable, _git_executable
+    """Reset the cached git executable and TLS config probe (tests only)."""
+    global _gh_executable, _git_executable, _real_git_tls_config_cache
     _git_executable = None
     _gh_executable = None
+    _real_git_tls_config_cache = None
 
 
 def git_long_paths_args() -> list[str]:

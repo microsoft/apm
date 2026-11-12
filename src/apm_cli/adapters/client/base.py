@@ -1,5 +1,6 @@
 """Base adapter interface for MCP clients."""
 
+import json
 import os
 import re
 from abc import ABC, abstractmethod
@@ -8,7 +9,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_warning
+from ...utils.path_security import has_symlink_component
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -334,6 +337,7 @@ class MCPClientAdapter(ABC):
         """
         self._project_root = Path(project_root) if project_root is not None else None
         self.user_scope = user_scope
+        self.written_mcp_hashes: dict[str, str] = {}
         # Per-server tracking populated by the env-resolution helpers and
         # consumed by ``configure_mcp_server`` for the post-install summary
         # and the aggregated legacy-syntax deprecation warning. Defined on
@@ -364,18 +368,53 @@ class MCPClientAdapter(ABC):
             return self._project_root
         return Path(os.getcwd())
 
-    def render_server_config(self, server_info: dict) -> dict:
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
         """Render one native server entry for exact baseline comparisons."""
         rendered = self._format_server_config(
             server_info,
-            env_overrides={},
-            runtime_vars={},
+            env_overrides=env_overrides or {},
+            runtime_vars=runtime_vars or {},
         )
         if isinstance(rendered, tuple):
             rendered = rendered[0]
         if not isinstance(rendered, dict):
             raise ValueError("Adapter did not produce a native MCP server mapping")
         return rendered
+
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """Compare the native connection with the adapter's rendered baseline."""
+        return native == expected
+
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
+    ) -> bool:
+        """Recognize a verified write from an older formatter; never a current match.
+
+        ``recorded_write`` is ``True`` or ``False`` when the lockfile holds a
+        fingerprint of the earlier write that does or does not match *native*,
+        and ``None`` when no fingerprint was recorded.
+        """
+        return False
+
+    def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
+        """Extra target-specific guidance for a preserved conflicting entry."""
+        return None
+
+    def managed_server_config(self, native: dict) -> dict:
+        """Return connection data for an actual-write fingerprint."""
+        return dict(native)
+
+    def project_managed_server_config(
+        self, native: object, *, baseline: dict, requested: dict
+    ) -> object:
+        """Return a comparison-only view for an already recorded managed connection."""
+        return native
 
     @abstractmethod
     def get_config_path(self):
@@ -395,6 +434,71 @@ class MCPClientAdapter(ABC):
     def get_current_config(self):
         """Get the current MCP configuration."""
         pass
+
+    def validate_config_for_install(self) -> bool:
+        """Allow adapters to refuse unsafe configs before existing-server shortcuts."""
+        return True
+
+    def _read_json_config_for_update(self, config_path: Path) -> dict | None:
+        """Return the JSON object at *config_path* before a merge-and-write.
+
+        A missing or blank file yields ``{}``.  Returns ``None`` after a
+        warning when rewriting the file could lose data, so the caller skips
+        the write: the existing content is not a JSON object (for example
+        JSONC comments), or a user-scope path runs through a symlink, which
+        stale cleanup refuses to rewrite later.
+        """
+        if self.user_scope and has_symlink_component(Path.home(), config_path):
+            _rich_warning(
+                f"Skipped {config_path}: APM does not write MCP config through "
+                "symlinks. Replace the symlink or configure this server manually.",
+                symbol="warning",
+            )
+            return None
+        try:
+            raw = config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except (OSError, UnicodeError) as exc:
+            _rich_warning(
+                f"Could not read {config_path}: {exc} -- skipping config write; "
+                "fix the file's permissions or encoding, or add this server manually",
+                symbol="warning",
+            )
+            return None
+        if not raw.strip():
+            return {}
+        try:
+            config = json.loads(raw)
+        except json.JSONDecodeError:
+            config = None
+        if not isinstance(config, dict):
+            _rich_warning(
+                f"Could not parse {config_path} as a JSON object -- skipping config "
+                "write to avoid data loss (comments and trailing commas are not "
+                "preserved); fix the file or add this server manually",
+                symbol="warning",
+            )
+            return None
+        if self.mcp_servers_key in config and not isinstance(config[self.mcp_servers_key], dict):
+            _rich_warning(
+                f"Could not parse {config_path}: {self.mcp_servers_key} must be "
+                "a JSON object -- skipping config write to avoid data loss; "
+                "fix the file or add this server manually",
+                symbol="warning",
+            )
+            return None
+        return config
+
+    @staticmethod
+    def _write_json_config(config_path: Path, config: dict) -> None:
+        """Atomically write *config* as JSON and keep the file owner-only.
+
+        Entries can carry env values resolved at install time.
+        """
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(config_path, json.dumps(config, indent=2), new_file_mode=0o600)
+        os.chmod(config_path, 0o600)
 
     @abstractmethod
     def configure_mcp_server(
@@ -908,6 +1012,118 @@ class MCPClientAdapter(ABC):
         return None
 
     @classmethod
+    def _is_options_only(cls, args: list[Any]) -> bool:
+        """Return True if args contains only options and their values.
+
+        An argument list is considered options-only if every non-option token
+        is consumed as the value of a preceding option that requires an
+        argument, and no positional subcommands or operands are present.
+        """
+        if not args:
+            return True
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if not isinstance(arg, str):
+                return False
+            if arg == "--":
+                return False
+            if arg.startswith("--"):
+                option = arg.split("=", 1)[0]
+                consumes_next = "=" not in arg and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                if consumes_next:
+                    if index + 1 >= len(args):
+                        return False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            next_arg = args[index + 1] if index + 1 < len(args) else None
+            if arg.startswith("-") and arg != "-":
+                consumes_next = cls._docker_option_requires_value(arg)
+                if arg in ("-v", "--version") and next_arg == "run":
+                    consumes_next = False
+                if consumes_next:
+                    if index + 1 >= len(args):
+                        return False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            return False
+        return True
+
+    @classmethod
+    def _is_docker_package(cls, package: dict | None) -> bool:
+        """Return whether the package resolves to a Docker/container launcher."""
+        if not package:
+            return False
+        runtime_hint = package.get("runtime_hint", "")
+        registry_name = cls._infer_registry_name(package)
+        return runtime_hint == "docker" or registry_name == "docker"
+
+    @classmethod
+    def _ensure_docker_run_args(
+        cls,
+        runtime_args: list[Any] | None,
+    ) -> list[Any]:
+        """Return runtime arguments with Docker's 'run' subcommand and stdio flags.
+
+        If runtime_args is empty, defaults to ['run', '-i', '--rm'].
+        If runtime_args contains options without a leading 'run' subcommand
+        (e.g. options-only metadata from OCI registries), prepends 'run' and
+        ensures '-i' and '--rm' are present unless already specified.
+        Otherwise, returns runtime_args as is to preserve authored invocations
+        (such as ['container', 'run', ...]).
+
+        Args:
+            runtime_args: Resolved runtime arguments from the package entry.
+
+        Returns:
+            list: Arguments with leading 'run', '-i', '--rm' and any options,
+            or authored arguments preserved as is.
+        """
+        if not runtime_args:
+            return ["run", "-i", "--rm"]
+        args = list(runtime_args)
+        if not cls._is_options_only(args):
+            return args
+
+        has_interactive = False
+        has_rm = False
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if arg in ("-i", "--interactive") or (
+                isinstance(arg, str)
+                and arg.startswith("-")
+                and not arg.startswith("--")
+                and "i" in arg[1:]
+                and not cls._docker_option_requires_value(arg)
+            ):
+                has_interactive = True
+                index += 1
+            elif arg == "--rm":
+                has_rm = True
+                index += 1
+            elif isinstance(arg, str) and arg.startswith("--"):
+                option = arg.split("=", 1)[0]
+                consumes_next = "=" not in arg and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                index += 2 if consumes_next else 1
+            elif isinstance(arg, str) and arg.startswith("-") and arg != "-":
+                consumes_next = cls._docker_option_requires_value(arg)
+                index += 2 if consumes_next else 1
+            else:
+                index += 1
+
+        prefix = ["run"]
+        if not has_interactive:
+            prefix.append("-i")
+        if not has_rm:
+            prefix.append("--rm")
+        return [*prefix, *args]
+
+    @classmethod
     def _ensure_docker_image_arg(
         cls,
         runtime_args: list[Any],
@@ -1049,6 +1265,28 @@ class MCPClientAdapter(ABC):
         if os.getenv("APM_E2E_TESTS") == "1":
             return True
         return not (sys.stdin.isatty() and sys.stdout.isatty())
+
+    def _resolve_explicit_environment_values(
+        self,
+        env_vars: dict[str, object],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Translate authored references while preserving explicit env literals.
+
+        Resets placeholder tracking; mid-render callers must preserve prior keys.
+        """
+        resolved: dict[str, str] = {}
+        self._last_env_placeholder_keys = set()
+        for name, value in env_vars.items():
+            if not name or value is None:
+                continue
+            if isinstance(value, TrustedEnvLiteral):
+                resolved[name] = value
+            elif isinstance(value, str):
+                resolved[name] = self._resolve_env_variable(name, value, env_overrides)
+            else:
+                resolved[name] = _stringify_env_literal(value)
+        return resolved
 
     def _resolve_environment_variables(self, env_vars, env_overrides=None):
         """Resolve (or translate) declared environment variables.
@@ -1316,23 +1554,33 @@ class MCPClientAdapter(ABC):
         return server_info
 
     @staticmethod
-    def _determine_config_key(server_url: str, server_name: str | None) -> str:
+    def _determine_config_key(
+        server_url: str,
+        server_name: str | None,
+        server_info: dict | None = None,
+    ) -> str:
         """Return the configuration key to use for *server_url*/*server_name*.
 
         The caller-supplied *server_name* takes precedence. If it is absent,
-        preserve npm-style scoped names such as ``@scope/name`` (one slash by
-        npm convention) while keeping the historical ``owner/repo -> repo``
-        fallback for registry paths.
+        preserve self-defined names and npm-style scoped names such as
+        ``@scope/name`` (one slash by npm convention) while keeping the historical
+        ``owner/repo -> repo`` fallback for registry paths.
 
         Args:
             server_url: Registry reference used as fallback source.
             server_name: Explicit caller-supplied name, if any.
+            server_info: Optional resolved or synthetic server info dict.
 
         Returns:
             Non-empty configuration key string.
         """
         if server_name:
             return server_name
+        # ``is_self_defined`` / ``_raw_stdio`` are APM-synthetic markers. Return
+        # the caller's reference, never ``server_info["name"]``, so a registry
+        # response carrying these keys cannot choose an arbitrary config key.
+        if server_info and (server_info.get("is_self_defined") or "_raw_stdio" in server_info):
+            return server_url
         if server_url.startswith("@") and server_url.count("/") == 1:
             return server_url
         if "/" in server_url:
@@ -1424,7 +1672,7 @@ class MCPClientAdapter(ABC):
 
         Args:
             config: Mutable config dict updated in place.
-            remote: Registry remote entry (may contain a ``"headers"`` list).
+            remote: Registry remote entry (headers may be records or a mapping).
             server_info: Registry server metadata used for name / URL lookup.
             env_overrides: Caller-supplied env-var override mapping.
             runtime_label: Label for diagnostic messages.
@@ -1432,18 +1680,38 @@ class MCPClientAdapter(ABC):
                 instantiate.  Passed by the caller so tests can patch the right
                 module-level name.
         """
+        from ...core.auth import AuthResolver
+        from ...models.dependency.mcp import ManifestHeaderValue
+
         server_name = server_info.get("name", "")
         is_github_server = self._is_github_server(server_name, remote.get("url", ""))
         local_token_injected = False
-        if is_github_server:
-            _tm = token_manager_class()
-            github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
-                "GITHUB_PERSONAL_ACCESS_TOKEN"
+        headers = remote.get("headers", []) or []
+        if isinstance(headers, dict):
+            headers = [{"name": name, "value": value} for name, value in headers.items()]
+        explicit_authorization = any(
+            isinstance(header, dict)
+            and isinstance(header.get("name"), str)
+            and header["name"].casefold() == "authorization"
+            and isinstance(header.get("value"), ManifestHeaderValue)
+            and bool(header.get("value"))
+            for header in headers
+        )
+        if is_github_server and not explicit_authorization:
+            resolver = AuthResolver(
+                token_manager=token_manager_class(), allow_external_fallback=False
             )
-            if github_token:
-                config["headers"] = {"Authorization": f"Bearer {github_token}"}
+            selected = resolver.resolve_github_mcp_token(
+                source_only=self._supports_runtime_env_substitution
+            )
+            if selected:
+                credential = (
+                    self._format_runtime_env_placeholder(selected)
+                    if self._supports_runtime_env_substitution
+                    else selected
+                )
+                config.setdefault("headers", {})["Authorization"] = f"Bearer {credential}"
                 local_token_injected = True
-        headers = remote.get("headers", [])
         if headers:
             if "headers" not in config:
                 config["headers"] = {}
@@ -1451,8 +1719,15 @@ class MCPClientAdapter(ABC):
                 header_name = header.get("name", "")
                 header_value = header.get("value", "")
                 if header_name and header_value:
-                    if header_name == "Authorization" and local_token_injected:
-                        continue
+                    if header_name.casefold() == "authorization":
+                        if local_token_injected or (
+                            explicit_authorization
+                            and not isinstance(header_value, ManifestHeaderValue)
+                        ):
+                            continue
+                        for key in list(config["headers"]):
+                            if key.casefold() == "authorization":
+                                del config["headers"][key]
                     resolved_value = self._resolve_env_variable(
                         header_name, header_value, env_overrides
                     )
