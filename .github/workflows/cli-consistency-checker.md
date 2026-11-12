@@ -108,7 +108,7 @@ Analyze ALL collected help output for the following categories of issues. Be tho
 - Do any commands reference features, flags, or subcommands that don't exist?
 
 ### 3.4 Documentation Cross-Reference
-The CLI reference lives in `docs/src/content/docs/reference/cli/`, one page per top-level command (`<command>.md`); subcommands are documented on their parent command's page. Read the documentation files:
+The CLI reference lives in `docs/src/content/docs/reference/cli/`, one page per top-level command (`<command>.md`); subcommands at any depth are documented on their top-level command's page (for example, `apm marketplace package add` lives in `marketplace.md`). Read the documentation files:
 
 ```
 ls docs/src/content/docs/reference/cli/
@@ -122,11 +122,12 @@ cat README.md
 
 Then compare:
 - Every top-level command found in Step 2 must have a page in `docs/src/content/docs/reference/cli/`, and every page there must match a command that exists in the actual CLI.
-- Every subcommand found in Step 2 must be documented on its parent command's page, and every subcommand documented there must exist in the actual CLI.
+- Every subcommand found in Step 2 must be documented on its top-level command's page, and every subcommand documented there must exist in the actual CLI.
 - Every command mentioned in `README.md` must exist in the actual CLI.
 - Flag names, argument names, and descriptions should match between docs and CLI help.
 - Usage examples in docs should be syntactically correct per the actual CLI interface.
 - If docs mention commands or flags not present in the CLI (or vice versa), flag as **high severity**.
+- Hidden aliases and hidden options (for example `apm info`) do not appear in `--help`, so Step 2 does not list them. Before flagging a command or flag that the docs mention but Step 2 did not find, invoke it directly (for example `apm info --help`); report it only if that invocation fails.
 
 ### 3.5 Flag Consistency Audit
 Check these common flags across all commands that support them:
