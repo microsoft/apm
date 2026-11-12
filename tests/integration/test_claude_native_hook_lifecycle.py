@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -28,12 +30,12 @@ ClaudePluginCLI.run = _controlled_native_run
 """
 
 
-@pytest.mark.parametrize("failure", ["", "install", "uninstall"])
-@pytest.mark.parametrize("local", [False, True])
-def test_installed_hook_source_reinstall_and_removal(
-    tmp_path: Path, apm_engine_command: tuple[str, ...], failure: str, local: bool
-) -> None:
-    """Run acquisition, consent, lock, scan and removal through the installed CLI."""
+_RUNTIME_ROOT_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/native_claude_hooks"
+_HOOK_EVENTS = ("SessionStart", "SubagentStart", "UserPromptSubmit")
+
+
+def _native_scenario(tmp_path: Path) -> tuple[IsolatedApmEnvironment, dict[str, str], Path]:
+    """Isolate HOME and substitute only the external Claude metadata transport."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     env["CLAUDE_CONFIG_DIR"] = str(isolated.home / ".claude")
@@ -50,6 +52,127 @@ def test_installed_hook_source_reinstall_and_removal(
     guard.write_text(
         guard.read_text(encoding="utf-8") + NATIVE_CLIENT_STUB + _FAILURE_STUB, encoding="utf-8"
     )
+    return isolated, env, state_file
+
+
+def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """#3191: hooks that join process.env.CLAUDE_PLUGIN_ROOT keep their bundle.
+
+    The command has no ./ path, so loose projection registered it without its
+    script. Two plugins must each register intact under a distinct root, with
+    no loose Claude hook registration, and removal must be owner-scoped.
+    """
+    isolated, env, state_file = _native_scenario(tmp_path)
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("runtime-root-hooks")
+    sources: dict[str, Path] = {}
+    for label in ("alpha", "beta"):
+        source = repository.worktree / "plugins" / label
+        shutil.copytree(_RUNTIME_ROOT_FIXTURE, source)
+        manifest_path = source / ".claude-plugin/plugin.json"
+        plugin_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        plugin_manifest["name"] = f"apm-hook-context-{label}"
+        manifest_path.write_text(json.dumps(plugin_manifest), encoding="utf-8")
+        (source / "resources/identity.txt").write_text(f"IDENTITY_{label}\n", encoding="ascii")
+        sources[label] = source
+    revision = factory.commit(repository, message="Runtime plugin-root hook fixtures").sha
+    dependency = "fixture/runtime-root-hooks"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "hook-consumer",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {
+            "apm": [
+                {"git": dependency, "ref": revision, "path": f"plugins/{label}"}
+                for label in sources
+            ]
+        },
+        "allowExecutables": {
+            f"github.com/{dependency}/plugins/{label}#{revision}": {"hooks": True}
+            for label in sources
+        },
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+
+    def run(*args: str) -> None:
+        result = runner.run(
+            args, scenario_id="claude-native-runtime-root-hooks", cwd=isolated.work_root, env=env
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def registered() -> dict[str, Path]:
+        plugins = json.loads(state_file.read_text(encoding="utf-8"))["plugins"]
+        return {Path(p["readFromFolder"]).name: Path(p["readFromFolder"]) for p in plugins}
+
+    run("install", "--global", "--target", "claude", "--only", "apm")
+    roots = registered()
+    assert sorted(roots) == ["alpha", "beta"]
+    assert roots["alpha"] != roots["beta"]
+    plugins = json.loads(state_file.read_text(encoding="utf-8"))["plugins"]
+    assert all(plugin["enabled"] is False for plugin in plugins)
+    fixture_hooks = (_RUNTIME_ROOT_FIXTURE / "hooks/hooks.json").read_bytes()
+    for label, root in roots.items():
+        assert root.is_relative_to(isolated.config_root / "apm_modules")
+        assert (root / "hooks/hooks.json").read_bytes() == fixture_hooks
+        assert (root / "hooks/context.js").read_bytes() == (
+            _RUNTIME_ROOT_FIXTURE / "hooks/context.js"
+        ).read_bytes()
+        assert (root / "resources/identity.txt").read_text() == f"IDENTITY_{label}\n"
+    claude_home = isolated.home / ".claude"
+    assert not (claude_home / "settings.json").exists()
+    assert not (claude_home / "apm-hooks.json").exists()
+    assert not (claude_home / "hooks").exists()
+
+    # Substituted host: Claude sets CLAUDE_PLUGIN_ROOT per plugin; this is not
+    # a native execution witness (see the PR's native hook check).
+    node = shutil.which("node")
+    if node is not None and os.name != "nt":
+        witness = isolated.root / "hook-witness.jsonl"
+        for root in roots.values():
+            hook_env = dict(env, CLAUDE_PLUGIN_ROOT=str(root), APM_HOOK_PROBE_MARKER=str(witness))
+            declared = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8"))
+            for event in _HOOK_EVENTS:
+                command = declared["hooks"][event][0]["hooks"][0]["command"]
+                completed = subprocess.run(
+                    command,
+                    shell=True,
+                    input=json.dumps({"hook_event_name": event}),
+                    text=True,
+                    capture_output=True,
+                    env=hook_env,
+                    cwd=isolated.work_root,
+                    timeout=30,
+                    check=False,
+                )
+                assert completed.returncode == 0, completed.stderr
+        rows = [json.loads(line) for line in witness.read_text().splitlines() if line.strip()]
+        assert sorted((Path(row["root"]).name, row["event"], row["resource"]) for row in rows) == [
+            (label, event, f"IDENTITY_{label}")
+            for label in ("alpha", "beta")
+            for event in sorted(_HOOK_EVENTS)
+        ]
+
+    run("uninstall", "--global", f"{dependency}/plugins/beta")
+    assert sorted(registered()) == ["alpha"]
+    assert not roots["beta"].exists()
+    assert (roots["alpha"] / "hooks/context.js").is_file()
+    run("uninstall", "--global", f"{dependency}/plugins/alpha")
+    assert registered() == {}
+    calls = json.loads(state_file.read_text(encoding="utf-8"))["calls"]
+    assert all(call[1:2] not in (["enable"], ["disable"]) for call in calls)
+
+
+@pytest.mark.parametrize("failure", ["", "install", "uninstall"])
+@pytest.mark.parametrize("local", [False, True])
+def test_installed_hook_source_reinstall_and_removal(
+    tmp_path: Path, apm_engine_command: tuple[str, ...], failure: str, local: bool
+) -> None:
+    """Run acquisition, consent, lock, scan and removal through the installed CLI."""
+    isolated, env, state_file = _native_scenario(tmp_path)
     factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
     repository = factory.create("hooks")
     source = repository.worktree / "plugins/context"

@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(require('node:path').join(process.env.CLAUDE_PLUGIN_ROOT.replaceAll(String.fromCharCode(92), '/'), 'hooks/context.js'))\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(require('node:path').join(process.env.CLAUDE_PLUGIN_ROOT.replaceAll(String.fromCharCode(92), '/'), 'hooks/context.js'))\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(require('node:path').join(process.env.CLAUDE_PLUGIN_ROOT.replaceAll(String.fromCharCode(92), '/'), 'hooks/context.js'))\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
