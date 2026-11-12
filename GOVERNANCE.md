@@ -96,15 +96,18 @@ parent's priority does not approve every child.
 The roadmap tells one story: APM is the open package manager for agent
 configuration: consume anywhere, produce once, govern at scale, on an open
 standard. Every roadmap item belongs to one pillar, recorded in the Project's
-`Pillar` field and the matching `pillar/*` label:
+`Pillar` field and its label:
 
-| Pillar | Promise |
-| --- | --- |
-| Consume | Install any agent package into any harness, reproducibly. |
-| Produce | Author, package, publish and patch with confidence. |
-| Govern | Policy, trust, audit and supply-chain integrity for enterprises. |
-| Open ecosystem | OpenAPM spec, upstream standards, CNCF. |
-| Foundations | Reliability, platforms, CI, code health. |
+| Pillar | Label | Promise |
+| --- | --- | --- |
+| Consume | `pillar/consume` | Install any agent package into any harness, reproducibly. |
+| Produce | `pillar/produce` | Author, package, publish and patch with confidence. |
+| Govern | `pillar/govern` | Policy, trust, audit and supply-chain integrity for enterprises. |
+| Open ecosystem | `pillar/ecosystem` | OpenAPM spec, upstream standards, CNCF. |
+| Foundations | `pillar/foundations` | Reliability, platforms, CI, code health. |
+
+Each pillar has one or more `[EPIC]` parent issues; see the
+[Epics](https://github.com/orgs/microsoft/projects/2304/views/9) view.
 
 Anyone may propose an outcome in an issue with the problem, evidence, and
 alternatives. Area maintainers assess scope, risk, and maintenance cost;
@@ -122,11 +125,14 @@ not a separate planning committee.
 `Phase` records maturity: Exploring, In design (including `status/needs-design`),
 Preview (experimental or behind a flag), or GA.
 
-Accepted issues enter the Project with Horizon `Next` until a maintainer
-moves them; `.github/workflows/roadmap-accepted.yml` sets it when
-`status/accepted` is applied and never overwrites an existing Horizon. Leave Horizon empty for untriaged intake. Roadmap placement, ordering, and
-reactions neither authorize implementation nor guarantee delivery. Moving
-or removing an issue from a Horizon does not revoke its human approval.
+When `status/accepted` is applied, `.github/workflows/roadmap-accepted.yml`
+adds the issue to the Project and sets an empty Horizon to `Next`; it never
+overwrites an existing Horizon and skips with a notice when the
+`APM_ROADMAP_PROJECT_TOKEN` secret is not configured. Maintainers move the
+issue from there. Leave Horizon empty for untriaged intake. Roadmap
+placement, ordering, and reactions neither authorize implementation nor
+guarantee delivery. Moving or removing an issue from a Horizon does not
+revoke its human approval.
 Record any change to approved scope or review support explicitly on the
 issue. Accepted, unclaimed work still needs no second permission request:
 follow [the contribution process](CONTRIBUTING.md#before-you-start-implementation),
@@ -150,16 +156,19 @@ and their milestone history, including completed work in the active release.
 
 ### Native Project settings
 
-Project 2304 has public visibility, Horizon columns, Pillar and Milestone
-grouping, the saved views below, and native issue-only auto-add. Maintainers
-keep the existing-issue intake current and preserve completed issue history.
+Project 2304 uses public visibility, the saved views below with Horizon
+columns, Pillar swimlanes, and Milestone grouping, and native issue-only
+auto-add. Maintainers keep the existing-issue intake current and preserve
+completed issue history.
 
 In Project settings, use public visibility and these single-select fields:
 `Horizon` (Now, Next, Later, Exploring), `Pillar` (Consume, Produce, Govern,
 Open ecosystem, Foundations), `Phase` (Exploring, In design, Preview, GA),
-`Area`, `Kind`, and `Status`. Display the native Assignees, Labels,
-Milestone, and Parent issue fields; do not add a duplicate target-release or
-scope-approval field. The epic is the native parent issue.
+`Priority`, `Area`, `Kind`, and `Status`. Display the native Assignees,
+Labels, Milestone, and Parent issue fields. `Start date` and `Target date`
+only feed timeline layouts; the milestone remains the release target. Do not
+add a duplicate target-release or scope-approval field. The epic is the
+native parent issue.
 
 Save these views with `repo:microsoft/apm is:issue` plus the filters below:
 
@@ -193,7 +202,8 @@ instructions.
 
 The initial rollout and its operator decisions are recorded in
 [#2960](https://github.com/microsoft/apm/issues/2960). Keep other native
-workflows off; planning and release decisions remain human-owned.
+workflows off; apart from the accepted-issue Horizon default above, planning
+and release decisions remain human-owned.
 
 ## Contributor progression
 
