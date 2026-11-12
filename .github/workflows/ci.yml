@@ -129,6 +129,7 @@ jobs:
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
+        packages/apm-contributor-dashboard/tests/markdown.test.mjs
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python
@@ -173,7 +174,7 @@ jobs:
   windows-native-standard-user-symlink-gate:
     name: Windows Native Symlink Acceptance
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -198,9 +199,9 @@ jobs:
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
-    - name: Prove native standard-user fallback
+    - name: Prove native standard-user link materialization
       shell: pwsh
-      timeout-minutes: 10
+      timeout-minutes: 25
       env:
         APM_NATIVE_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       run: >-
@@ -428,6 +429,7 @@ jobs:
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
+        packages/apm-contributor-dashboard/tests/markdown.test.mjs
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python

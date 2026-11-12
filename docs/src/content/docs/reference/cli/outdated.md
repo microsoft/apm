@@ -25,7 +25,7 @@ state:
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
 - **Marketplace deps**: compare the installed ref against the marketplace entry's current `source.ref`.
-- **Registry deps** (experimental `registries` feature): `Current` is the locked version; `Latest` is the highest published parseable semver, including prereleases under existing registry ordering and build precedence. `Wanted` is the highest version satisfying the manifest constraint, using the same matching as `apm install`. Constraints come from the root or installed packages' `apm.yml` files.
+- **Registry deps** (experimental `registries` feature): `Current` is the locked version; `Latest` is the highest published parseable semver, including prereleases under existing registry ordering and build precedence. `Wanted` is the highest version satisfying the manifest constraint, using the same matching as `apm install`, so it is a pre-release only when the constraint names one on the same `major.minor.patch`. Constraints come from the root or installed packages' `apm.yml` files.
 
 Common monorepo layouts are detected automatically for `outdated` reporting. Set an explicit marketplace `tag_pattern` when your producer uses a different layout than the built-in patterns.
 

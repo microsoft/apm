@@ -111,13 +111,16 @@ under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
 | grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
-| cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); description auto-derived if missing |
+| cursor | `.cursor/rules/<name>.mdc` | exactly one universal `**` (scalar, padded, or single-item list) -> `alwaysApply: true`, no `globs:`; other non-empty `applyTo`, including `**` mixed with scoped globs -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); absent, empty, or null `applyTo` -> neither key (Cursor decides from `description`); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
 | antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (one quoted, comma-separated string, for example `"src/**, tests/**"`); missing `applyTo` -> `trigger: always_on` |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |
+
+Reinstalling replaces a Cursor rule that APM previously generated as
+`globs: **` with the `alwaysApply: true` form.
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
 `src/apm_cli/integration/targets.py`.
@@ -201,12 +204,17 @@ all -- APM fails closed. Kiro may warn and fall back if the specified
 validation.
 
 Codex receives `name`, `description`, and the Markdown body as
-`developer_instructions`. Supplied string values for `model` and
+`developer_instructions`, with [package-relative links](../../package-relative-links/)
+rewritten for the generated agent's location. Supplied string values for `model` and
 `model_reasoning_effort` become top-level keys in the generated agent TOML,
 as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
 Omitted fields remain absent; APM does not translate model names, choose
 defaults, or validate which models and effort values your Codex supports.
-Non-string values are dropped with a warning naming the field.
+Non-string values are dropped with a warning naming the field. The one
+model check is by name only: a Claude model alias (`opus`, `sonnet`,
+`haiku`, `inherit`) or `claude-*` id is still kept as written, with a
+warning naming the agent, because Codex does not recognize it; use a
+Codex-specific agent source or remove `model`.
 
 Other frontmatter fields are dropped with a warning that APM does not
 translate them for Codex. This includes other native Codex settings and
@@ -228,6 +236,33 @@ its theme names (`primary`, `secondary`, `accent`, `success`,
 install time when an agent ships shapes OpenCode would reject at
 load time -- the file is still deployed, but the warning names the
 offending package and field so you can fix the source.
+
+### Per-harness model values
+
+Agent files and model identifiers belong to each harness vendor. APM
+writes a string `model` value verbatim to every target that receives
+agent files, so a Claude alias such as `sonnet` also lands in the Codex
+TOML, with a warning naming the agent (see the Codex paragraph above).
+APM does not add
+a per-target model map or a `codex:` override block
+([#3324](https://github.com/microsoft/apm/issues/3324)): no other tool
+could read it. Workarounds:
+
+1. **Omit `model`** from the shared agent so each harness uses its own
+   default or user setting (simplest).
+2. **Split by target:** one small package per harness with its own
+   `target:` and `model:`, plus a common package for shared content.
+3. **A `post-install` / `post-update`
+   [lifecycle script](../../../enterprise/lifecycle-scripts/) in the
+   consuming project** (its `apm.yml`, trusted with `apm lifecycle trust`;
+   a dependency package cannot ship one) that sets `model` in the
+   generated `.codex/agents/*.toml`. It edits APM-managed
+   output, so `apm audit --ci` reports those files as drifted and the
+   script must run on every install. Not recommended for CI-gated teams.
+
+For a portable fix, raise it upstream with
+[Claude Code](https://github.com/anthropics/claude-code/issues) or
+[Codex](https://github.com/openai/codex/issues).
 
 ### Body conventions
 

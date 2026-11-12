@@ -958,9 +958,8 @@ def _fire_update_scripts(
 
     with contextlib.suppress(Exception):
         from apm_cli.core.lifecycle_scripts import (
-            LifecycleEvent,
-            PackageInfo,
             build_runner_from_context,
+            event_for_dependencies,
         )
 
         project_root = None
@@ -974,15 +973,10 @@ def _fire_update_scripts(
             project_root=project_root,
         )
 
-        pkg_infos = []
-        for dep in apm_package.get_apm_dependencies():
-            pkg_infos.append(PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference))
-
-        scope_name = scope.value if hasattr(scope, "value") else str(scope)
-        event = LifecycleEvent.create(
-            event=event_name,
-            packages=pkg_infos,
-            scope=scope_name,
+        event = event_for_dependencies(
+            event_name,
+            apm_package.get_apm_dependencies(),
+            scope=scope.value if hasattr(scope, "value") else str(scope),
             working_directory=project_root,
         )
 

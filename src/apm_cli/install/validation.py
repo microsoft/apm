@@ -31,6 +31,7 @@ from pathlib import Path
 
 import requests
 
+from ..core.tls_trust import tls_failure_guidance
 from ..deps.github_rate_limit import GitHubThrottleError, raise_for_github_throttle
 from ..models.dependency.host_virtual import (
     dependency_repository_owner,
@@ -137,15 +138,9 @@ def _log_tls_failure(host_display: str, exc: BaseException, verbose_log, logger)
     a corporate proxy see the right next step without re-running with --verbose.
     Verbose: also include the host name and the underlying exception text.
     """
-    logger.warning(
-        "TLS verification failed -- APM uses the system trust store by default. "
-        "If you're behind a corporate proxy or firewall, make sure your "
-        "organisation's CA is installed in the OS trust store, or set "
-        "APM_EXTRA_CA_BUNDLE to a readable PEM bundle to add it while retaining "
-        "public trust. Use REQUESTS_CA_BUNDLE only to replace the complete "
-        "Requests trust set. "
-        "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
-    )
+    # The TLS trust owner maps its recorded selection to guidance, so the
+    # hint never recommends a trust source the selected mode ignores.
+    logger.warning(tls_failure_guidance())
     if verbose_log:
         verbose_log(f"underlying error from {host_display}: {exc}")
 

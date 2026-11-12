@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.apm_package import APMPackage, invalidate_apm_yml_cache_entry
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.dependency.host_virtual import dependency_repository_owner
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -63,6 +63,10 @@ def materialize_virtual_file_package(
     primitive_path.parent.mkdir(parents=True, exist_ok=True)
     primitive_path.write_bytes(content)
     atomic_write_text(manifest_path, manifest_text)
+    # Every apm.yml rewrite inside a package tree drops stale from_apm_yml
+    # cache entries, so a same-process re-materialization never serves a
+    # pre-rewrite manifest (#3585).
+    invalidate_apm_yml_cache_entry(manifest_path)
     return APMPackage(
         name=name,
         version="1.0.0",

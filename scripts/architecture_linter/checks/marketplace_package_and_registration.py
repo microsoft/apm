@@ -194,7 +194,7 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
             "src/apm_cli/install/native_plugin_admission.py",
             (
                 "_copy_tree_dereferencing_validated(source, replay_path, source)",
-                "verify_package_hash(candidate, expected_hash)",
+                "verify_locked_package(candidate, expected_hash, carried)",
             ),
             "Native cache verification must reuse canonical copying and package hashing",
         )

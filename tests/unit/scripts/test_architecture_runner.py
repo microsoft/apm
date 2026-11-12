@@ -624,6 +624,7 @@ install-deployment-audit-replay
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
+install-deployment-codex-agent-link-resolution
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-executable-trust-context
@@ -650,6 +651,7 @@ install-deployment-orphan-selection
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-policy-remote-origin-owner
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
@@ -705,6 +707,7 @@ mutation_writes.mcp_passthrough_denylist
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.opencode_enabled_intent
+mutation_writes.user_hook_home_reference
 mutation_writes.user_root_scope
 onboarding-metadata-only
 contracts-tooling-root-context-write-eligibility

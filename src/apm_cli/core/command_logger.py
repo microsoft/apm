@@ -113,7 +113,7 @@ class CommandLogger:
         noun = "server" if count == 1 else "servers"
         _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
 
-    def info(self, message: str, symbol: str = "info"):
+    def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
 
         Distinct from :meth:`progress` only at the semantic level:
@@ -124,6 +124,10 @@ class CommandLogger:
         split exists so future quiet-mode policy can drop ``progress``
         without dropping advisory context.
         """
+        # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
+        if soft_wrap:
+            _rich_info(message, symbol=symbol, soft_wrap=True)
+            return
         _rich_info(message, symbol=symbol)
 
     def success(self, message: str, symbol: str = "sparkles"):
@@ -611,15 +615,23 @@ class InstallLogger(CommandLogger):
         cached: bool,
         enforcement: str,
         age_seconds: int | None = None,
+        subgroup_scoped: bool = False,
+        chain: list[str] | None = None,
     ):
         """Log policy discovery outcome.
 
         Verbose by default; always shown when ``enforcement == "block"``
-        (users must know blocking is active).
+        (users must know blocking is active) or when ``subgroup_scoped``
+        is set and enforcement is not ``off`` -- a GitLab subgroup policy
+        composed with its ancestors names its ordered extends chain even at
+        default verbosity (#2753).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
         parts = [f"Policy: {source}"]
+        if chain and len(chain) > 1:
+            # The leaf is already the source; show its ancestors root first.
+            parts.append(f"(extends chain: {' -> '.join(chain[:-1])})")
 
         if cached:
             cache_detail = "cached"
@@ -639,9 +651,12 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose:
+        elif self.verbose or (subgroup_scoped and enforcement != "off"):
+            # GitLab subgroup composition: show the chain even in non-verbose
+            # warn mode so the dev sees which namespaces applied (#2753);
+            # an ``off`` policy needs no action and stays silent.
             _rich_info(message, symbol="info")
-        # Non-verbose + non-block: silent (no noise for warn/off)
+        # Non-verbose + non-block + top-level: silent (no noise for warn/off)
 
     def policy_discovery_miss(
         self,

@@ -1,8 +1,8 @@
 """Lifecycle script models, runner, and discovery.
 
 APM supports lifecycle scripts that fire at key moments during install,
-update, and uninstall operations.  Scripts are configured in well-known
-locations discovered from three tiers:
+update, uninstall, and compile operations.  Scripts are configured in
+well-known locations discovered from three tiers:
 
 1. Policy  -- platform-specific admin directory (JSON drop-ins, unchanged)
 2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
@@ -42,7 +42,10 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.core.command_logger import CommandLogger
+    from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ LIFECYCLE_EVENTS = (
     "post-update",
     "pre-uninstall",
     "post-uninstall",
+    "pre-compile",
 )
 
 # Supported script action types.
@@ -112,6 +116,32 @@ class LifecycleEvent:
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )
+
+
+def event_for_dependencies(
+    event_name: str,
+    dependencies: Iterable[DependencyReference],
+    *,
+    scope: str,
+    working_directory: str | None,
+) -> LifecycleEvent:
+    """Build the event payload for a manifest's dependency references.
+
+    The one place that turns dependencies into the payload's package list,
+    shared by install, update and compile.
+    """
+    return LifecycleEvent.create(
+        event=event_name,
+        packages=[
+            PackageInfo(
+                name=getattr(dep, "repo_url", None) or str(dep),
+                reference=getattr(dep, "reference", None),
+            )
+            for dep in dependencies
+        ],
+        scope=scope,
+        working_directory=working_directory,
+    )
 
 
 # -- Script entry (one action inside a script file) ------------------------
@@ -499,7 +529,7 @@ class LifecycleScriptRunner:
         self._skip_notice_emitted = True
         count = self._skipped_project_scripts
         msg = (
-            f"[!] Skipped {count} untrusted project script(s). "
+            f"Skipped {count} untrusted project script(s). "
             "Run 'apm lifecycle trust' to enable them."
         )
         if self._logger is not None:
@@ -576,8 +606,12 @@ def build_runner_from_context(
     logger: CommandLogger | None = None,
     verbose: bool = False,
     project_root: str | None = None,
+    events: tuple[str, ...] | None = None,
 ) -> LifecycleScriptRunner:
     """Create a LifecycleScriptRunner via file-based discovery.
+
+    ``events`` limits the runner to those events, so a command whose events
+    have no scripts returns before org-policy discovery.
 
     Scans policy (JSON), user (apm.yml lifecycle:), and project (apm.yml
     lifecycle:) script sources.
@@ -625,6 +659,8 @@ def build_runner_from_context(
         # abort the install/update/uninstall flow.
         project_entries, project_fp = [], None
     scripts.extend(project_entries)
+    if events is not None:
+        scripts = [script for script in scripts if script.event in events]
 
     if not scripts:
         return LifecycleScriptRunner(
@@ -636,7 +672,11 @@ def build_runner_from_context(
     try:
         from apm_cli.policy.discovery import discover_policy_with_chain
 
-        fetch_result = discover_policy_with_chain(project_root)
+        # Discovery joins paths onto the root, so a str root would raise
+        # TypeError here and the except below would silently skip deny_all.
+        fetch_result = discover_policy_with_chain(
+            Path(project_root) if project_root else Path.cwd()
+        )
         if fetch_result and fetch_result.policy:
             org_deny_all = bool(fetch_result.policy.executables.deny_all)
     except Exception:
@@ -646,7 +686,7 @@ def build_runner_from_context(
         if logger is not None:
             emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if emit is not None:
-                emit("[!] Lifecycle scripts suppressed by org policy (executables.deny_all).")
+                emit("Lifecycle scripts suppressed by org policy (executables.deny_all).")
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )

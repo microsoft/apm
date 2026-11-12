@@ -174,10 +174,14 @@ def test_prune_preserves_declared_skill_bundle(
 
 
 @pytest.mark.parametrize("retention", ["direct", "dev", "transitive"])
-def test_prune_retains_installed_ancestor_after_root_declaration_removed(
+def test_install_trims_released_root_to_nested_dependency_it_hosts(
     tmp_path_factory: pytest.TempPathFactory, apm_binary_path: Path, retention: str
 ) -> None:
-    """The installed root survives lock removal while a nested dependency needs it."""
+    """A released root is trimmed to the nested dependency it still hosts (#2926).
+
+    Prune then has nothing left to remove or retain, and content written
+    afterwards inside the hosting directory is never touched.
+    """
     isolated = IsolatedApmEnvironment.create(
         tmp_path_factory.mktemp("pc") / "i", base_env=os.environ
     )
@@ -238,12 +242,13 @@ def test_prune_retains_installed_ancestor_after_root_declaration_removed(
     lock = LockFile.read(lock_path)
     assert root_key not in lock.dependencies
     assert any(package.virtual_path == child_path for package in lock.dependencies.values())
+    assert not (root / "SKILL.md").exists()
+    assert (root / child_path / "SKILL.md").is_file()
     (root / "personal-note.txt").write_text("Keep the entire containing root\n", encoding="utf-8")
     before = ArtifactSnapshot.capture(consumer.root)
 
     for args in (("prune", "--dry-run"), ("prune",), ("prune",)):
         output = run(*args)
-        assert "Retained fixture/family" in output
         assert "No orphaned packages" in output
         assert "would be removed" not in output
         assert_unchanged(before, ArtifactSnapshot.capture(consumer.root))

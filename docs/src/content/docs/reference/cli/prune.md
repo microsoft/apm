@@ -36,6 +36,10 @@ dependency list nor needed by a retained package. This preserves transitive
 dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
+Switching a whole-repository dependency such as `owner/repo` to `path:`
+dependencies on the same repository needs no prune: the next `apm install` or
+`apm update` trims the old checkout to the requested subdirectories.
+
 GitHub owner and repository names are compared case-insensitively: changing
 `microsoft/apm` to `Microsoft/APM` does not orphan the installed package.
 Prune preserves its existing directory spelling; it does not rename packages.

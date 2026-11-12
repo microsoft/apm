@@ -84,7 +84,7 @@
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks pin)",
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks and line-ending pins)",
       "selectors": ["src/apm_cli/utils/git_env.py"],
       "guards": [
         "transport-platform-git-child-environment",
@@ -112,7 +112,7 @@
     },
     {
       "id": "sparse-cone-symlink-validation",
-      "decision": "Sparse-cone setup, dangling-symlink repair, and materialized symlink validation",
+      "decision": "Sparse-cone setup and Git-object symlink materialization and validation",
       "owner": "utils/git_sparse.py",
       "selectors": ["src/apm_cli/utils/git_sparse.py"],
       "guards": ["transport-platform-sparse-symlink-validation"]

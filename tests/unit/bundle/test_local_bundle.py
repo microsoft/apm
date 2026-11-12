@@ -224,6 +224,44 @@ class TestDetectLocalBundle:
         result = detect_local_bundle(tmp_path / "does-not-exist")
         assert result is None
 
+    @pytest.mark.parametrize("own_lockfile", [False, True], ids=["no-lockfile", "install-lock"])
+    def test_detect_skips_source_package_with_apm_yml(
+        self, tmp_path: Path, own_lockfile: bool
+    ) -> None:
+        """#3443: apm.yml + root plugin.json without a pack manifest is a source package."""
+        package = _make_plugin_bundle(tmp_path, include_lockfile=False)
+        (package / "apm.yml").write_text("name: demo-pkg\nversion: 1.0.0\n", encoding="utf-8")
+        skill = package / ".apm" / "skills" / "demo" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# Demo\n", encoding="utf-8")
+        if own_lockfile:
+            (package / "apm.lock.yaml").write_text(
+                yaml.safe_dump({"lockfile_version": "1", "dependencies": []}),
+                encoding="utf-8",
+            )
+
+        assert detect_local_bundle(package) is None
+
+    def test_detect_keeps_packed_directory_with_apm_yml(self, tmp_path: Path) -> None:
+        """A directory whose apm.lock.yaml carries the pack manifest stays a bundle."""
+        bundle = _make_plugin_bundle(tmp_path)
+        (bundle / "apm.yml").write_text("name: packed\nversion: 1.0.0\n", encoding="utf-8")
+
+        result = detect_local_bundle(bundle)
+
+        assert result is not None
+        assert result.lockfile is not None
+        assert "pack" in result.lockfile
+
+    def test_detect_keeps_legacy_manifestless_directory(self, tmp_path: Path) -> None:
+        """plugin.json without apm.yml or lockfile keeps the legacy bundle route."""
+        bundle = _make_plugin_bundle(tmp_path, include_lockfile=False)
+
+        result = detect_local_bundle(bundle)
+
+        assert result is not None
+        assert result.lockfile is None
+
     def test_detect_reads_plugin_json_id(self, tmp_path: Path) -> None:
         bundle = _make_plugin_bundle(tmp_path, plugin_id="my-custom-id")
         result = detect_local_bundle(bundle)

@@ -309,7 +309,7 @@ export function renderHtml({ csrfToken, repo }) {
     .kind-issue { background: #1f6feb30; color: #58a6ff; border: 1px solid #1f6feb; }
     .kind-pr { background: #23863620; color: #3fb950; border: 1px solid #238636; }
     .label-area { background: #1f6feb18; color: #58a6ff; border: 1px solid #1f6feb; }
-    .label-theme { background: #d2992218; color: #d29922; border: 1px solid #d29922; }
+    .label-pillar { background: #d2992218; color: #d29922; border: 1px solid #d29922; }
     .item-card {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 9.5rem;
@@ -579,6 +579,7 @@ export function renderHtml({ csrfToken, repo }) {
     }
     function workerTarget(action, number) {
       if (action === "worker-issue-triage") return "worker:issue-triage:" + number;
+      if (action === "worker-issue-accept") return "worker:issue-accept:" + number;
       if (action === "worker-issue-delivery") return "worker:issue-delivery:" + number;
       if (action === "worker-pr-triage") return "worker:pr-triage:" + number;
       if (action === "worker-pr-review") return "worker:pr-review:" + number;
@@ -593,10 +594,10 @@ export function renderHtml({ csrfToken, repo }) {
       return found ? found.slice(5) : "";
     }
     function classLine(item) {
-      const bits = (item.labels || []).filter((name) => name.startsWith("area/") || name.startsWith("theme/"));
+      const bits = (item.labels || []).filter((name) => name.startsWith("area/") || name.startsWith("pillar/"));
       if (!bits.length) return "";
       return bits.map((name) => {
-        const cls = name.startsWith("theme/") ? "label-theme" : "label-area";
+        const cls = name.startsWith("pillar/") ? "label-pillar" : "label-area";
         return '<span class="badge ' + cls + '">' + escapeHtml(name) + "</span>";
       }).join("");
     }
@@ -696,7 +697,7 @@ export function renderHtml({ csrfToken, repo }) {
         pushButton(btns, "Issue triage", "btn-open-session", { spawn: { action: "worker-issue-triage", number: n } });
       }
       if (lane === "decide") {
-        pushButton(btns, "Accept", "btn-start", { label: { kind: "issue", number: n, action: "accept" } });
+        pushButton(btns, "Accept", "btn-start", { spawn: { action: "worker-issue-accept", number: n } });
         pushButton(btns, "Defer", "btn-sm", { label: { kind: "issue", number: n, action: "defer", confirmClearAccepted: !!item.accepted } });
         pushButton(btns, "Re-triage issue", "btn-open-session", { spawn: { action: "worker-issue-triage", number: n } });
       }
@@ -707,7 +708,7 @@ export function renderHtml({ csrfToken, repo }) {
         pushButton(btns, "Defer", "btn-sm", { label: { kind: "issue", number: n, action: "defer", confirmClearAccepted: true } });
       }
       if (lane === "deferred") {
-        pushButton(btns, "Accept", "btn-start", { label: { kind: "issue", number: n, action: "accept" } });
+        pushButton(btns, "Accept", "btn-start", { spawn: { action: "worker-issue-accept", number: n } });
         pushButton(btns, "Re-triage issue", "btn-open-session", { spawn: { action: "worker-issue-triage", number: n } });
       }
       return btns.join("");

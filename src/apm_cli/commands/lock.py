@@ -87,6 +87,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     name="lock",
     invoke_without_command=True,
     help="Resolve dependencies and write apm.lock.yaml without deploying or deleting files",
+    short_help="Resolve dependencies and write apm.lock.yaml",
 )
 @click.option(
     "--verbose",

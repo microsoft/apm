@@ -158,7 +158,7 @@ def _lookup_in_index(query: str, index: dict[str, list[str]]) -> list[str] | Non
 # ---------------------------------------------------------------------------
 
 
-@click.command("find")
+@click.command("find", short_help="Trace a materialized file to its package(s)")
 @click.argument("file_path")
 @click.option(
     "--source",

@@ -103,13 +103,19 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "audit",
         "apm_cli.commands.audit",
         "audit",
-        "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
+        "Scan for hidden Unicode, drift, and policy violations",
+    ),
+    (
+        "export-patch",
+        "apm_cli.commands.export_patch",
+        "export_patch",
+        "Export local edits as patches to source packages",
     ),
     (
         "install",
         "apm_cli.commands.install",
         "install",
-        "Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)",
+        "Install APM, MCP, and LSP dependencies",
     ),
     (
         "marketplace",
@@ -127,7 +133,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "prune",
         "apm_cli.commands.prune",
         "prune",
-        "Remove APM packages absent from the resolved dependency graph and repair stale deployment owners",
+        "Remove packages absent from the dependency graph",
     ),
     (
         "search",
@@ -139,7 +145,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "uninstall",
         "apm_cli.commands.uninstall",
         "uninstall",
-        "Remove packages using manifest entries or direct locked keys from 'apm deps list'",
+        "Remove packages by manifest entry or locked key",
     ),
     (
         "unpack",
@@ -302,8 +308,14 @@ def cli(ctx, verbose: bool) -> None:
     # Check for updates only for known commands; skip on invalid input to fail fast.
     # Discovery must not initialize caches or contact the update service.
     raw_args = ctx.meta.get("apm_raw_args", sys.argv[1:])
-    discovering = ctx.invoked_subcommand == "discover" or (
-        ctx.invoked_subcommand == "init" and "--discover" in raw_args
+    discovering = (
+        ctx.invoked_subcommand == "discover"
+        or (ctx.invoked_subcommand == "init" and "--discover" in raw_args)
+        # Read-only file provenance (#739) must not write caches either.
+        or (
+            ctx.invoked_subcommand in ("view", "info")
+            and any(arg == "--file" or arg.startswith("--file=") for arg in raw_args)
+        )
     )
     if (
         not ctx.resilient_parsing

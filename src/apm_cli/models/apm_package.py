@@ -8,6 +8,7 @@ compatibility.
 
 import logging
 import re
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,7 @@ __all__ = [  # noqa: RUF022
     "PackageInfo",
     "build_installed_package_info",
     "clear_apm_yml_cache",
+    "invalidate_apm_yml_cache_entry",
     "surviving_dependency_refs_for_reintegration",
 ]
 
@@ -77,11 +79,58 @@ __all__ = [  # noqa: RUF022
 # declared them. Sharing one APMPackage instance across both would let the
 # resolver mutate ``source_path`` and poison the cache for the other consumer.
 _apm_yml_cache: dict[tuple[Path, Path | None, bool], "APMPackage"] = {}
+# Guards every structural mutation of ``_apm_yml_cache``. The parallel
+# pre-download executor and the BFS resolver pool both insert entries from
+# worker threads while ``invalidate_apm_yml_cache_entry`` iterates the dict;
+# an unguarded concurrent insert would raise ``RuntimeError: dictionary
+# changed size during iteration`` and fail the install intermittently.
+# Lock-free ``dict.get`` reads stay safe: the lookup executes as one
+# GIL-held C-level dict operation, so it cannot observe a torn mutation.
+# This read path (and the generation snapshot below) assumes the GIL;
+# revisit both before supporting free-threaded CPython (PEP 703).
+_apm_yml_cache_lock = threading.Lock()
+
+# Bumped under the lock by every invalidation/clear. ``from_apm_yml``
+# snapshots it BEFORE reading the file and skips its insert (still
+# returning the parsed result) when the generation moved: an in-flight
+# parse that read PRE-rewrite bytes must not re-poison the cache AFTER
+# the rewrite's invalidation ran. Global (not per-path) on purpose --
+# the cost of over-invalidation is one extra parse on the next load for
+# each parse in flight when an invalidation lands (invalidations only
+# fire on apm.yml rewrites during materialization, so keep them off hot
+# read paths), and a per-path map would reintroduce the
+# iteration/mutation problem the lock exists to solve.
+_apm_yml_cache_generation = 0
 
 
 def clear_apm_yml_cache() -> None:
     """Clear the from_apm_yml parse cache. Call in tests for isolation."""
-    _apm_yml_cache.clear()
+    global _apm_yml_cache_generation
+    with _apm_yml_cache_lock:
+        _apm_yml_cache_generation += 1
+        _apm_yml_cache.clear()
+
+
+def invalidate_apm_yml_cache_entry(apm_yml_path: Path) -> None:
+    """Drop every cache entry for *apm_yml_path* (all source_path variants).
+
+    MUST be called after rewriting an ``apm.yml`` on disk within a run
+    (marketplace-plugin synthesis, ``stamp_plugin_version``). The cache
+    assumes file content is stable for the process lifetime; a rewrite
+    breaks that. Concretely (apm#2619 migration surfaced this): when a
+    same-process re-download re-synthesized a marketplace plugin's
+    ``apm.yml`` at ``version: 0.0.0``, ``from_apm_yml`` returned the STALE
+    cached instance -- already stamped to the short commit SHA earlier in
+    the run -- so ``stamp_plugin_version``'s ``version == "0.0.0"`` guard
+    skipped, leaving an unstamped tree on disk whose content hash matched
+    neither the lockfile record nor a fresh install's tree.
+    """
+    global _apm_yml_cache_generation
+    resolved = apm_yml_path.resolve()
+    with _apm_yml_cache_lock:
+        _apm_yml_cache_generation += 1
+        for key in [k for k in _apm_yml_cache if k[0] == resolved]:
+            _apm_yml_cache.pop(key, None)
 
 
 def _parse_v01_registries_block(
@@ -804,6 +853,13 @@ class APMPackage:
         if cached is not None:
             return cached
 
+        # Snapshot BEFORE reading the file: if an invalidation lands while
+        # this thread parses (a concurrent rewrite of the manifest), the
+        # insert below is skipped so pre-rewrite bytes cannot re-poison
+        # the cache. Plain int read is GIL-atomic; writers bump under the
+        # lock.
+        generation_snapshot = _apm_yml_cache_generation
+
         try:
             from ..utils.yaml_io import load_yaml
 
@@ -821,7 +877,9 @@ class APMPackage:
             manifest_path=apm_yml_path,
             create_config=create_config,
         )
-        _apm_yml_cache[cache_key] = result
+        with _apm_yml_cache_lock:
+            if _apm_yml_cache_generation == generation_snapshot:
+                _apm_yml_cache[cache_key] = result
         return result
 
     def get_apm_dependencies(self) -> list[DependencyReference]:
@@ -952,6 +1010,9 @@ class PackageInfo:
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
     root_local_project_root: Path | None = None
     deployment_package_root: Path | None = None  # Source root in the deployment output frame
+    # Verbatim licence copies APM added after materialization (#3556); see
+    # apm_cli.deps.carried_license. Empty when nothing was carried.
+    carried_licenses: tuple[Any, ...] = ()
 
     def get_canonical_dependency_string(self) -> str:
         """Get the canonical dependency string for this package.
