@@ -159,3 +159,66 @@ class TestPickBest:
     def test_prerelease_sorts_before_release(self):
         versions = ["1.0.0-beta.1", "1.0.0"]
         assert pick_best(">=1.0.0-beta.1 <2.0.0", versions) == "1.0.0"
+
+
+class TestPickBestPrereleaseOptIn:
+    """OpenAPM v0.1 section 7.3.1 pre-release opt-in (issue #3466).
+
+    A pre-release candidate is eligible only when the range names a
+    pre-release on the same [major, minor, patch] tuple; otherwise it is
+    discarded before highest-match selection.
+    """
+
+    @pytest.mark.parametrize(
+        "spec,versions,expected",
+        [
+            ("^1.2.3", ["1.2.3", "1.3.0-beta.1"], "1.2.3"),
+            (">=1.2.0 <2.0.0", ["1.9.0", "2.0.0-rc.1"], "1.9.0"),
+            ("~1.2.0", ["1.2.4", "1.2.5-alpha.1"], "1.2.4"),
+            ("1.2.x", ["1.2.0", "1.2.1-rc.1"], "1.2.0"),
+            (">=1.0.0", ["1.0.0", "3.0.0-beta"], "1.0.0"),
+        ],
+    )
+    def test_stable_range_discards_prereleases(self, spec, versions, expected):
+        assert pick_best(spec, versions) == expected
+
+    def test_stable_range_with_only_prereleases_matches_nothing(self):
+        assert pick_best("^1.0.0", ["1.1.0-beta.1", "1.2.0-rc.1"]) is None
+
+    def test_same_tuple_prerelease_range_selects_prerelease(self):
+        versions = ["1.1.0-alpha", "1.1.0-beta"]
+        assert pick_best(">=1.1.0-alpha <1.2.0", versions) == "1.1.0-beta"
+
+    def test_same_tuple_prerelease_range_still_prefers_release(self):
+        versions = ["1.0.9", "1.1.0-alpha", "1.1.0-beta", "1.1.0", "1.1.5"]
+        assert pick_best(">=1.1.0-alpha <1.2.0", versions) == "1.1.5"
+
+    def test_prerelease_range_rejects_prerelease_on_other_tuple(self):
+        versions = ["1.2.0", "1.5.0-beta"]
+        assert pick_best(">=1.2.0-alpha <2.0.0", versions) == "1.2.0"
+
+    def test_prerelease_range_tuple_from_upper_bound(self):
+        versions = ["1.9.0", "2.0.0-alpha.1", "2.0.0-beta.1"]
+        assert pick_best(">=1.0.0 <2.0.0-beta.1", versions) == "2.0.0-alpha.1"
+
+    def test_caret_prerelease_admits_same_tuple_only(self):
+        versions = ["1.2.3-beta.2", "1.2.4-beta.1"]
+        assert pick_best("^1.2.3-beta.1", versions) == "1.2.3-beta.2"
+
+    def test_exact_prerelease_spec_selects_it(self):
+        assert pick_best("1.0.0-beta.1", ["1.0.0-beta.1", "0.9.0"]) == "1.0.0-beta.1"
+
+
+class TestPickBestBuildMetadataTiebreak:
+    """req-rs-014: equal precedence ties break on the bytewise-highest tag."""
+
+    @pytest.mark.parametrize(
+        "versions",
+        [
+            ["1.2.3+alpha", "1.2.3+zeta", "1.2.3+build.42"],
+            ["1.2.3+zeta", "1.2.3+build.42", "1.2.3+alpha"],
+            ["1.2.3+build.42", "1.2.3+alpha", "1.2.3+zeta"],
+        ],
+    )
+    def test_tiebreak_is_order_independent(self, versions):
+        assert pick_best("^1.2.3", versions) == "1.2.3+zeta"
