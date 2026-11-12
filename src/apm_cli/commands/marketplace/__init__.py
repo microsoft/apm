@@ -340,33 +340,26 @@ def add(source, name, ref, branch, host, verbose):
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registration import (
             MarketplaceManifestNotFoundError,
+            parse_registration_source,
             probe_registration,
         )
         from ...marketplace.registry import add_marketplace
         from ...marketplace.source_identity import parse_marketplace_source
 
-        source_arg, fragment_ref = _split_source_fragment_ref(source)
-
-        # --ref / --branch reconciliation. --branch stays as a hidden alias
-        # for one release so legacy invocations keep working; passing multiple
-        # ref sources is a hard error so we never silently pick one.
-        explicit_ref = ref is not None or branch is not None
+        # --branch stays as a hidden CLI-only alias for --ref for one release.
+        # Normalize it here; the shared parser owns the rest of the SOURCE
+        # grammar (#ref fragments, ref precedence, direct-URL classification),
+        # exactly as the user-manifest ``marketplaces:`` reconcile does.
         if ref is not None and branch is not None:
             logger.error(
                 "--ref and --branch are mutually exclusive. Use --ref (--branch is a deprecated alias).",
                 symbol="error",
             )
             sys.exit(1)
-        if fragment_ref and explicit_ref:
-            logger.error(
-                "Do not combine a git URL #ref with --ref or --branch. Use one ref source.",
-                symbol="error",
-            )
-            sys.exit(1)
-        effective_ref = fragment_ref or ref or branch or "main"
+        explicit_ref = ref if ref is not None else branch
 
         try:
-            url, kind, resolved_host = _parse_marketplace_source(source_arg, host)
+            parsed = parse_registration_source(source, ref=explicit_ref, host=host)
         except PathTraversalError:
             logger.error(
                 f"Invalid source '{source}': contains a path-traversal sequence. "
@@ -374,13 +367,18 @@ def add(source, name, ref, branch, host, verbose):
             )
             sys.exit(1)
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(str(exc), symbol="error")
             sys.exit(1)
+        url, kind, resolved_host = parsed.url, parsed.kind, parsed.host
+        fragment_ref = parsed.fragment_ref
+        effective_ref = parsed.ref
+        is_direct_url = parsed.is_direct_url
+        # Without a #ref fragment the source is the argument itself.
+        source_arg = source.strip()
 
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
         # --host is being ignored rather than silently overriding.
-        is_direct_url = _is_remote_marketplace_json_url(url)
 
         if host is not None and is_direct_url:
             logger.warning(
@@ -419,7 +417,7 @@ def add(source, name, ref, branch, host, verbose):
         )
         logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
         if _should_warn_unpinned_git_url(
-            source_arg, kind, is_direct_url, fragment_ref, explicit_ref
+            source_arg, kind, is_direct_url, fragment_ref, explicit_ref is not None
         ):
             from ...marketplace.source_identity import parse_marketplace_source
 
@@ -518,17 +516,6 @@ def add(source, name, ref, branch, host, verbose):
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
-
-
-def _is_remote_marketplace_json_url(url: str) -> bool:
-    """Return True when *url* names a hosted marketplace.json document.
-
-    Delegates to the single shared classifier in ``marketplace.models`` so
-    the CLI and ``MarketplaceSource`` cannot drift on the url-kind decision.
-    """
-    from ...marketplace.models import url_names_remote_manifest
-
-    return url_names_remote_manifest(url)
 
 
 def _should_warn_unpinned_git_url(

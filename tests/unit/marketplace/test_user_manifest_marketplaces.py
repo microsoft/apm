@@ -342,3 +342,83 @@ class TestReconcile:
         assert report.ok
         logger.start.assert_not_called()
         assert registry_mod.marketplace_names() == ["manual"]
+
+    @pytest.mark.parametrize("body", ["", "- a\n- b\n", "just-a-string\n", "name: [unclosed\n"])
+    def test_malformed_root_fails_before_touching_registry(self, user_manifest, probe, body):
+        _write_manifest(user_manifest, [{"name": "acme", "source": "acme-org/m"}])
+        reconcile_user_marketplaces(user_manifest, logger=MagicMock())
+        user_manifest.write_text(body, encoding="utf-8")
+        logger = MagicMock()
+        assert (
+            reconcile_user_marketplaces_for_install(user_manifest, logger=logger, dry_run=False)
+            is False
+        )
+        assert registry_mod.marketplace_names() == ["acme"]
+        assert user_manifest.as_posix() in logger.error.call_args.args[0]
+
+    def test_failed_fetch_keeps_stale_manifest_entries(self, user_manifest, monkeypatch, probe):
+        _write_manifest(user_manifest, [{"name": "old", "source": "acme-org/m"}])
+        reconcile_user_marketplaces(user_manifest, logger=MagicMock())
+        probe.side_effect = MarketplaceFetchError("new", "404")
+        _write_manifest(user_manifest, [{"name": "new", "source": "acme-org/m2"}])
+        report = reconcile_user_marketplaces(user_manifest, logger=MagicMock())
+        assert [name for name, _ in report.failed] == ["new"]
+        assert report.removed == []
+        assert registry_mod.marketplace_names() == ["old"]
+
+    def test_dry_run_creates_no_registry_files(self, _isolate_user_root, user_manifest, probe):
+        apm_dir = _isolate_user_root / ".apm"
+        _write_manifest(user_manifest, [{"name": "acme", "source": "acme-org/m"}])
+        report = reconcile_user_marketplaces(user_manifest, logger=MagicMock(), dry_run=True)
+        assert report.registered == ["acme"]
+        assert not (apm_dir / "marketplaces.json").exists()
+        assert not (apm_dir / "config.json").exists()
+
+    def test_nothing_declared_creates_no_registry_files(self, _isolate_user_root, user_manifest):
+        apm_dir = _isolate_user_root / ".apm"
+        _write_manifest(user_manifest, None)
+        report = reconcile_user_marketplaces(user_manifest, logger=MagicMock())
+        assert report.ok
+        assert not (apm_dir / "marketplaces.json").exists()
+        assert not (apm_dir / "config.json").exists()
+
+
+# -- shared SOURCE grammar ------------------------------------------------------
+
+
+class TestMarketplaceAddSharesRegistrationParser:
+    """``apm marketplace add`` and the reconcile parse SOURCE through one owner."""
+
+    def _invoke(self, args):
+        from click.testing import CliRunner
+
+        from apm_cli.commands.marketplace import marketplace
+
+        return CliRunner().invoke(marketplace, ["add", *args])
+
+    def test_add_routes_source_through_parse_registration_source(self, monkeypatch):
+        calls = []
+
+        def _boom(source, *, ref=None, host=None):
+            calls.append((source, ref, host))
+            raise ValueError("rejected by the shared parser")
+
+        monkeypatch.setattr("apm_cli.marketplace.registration.parse_registration_source", _boom)
+        result = self._invoke(["https://example.com/o/r.git#v1", "--branch", "dev"])
+        assert result.exit_code == 1
+        assert calls == [("https://example.com/o/r.git#v1", "dev", None)]
+        assert "rejected by the shared parser" in result.output
+
+    def test_add_and_declaration_reject_the_same_fragment_conflict(self, user_manifest):
+        result = self._invoke(["https://example.com/o/r.git#v1", "--ref", "v2"])
+        assert result.exit_code == 1
+        assert "Do not combine a git URL #ref with --ref" in result.output
+        with pytest.raises(ValueError, match="Do not combine a git URL #ref with --ref"):
+            parse_declared_marketplaces(
+                {
+                    "marketplaces": [
+                        {"name": "a", "source": "https://example.com/o/r.git#v1", "ref": "v2"}
+                    ]
+                },
+                user_manifest,
+            )

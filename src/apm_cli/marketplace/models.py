@@ -88,7 +88,7 @@ def url_names_remote_manifest(url: str) -> bool:
     """Return True when *url* is a direct hosted ``marketplace.json`` document.
 
     Single source of truth for the "is this a hosted marketplace.json URL"
-    decision, shared by the marketplace CLI (``_is_remote_marketplace_json_url``)
+    decision, shared by registration parsing (``parse_registration_source``)
     and ``MarketplaceSource.is_remote_manifest_url`` so the two predicates
     cannot drift (see #692 forward-compat constraint 1: the source-kind
     discriminator stays a derived, validated string). Matches Anthropic's
