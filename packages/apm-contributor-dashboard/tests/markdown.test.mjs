@@ -173,8 +173,69 @@ describe("renderMarkdown", () => {
   it("renders a link with target=_blank", () => {
     assert.equal(
       renderMarkdown("[click here](https://example.com)"),
-      '<p class="md-p"><a class="md-link" href="https://example.com" target="_blank">click here</a></p>',
+      '<p class="md-p"><a class="md-link" href="https://example.com" target="_blank" rel="noopener noreferrer">click here</a></p>',
     );
+  });
+
+  // -- URL scheme allowlist ----------------------------------------------------
+
+  const unsafeUrls = [
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    " javascript:alert(1)",
+    "java\tscript:alert(1)",
+    "java\rscript:alert(1)",
+    "\u0001javascript:alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "file:///etc/passwd",
+    "\u00a0javascript:alert%281%29",
+    "\u1680javascript:alert%281%29",
+    "\u2000javascript:alert%281%29",
+    "\u200ajavascript:alert%281%29",
+    "\u2028javascript:alert%281%29",
+    "\u2029javascript:alert%281%29",
+    "\u202fjavascript:alert%281%29",
+    "\u205fjavascript:alert%281%29",
+    "\u3000javascript:alert%281%29",
+    "\ufeffjavascript:alert%281%29",
+  ];
+
+  for (const url of unsafeUrls) {
+    it(`renders an unsafe link as plain text: ${JSON.stringify(url)}`, () => {
+      const result = renderMarkdown(`[label](${url})`);
+      assert.ok(!result.includes("<a "), `got: ${result}`);
+      assert.ok(!/href=/i.test(result), `got: ${result}`);
+      assert.ok(result.includes("label"), `got: ${result}`);
+    });
+
+    it(`renders an unsafe image as alt text: ${JSON.stringify(url)}`, () => {
+      const result = renderMarkdown(`![alt text](${url})`);
+      assert.ok(!result.includes("<img"), `got: ${result}`);
+      assert.ok(!/src=/i.test(result), `got: ${result}`);
+      assert.ok(result.includes("alt text"), `got: ${result}`);
+    });
+  }
+
+  it("keeps entity-encoded scheme text inert", () => {
+    const result = renderMarkdown("[x](&#106;avascript:alert(1))");
+    assert.ok(!/href="(?:&#106;|j)avascript:/i.test(result), `got: ${result}`);
+  });
+
+  it("allows mailto links", () => {
+    const result = renderMarkdown("[mail](mailto:dev@example.com)");
+    assert.ok(result.includes('href="mailto:dev@example.com"'), `got: ${result}`);
+  });
+
+  it("allows relative and fragment links", () => {
+    assert.ok(renderMarkdown("[doc](./docs/a.md)").includes('href="./docs/a.md"'));
+    assert.ok(renderMarkdown("[top](#top)").includes('href="#top"'));
+    assert.ok(renderMarkdown("[p](/path)").includes('href="/path"'));
+  });
+
+  it("does not render mailto images", () => {
+    const result = renderMarkdown("![a](mailto:dev@example.com)");
+    assert.ok(!result.includes("<img"), `got: ${result}`);
   });
 
   it("renders a link with multi-word anchor text", () => {
