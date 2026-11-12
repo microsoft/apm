@@ -129,8 +129,8 @@ class APMDependencyResolver:
             auth_resolver: Optional auth resolver for marketplace dependency resolution.
             update_refs: True for ``apm update`` / ``--refresh``. When set,
                 ``_should_force_recheck`` gives ``download_callback`` a
-                chance to run for a semver-ranged dep even when its
-                install path already exists, at any depth -- see that
+                chance to run for a semver-ranged or mutable-ref Git dep
+                even when its install path already exists, at any depth -- see that
                 method's docstring for why this can't be scoped to direct
                 deps only.
             update_keys: Shared selected-package keys for scoped updates.
