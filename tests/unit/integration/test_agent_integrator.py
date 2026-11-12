@@ -1521,6 +1521,162 @@ class TestCodexAgentIntegration:
         assert source.read_text(encoding="utf-8") == content
         assert diagnostics.by_category() == {}
 
+    # -- #2966: source-relative Markdown links survive Codex relocation --
+
+    _LINKED_BODY = (
+        "Use the [guide skill](../skills/guide/SKILL.md#usage) first.\n"
+        "See [docs](https://example.com/docs.md), [top](#top),\n"
+        "[missing](../skills/missing/SKILL.md) and [outside](../../../../../outside.md).\n"
+    )
+
+    def _linked_package(self) -> tuple[Path, Path]:
+        """Installed dependency whose agent links to a retained sibling skill."""
+        package_dir = self.root / "apm_modules" / "owner" / "pkg"
+        agents_dir = package_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        skill = package_dir / ".apm" / "skills" / "guide" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: guide\ndescription: Guide\n---\nGuide.\n", encoding="utf-8")
+        (self.root / "outside.md").write_text("outside\n", encoding="utf-8")
+        (agents_dir / "reviewer.agent.md").write_text(
+            "---\nname: reviewer\ndescription: Review code\nmodel: gpt-5.6-sol\n"
+            f"model_reasoning_effort: high\n---\n{self._LINKED_BODY}",
+            encoding="utf-8",
+        )
+        return package_dir, skill
+
+    @staticmethod
+    def _links(text: str) -> list[str]:
+        import re
+
+        return re.findall(r"\]\(([^)]+)\)", text)
+
+    def _assert_guide_link_reaches(self, agent_file: Path, text: str, skill: Path) -> None:
+        guide = self._links(text)[0]
+        path, _, fragment = guide.partition("#")
+        assert fragment == "usage"
+        assert (agent_file.parent / path).resolve() == skill.resolve()
+
+    def test_codex_relative_link_resolves_from_generated_agent_location(self) -> None:
+        """Codex developer_instructions links reach the retained resource (#2966)."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, skill = self._linked_package()
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+        assert result.target_paths == [target]
+        assert result.links_resolved == 1
+        doc = tomllib.loads(target.read_text(encoding="utf-8"))
+        assert {k: v for k, v in doc.items() if k != "developer_instructions"} == {
+            "name": "reviewer",
+            "description": "Review code",
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "high",
+        }
+        instructions = doc["developer_instructions"]
+        self._assert_guide_link_reaches(target, instructions, skill)
+        # URL, anchor, unresolvable and out-of-package links keep the shared
+        # resolver's existing pass-through behavior.
+        assert self._links(instructions)[1:] == [
+            "https://example.com/docs.md",
+            "#top",
+            "../skills/missing/SKILL.md",
+            "../../../../../outside.md",
+        ]
+        assert diagnostics.by_category() == {}
+
+    def test_codex_and_copilot_links_reach_same_resource(self) -> None:
+        """Same package: Codex and Copilot links resolve to one installed file."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, skill = self._linked_package()
+        (self.root / ".github").mkdir()
+        package_info = self._create_package_info(package_dir)
+        integrator = AgentIntegrator()
+
+        codex = integrator.integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root
+        )
+        copilot = integrator.integrate_agents_for_target(
+            KNOWN_TARGETS["copilot"], package_info, self.root
+        )
+
+        codex_file = codex.target_paths[0]
+        copilot_file = copilot.target_paths[0]
+        assert copilot_file == self.root / ".github" / "agents" / "reviewer.agent.md"
+        codex_text = tomllib.loads(codex_file.read_text(encoding="utf-8"))["developer_instructions"]
+        copilot_text = copilot_file.read_text(encoding="utf-8")
+        self._assert_guide_link_reaches(codex_file, codex_text, skill)
+        self._assert_guide_link_reaches(copilot_file, copilot_text, skill)
+        assert codex.links_resolved == copilot.links_resolved == 1
+
+    def test_codex_relative_link_survives_reinstall_and_update(self) -> None:
+        """Reinstall and source update rewrite links again from the new body."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, skill = self._linked_package()
+        package_info = self._create_package_info(package_dir)
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+        managed = {".codex/agents/reviewer.toml"}
+
+        AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root
+        )
+        first = target.read_text(encoding="utf-8")
+
+        reinstall = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root, managed_files=managed
+        )
+        assert reinstall.files_integrated == 1
+        assert target.read_text(encoding="utf-8") == first
+
+        source = package_dir / ".apm" / "agents" / "reviewer.agent.md"
+        source.write_text(
+            "---\nname: reviewer\n---\nUpdated: read [guide](../skills/guide/SKILL.md#usage).\n",
+            encoding="utf-8",
+        )
+        update = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"], package_info, self.root, managed_files=managed
+        )
+        assert update.links_resolved == 1
+        instructions = tomllib.loads(target.read_text(encoding="utf-8"))["developer_instructions"]
+        assert instructions.startswith("Updated: read [guide](")
+        self._assert_guide_link_reaches(target, instructions, skill)
+
+    def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self) -> None:
+        """A managed TOML written before #2966 is repaired by the next install."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, skill = self._linked_package()
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            'name = "reviewer"\ndescription = "Review code"\n'
+            'developer_instructions = "Use the [guide skill](../skills/guide/SKILL.md#usage)."\n',
+            encoding="utf-8",
+        )
+        assert not (target.parent / "../skills/guide/SKILL.md").exists()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            managed_files={".codex/agents/reviewer.toml"},
+        )
+
+        assert result.files_integrated == 1
+        assert result.links_resolved == 1
+        instructions = tomllib.loads(target.read_text(encoding="utf-8"))["developer_instructions"]
+        self._assert_guide_link_reaches(target, instructions, skill)
+
     def test_codex_agent_tools_scope_emits_lossy_compilation_warning(self, capsys):
         """Codex installs must not silently discard agent tool restrictions."""
         from apm_cli.integration.targets import KNOWN_TARGETS
