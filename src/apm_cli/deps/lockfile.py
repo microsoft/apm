@@ -13,7 +13,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +129,7 @@ def resolve_reproducible_timestamp(
         try:
             return datetime.fromtimestamp(
                 int(source_date_epoch),
-                tz=timezone.utc,
+                tz=UTC,
             ).isoformat()
         except (ValueError, OverflowError, OSError):
             pass
@@ -1350,9 +1350,9 @@ class LockFile:
             if self.is_semantically_equivalent(existing):
                 self.generated_at = existing.generated_at
             else:
-                self.generated_at = datetime.now(timezone.utc).isoformat()
+                self.generated_at = datetime.now(UTC).isoformat()
         elif legacy_timestamp_present:
-            self.generated_at = datetime.now(timezone.utc).isoformat()
+            self.generated_at = datetime.now(UTC).isoformat()
         else:
             self.generated_at = None
         serialized = self.to_yaml()

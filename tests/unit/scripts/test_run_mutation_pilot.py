@@ -5,12 +5,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tomllib
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_mutation_pilot.py"

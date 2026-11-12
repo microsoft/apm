@@ -33,8 +33,8 @@ APM is a build-time dependency manager for AI agent configuration. It performs f
 APM has no runtime footprint. Once `apm install` or `apm compile` completes, the process exits.
 
 - **No runtime component.** APM generates files then terminates. It does not run alongside your application.
-- **No network calls after install (by default).** All network activity (git clone/fetch) occurs during dependency resolution. There are no callbacks or phone-home requests. (**Scripts exception:** opt-in [lifecycle scripts](/apm/enterprise/lifecycle-scripts/) may send HTTPS POST requests, but only from policy- or user-installed script files, or project script files you have explicitly trusted -- see the [lifecycle scripts trust model](/apm/enterprise/lifecycle-scripts/#trust-model).)
-- **No arbitrary code execution (by default).** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. (**Scripts exception:** opt-in [lifecycle scripts](/apm/enterprise/lifecycle-scripts/) may run shell commands, but project-source scripts are skipped unless you explicitly trust them with `apm lifecycle trust`; policy and user scripts originate from sources you already control. See the [trust model](/apm/enterprise/lifecycle-scripts/#trust-model).) (**Canvas exception:** the experimental `canvas` primitive deploys executable `extension.mjs` (Node.js) code to `.github/extensions/` or `~/.copilot/extensions/`; this surface is gated by both the `canvas` experimental flag and the [executable trust gate](#executable-trust-gate) for dependency-provided canvases. See [Canvas extensions](/apm/integrations/canvas/).)
+- **No network calls after install (by default).** All network activity (git clone/fetch) occurs during dependency resolution. There are no callbacks or phone-home requests. (**Scripts exception:** opt-in [lifecycle scripts](/apm/enterprise/lifecycle-scripts/), including `pre-compile` scripts during `apm compile`, may send HTTPS POST requests, but only from policy- or user-installed script files, or project script files you have explicitly trusted -- see the [lifecycle scripts trust model](/apm/enterprise/lifecycle-scripts/#trust-model).)
+- **No arbitrary code execution (by default).** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. (**Scripts exception:** opt-in [lifecycle scripts](/apm/enterprise/lifecycle-scripts/) may run shell commands during `apm install`, `apm update`, `apm uninstall`, and `apm compile`, but project-source scripts are skipped unless you explicitly trust them with `apm lifecycle trust`; policy and user scripts originate from sources you already control. See the [trust model](/apm/enterprise/lifecycle-scripts/#trust-model).) (**Canvas exception:** the experimental `canvas` primitive deploys executable `extension.mjs` (Node.js) code to `.github/extensions/` or `~/.copilot/extensions/`; this surface is gated by both the `canvas` experimental flag and the [executable trust gate](#executable-trust-gate) for dependency-provided canvases. See [Canvas extensions](/apm/integrations/canvas/).)
 - **No access to application data.** APM never reads databases, API responses, application state, or user data.
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
@@ -44,7 +44,7 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 APM resolves `git` and `gh` from explicit `PATH` directories outside the
 current repository or APM project. Project-local executables and symlinks
 resolving back into that project are excluded. On Windows, discovery also
-checks `PATHEXT` extensions such as `.EXE`, including on Python 3.10 and 3.11,
+checks `PATHEXT` extensions such as `.EXE`, including on Python 3.11,
 without adding the current directory to the search.
 
 This check applies to APM's executable selection, not to searches performed
@@ -180,7 +180,7 @@ download -> authorize deploy set -> scan selected files -> block or deploy -> re
 
 Content scanning extends beyond install:
 
-- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
+- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing. This is defense-in-depth for dependency sources, which were already scanned at install, and the first scan of content a `pre-compile` [lifecycle script](/apm/enterprise/lifecycle-scripts/#generating-sources-before-compile) generated, since compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
 - **`apm compile --global`** scans user-scope root context files assembled from
   globally installed instructions before writing them. Critical findings stop
   the write and exit with code 1. Existing hand-authored root context files are

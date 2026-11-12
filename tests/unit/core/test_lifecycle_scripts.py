@@ -21,6 +21,7 @@ from apm_cli.core.lifecycle_scripts import (
     _get_policy_scripts_dir,
     build_runner_from_context,
     discover_scripts,
+    event_for_dependencies,
     parse_apm_yml_lifecycle,
     parse_project_script_file,
     parse_script_file,
@@ -54,6 +55,30 @@ class TestLifecycleEvent:
         assert event.event == "pre-install"
         assert event.cli_version == "0.14.1"
         assert event.timestamp
+
+
+class TestEventForDependencies:
+    def test_maps_dependency_references_to_packages(self) -> None:
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        deps = [
+            DependencyReference.parse("acme/guidelines#v1.2.0"),
+            DependencyReference.parse("acme/tools"),
+        ]
+        event = event_for_dependencies(
+            "pre-compile", deps, scope="project", working_directory="/tmp/project"
+        )
+        assert event.event == "pre-compile"
+        assert event.scope == "project"
+        assert event.working_directory == "/tmp/project"
+        assert [(p.name, p.reference) for p in event.packages] == [
+            ("acme/guidelines", "v1.2.0"),
+            ("acme/tools", None),
+        ]
+
+    def test_no_dependencies_gives_an_empty_package_list(self) -> None:
+        event = event_for_dependencies("pre-compile", [], scope="project", working_directory=None)
+        assert event.packages == []
 
 
 class TestScriptEntry:
@@ -343,6 +368,30 @@ class TestBuildRunnerFromContext:
         assert runner._scripts == []
         assert runner._skipped_project_scripts == 1
 
+    def test_events_filter_skips_policy_discovery(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo hi"}]}},
+        )
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain") as discover:
+            runner = build_runner_from_context(project_root=str(tmp_path), events=("pre-compile",))
+        discover.assert_not_called()
+        assert runner.scripts_for_event("post-install") == []
+
+    def test_events_filter_keeps_matching_scripts(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"pre-compile": [{"type": "command", "bash": "gen"}]}},
+        )
+        with (
+            patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=True),
+            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=None),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path), events=("pre-compile",))
+        assert [s.bash for s in runner.scripts_for_event("pre-compile")] == ["gen"]
+
     def test_trusted_project_scripts_are_included(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
         _write_yaml(
@@ -380,6 +429,7 @@ class TestConstants:
             "post-update",
             "pre-uninstall",
             "post-uninstall",
+            "pre-compile",
         }
 
     def test_script_types_tuple(self) -> None:
