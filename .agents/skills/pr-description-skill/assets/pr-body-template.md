@@ -20,6 +20,10 @@
 
 <2-4 sentences: what changed, why now, the risk this eliminates.>
 
+<Fixes #N | Closes #N when this PR fully delivers issue N; Refs #N when
+partial or related. One line per issue; never a closing keyword for
+partial work.>
+
 > [!NOTE]
 > <Optional one-line callout: linked issue, follow-up plan, or the
 > single fact a reviewer most needs to know up front.>

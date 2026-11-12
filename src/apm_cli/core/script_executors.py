@@ -34,6 +34,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
+from ..utils.net import parse_host_address
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - non-POSIX
@@ -724,36 +726,6 @@ _CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
 _SITE_LOCAL_NET = ipaddress.ip_network("fec0::/10")
 
 
-def _host_to_ip_literal(host: str) -> ipaddress._BaseAddress | None:
-    """Canonicalise *host* to an IP address if it denotes one literally.
-
-    Handles dotted IPv4/IPv6, bracket-stripped IPv6, trailing-dot forms,
-    and the decimal / hexadecimal integer encodings that defeat a naive
-    ``ipaddress.ip_address(hostname)`` guard (e.g. ``2130706433`` and
-    ``0x7f000001`` both denote ``127.0.0.1``). Returns ``None`` when the
-    host is a DNS name rather than an address literal.
-    """
-    h = host.strip().rstrip(".")
-    if not h:
-        return None
-    try:
-        return ipaddress.ip_address(h)
-    except ValueError:
-        pass
-    try:
-        if h.lower().startswith("0x"):
-            value = int(h, 16)
-        elif h.isdigit():
-            value = int(h, 10)
-        else:
-            return None
-        if 0 <= value <= 0xFFFFFFFF:
-            return ipaddress.ip_address(value)
-    except ValueError:
-        pass
-    return None
-
-
 def _ip_is_internal(ip: ipaddress._BaseAddress) -> bool:
     """Return True for any address an SSRF guard must refuse to reach."""
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
@@ -790,7 +762,7 @@ def _ssrf_block_reason(host: str) -> str | None:
     if host.rstrip(".").lower() in _METADATA_HOSTNAMES:
         return "cloud-metadata hostname"
 
-    literal = _host_to_ip_literal(host)
+    literal = parse_host_address(host)
     if literal is not None:
         return "internal address" if _ip_is_internal(literal) else None
 
@@ -989,6 +961,11 @@ def _build_guarded_session():
     # _dispatch_http_request (which honors the operator's env proxy explicitly);
     # this session is used only when no env proxy applies to the destination.
     session.trust_env = False
+    from .tls_trust import explicit_ca_bundle_path
+
+    explicit_ca = explicit_ca_bundle_path()
+    if explicit_ca:
+        session.verify = explicit_ca
     session.mount("https://", _SSRFGuardAdapter())
     return session
 
@@ -1085,6 +1062,11 @@ def _build_capturing_session():
     # Never auto-honor env proxies: the proxy is passed EXPLICITLY per-dispatch
     # in _run, so a stray env var cannot silently re-route a dispatch here.
     session.trust_env = False
+    from .tls_trust import explicit_ca_bundle_path
+
+    explicit_ca = explicit_ca_bundle_path()
+    if explicit_ca:
+        session.verify = explicit_ca
     adapter = _CapturingAdapter()
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -1410,6 +1392,12 @@ def _dispatch_http_request(
         # daemon, reaped at process exit) and reclaim the permit when it dies.
         if _abort_dispatch_sock(holder):
             worker.join(_HTTP_ABANDON_GRACE)
+        # The worker may publish its response during the grace join; close it
+        # like the completion path does so the late response does not leak.
+        late_resp = holder.get("resp")
+        if late_resp is not None:
+            with contextlib.suppress(Exception):
+                late_resp.close()
         _append_to_script_log(
             event_name,
             "http",

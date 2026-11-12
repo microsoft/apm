@@ -73,21 +73,16 @@ class TestGHESFQDNSubpathThroughManifest:
         assert dep.virtual_path == "packages/skill"
         assert dep.reference == "v1.0.0"
 
-    def test_without_github_host_subpath_is_not_split(self, tmp_path, monkeypatch):
-        """Recovery-path contract: unset GITHUB_HOST -> generic host, no split.
-
-        This is the pre-fix behaviour and documents why GITHUB_HOST is
-        required: the subpath stays embedded in repo_url rather than being
-        promoted to a virtual path. Pinning it guards against an accidental
-        widening of GHES detection to hosts that were never configured.
-        """
+    def test_without_github_host_subpath_fails_loudly(self, tmp_path, monkeypatch):
+        """Unset GITHUB_HOST reports the host, not a folded repository path."""
         monkeypatch.delenv("GITHUB_HOST", raising=False)
         apm_yml = _write_apm_yml(tmp_path, ["ghe.example.com/org/repo/packages/skill"])
 
-        pkg = APMPackage.from_apm_yml(apm_yml)
-        deps = pkg.get_apm_dependencies()
-
-        assert len(deps) == 1
-        dep = deps[0]
-        assert dep.virtual_path != "packages/skill"
-        assert dep.repo_url != "org/repo"
+        with pytest.raises(ValueError) as excinfo:
+            APMPackage.from_apm_yml(apm_yml)
+        lines = str(excinfo.value).splitlines()
+        assert lines[0] == (
+            "Invalid APM dependency 'ghe.example.com/org/repo/packages/skill': "
+            "Unsupported package host: 'ghe.example.com'."
+        )
+        assert "Invalid repository format" not in str(excinfo.value)

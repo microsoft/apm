@@ -1,0 +1,228 @@
+"""Catalog-derived ownership checks for root context compilation outputs."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Callable, MutableSequence, MutableSet
+from pathlib import Path
+
+from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.primitives.models import Instruction, PrimitiveCollection
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.paths import portable_relpath
+
+from .build_id import has_valid_build_id
+from .claude_formatter import CLAUDE_HEADER
+from .constants import (
+    AGENTS_MD_GENERATED_MARKER,
+    DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+    GEMINI_MD_GENERATED_MARKER,
+    decode_utf8_prefix,
+    has_generated_marker_header,
+)
+
+_AGENTS_ROOT_GENERATED_MARKERS = (
+    AGENTS_MD_GENERATED_MARKER,
+    DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+)
+_ROOT_CONTEXT_BY_COMPILE_FAMILY = {
+    "agents": ("AGENTS.md", _AGENTS_ROOT_GENERATED_MARKERS),
+    "claude": ("CLAUDE.md", (CLAUDE_HEADER,)),
+    "gemini": ("GEMINI.md", (GEMINI_MD_GENERATED_MARKER,)),
+    "vscode": ("AGENTS.md", _AGENTS_ROOT_GENERATED_MARKERS),
+}
+
+
+def _get_deployed_instruction_filenames(
+    rules_dir: Path,
+    base_dir: Path,
+    warn_fn: Callable[[str], None],
+    expected_filenames: set[str] | None = None,
+) -> set[str]:
+    """Return safely contained deployed rule names from a target rules directory."""
+    if not rules_dir.is_dir():
+        return set()
+    try:
+        ensure_path_within(rules_dir, base_dir)
+    except PathTraversalError:
+        warn_fn(f"{rules_dir} is a symlink outside the project root -- ignoring")
+        return set()
+    candidates = (
+        (rules_dir / name for name in expected_filenames)
+        if expected_filenames is not None
+        else rules_dir.glob("*.md")
+    )
+    deployed: set[str] = set()
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            ensure_path_within(candidate, base_dir)
+        except PathTraversalError:
+            warn_fn(f"{candidate} is a symlink outside the project root -- ignoring")
+            continue
+        deployed.add(candidate.name)
+    return deployed
+
+
+def _instruction_rule_filename(target_key: str, instruction: Instruction) -> str | None:
+    """Return the target-native filename for one instruction, when supported."""
+    target_profile = KNOWN_TARGETS.get(target_key)
+    if not target_profile or "instructions" not in target_profile.primitives:
+        return None
+    stem = instruction.file_path.name
+    if stem.endswith(".instructions.md"):
+        stem = stem[: -len(".instructions.md")]
+    return f"{stem}{target_profile.primitives['instructions'].extension}"
+
+
+def _build_expected_rule_filenames(
+    target_key: str,
+    primitives: PrimitiveCollection,
+    instructions: list[Instruction] | None = None,
+) -> set[str]:
+    """Return the native rule filenames used to decide root-context coverage.
+
+    Args:
+        target_key: Canonical target profile key.
+        primitives: Collection whose instructions supply expected filenames.
+        instructions: Optional subset replacing primitives.instructions when
+            only selected instructions contribute expected filenames.
+    """
+    source_instructions = primitives.instructions if instructions is None else instructions
+    return {
+        filename
+        for instruction in source_instructions
+        if (filename := _instruction_rule_filename(target_key, instruction)) is not None
+    }
+
+
+def root_context_filename(compile_family: str | None) -> str | None:
+    """Return the known context filename for one catalog compile family."""
+    contract = _ROOT_CONTEXT_BY_COMPILE_FAMILY.get(compile_family)
+    return contract[0] if contract is not None else None
+
+
+def protected_user_root_status(path: Path, content: str) -> str | None:
+    """Protect user-authored or edited compiled roots before replacement/cleanup."""
+    if path.is_symlink():
+        return "skipped-symlink"
+    if not content.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):
+        return "skipped-hand-authored"
+    if not has_valid_build_id(content):
+        return "skipped-modified"
+    return None
+
+
+def clean_redundant_user_root(
+    path: Path, deploy_root: Path, expected: str, *, dry_run: bool
+) -> str:
+    """Remove only a regular, unchanged, currently redundant compiled user root.
+
+    Compiled roots are not deployed primitives tracked by the install lockfile.
+    The reproducible legacy root is their ownership and native-coverage proof.
+    Recheck it immediately before deletion; never follow a final symlink.
+    """
+    if path.is_symlink():
+        return "skipped-symlink"
+    ensure_path_within(path, deploy_root)
+    existing = path.read_text(encoding="utf-8")
+    protected = protected_user_root_status(path, existing)
+    if protected is not None:
+        return protected
+    if existing != expected:
+        return "skipped-modified"
+    if dry_run:
+        return "would-remove"
+    path.unlink()
+    return "removed"
+
+
+def catalog_root_context_markers() -> dict[str, tuple[str, ...]]:
+    """Return generated root context filenames implied by the target catalog."""
+    markers_by_name: dict[str, tuple[str, ...]] = {}
+    for profile in KNOWN_TARGETS.values():
+        family = profile.compile_family
+        if family is None:
+            continue
+        root_context = _ROOT_CONTEXT_BY_COMPILE_FAMILY.get(family)
+        if root_context is None:
+            continue
+        filename, markers = root_context
+        existing = markers_by_name.setdefault(filename, markers)
+        if existing != markers:
+            raise ValueError(f"Conflicting root context markers for {filename}")
+    return dict(sorted(markers_by_name.items()))
+
+
+def hand_authored_root_context_blocks_write(
+    path: Path,
+    *,
+    base_dir: Path,
+    resolved_base_dir: Path,
+    protected_paths: MutableSet[Path],
+    warnings: MutableSequence[str],
+) -> bool:
+    """Return whether an existing project-root context file must be retained."""
+    canonical_name = None
+    normalized_path = Path(os.path.abspath(path))
+    lexical_root = Path(os.path.abspath(path.parent)) == resolved_base_dir
+    accepted_markers_by_name = catalog_root_context_markers()
+    canonical_paths = tuple(resolved_base_dir / filename for filename in accepted_markers_by_name)
+    if lexical_root:
+        for candidate in canonical_paths:
+            if normalized_path == candidate:
+                canonical_name = candidate.name
+                break
+            try:
+                if os.path.samestat(path.lstat(), candidate.lstat()):
+                    canonical_name = candidate.name
+                    break
+            except OSError:
+                continue
+    if canonical_name is None:
+        if not path.is_file():
+            return False
+        try:
+            resolved = ensure_path_within(path, base_dir)
+            if resolved.parent != resolved_base_dir:
+                return False
+            for candidate in canonical_paths:
+                if candidate.is_file() and path.samefile(candidate):
+                    canonical_name = candidate.name
+                    break
+        except (OSError, PathTraversalError):
+            return False
+        if canonical_name is None:
+            return False
+    rel_path = portable_relpath(path, base_dir)
+    if lexical_root and path.is_symlink():
+        protected_paths.add(path)
+        warnings.append(
+            f"Protected {rel_path}: root context symlinks are not overwritten. "
+            "Replace the symlink with a regular generated file before rerunning."
+        )
+        return True
+    if not path.is_file():
+        return False
+    try:
+        ensure_path_within(path, base_dir)
+        with path.open("rb") as handle:
+            prefix = decode_utf8_prefix(handle.read(4096))
+    except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
+        protected_paths.add(path)
+        warnings.append(
+            f"Skipped {rel_path}: could not verify the APM-generated marker; "
+            f"file will not be overwritten ({type(exc).__name__}). "
+            "Fix file access, UTF-8 encoding, or path containment, then rerun."
+        )
+        return True
+    accepted_markers = accepted_markers_by_name[canonical_name]
+    if has_generated_marker_header(prefix, accepted_markers):
+        return False
+    protected_paths.add(path)
+    warnings.append(
+        f"Protected {rel_path}: hand-authored file will not be overwritten. "
+        "To regenerate it, delete or rename the file, then re-run 'apm compile'."
+    )
+    return True

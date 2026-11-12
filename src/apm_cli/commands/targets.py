@@ -40,7 +40,7 @@ import click
     "show_all",
     is_flag=True,
     default=False,
-    help="Include the agent-skills meta-target in JSON output (excluded by default).",
+    help="Include explicit-only targets (e.g. agent-skills, grok-bot) in JSON output (excluded by default).",
 )
 @click.pass_context
 def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
@@ -58,9 +58,9 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     )
 
     project_root = Path.cwd()
-    # agent-skills is a meta-target (multi-harness fan-out), not a
-    # harness in itself. Excluded from the apm targets table; visible
-    # only in JSON output if invoked with --all (convergence item 13).
+    # Explicit-only targets (agent-skills, grok-bot, ...) are never
+    # auto-detected, so they are excluded from the apm targets table and
+    # visible only in JSON output with --all (convergence item 13).
 
     # Try to resolve targets using the v2 algorithm.
     # On ambiguous-harness, show all detected signals (the user ran
@@ -96,18 +96,33 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
 
     if as_json:
         if show_all:
-            # Surface meta-target only when explicitly requested.
-            rows = [
-                *rows,
-                {
-                    "target": "agent-skills",
-                    "status": "active" if "agent-skills" in active else "inactive",
-                    "source": None,
-                    "deploy_dir": ".agents/",
-                    "needs": None,
-                    "meta_target": True,
-                },
-            ]
+            # Surface stable explicit-only targets (never auto-detected, so
+            # absent from the default table) only when explicitly requested.
+            # The set, deploy roots and meta-target flag come from the catalog.
+            from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+            from apm_cli.integration.targets import KNOWN_TARGETS
+
+            shown = {row["target"] for row in rows}
+            for name, capability in TARGET_CAPABILITIES.items():
+                profile = KNOWN_TARGETS.get(name)
+                if (
+                    not capability.explicit_only
+                    or capability.experimental_flag is not None
+                    or profile is None
+                    or name in shown
+                ):
+                    continue
+                rows = [
+                    *rows,
+                    {
+                        "target": name,
+                        "status": "active" if name in active else "inactive",
+                        "source": None,
+                        "deploy_dir": f"{profile.root_dir}/",
+                        "needs": None,
+                        "meta_target": capability.meta_target,
+                    },
+                ]
         click.echo(_json.dumps(rows, indent=2))
         return
 

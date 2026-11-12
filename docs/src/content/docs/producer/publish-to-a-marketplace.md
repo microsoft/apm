@@ -58,6 +58,9 @@ APM uses a single source-of-truth model:
 - `.agents/plugins/marketplace.json` -- optional Codex repo
   marketplace output. Enable it by adding `codex` to
   `marketplace.outputs`.
+- `.github/plugin/marketplace.json` -- optional Copilot CLI
+  marketplace output. Enable it by adding `copilot` to
+  `marketplace.outputs`.
 
 Commit every generated file matching your enabled
 `marketplace.outputs`. The legacy standalone `marketplace.yml` is
@@ -85,13 +88,16 @@ marketplace:
     url: https://github.com/acme-org
 
   outputs:                             # map form (recommended)
-    claude: {}                         # default; add codex for Codex output
+    claude: {}                         # default; add codex for Codex output, copilot for Copilot CLI output
 
   claude:
     output: .claude-plugin/marketplace.json
 
   codex:
     output: .agents/plugins/marketplace.json
+
+  copilot:
+    output: .github/plugin/marketplace.json
 
   # Optional: package sources can be relative to this git base.
   sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
@@ -138,7 +144,6 @@ full HTTPS URLs (including nested paths such as
 See the [manifest schema](../../reference/manifest-schema/#75-marketplacepackages)
 for the full validation and override rules.
 
-The generated source object is also a producer-to-consumer contract.
 `apm pack` emits `source: url` for a remote repository and
 `source: git-subdir` when `subdir` is set.
 It also emits the effective `source.tag_pattern`: a package override takes
@@ -148,16 +153,23 @@ metadata after changing either value so consumers receive the new convention.
 the generated entry rather than from the marketplace host, and preserves
 the generated path and ref.
 
+For annotated or signed tags, `source.sha` records the peeled checkout
+commit, not the tag object; `source.ref` remains the selected tag. This
+correction does not change version selection or verify signatures. To
+replace older tag-object pins, upgrade APM, rerun `apm pack`, and publish
+the regenerated `marketplace.json`. Repacking still resolves configured
+version ranges, which may select newer matching tags.
+
 For an Azure DevOps Services marketplace, point `sourceBase` at the
 `https://dev.azure.com/{org}/{project}/_git` base; relative sources compose
 onto it and the `dev.azure.com` host is kept on the consumer side:
 
 ```yaml
 marketplace:
-  sourceBase: https://dev.azure.com/contoso/platform/_git
+  sourceBase: https://dev.azure.com/contoso/My%20Projects/_git
   packages:
     - name: agent-skills
-      source: agent-skills          # -> .../contoso/platform/_git/agent-skills
+      source: agent-skills          # -> .../contoso/My%20Projects/_git/agent-skills
       ref: 3f2a9b1c
 ```
 
@@ -167,6 +179,10 @@ use `ADO_APM_PAT`, and use the portless root-hosted
 `https://host/Collection/Project/_git` form for `sourceBase`. Server does not
 use the Azure CLI bearer. See
 [authentication](../../getting-started/authentication/#azure-devops).
+
+Percent-encode ADO path spaces, for example `My%20Projects`. The generated
+URL keeps that encoded spelling, while APM uses the decoded organization,
+project, and repository identity for resolution and authentication.
 
 Before:
 
@@ -211,6 +227,31 @@ remote entries to `source: url`, and remote subdirectory entries to
 `source: git-subdir`. Claude output also emits `category` on any
 package where it is set, even though only `codex` requires it.
 
+The `copilot` output targets the [GitHub Copilot CLI marketplace
+format](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#plugin-source-types)
+(`.github/plugin/marketplace.json` by default). It has no `category`
+requirement. Local `plugins[].source` values keep their declared
+relative paths, such as `"./plugins/demo"`. Remote sources use
+`{"source":"github","repo":"owner/repo"}` or
+`{"source":"url","url":"https://host/team/repo.git"}`, with the
+repository subdirectory in `path` when present. Resolved tag refs
+and full 40-character commit pins are retained as `ref` and `sha`;
+annotated tags use the peeled commit SHA, not the tag-object SHA.
+A raw commit pin is emitted only as `sha`, never as a cloneable `ref`.
+Unrepresentable sources or invalid pins fail explicitly rather than
+inventing a local path. Existing branch restrictions remain unchanged.
+Marketplace description and version live under `metadata`.
+
+Select both formats with `outputs: {claude: {}, copilot: {}}`.
+Set `outputs.copilot.path` to change the Copilot destination;
+`copilot.output` takes precedence over that map path, and
+`apm pack --marketplace-path copilot=dist/copilot.json` overrides both.
+Each output format also declares an
+`APM_MARKETPLACE_<FORMAT>_PATH` environment variable name (for
+example `APM_MARKETPLACE_COPILOT_PATH`) reserved for a future release
+to override its output path; it is validated at startup but not yet
+consumed by `apm pack`.
+
 ## Build
 
 ```bash
@@ -227,7 +268,15 @@ apm pack --offline              # cached refs only
 apm pack --include-prerelease   # allow pre-release tags
 apm pack -v                     # per-entry resolution detail
 apm pack --marketplace=claude --json   # JSON output for CI pipelines
+apm pack --strict-metadata      # require remote Claude package metadata fetches
 ```
+
+Strict remote metadata inheritance currently uses GitHub APIs. For GitLab,
+Azure DevOps, or another host, give each remote package a fixed `description`
+and fixed display `version` (not a range) so `--strict-metadata` can certify it
+without fetching `apm.yml`. On GitHub, an absent remote `apm.yml` is also
+certifiable when APM verifies a `SKILL.md` at the same resolved repository,
+ref, and package subdirectory.
 
 For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
@@ -247,7 +296,9 @@ apm marketplace outdated     # packages with newer matching tags
 ```
 
 `check` is the gate to run in CI: a missing tag or unresolvable
-range exits non-zero before you push the release commit.
+range exits non-zero before you push the release commit. A full
+40-character commit SHA `ref` passes when the remote serves that commit;
+abbreviated SHAs are rejected.
 
 ## Pitfalls
 
@@ -259,8 +310,9 @@ range exits non-zero before you push the release commit.
 - **`*.json` in `.gitignore`** will silently skip generated files.
   `apm marketplace init` warns on this; if you hit it, add an
   unignore for every enabled output, such as
-  `!.claude-plugin/marketplace.json` and
-  `!.agents/plugins/marketplace.json`.
+  `!.claude-plugin/marketplace.json`,
+  `!.agents/plugins/marketplace.json`, and
+  `!.github/plugin/marketplace.json`.
 - **Local-path entries skip git resolution.** They emit the path
   verbatim; consumers see the same path. Use `metadata.pluginRoot` if
   your plugins live under a common subdirectory.

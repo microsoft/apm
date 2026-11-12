@@ -121,7 +121,7 @@ Consumers can opt into fail-closed semantics for the no-cache case from their `a
 
 ### `ttl`
 
-Time-to-live in seconds for the cached policy file. Default: `3600` (1 hour). The cache is stored in `apm_modules/.policy-cache/`.
+Time-to-live in seconds for the cached policy file. Default: `3600` (1 hour). The cache is stored in the platform user cache under `apm/policy_v1/<project-key>/`, not inside the project.
 
 ---
 
@@ -162,6 +162,8 @@ dependencies:
     - "contoso/agent-standards"           # Must be a dependency
     - "contoso/security-rules#v2.0.0"     # Must be at specific version
 ```
+
+`allow`, `deny`, and `require` match GitHub and registry-backed packages case-insensitively (`Contoso/Repo` matches `contoso/repo`); other sources (non-GitHub hosts, ADO, local paths, marketplace, refs) stay case-sensitive. See [Identity casing](../../reference/policy-schema/#identity-casing) for the full breakdown.
 
 ### `require_resolution`
 
@@ -612,11 +614,17 @@ Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-re
 
 ### 2. Discovery and applicability
 
-APM auto-discovers policy from `<org>/.github/apm-policy.yml` for GitHub and
-GitHub Enterprise remotes. Azure DevOps remotes use the org `_apm` project and
-`_apm` repository. GitLab and plain git remotes currently fall through with no
-policy applied. Repositories with no detectable git remote emit an explicit
-"could not determine org" line and skip discovery.
+For GitHub and GitHub Enterprise remotes, APM auto-discovers the first policy
+found in the organization cascade: `.github-private`, `.github`, `.apm`, then
+`_apm`. Azure DevOps remotes use the org `apm` project and `apm-policy`
+repository. Legacy `_apm/_apm` is a temporary fallback after a 404 from the
+primary coordinate.
+GitLab remotes use `<top-level-group>/apm-policy/apm-policy.yml`, using the
+first path segment of the remote; nested subgroup scopes are not searched. Set
+`GITLAB_HOST` or `APM_GITLAB_HOSTS` to recognize a self-managed host, and use
+`APM_GITLAB_POLICY_REPO` to select another project name. Plain git remotes
+fall through with no policy applied. Repositories with no detectable git remote
+emit an explicit "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
 
@@ -789,7 +797,7 @@ $ echo $?
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
+Resolved effective policy is cached under the platform user cache at `apm/policy_v1/<project-key>/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
 
 ### 9.5. Network failure semantics
 
@@ -798,6 +806,7 @@ When discovery cannot reach the policy source, APM behaves as follows:
 - **Cached, stale within 7 days** -- use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
 - **Cache miss or stale beyond 7 days, fetch fails** -- emit a loud warning every invocation; **do NOT block the install** by default, to keep developers unblocked when GitHub is unreachable. Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
 - **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) -- same posture as fetch failure: warn loudly by default, block when the project pins `policy.fetch_failure_default: block`.
+- **Explicit `apm audit --ci --policy <source>`** -- the fail-open default above applies only to discovered policy (no `--policy`, or `--policy org`). When `--policy` names a local path, `https://` URL, or `owner/repo` and that policy cannot be loaded (missing file, unreachable, malformed, garbage response, or no policy at the source), audit prints `[x] Policy '<source>' could not be loaded: <cause>` and exits 1, whatever `policy.fetch_failure_default` says. A stale-but-valid cached policy within the 7-day ceiling is still enforced.
 
 #### 9.5.1. No-policy outcomes (`no_git_remote` / `absent` / `empty`)
 
@@ -812,7 +821,7 @@ These outcomes honour the same knob as fetch failures on both `apm install` and 
 - **`warn` (default):** `[!]` warning on stderr explaining the cause; install / audit proceeds.
 - **`block`:** `[x]` error on stderr; install raises `PolicyViolationError`, `apm audit --ci` exits 1.
 
-Explicit `--policy <file>` falls through these three outcomes -- an opt-in pointer at a baseline file is treated as the authoritative source.
+`--policy org` falls through these three outcomes. Any other explicit `--policy <source>` fails closed when it yields no policy (see above); a valid but `empty` policy loads and passes.
 
 Example -- consumer-side opt-in to fail-closed semantics in `apm.yml`:
 
@@ -843,7 +852,7 @@ shasum -a 256 .github/apm-policy.yml | awk '{print "sha256:" $1}'
 
 When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility.
 
-A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. MD5 and SHA-1 are not accepted.
+A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. Only SHA-256, SHA-384, and SHA-512 are supported.
 
 Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "sha256:" $1}'`.
 
@@ -909,9 +918,11 @@ When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci` mirrors t
 
 ```shell
 $ apm audit --ci                     # auto-discovers org policy
-$ apm audit --ci --policy <local>    # explicit override
+$ apm audit --ci --policy <local>    # explicit override; exits 1 if it cannot be loaded
 $ apm audit --ci --no-policy         # baseline checks only
 ```
+
+CI JSON output carries a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF carries the same object under `runs[0].invocations[0].properties.policy`. `enforced` is `true` only when policy checks were evaluated, so wrappers can tell "passed with policy" from "passed without policy".
 
 ### 10. Error and exit-code reference
 

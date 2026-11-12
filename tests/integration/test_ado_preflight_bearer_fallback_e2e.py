@@ -18,15 +18,30 @@ preflight raised AuthenticationError on the first 401 without retrying.
 
 import os
 import stat
+import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from apm_cli.install.context import InstallContext
+from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.git_env import reset_git_cache
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
     reason="POSIX-only fake-binary E2E; Windows variant lives in test-integration.ps1",
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_git_executable_between_fake_path_scenarios() -> Iterator[None]:
+    """Each fake-PATH scenario must resolve its own Git executable."""
+    reset_git_cache()
+    yield
+    reset_git_cache()
+
 
 FAKE_GIT = r"""#!/usr/bin/env python3
 """
@@ -39,12 +54,59 @@ Behavior:
 """
 FAKE_GIT += """
 import os
+import subprocess
 import sys
 
 argv = sys.argv[1:]
 
+if "config" in argv and "--list" in argv:
+    fields = bytearray()
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if key:
+            fields.extend(f"command\\0{key}\\n{value}\\0".encode())
+    os.write(1, fields)
+    sys.exit(0)
+
+if "config" in argv and "--get-urlmatch" in argv:
+    target = argv[-1]
+    matches = []
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        normalized = key.lower()
+        if normalized == "http.extraheader":
+            matches.append((0, index, value))
+        elif normalized.startswith("http.") and normalized.endswith(".extraheader"):
+            scope = key[5:-12]
+            if target.startswith(scope):
+                matches.append((len(scope), index, value))
+    if not matches:
+        sys.exit(1)
+    os.write(1, (max(matches)[2] + "\\0").encode())
+    sys.exit(0)
+
 # Probe call from preflight: ls-remote --heads --exit-code <url>
 if argv[:1] == ["ls-remote"]:
+    helpers = []
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "").lower()
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if key == "credential.helper" or (
+            key.startswith("credential.") and key.endswith(".helper")
+        ):
+            if value:
+                helpers.append(value)
+            else:
+                helpers.clear()
+    for helper in helpers:
+        if helper.startswith("!"):
+            subprocess.run([helper[1:]], check=False)
+
     # Look for a bearer header injected via GIT_CONFIG_VALUE_<n>.
     has_bearer = False
     for k, v in os.environ.items():
@@ -134,26 +196,15 @@ def test_preflight_falls_back_from_stale_pat_to_bearer(tmp_path, monkeypatch):
 
     get_bearer_provider().clear_cache()
 
-    from unittest.mock import MagicMock
-
     from apm_cli.core.auth import AuthResolver
     from apm_cli.install.pipeline import _preflight_auth_check
 
-    # Build a real-enough dep ref + ctx.
-    dep = MagicMock()
-    dep.host = "dev.azure.com"
-    dep.repo_url = "myorg/myproject/_git/myrepo"
-    dep.port = None
-    dep.is_azure_devops.return_value = True
-    dep.explicit_scheme = None
-    dep.is_insecure = False
-    dep.ado_organization = "myorg"
-    dep.ado_project = "myproject"
-    dep.ado_repo = "myrepo"
-
-    ctx = MagicMock()
-    ctx.deps_to_install = [dep]
-    ctx.update_refs = True
+    dep = DependencyReference.parse("dev.azure.com/myorg/myproject/_git/myrepo")
+    assert dep.source_reference.host == "dev.azure.com"
+    assert dep.source_reference.is_azure_devops()
+    ctx = InstallContext(
+        project_root=tmp_path, apm_dir=tmp_path, deps_to_install=[dep], update_refs=True
+    )
 
     # Real AuthResolver -- this drives execute_with_bearer_fallback through
     # the real azure_cli provider, which shells out to our fake `az`.
@@ -161,6 +212,53 @@ def test_preflight_falls_back_from_stale_pat_to_bearer(tmp_path, monkeypatch):
 
     # Should NOT raise. Before the fix, this raised AuthenticationError.
     _preflight_auth_check(ctx, resolver, verbose=False)
+
+
+def test_install_validation_never_invokes_ado_native_credential_helper(
+    tmp_path,
+    monkeypatch,
+):
+    """A PAT 401 retries with az bearer without activating ambient helpers."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "helper-invoked"
+    helper = bin_dir / "sentinel-helper"
+    _write_fake(
+        helper,
+        (
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "from pathlib import Path\n"
+            "Path(os.environ['SENTINEL_HELPER_MARKER']).write_text('invoked', encoding='ascii')\n"
+        ),
+    )
+    _write_fake(bin_dir / "git", FAKE_GIT)
+    _write_fake(bin_dir / "az", FAKE_AZ)
+
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin:/bin")
+    monkeypatch.setenv("ADO_APM_PAT", "stale-pat-value")
+    monkeypatch.setenv("SENTINEL_HELPER_MARKER", str(marker))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv(
+        "GIT_CONFIG_KEY_0",
+        "credential.https://dev.azure.com/myorg/myproject/_git/myrepo.helper",
+    )
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", f"!{helper}")
+    monkeypatch.delenv("AZURE_CLI_TEST_DEV_SP_NAME", raising=False)
+
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.core.azure_cli import get_bearer_provider
+    from apm_cli.install.validation import _validate_package_exists
+
+    get_bearer_provider().clear_cache()
+    assert (
+        _validate_package_exists(
+            "dev.azure.com/myorg/myproject/_git/myrepo",
+            auth_resolver=AuthResolver(),
+        )
+        is True
+    )
+    assert not marker.exists()
 
 
 def test_preflight_still_raises_when_both_pat_and_bearer_fail(tmp_path, monkeypatch):
@@ -174,8 +272,31 @@ def test_preflight_still_raises_when_both_pat_and_bearer_fail(tmp_path, monkeypa
     bin_dir.mkdir()
 
     fake_git_always_401 = """#!/usr/bin/env python3
+import os
 import sys
-if sys.argv[1:2] == ["ls-remote"]:
+argv = sys.argv[1:]
+if "config" in argv and "--list" in argv:
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    fields = b"".join(
+        f"command\\0{key}\\n{value}\\0".encode()
+        for index in range(count)
+        for key in [os.environ.get(f"GIT_CONFIG_KEY_{index}", "")]
+        for value in [os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")]
+        if key
+    )
+    os.write(1, fields)
+    sys.exit(0)
+if "config" in argv and "--get-urlmatch" in argv:
+    values = [
+        os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        for index in range(int(os.environ.get("GIT_CONFIG_COUNT", "0")))
+        if os.environ.get(f"GIT_CONFIG_KEY_{index}", "").lower() == "http.extraheader"
+    ]
+    if values:
+        os.write(1, (values[-1] + "\\0").encode())
+        sys.exit(0)
+    sys.exit(1)
+if argv[:1] == ["ls-remote"]:
     sys.stderr.write(
         "fatal: Authentication failed for "
         "'https://dev.azure.com/myorg/myproject/_git/myrepo'\\n"
@@ -194,26 +315,16 @@ sys.exit(0)
 
     get_bearer_provider().clear_cache()
 
-    from unittest.mock import MagicMock
-
     from apm_cli.core.auth import AuthResolver
     from apm_cli.install.errors import AuthenticationError
     from apm_cli.install.pipeline import _preflight_auth_check
 
-    dep = MagicMock()
-    dep.host = "dev.azure.com"
-    dep.repo_url = "myorg/myproject/_git/myrepo"
-    dep.port = None
-    dep.is_azure_devops.return_value = True
-    dep.explicit_scheme = None
-    dep.is_insecure = False
-    dep.ado_organization = "myorg"
-    dep.ado_project = "myproject"
-    dep.ado_repo = "myrepo"
-
-    ctx = MagicMock()
-    ctx.deps_to_install = [dep]
-    ctx.update_refs = True
+    dep = DependencyReference.parse("dev.azure.com/myorg/myproject/_git/myrepo")
+    assert dep.source_reference.host == "dev.azure.com"
+    assert dep.source_reference.is_azure_devops()
+    ctx = InstallContext(
+        project_root=tmp_path, apm_dir=tmp_path, deps_to_install=[dep], update_refs=True
+    )
 
     resolver = AuthResolver()
 
@@ -223,3 +334,128 @@ sys.exit(0)
     # bearer_also_failed signal should be in the diagnostic context.
     diag = exc_info.value.diagnostic_context or ""
     assert "bearer" in diag.lower() or "az cli" in diag.lower()
+
+
+FAKE_GIT_GCM_FILL = r"""#!/usr/bin/env python3
+"""
+"""Fake git: PAT and Bearer 401; GCM Basic password gcm-token succeeds."""
+FAKE_GIT_GCM_FILL += r"""
+import base64
+import os
+import sys
+
+argv = sys.argv[1:]
+
+if "config" in argv and "--list" in argv:
+    fields = bytearray()
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if key:
+            fields.extend(f"command\0{key}\n{value}\0".encode())
+    os.write(1, fields)
+    sys.exit(0)
+
+if "config" in argv and "--get-urlmatch" in argv:
+    target = argv[-1]
+    matches = []
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}", "")
+        normalized = key.lower()
+        if normalized == "http.extraheader":
+            matches.append((0, index, value))
+        elif normalized.startswith("http.") and normalized.endswith(".extraheader"):
+            scope = key[5:-12]
+            if target.startswith(scope):
+                matches.append((len(scope), index, value))
+    if not matches:
+        sys.exit(1)
+    os.write(1, (max(matches)[2] + "\0").encode())
+    sys.exit(0)
+
+if argv[:2] == ["credential", "fill"]:
+    sys.stdout.write("protocol=https\nhost=dev.azure.com\nusername=unused\npassword=gcm-token\n")
+    sys.exit(0)
+
+if argv[:1] == ["ls-remote"]:
+    password = ""
+    for key, value in os.environ.items():
+        if not key.startswith("GIT_CONFIG_VALUE_"):
+            continue
+        if "Bearer " in value:
+            sys.stderr.write(
+                "fatal: unable to access 'https://dev.azure.com/...': "
+                "The requested URL returned error: 401\n"
+            )
+            sys.exit(128)
+        if "Basic " in value:
+            blob = value.split("Basic ", 1)[1].strip()
+            try:
+                password = base64.b64decode(blob).decode("utf-8", errors="replace").split(":", 1)[-1]
+            except Exception:
+                password = ""
+    if password == "gcm-token":
+        sys.stdout.write("abc123\trefs/heads/main\n")
+        sys.exit(0)
+    sys.stderr.write(
+        "fatal: unable to access 'https://dev.azure.com/...': "
+        "The requested URL returned error: 401\n"
+    )
+    sys.exit(128)
+
+sys.exit(0)
+"""
+
+
+def test_ado_bearer_rejected_falls_back_to_git_credential_fill(tmp_path, monkeypatch):
+    """PAT and az bearer 401; path-scoped git credential fill succeeds."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake(bin_dir / "git", FAKE_GIT_GCM_FILL)
+    _write_fake(bin_dir / "az", FAKE_AZ)
+
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin:/bin")
+    monkeypatch.setenv("ADO_APM_PAT", "stale-pat-value")
+    monkeypatch.delenv("AZURE_CLI_TEST_DEV_SP_NAME", raising=False)
+
+    from apm_cli.core.azure_cli import get_bearer_provider
+
+    get_bearer_provider().clear_cache()
+
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.utils.git_env import get_git_executable
+
+    resolver = AuthResolver()
+
+    def _op(_token, git_env):
+        result = subprocess.run(
+            [
+                get_git_executable(),
+                "ls-remote",
+                "--heads",
+                "https://dev.azure.com/org/proj/_git/repo",
+            ],
+            capture_output=True,
+            text=True,
+            env=git_env,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                result.args,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        return result.stdout
+
+    outcome = resolver.try_with_fallback(
+        "dev.azure.com",
+        _op,
+        org="org",
+        path="org/proj/_git/repo",
+    )
+    assert "refs/heads/main" in outcome

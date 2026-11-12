@@ -251,6 +251,44 @@ class TestGuardedSession:
             assert se._get_guarded_session() is None
 
 
+@pytest.mark.parametrize("builder_name", ["_build_guarded_session", "_build_capturing_session"])
+@pytest.mark.parametrize("env_var", ["REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"])
+def test_hardened_sessions_honor_explicit_ca_bundle_with_trust_env_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    builder_name: str,
+    env_var: str,
+) -> None:
+    """Lifecycle direct/proxy sessions retain explicit replacement trust."""
+    selected = tmp_path / f"{env_var.lower()}.pem"
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+    monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+    monkeypatch.setenv(env_var, str(selected))
+
+    session = getattr(se, builder_name)()
+    settings = session.merge_environment_settings(
+        "https://example.com/hook", proxies={}, stream=None, verify=None, cert=None
+    )
+
+    assert session.trust_env is False
+    assert settings["verify"] == str(selected)
+
+
+@pytest.mark.parametrize("builder_name", ["_build_guarded_session", "_build_capturing_session"])
+def test_hardened_sessions_prefer_requests_ca_bundle(
+    monkeypatch: pytest.MonkeyPatch, builder_name: str
+) -> None:
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/trust/requests.pem")
+    monkeypatch.setenv("CURL_CA_BUNDLE", "/trust/curl.pem")
+
+    session = getattr(se, builder_name)()
+    settings = session.merge_environment_settings(
+        "https://example.com/hook", proxies={}, stream=None, verify=None, cert=None
+    )
+
+    assert settings["verify"] == "/trust/requests.pem"
+
+
 class TestConnectLayerHost:
     def test_plain_url_host(self) -> None:
         assert se._connect_layer_host("https://example.com/path") == "example.com"
@@ -478,6 +516,42 @@ class TestDispatchHttpRequest:
                         "https://example.com/h",
                     )
         assert "status=error" in apm_log_home.read_text()
+
+    def test_response_published_during_grace_join_is_closed(self, apm_log_home: Path) -> None:
+        # The worker records a socket, wedges past the total deadline, and only
+        # publishes its response once the deadline abort shuts that socket down
+        # -- i.e. inside the post-abort grace join (#3436).
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.ok = True
+        aborted = threading.Event()
+        published = threading.Event()
+        sock = MagicMock()
+        sock.shutdown.side_effect = lambda *_a: aborted.set()
+
+        def _late_post(*_a, **_kw):
+            se._DISPATCH_SOCK.holder["sock"] = sock
+            assert aborted.wait(5), "deadline abort never reached the worker socket"
+            published.set()
+            return resp
+
+        with patch.object(se, "_get_guarded_session", return_value=None):
+            with patch.object(se, "_get_capturing_session", return_value=None):
+                with patch("requests.post", side_effect=_late_post):
+                    se._dispatch_http_request(
+                        "https://example.com/h",
+                        "{}",
+                        {},
+                        0.05,
+                        "post-install",
+                        "https://example.com/h",
+                    )
+        assert published.is_set()
+        resp.close.assert_called_once()
+        log = apm_log_home.read_text()
+        assert "request exceeded total deadline 0.05s" in log
+        assert "status=error" in log
+        assert "HTTP 200" not in log
 
 
 class TestExecuteHttpThread:

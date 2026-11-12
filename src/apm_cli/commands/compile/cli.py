@@ -11,6 +11,7 @@ import click
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
+    from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
@@ -22,7 +23,8 @@ from ...core.target_catalog import (
     target_all_exclusion_help,
     target_help_fragment,
 )
-from ...core.target_detection import TargetParamType
+from ...core.target_detection import TargetParamType, should_compile_agents_md
+from ...install.locking import serialized_lifecycle_unless
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
@@ -38,7 +40,9 @@ from .._helpers import (
 from .watcher import _watch_mode
 
 
-def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
+def _display_single_file_summary(
+    stats, c_status, c_hash, output_path, dry_run, write_blocked=False
+):
     """Display compilation summary table for single-file mode."""
     try:
         console = _get_console()
@@ -88,7 +92,13 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
         except Exception:
             output_details = f"{output_path.name}"
 
-        table.add_row("Output", "* SUCCESS", output_details)
+        if write_blocked and dry_run:
+            output_status = "* WOULD RETAIN"
+        elif write_blocked:
+            output_status = "* RETAINED"
+        else:
+            output_status = "* SUCCESS"
+        table.add_row("Output", output_status, output_details)
         console.print(table)
     except Exception:
         _rich_info(f"Processed {stats.get('primitives_found', 0)} primitives:")
@@ -366,15 +376,45 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
-def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
+def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], list[str] | None]:
+    """Return the target profiles ``apm compile -g`` should write.
+
+    The optional names preserve the manifest spelling for diagnostics.
+
+    ``--target`` is rejected alongside ``--global``, so the user manifest's
+    ``targets:`` is the only way to narrow user-scope output. Honoring it keeps
+    the resolution chain consistent with ``apm install -g`` and stops compile
+    from creating deploy roots for harnesses the user never declared (#2768).
+    Declaring nothing keeps the historical every-known-target behavior.
+
+    Declared names are normalized before lookup because ``apm.yml`` accepts the
+    ``vscode`` alias, which is not a ``KNOWN_TARGETS`` key; matching raw tokens
+    would drop it and silently compile nothing.
+    """
+    from ...core.apm_yml import read_declared_target_names
+    from ...core.target_catalog import normalize_target_name
+    from ...integration.targets import KNOWN_TARGETS
+
+    declared = read_declared_target_names(source_root)
+    if declared is None or not declared:
+        return list(KNOWN_TARGETS.values()), None
+    canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
+    profiles = (KNOWN_TARGETS.get(name) for name in canonical)
+    return [profile for profile in profiles if profile is not None], declared
+
+
+@serialized_lifecycle_unless("dry_run")
+def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = False) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
     """
 
+    import yaml
+
     from ...compilation import compile_user_root_contexts
+    from ...core.errors import TargetResolutionError
     from ...core.scope import InstallScope, get_apm_dir
-    from ...integration.targets import KNOWN_TARGETS
 
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
@@ -387,25 +427,76 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         )
         return 1
 
+    # A malformed user manifest is authoritative-but-broken, so it fails closed
+    # with the same framing 'apm install -g' uses rather than degrading to
+    # "nothing declared" and compiling every harness.
+    try:
+        compile_targets, declared_targets = _global_compile_targets(source_root)
+    except TargetResolutionError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
+        logger.error(
+            f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
+            symbol="",
+        )
+        return 1
+    except yaml.YAMLError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        logger.error(
+            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
+            symbol="error",
+        )
+        return 1
+    except OSError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        logger.error(
+            f"Failed to read {display_path}: {exc}. "
+            "Ensure it is a readable YAML file and rerun 'apm compile -g'.",
+            symbol="error",
+        )
+        return 1
+
+    target_names = ", ".join(profile.name for profile in compile_targets)
+    if declared_targets is None:
+        provenance = target_names
+        selection_source = "global default"
+    else:
+        declared_names = ", ".join(declared_targets)
+        provenance = (
+            declared_names
+            if declared_names == target_names
+            else f"{declared_names} -> {target_names}"
+        )
+        selection_source = "~/.apm/apm.yml"
+    logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
+
     results = compile_user_root_contexts(
-        list(KNOWN_TARGETS.values()),
+        compile_targets,
         source_root,
         dry_run=dry_run,
+        clean=clean,
         logger=None,
     )
 
     if not results:
-        logger.info(
-            "No user-scope targets produced output -- run 'apm install -g <package>' "
-            "to add global instructions.",
-            symbol="info",
-        )
+        if declared_targets is not None:
+            message = (
+                f"Declared global targets ({target_names}) produce no user-scope "
+                "root context output. No files changed."
+            )
+        else:
+            message = (
+                "No user-scope targets produced output -- run 'apm install -g <package>' "
+                "to add global instructions."
+            )
+        logger.info(message, symbol="info")
         return 0
 
     has_error = False
     written_count = 0
     would_write_count = 0
     unchanged_count = 0
+    removed_count = 0
     for entry in results:
         status = entry.status
         tname = entry.target
@@ -424,6 +515,32 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
             logger.info(f"{tname}: skipped (hand-authored) {display_path}", symbol="info")
         elif status == "skipped-no-instructions":
             logger.verbose_detail(f"{tname}: skipped (no global instructions)")
+        elif status == "skipped-native-rules":
+            logger.verbose_detail(f"{tname}: skipped (instructions already in native rules)")
+        elif status == "skipped-redundant":
+            logger.info(
+                f"{tname}: retained redundant {display_path}. "
+                "Run 'apm compile -g --clean --dry-run' to preview safe cleanup.",
+                symbol="info",
+            )
+        elif status in {"skipped-modified", "skipped-symlink"}:
+            reason = (
+                "edited or unverifiable generated file"
+                if status == "skipped-modified"
+                else "symlink"
+            )
+            logger.warning(
+                f"{tname}: retained {display_path} ({reason}). "
+                "Review and rename or remove it manually before regenerating."
+            )
+        elif status in {"removed", "would-remove"}:
+            removed_count += 1
+            if status == "would-remove":
+                logger.info(
+                    f"{tname}: would remove redundant {display_path} (dry-run)", symbol="preview"
+                )
+            else:
+                logger.success(f"{tname}: removed redundant {display_path}", symbol="check")
         elif status.startswith("error:"):
             logger.error(f"{tname}: {status[6:]}", symbol="error")
             has_error = True
@@ -442,7 +559,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
                 logger.info(message, symbol="preview")
             else:
                 logger.success(message, symbol="check")
-        else:
+        elif not removed_count:
             logger.info("No user-scope root context files changed.", symbol="info")
 
     return 1 if has_error else 0
@@ -473,6 +590,7 @@ def _validate_project(
     callers must keep validation and watch modes on the content-required path.
     """
     from ...compilation.constitution import find_constitution
+    from ...core.scope import InstallScope, get_modules_dir
 
     if not (source_root / APM_YML_FILENAME).exists():
         logger.error("Not an APM project - no apm.yml found")
@@ -481,7 +599,9 @@ def _validate_project(
         sys.exit(1)
 
     # Check if there are any instruction files to compile
-    apm_modules_exists = (source_root / APM_MODULES_DIR).exists()
+    apm_modules_exists = (source_root / APM_MODULES_DIR).exists() or get_modules_dir(
+        InstallScope.PROJECT
+    ).exists()
     constitution_exists = find_constitution(source_root).exists()
 
     # Check if .apm directory has actual content
@@ -600,6 +720,90 @@ def _run_watch_mode(
     )
 
 
+def _report_distributed_dry_run_protection(
+    logger: CommandLogger,
+    stats: dict[str, object],
+) -> None:
+    """Report root files retained by a distributed dry run."""
+    protected_count = int(stats.get("root_context_files_protected", 0))
+    if not protected_count:
+        return
+    noun = "file" if protected_count == 1 else "files"
+    logger.progress(
+        f"Would retain {protected_count} hand-authored root {noun}; "
+        "no protected files would be generated.",
+        symbol="info",
+    )
+
+
+def _report_distributed_live_success(
+    logger: CommandLogger,
+    stats: dict[str, object],
+    warnings: list[str],
+    files_written: int,
+    agents_generated: int,
+) -> None:
+    """Report generated, retained, and skipped distributed outputs."""
+    nested_skips = max(
+        int(stats.get("nested_git_placements_skipped", 0) or 0),
+        sum(
+            "Skipping AGENTS.md at " in warning and ": nested Git repository " in warning
+            for warning in warnings
+        ),
+    )
+    protected_count = int(stats.get("root_context_files_protected", 0) or 0)
+    output_noun = "file" if files_written == 1 else "files"
+    if nested_skips:
+        generated_noun = "file" if agents_generated == 1 else "files"
+        skipped_noun = "placement" if nested_skips == 1 else "placements"
+        protected_note = ""
+        if protected_count:
+            protected_noun = "file" if protected_count == 1 else "files"
+            protected_note = f"; retained {protected_count} hand-authored root {protected_noun}"
+        logger.success(
+            f"Compiled {files_written} output {output_noun} "
+            f"({agents_generated} AGENTS.md {generated_noun}){protected_note}; "
+            f"skipped {nested_skips} nested Git repository {skipped_noun}.",
+            symbol="check",
+        )
+    elif protected_count:
+        protected_noun = "file" if protected_count == 1 else "files"
+        logger.success(
+            f"Generated {files_written} output {output_noun}; "
+            f"retained {protected_count} hand-authored root {protected_noun}.",
+            symbol="check",
+        )
+    else:
+        logger.success("Compilation completed successfully!", symbol="check")
+
+
+def _report_protected_no_write(
+    logger: CommandLogger,
+    stats: dict[str, object],
+    warnings: list[str],
+) -> None:
+    """Report a distributed run where every root output was retained."""
+    protected_count = int(stats["root_context_files_protected"])
+    protected_noun = "file" if protected_count == 1 else "files"
+    nested_skips = max(
+        int(stats.get("nested_git_placements_skipped", 0) or 0),
+        sum(
+            "Skipping AGENTS.md at " in warning and ": nested Git repository " in warning
+            for warning in warnings
+        ),
+    )
+    skipped_note = ""
+    if nested_skips:
+        skipped_noun = "placement" if nested_skips == 1 else "placements"
+        skipped_note = f" skipped {nested_skips} nested Git repository {skipped_noun};"
+    logger.progress(
+        f"Retained {protected_count} hand-authored root {protected_noun};"
+        f"{skipped_note} no files generated.",
+        symbol="info",
+    )
+
+
+@serialized_lifecycle_unless("dry_run")
 def _run_compilation(
     logger: CommandLogger,
     target: str | list[str] | None,
@@ -711,7 +915,6 @@ def _run_compilation(
             else:
                 _target_label = "multi-target"
             from ...core.target_detection import (
-                should_compile_agents_md,
                 should_compile_claude_md,
                 should_compile_gemini_md,
             )
@@ -754,12 +957,13 @@ def _run_compilation(
 
     if result.success:
         # Handle different compilation modes
-        if config.strategy == "distributed" and not single_agents:
+        if (config.strategy == "distributed" and not single_agents) or not should_compile_agents_md(
+            effective_target
+        ):
             # Distributed compilation results - output already shown by professional formatter
             # Just show final success message
             if dry_run:
-                # Success message for dry run already included in formatter output
-                pass
+                _report_distributed_dry_run_protection(logger, result.stats)
             else:
                 # Defense-in-depth (#820): don't claim "completed
                 # successfully" when zero files were emitted.  With
@@ -767,20 +971,31 @@ def _run_compilation(
                 # unreachable in normal flow, but silent zero-effect
                 # success is the worst-case package-manager DX.
                 #
-                # Pattern-based stat scan (instead of a hardcoded key
-                # list) so new compile-time targets pick up the guard
-                # automatically: any stat ending in ``_files_written``
-                # or ``_files_generated`` contributes to the total.
-                _files_written = sum(
-                    int(v or 0)
-                    for k, v in result.stats.items()
-                    if k.endswith(("_files_written", "_files_generated"))
+                agents_generated = int(
+                    result.stats.get(
+                        "agents_files_generated",
+                        result.stats.get("agents_files_written", 0),
+                    )
+                    or 0
+                )
+                _files_written = agents_generated + sum(
+                    int(result.stats.get(key, 0) or 0)
+                    for key in (
+                        "claude_files_written",
+                        "gemini_files_written",
+                        "copilot_root_instructions_written",
+                    )
                 )
                 if _files_written > 0:
-                    logger.success(
-                        "Compilation completed successfully!",
-                        symbol="check",
+                    _report_distributed_live_success(
+                        logger,
+                        result.stats,
+                        result.warnings,
+                        _files_written,
+                        agents_generated,
                     )
+                elif result.stats.get("root_context_files_protected"):
+                    _report_protected_no_write(logger, result.stats, result.warnings)
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass
@@ -806,21 +1021,31 @@ def _run_compilation(
                 dry_run=True,
                 strategy="single-file",
             )
-            intermediate_result = compiler.compile(intermediate_config)
+            intermediate_result = compiler.compile(
+                intermediate_config,
+                root_outputs=frozenset({"agents"}),
+            )
 
             if intermediate_result.success:
-                # Perform constitution injection / preservation
-                from ...compilation.injector import ConstitutionInjector
-
-                injector = ConstitutionInjector(base_dir=".")
-                output_path = Path(config.output_path)
-                final_content, c_status, c_hash = injector.inject(
-                    intermediate_result.content,
-                    with_constitution=config.with_constitution,
-                    output_path=output_path,
+                agents_write_blocked = bool(
+                    intermediate_result.stats.get("agents_root_context_write_blocked", 0)
                 )
+                # Perform constitution injection / preservation
+                output_path = Path(config.output_path)
+                if agents_write_blocked:
+                    final_content = intermediate_result.content
+                    c_status, c_hash = "NOT APPLIED", None
+                else:
+                    from ...compilation.injector import ConstitutionInjector
 
-                if not dry_run:
+                    injector = ConstitutionInjector(base_dir=".")
+                    final_content, c_status, c_hash = injector.inject(
+                        intermediate_result.content,
+                        with_constitution=config.with_constitution,
+                        output_path=output_path,
+                    )
+
+                if not dry_run and not agents_write_blocked:
                     # Only rewrite when content materially changes (creation, update, missing constitution case)
                     if c_status in ("CREATED", "UPDATED", "MISSING"):
                         # Defense-in-depth: scan compiled output before writing
@@ -859,7 +1084,13 @@ def _run_compilation(
                         )
 
                 # Report success at the top
-                if dry_run:
+                if agents_write_blocked:
+                    action = "would be retained" if dry_run else "retained"
+                    logger.progress(
+                        f"AGENTS.md not generated -- protected hand-authored root file {action}",
+                        symbol="info",
+                    )
+                elif dry_run:
                     logger.success(
                         "Context compilation completed successfully (dry run)",
                         symbol="check",
@@ -876,12 +1107,19 @@ def _run_compilation(
                 # Add spacing before summary table
                 _rich_blank_line()
 
-                _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run)
+                _display_single_file_summary(
+                    stats,
+                    c_status,
+                    c_hash,
+                    output_path,
+                    dry_run,
+                    write_blocked=agents_write_blocked,
+                )
 
-                if dry_run:
+                if dry_run and not agents_write_blocked:
                     preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
                     _rich_panel(preview, title=" Generated Content Preview", style="cyan")
-                else:
+                elif not agents_write_blocked:
                     _display_next_steps(output)
 
     # Display warnings for all compilation modes
@@ -988,6 +1226,7 @@ def _run_compilation(
     is_flag=True,
     help=(
         "Remove orphaned output files (AGENTS.md, CLAUDE.md) no longer generated. "
+        "With --global, remove an unchanged redundant generated Claude root. "
         "Hand-authored files are never deleted; use --dry-run to preview removals."
     ),
 )
@@ -1016,7 +1255,9 @@ def _run_compilation(
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
         "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, or .agents/rules/ for Antigravity. Overrides the "
+        "already populated, in .github/copilot-instructions.md even when the "
+        "matching .github/instructions/ file is deployed, or in .agents/rules/ "
+        "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "
         "duplicate context. Affects the Claude, Copilot, and Antigravity "
         "deduplication paths. Alias: --no-dedup."
@@ -1051,9 +1292,10 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
-        "flags such as --target, --all, --watch, --root, or --output; use with "
-        "--dry-run to preview changes."
+        "from ~/.apm/apm_modules, using target(s) from ~/.apm/apm.yml or every "
+        "supported target when undeclared. Cannot be combined with project-scoped "
+        "output flags such as --target, --all, --watch, --root, or --output; "
+        "use with --dry-run to preview changes."
     ),
 )
 @click.pass_context
@@ -1102,6 +1344,8 @@ def compile(  # noqa: PLR0913 -- Click handler
       already in .claude/rules/ with no constitution or other keep-alive).
       Hand-authored files are never deleted. Combine with --dry-run to
       preview removals before they happen.
+      With --global, only an unchanged generated Claude root fully covered
+      by matching user rules is removed; edited roots are retained.
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
 
@@ -1126,7 +1370,7 @@ def compile(  # noqa: PLR0913 -- Click handler
     if global_:
         from click.core import ParameterSource
 
-        allowed_with_global = {"global_", "dry_run", "verbose"}
+        allowed_with_global = {"global_", "dry_run", "verbose", "clean"}
         flag_names = {
             "chatmode": "--chatmode",
             "clean": "--clean",
@@ -1149,7 +1393,7 @@ def compile(  # noqa: PLR0913 -- Click handler
                 continue
             flag = flag_names.get(name, f"--{name.replace('_', '-')}")
             raise click.UsageError(f"--global is not valid with {flag}")
-        rc = _handle_global_flag(dry_run=dry_run, logger=logger)
+        rc = _handle_global_flag(dry_run=dry_run, logger=logger, clean=clean)
         if rc != 0:
             ctx.exit(rc)
         return

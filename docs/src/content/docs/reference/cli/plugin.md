@@ -18,6 +18,10 @@ apm plugin init my-skill --yes
 
 `apm plugin init` scaffolds a publishable plugin in the current directory: a `plugin.json` manifest plus an `apm.yml` carrying a `devDependencies` block. The result is a working tree you can commit, tag, and reference from a marketplace.
 
+The generated dependency block is empty so direct installs select the plugin
+layout. Adding an APM or MCP dependency makes `apm.yml` eligible and switches
+direct installs to the APM package layout.
+
 `apm plugin` is the noun-verb home for plugin-author workflows, mirroring `apm marketplace` for marketplace-author verbs. Today it ships a single verb -- `apm plugin init`. Sibling verbs live under the same namespace as they ship.
 
 The two common repo shapes for plugin authors -- **single-plugin** (one plugin per repo) and **aggregator** (one repo that ships a marketplace plus the plugins it indexes) -- are not gated by flags. They emerge from composing `apm plugin init` and [`apm marketplace init`](../marketplace/#apm-marketplace-init) in the same working tree.
@@ -39,11 +43,13 @@ apm plugin init my-skill --target copilot,claude --yes
 | `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be non-empty kebab-case without path separators and must not be `..`. If a filesystem root has no directory name, APM uses `my-project`. |
 | `--yes`, `-y` | Skip interactive prompts and use auto-detected defaults. |
 | `--target` | Comma-separated target list (e.g. `copilot,claude,codex`). Skips the target prompt and writes selections directly. |
+| `--claude-plugin` | Scaffold the Claude-compatible layout. This is what `apm plugin init` writes with zero flags. |
+| `--format [plugin\|agent-plugin\|claude\|claude-plugin]` | `agent-plugin` scaffolds a portable [Agent Plugins v1](../pack/#agent-plugin-bundle---format-agent-plugin) manifest instead; `plugin`, `claude`, and `claude-plugin` all select the current Claude-compatible default. Mutually exclusive with `--claude-plugin`. |
 | `--verbose`, `-v` | Show detailed output. |
 
 ## Migration from `apm init --plugin`
 
-If you've used `apm init --plugin` before, here's the move: run `apm plugin init` instead. The generated files are byte-for-byte identical.
+If you've used `apm init --plugin` before, run `apm plugin init` instead. Both scaffold the same Claude-compatible layout by default.
 
 The legacy `apm init --plugin` flag still works and still produces the same output, but prints a deprecation warning on stderr.
 
@@ -78,3 +84,4 @@ The top-level `apm.yml` carries the marketplace authoring config; each plugin li
 ## See also
 
 - [`apm marketplace`](../marketplace/) -- author and publish marketplaces that index your plugins.
+- [`apm pack`](../pack/) -- build the Claude plugin bundle or the portable Agent Plugins v1 bundle from a scaffolded project.

@@ -7,6 +7,7 @@ import sys
 import click
 
 from ....core.command_logger import CommandLogger
+from ....install.locking import serialized_lifecycle
 from ....marketplace.errors import MarketplaceYmlError
 from ..._helpers import _is_interactive
 from . import (
@@ -19,6 +20,7 @@ from . import (
 @click.argument("name")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def remove(name, yes, verbose):
     """Remove a package entry from marketplace.yml."""
     from ....marketplace.yml_editor import remove_plugin_entry

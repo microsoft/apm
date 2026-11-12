@@ -186,9 +186,12 @@ class CommandIntegrator(BaseIntegrator):
         self._passthrough_notified.add(target_name)
         return True
 
-    def find_prompt_files(self, package_path: Path) -> list[Path]:
+    def find_prompt_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all .prompt.md files in a package."""
-        return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
+        return self.filter_authorized_files(
+            self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"]),
+            source_plan,
+        )
 
     def _transform_prompt_to_command(
         self,
@@ -462,6 +465,7 @@ class CommandIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         scope=None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
@@ -498,7 +502,7 @@ class CommandIntegrator(BaseIntegrator):
                 )
             return IntegrationResult(0, 0, 0, [], 0)
 
-        prompt_files = self.find_prompt_files(package_info.install_path)
+        prompt_files = self.find_prompt_files(package_info.install_path, source_plan)
         if not prompt_files:
             return IntegrationResult(0, 0, 0, [], 0)
 

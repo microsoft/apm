@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import shutil
+from copy import deepcopy
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
@@ -18,8 +19,7 @@ import yaml
 from ..deps.lockfile import (
     LockedDependency,
     LockFile,
-    get_lockfile_path,
-    migrate_lockfile_if_needed,
+    resolve_lockfile_path_for_read,
 )
 from ..models.apm_package import APMPackage, DependencyReference
 from ..models.dependency.subsets import skill_subset_filter_tokens
@@ -29,6 +29,7 @@ from ..utils.archive import (
     write_tar_archive,
     write_zip_archive,
 )
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
@@ -48,6 +49,56 @@ def _validate_output_rel(rel: str) -> bool:
     if PurePosixPath(rel).is_absolute() or PureWindowsPath(rel).is_absolute():
         return False
     return ".." not in Path(rel).parts
+
+
+def _scan_bundle_sources(file_map: dict[str, tuple[Path, str]], logger=None) -> None:
+    """Warn when bundle source files contain hidden Unicode characters."""
+    from ..security.gate import WARN_POLICY, SecurityGate
+
+    scan_findings_total = 0
+    for src, _owner in file_map.values():
+        if src.is_symlink():
+            continue
+        if src.is_dir():
+            verdict = SecurityGate.scan_files(src, policy=WARN_POLICY)
+            scan_findings_total += len(verdict.all_findings)
+        elif src.is_file():
+            try:
+                text = src.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            verdict = SecurityGate.scan_text(text, str(src), policy=WARN_POLICY)
+            scan_findings_total += len(verdict.all_findings)
+    if scan_findings_total:
+        message = (
+            f"Bundle contains {scan_findings_total} hidden character(s) across "
+            "source files -- run 'apm audit' to inspect before publishing"
+        )
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message)
+
+
+def _write_bundle_sources(
+    file_map: dict[str, tuple[Path, str]],
+    bundle_dir: Path,
+    output_dir: Path,
+) -> None:
+    """Write validated bundle sources into a clean output directory."""
+    if bundle_dir.exists():
+        safe_rmtree(bundle_dir, output_dir)
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    for output_rel, (source_abs, _owner) in file_map.items():
+        if not _validate_output_rel(output_rel) or source_abs.is_symlink():
+            continue
+        dest = bundle_dir / output_rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            ensure_path_within(dest, bundle_dir)
+        except PathTraversalError:
+            continue
+        shutil.copy2(source_abs, dest, follow_symlinks=False)
 
 
 _SAFE_BUNDLE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]")
@@ -276,18 +327,23 @@ def _deep_merge(base: dict, overlay: dict, *, overwrite: bool = False, _depth: i
             _deep_merge(base[key], value, overwrite=False, _depth=_depth + 1)
 
 
-def _collect_hooks_from_apm(apm_dir: Path) -> dict:
+def _collect_hooks_from_apm(
+    apm_dir: Path, *, documents: list[tuple[Path, dict]] | None = None
+) -> dict:
     """Return merged hooks from ``.apm/hooks/*.json``."""
     hooks: dict = {}
     hooks_dir = apm_dir / "hooks"
     if not hooks_dir.is_dir():
         return hooks
     for f in sorted(hooks_dir.iterdir()):
-        if f.is_file() and f.suffix == ".json" and not f.is_symlink():
+        if f.is_file() and f.suffix == ".json" and f.name != "package.json" and not f.is_symlink():
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    _deep_merge(hooks, data, overwrite=False)
+                    if documents is not None:
+                        documents.append((f, deepcopy(data)))
+                    else:
+                        _deep_merge(hooks, data, overwrite=False)
             except (OSError, ValueError, RecursionError):
                 # Untrusted .apm/hooks/*.json: oversized-int -> bare ValueError,
                 # deep nest -> RecursionError. Fail closed (skip this file).
@@ -295,7 +351,9 @@ def _collect_hooks_from_apm(apm_dir: Path) -> dict:
     return hooks
 
 
-def _collect_hooks_from_root(package_root: Path) -> dict:
+def _collect_hooks_from_root(
+    package_root: Path, *, documents: list[tuple[Path, dict]] | None = None
+) -> dict:
     """Return hooks from a root-level ``hooks.json`` or ``hooks/`` directory."""
     hooks: dict = {}
     # Single file
@@ -304,7 +362,10 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
         try:
             data = json.loads(hooks_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                _deep_merge(hooks, data, overwrite=False)
+                if documents is not None:
+                    documents.append((hooks_file, deepcopy(data)))
+                else:
+                    _deep_merge(hooks, data, overwrite=False)
         except (OSError, ValueError, RecursionError):
             # Untrusted root hooks.json: fail closed (oversized-int ValueError /
             # deep-nest RecursionError are not JSONDecodeError).
@@ -313,11 +374,19 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
     hooks_dir = package_root / "hooks"
     if hooks_dir.is_dir():
         for f in sorted(hooks_dir.iterdir()):
-            if f.is_file() and f.suffix == ".json" and not f.is_symlink():
+            if (
+                f.is_file()
+                and f.suffix == ".json"
+                and f.name != "package.json"
+                and not f.is_symlink()
+            ):
                 try:
                     data = json.loads(f.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
-                        _deep_merge(hooks, data, overwrite=False)
+                        if documents is not None:
+                            documents.append((f, deepcopy(data)))
+                        else:
+                            _deep_merge(hooks, data, overwrite=False)
                 except (OSError, ValueError, RecursionError):
                     # Untrusted .../hooks/*.json: fail closed (skip this file).
                     pass
@@ -494,7 +563,7 @@ def _plugin_rel_for_deployed_path(
         if skill_subset and (skill_name is None or skill_name not in skill_subset):
             return None
         plugin_parts = list(parts)
-    elif parts[0] in {"agents", "commands", "instructions", "extensions"}:
+    elif parts[0] in {"agents", "commands", "instructions", "extensions", "hooks"}:
         plugin_parts = list(parts)
     elif len(parts) >= 3 and parts[0].startswith("."):
         skill_name = _skill_name_from_deployed_parts(parts)
@@ -527,10 +596,13 @@ def _plugin_rel_for_deployed_path(
 def _collect_explicit_local_components(
     project_root: Path,
     includes: list[str],
-) -> tuple[list[tuple[Path, str]], dict]:
+    *,
+    documents: list[tuple[Path, dict]] | None = None,
+) -> tuple[list[tuple[Path, str]], dict, bool]:
     """Collect only explicitly listed local paths and validate each path."""
     components: list[tuple[Path, str]] = []
     hooks: dict = {}
+    hooks_present = False
     for declared_path in includes:
         parts = _deployed_path_parts(declared_path)
         candidate = project_root.joinpath(*parts)
@@ -567,12 +639,13 @@ def _collect_explicit_local_components(
                     "project root. Remove the symlink or fix the path in apm.yml."
                 ) from exc
             repo_relative = portable_relpath(file_path, project_root)
-            is_hook = (
-                repo_relative == "hooks.json"
-                or repo_relative.startswith("hooks/")
-                or repo_relative.startswith(".apm/hooks/")
+            is_hook = repo_relative == "hooks.json" or (
+                file_path.suffix == ".json"
+                and file_path.name != "package.json"
+                and file_path.parent in (project_root / "hooks", project_root / ".apm/hooks")
             )
             if is_hook:
+                hooks_present = True
                 try:
                     hook_data = json.loads(file_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError, RecursionError) as exc:
@@ -583,7 +656,10 @@ def _collect_explicit_local_components(
                     raise ValueError(
                         f"Explicit hook include must contain a JSON object: {repo_relative}"
                     )
-                _deep_merge(hooks, hook_data, overwrite=False)
+                if documents is not None:
+                    documents.append((file_path, deepcopy(hook_data)))
+                else:
+                    _deep_merge(hooks, hook_data, overwrite=False)
                 continue
             plugin_relative = _plugin_rel_for_deployed_path(repo_relative, None)
             if plugin_relative is None:
@@ -591,7 +667,7 @@ def _collect_explicit_local_components(
                     f"Explicit include path is not a packable primitive: {repo_relative}"
                 )
             components.append((file_path, plugin_relative))
-    return components, hooks
+    return components, hooks, hooks_present
 
 
 def _verify_attested_hash(
@@ -772,9 +848,9 @@ def export_plugin_bundle(
     Returns:
         :class:`PackResult` describing what was produced.
     """
+    project_root = project_root.resolve()
     # 1. Read lockfile
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
 
     # 2. Read apm.yml
@@ -877,21 +953,37 @@ def export_plugin_bundle(
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
+    from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
+    from .plugin_hooks import PluginHookResources
+
     own_apm_dir = project_root / ".apm"
+    hook_documents: list[tuple[Path, dict]] = []
     if isinstance(package.includes, list):
-        own_components, root_hooks = _collect_explicit_local_components(
+        own_components, root_hooks, _hooks_present = _collect_explicit_local_components(
             project_root,
             package.includes,
+            documents=hook_documents,
         )
     else:
         own_components = _collect_apm_components(own_apm_dir)
-        root_hooks = _collect_hooks_from_apm(own_apm_dir)
+        root_hooks = _collect_hooks_from_apm(own_apm_dir, documents=hook_documents)
         if own_apm_dir.is_dir():
             _warn_skipped_root_components(project_root, logger)
         else:
             own_components.extend(_collect_root_plugin_components(project_root))
-            root_hooks_top = _collect_hooks_from_root(project_root)
+            root_hooks_top = _collect_hooks_from_root(project_root, documents=hook_documents)
             _deep_merge(root_hooks, root_hooks_top, overwrite=False)
+
+    hook_resources = PluginHookResources(
+        project_root,
+        own_components,
+        includes=package.includes if isinstance(package.includes, list) else None,
+        descriptors={path for path, _data in hook_documents},
+        output_path=lambda rel: _plugin_rel_for_deployed_path(rel, None),
+    )
+    root_hooks = {}
+    for descriptor, data in hook_documents:
+        _deep_merge(root_hooks, hook_resources.rewrite(data, descriptor), overwrite=False)
 
     if (
         not isinstance(package.includes, list)
@@ -902,6 +994,16 @@ def export_plugin_bundle(
         _warn_no_local_primitives(logger)
 
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
+    hook_resources.validate_outputs(
+        file_map,
+        reserved={
+            "plugin.json",
+            "hooks.json",
+            ".mcp.json",
+            "apm.lock.yaml",
+            PLUGIN_ECOSYSTEM_PATHS["claude"],
+        },
+    )
 
     # Hooks -- root package wins on key collision
     _deep_merge(merged_hooks, root_hooks, overwrite=True)
@@ -923,6 +1025,9 @@ def export_plugin_bundle(
     # Add generated files to the list
     if merged_hooks:
         output_files.append("hooks.json")
+        output_files.append(PLUGIN_ECOSYSTEM_PATHS["claude"])
+        plugin_json["hooks"] = "./hooks.json"
+    output_files.extend(hook_resources.generated)
     if merged_mcp:
         output_files.append(".mcp.json")
     output_files.append("plugin.json")
@@ -941,68 +1046,34 @@ def export_plugin_bundle(
         return PackResult(bundle_path=bundle_path, files=output_files)
 
     # 10. Security scan (warn-only, never blocks)
-    from ..security.gate import WARN_POLICY, SecurityGate
-
-    scan_findings_total = 0
-    for _rel, (src, _owner) in file_map.items():
-        if src.is_symlink():
-            continue
-        if src.is_dir():
-            verdict = SecurityGate.scan_files(src, policy=WARN_POLICY)
-            scan_findings_total += len(verdict.all_findings)
-        elif src.is_file():
-            try:
-                text = src.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            verdict = SecurityGate.scan_text(text, str(src), policy=WARN_POLICY)
-            scan_findings_total += len(verdict.all_findings)
-    if scan_findings_total:
-        _warn_msg = (
-            f"Bundle contains {scan_findings_total} hidden character(s) across "
-            f"source files — run 'apm audit' to inspect before publishing"
-        )
-        if logger:
-            logger.warning(_warn_msg)
-        else:
-            _rich_warning(_warn_msg)
+    _scan_bundle_sources(file_map, logger)
 
     # 11. Write files to output directory (clean slate to prevent symlink attacks)
-    if bundle_dir.exists():
-        safe_rmtree(bundle_dir, output_dir)
-    bundle_dir.mkdir(parents=True, exist_ok=True)
-
-    for output_rel, (source_abs, _owner) in file_map.items():
-        if not _validate_output_rel(output_rel):
-            continue
-        dest = bundle_dir / output_rel
-        if source_abs.is_symlink():
-            continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            ensure_path_within(dest, bundle_dir)
-        except PathTraversalError:
-            continue
-        shutil.copy2(source_abs, dest, follow_symlinks=False)
+    _write_bundle_sources(file_map, bundle_dir, output_dir)
 
     # 12. Write merged hooks.json
     if merged_hooks:
-        (bundle_dir / "hooks.json").write_text(
-            json.dumps(merged_hooks, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        write_text_lf(bundle_dir / "hooks.json", json.dumps(merged_hooks, indent=2, sort_keys=True))
+    for relative, content in hook_resources.generated.items():
+        destination = bundle_dir / relative
+        ensure_path_within(destination, bundle_dir)
+        write_text_lf(destination, content)
 
     # 13. Write merged .mcp.json
     if merged_mcp:
-        (bundle_dir / ".mcp.json").write_text(
+        write_text_lf(
+            bundle_dir / ".mcp.json",
             json.dumps({"mcpServers": merged_mcp}, indent=2, sort_keys=True),
-            encoding="utf-8",
         )
 
     # 14. Write plugin.json with updated component paths
     plugin_json = _update_plugin_json_paths(plugin_json, output_files, logger=logger)
-    (bundle_dir / "plugin.json").write_text(
-        json.dumps(plugin_json, indent=2, sort_keys=False), encoding="utf-8"
-    )
+    write_text_lf(bundle_dir / "plugin.json", json.dumps(plugin_json, indent=2, sort_keys=False))
+    if merged_hooks:
+        native_manifest = bundle_dir / PLUGIN_ECOSYSTEM_PATHS["claude"]
+        ensure_path_within(native_manifest, bundle_dir)
+        native_manifest.parent.mkdir(parents=True, exist_ok=True)
+        write_text_lf(native_manifest, json.dumps(plugin_json, indent=2, sort_keys=False))
 
     # 14b. Write enriched lockfile with bundle_files manifest (issue #1098).
     # Walk the bundle and hash every file (excluding the lockfile itself,
@@ -1032,7 +1103,7 @@ def export_plugin_bundle(
             target or "all",
             bundle_files=bundle_files,
         )
-        (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
+        write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(bundle_path=bundle_dir, files=output_files)
 

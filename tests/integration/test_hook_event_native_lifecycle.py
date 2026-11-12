@@ -139,6 +139,84 @@ def _author_source(
     return package
 
 
+def test_claude_install_handles_quoted_and_malformed_plugin_roots(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Quoted roots deploy runnable hooks while malformed roots warn without copying."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "quoted-plugin-root-hook-install",
+        base_env=dict(os.environ),
+    )
+    environment = isolated.subprocess_env()
+    sources = LocalPackageFactory(isolated.package_root)
+    consumers = LocalPackageFactory(isolated.work_root)
+    quoted = sources.create("quoted-plugin-root", targets=("claude",))
+    probe = quoted.root / "hooks" / "probe script.py"
+    probe.parent.mkdir()
+    probe.write_text("print('ok')\n", encoding="utf-8")
+    sources.add_hook(
+        quoted,
+        "quoted-root",
+        {
+            "hooks": {
+                "SessionStart": [
+                    _entry(r'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe\ script.py&&echo done')
+                ]
+            }
+        },
+    )
+    valid_consumer = consumers.create(
+        "quoted-plugin-root-consumer",
+        dependencies=({"path": str(quoted.root)},),
+        targets=("claude",),
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    valid = _run_success(
+        runner,
+        ("install", "--target", "claude", "--no-policy"),
+        scenario_id="quoted-plugin-root-hook-install",
+        cwd=valid_consumer.root,
+        environment=environment,
+    )
+
+    command = _commands(_read_hooks(valid_consumer.root / _CLAUDE_SETTINGS)["SessionStart"])[0]
+    assert "${CLAUDE_PLUGIN_ROOT}" not in command
+    assert command.count('"') % 2 == 0
+    assert command.endswith("&&echo done")
+    assert (
+        valid_consumer.root / ".claude/hooks/quoted-plugin-root/hooks/probe script.py"
+    ).is_file()
+    assert "Unresolved plugin-root reference" not in valid.stdout + valid.stderr
+
+    malformed = sources.create("malformed-plugin-root", targets=("claude",))
+    sources.add_hook(
+        malformed,
+        "malformed-root",
+        {"hooks": {"SessionStart": [_entry("python3 \"${CLAUDE_PLUGIN_ROOT}'/hooks/missing.py")]}},
+    )
+    malformed_consumer = consumers.create(
+        "malformed-plugin-root-consumer",
+        dependencies=({"path": str(malformed.root)},),
+        targets=("claude",),
+    )
+
+    malformed_result = _run_success(
+        runner,
+        ("install", "--target", "claude", "--no-policy"),
+        scenario_id="malformed-plugin-root-hook-install",
+        cwd=malformed_consumer.root,
+        environment=environment,
+    )
+
+    output = malformed_result.stdout + malformed_result.stderr
+    assert "Unresolved plugin-root reference" in output
+    assert not (
+        malformed_consumer.root / ".claude/hooks/malformed-plugin-root/hooks/missing.py"
+    ).exists()
+
+
 def test_project_hook_events_converge_update_and_contract(
     tmp_path: Path,
     apm_binary_path: Path,

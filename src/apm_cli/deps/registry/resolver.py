@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ...agent_plugins.errors import AgentPluginError
+from ...bundle.local_bundle import route_agent_plugin_package
 from ...models.apm_package import PackageInfo, validate_apm_package
 from ...models.dependency.reference import DependencyReference
 from ...models.dependency.types import GitReferenceType, ResolvedReference
@@ -28,7 +30,6 @@ from .auth import (
     RegistryAuthContext,
     make_auth_context,
     remediation_message,
-    resolve_for_url,
 )
 from .client import RegistryClient, RegistryError, VersionEntry
 from .extractor import extract_archive
@@ -73,6 +74,20 @@ def _clear_install_target(target_path: Path) -> None:
             child.unlink(missing_ok=True)
 
 
+def _clean_up_rejected_target(target_path: Path) -> None:
+    """Remove *target_path* after a rejected Agent Plugin admission.
+
+    A rejected Agent Plugin (unsupported or foreign ``$schema``) must not
+    leave the freshly-extracted registry tree on disk -- mirrors the same
+    cleanup-on-reject invariant enforced for the github/artifactory ingress
+    in ``deps/_shared.py::_validate_and_load_package``.
+    """
+    from ...utils.file_ops import robust_rmtree
+
+    if target_path.exists():
+        robust_rmtree(target_path, ignore_errors=True)
+
+
 def _package_info_from_extracted_registry_tree(
     dep_ref: DependencyReference,
     target_path: Path,
@@ -91,7 +106,16 @@ def _package_info_from_extracted_registry_tree(
                 f"package {dep_ref.repo_url!r} at version {chosen.version}"
             )
 
-    validation_result = validate_apm_package(target_path)
+    native_detection = None
+    try:
+        native_detection = route_agent_plugin_package(target_path)
+    except AgentPluginError:
+        _clean_up_rejected_target(target_path)
+        raise
+    validation_result = validate_apm_package(
+        target_path,
+        agent_plugin_detection=native_detection,
+    )
     if not validation_result.is_valid:
         errs = "\n  - ".join(validation_result.errors)
         raise RegistryResolutionError(
@@ -196,17 +220,7 @@ class RegistryPackageResolver:
         return url
 
     def _build_client(self, registry_name: str, base_url: str) -> RegistryClient:
-        auth = make_auth_context(registry_name)
-        return self._client_factory(base_url, auth)
-
-    def _build_client_for_url(self, base_url: str) -> RegistryClient:
-        """Build a client for a URL whose registry name we look up from config.
-
-        Used on the lockfile re-install path (§6.2): the URL is already
-        recorded; we walk the configured registries to find which name owns
-        that URL, then resolve its token. If no match, fall back to anonymous.
-        """
-        auth = resolve_for_url(base_url, self._registries)
+        auth = make_auth_context(registry_name, base_url)
         return self._client_factory(base_url, auth)
 
     def _pick_version(
@@ -219,6 +233,18 @@ class RegistryPackageResolver:
                 f"constraint (version selector required)"
             )
         version_strings = [v.version for v in versions]
+
+        # Exact-string match always wins, before range matching runs. This
+        # matters for semver-shaped selectors too: range matching (below)
+        # ignores build metadata per the semver spec, so a selector like
+        # '1.0.2+fa163e16' would otherwise tie with, and could resolve to,
+        # a *different* published build such as '1.0.2+863e11af'. No real
+        # range operator ('^', '~', '>=', a wildcard, ...) can ever equal a
+        # published version string, so this can't shadow genuine ranges.
+        exact = next((v for v in versions if v.version == spec), None)
+        if exact is not None:
+            return exact
+
         if not is_semver_range(spec):
             from apm_cli.models.dependency.identity import _looks_like_invalid_semver_range
 
@@ -230,15 +256,13 @@ class RegistryPackageResolver:
                     f"use a complete range like '^1.0.0' or a published version"
                 )
             # Non-semver selector: exact match per the registry HTTP API spec
-            # (section 1.3 -- "Non-semver selectors are matched exactly").
-            chosen = next((v for v in versions if v.version == spec), None)
-            if chosen is None:
-                raise RegistryResolutionError(
-                    f"version {spec!r} not found for {dep_ref.repo_url!r} "
-                    f"in registry {dep_ref.registry_name!r} "
-                    f"(available: {', '.join(version_strings) or '<none>'})"
-                )
-            return chosen
+            # (section 1.3 -- "Non-semver selectors are matched exactly") --
+            # already tried above and failed.
+            raise RegistryResolutionError(
+                f"version {spec!r} not found for {dep_ref.repo_url!r} "
+                f"in registry {dep_ref.registry_name!r} "
+                f"(available: {', '.join(version_strings) or '<none>'})"
+            )
         best = pick_best(spec, version_strings)
         if best is None:
             raise RegistryResolutionError(
@@ -347,7 +371,15 @@ class RegistryPackageResolver:
         locked version.  ``apm update`` bypasses this path entirely via
         ``update_refs=True``.
         """
-        client = self._build_client_for_url(resolved_url)
+        registry_name = dep_ref.registry_name
+        base_url = self._resolve_registry_url(registry_name)
+        client = self._build_client(registry_name, base_url)
+        owner, repo = _split_owner_repo(dep_ref.repo_url)
+        expected_url = client.archive_url(owner, repo, version)
+        if resolved_url != expected_url:
+            raise RegistryResolutionError(
+                "lockfile registry URL does not match the configured registry endpoint"
+            )
         try:
             archive_bytes, content_type = client.fetch_from_url(resolved_url)
         except RegistryError as exc:
@@ -370,7 +402,16 @@ class RegistryPackageResolver:
                     f"package {dep_ref.repo_url!r} at version {version}"
                 )
 
-        validation_result = validate_apm_package(target_path)
+        native_detection = None
+        try:
+            native_detection = route_agent_plugin_package(target_path)
+        except AgentPluginError:
+            _clean_up_rejected_target(target_path)
+            raise
+        validation_result = validate_apm_package(
+            target_path,
+            agent_plugin_detection=native_detection,
+        )
         if not validation_result.is_valid:
             errs = "\n  - ".join(validation_result.errors)
             raise RegistryResolutionError(

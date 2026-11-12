@@ -1,6 +1,7 @@
 """OpenCode implementation of MCP client adapter.
 
-OpenCode uses ``opencode.json`` at the project root with an ``mcp`` key.
+OpenCode uses ``opencode.json`` at the project root or
+``~/.config/opencode/opencode.json`` at user scope, with an ``mcp`` key.
 The schema differs from VSCode/Cursor:
 
 .. code-block:: json
@@ -22,61 +23,122 @@ Key differences from Copilot/Cursor:
 - Command format: single array ``command`` (not ``command`` + ``args``)
 - Env key: ``environment`` (not ``env``)
 
-APM only writes to ``opencode.json`` when the ``.opencode/`` directory
-already exists — OpenCode support is opt-in.
+At project scope APM only writes to ``opencode.json`` when the
+``.opencode/`` directory already exists -- OpenCode support is opt-in.
 """
 
 import json
 import os
+import re
 from pathlib import Path
+from typing import Any
 
+from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
 from .copilot import CopilotClientAdapter
+
+_ENV_REF_TEMPLATE = "{env:%s}"
+_ENV_REF_RE = re.compile(re.escape(_ENV_REF_TEMPLATE) % r"([A-Za-z_][A-Za-z0-9_]*)")
 
 
 class OpenCodeClientAdapter(CopilotClientAdapter):
     """OpenCode MCP client adapter.
 
     Converts the standard Copilot config format into OpenCode's schema
-    and writes to ``opencode.json`` in the project root.
+    and writes to the project or user-scope ``opencode.json``.
     """
 
-    supports_user_scope: bool = False
+    supports_user_scope: bool = True
     target_name: str = "opencode"
-    mcp_servers_key: str = "mcpServers"
+    mcp_servers_key: str = "mcp"
 
-    # OpenCode's config runtime-substitution support has not yet been
-    # individually audited (see #1152). Pin to legacy install-time
-    # resolution so this adapter is unchanged by the Copilot security fix;
-    # revisit in a follow-up.
-    _supports_runtime_env_substitution: bool = False
+    # OpenCode resolves {env:NAME} throughout config strings, including MCP
+    # environment, headers and command args (https://opencode.ai/docs/config/#env-vars).
+    # Keep referenced secrets out of generated configuration; see #3051.
+    _supports_runtime_env_substitution: bool = True
+
+    def _format_runtime_env_placeholder(self, name: str) -> str:
+        """Return OpenCode's native environment reference."""
+        return _ENV_REF_TEMPLATE % name
+
+    def _resolve_environment_variables(
+        self,
+        env_vars: dict[str, object] | list[dict[str, object]],
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Preserve explicit literals; translate references for runtime lookup."""
+        if not isinstance(env_vars, dict):
+            return super()._resolve_environment_variables(env_vars, env_overrides)
+        return self._resolve_explicit_environment_values(env_vars, env_overrides)
+
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Preserve per-server authored registry env values after normal rendering."""
+        config = super()._format_server_config(server_info, env_overrides, runtime_vars)
+        overlay = server_info.get("_apm_env_overlay")
+        env = config.get("env")
+        if server_info.get("_raw_stdio") or not overlay or not isinstance(env, dict):
+            return config
+
+        # Only declared/emitted keys participate, as on the legacy registry path.
+        # Never recover authored values from the shared collected overrides.
+        authored = {name: value for name, value in overlay.items() if name in env}
+        previous_keys = self._last_env_placeholder_keys - set(env)
+        # Deliberately omit collected overrides: only authored values belong here.
+        env.update(self._resolve_explicit_environment_values(authored))
+        self._last_env_placeholder_keys = previous_keys | {
+            name for value in env.values() for name in _ENV_REF_RE.findall(value)
+        }
+        return config
+
+    @staticmethod
+    def config_path_for(project_root: Path, user_scope: bool) -> Path:
+        """Return the OpenCode config path for a scope.
+
+        ``~/.config/opencode/opencode.json`` at user scope, else
+        ``opencode.json`` under *project_root*.  Static so stale cleanup can
+        locate the file without constructing an adapter.
+        """
+        if user_scope:
+            return Path.home() / ".config" / "opencode" / "opencode.json"
+        return Path(project_root) / "opencode.json"
 
     def get_config_path(self):
-        """Return the path to ``opencode.json`` in the repository root."""
-        return str(self.project_root / "opencode.json")
+        """Return the project or user-scope OpenCode config path."""
+        return str(self.config_path_for(self.project_root, self.user_scope))
 
-    def update_config(self, config_updates, enabled=True):
+    def update_config(self, config_updates, enabled: Any = True):
         """Merge *config_updates* into the ``mcp`` section of ``opencode.json``.
 
-        The ``.opencode/`` directory must already exist; if it does not, this
-        method returns silently (opt-in behaviour).
+        The project ``.opencode/`` directory must already exist. User-scope
+        installs create ``~/.config/opencode/`` when needed.  Returns
+        ``False`` without writing when the existing file cannot be rewritten
+        safely.
 
         Translates Copilot-format entries (``command``/``args``/``env``) into
         OpenCode format (``command`` array / ``environment``).
         """
         opencode_dir = self.project_root / ".opencode"
-        if not opencode_dir.is_dir():
-            return
+        if not self.user_scope and not opencode_dir.is_dir():
+            return None
 
         config_path = Path(self.get_config_path())
-        current_config = self.get_current_config()
+        current_config = self._read_json_config_for_update(config_path)
+        if current_config is None:
+            return False
         if "mcp" not in current_config:
             current_config["mcp"] = {}
 
         for name, copilot_entry in config_updates.items():
             current_config["mcp"][name] = self._to_opencode_format(copilot_entry, enabled=enabled)
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
+        self._write_json_config(config_path, current_config)
+        return True
+
+    def validate_config_for_install(self) -> bool:
+        """Refuse unsafe user configs even when no server write would be needed."""
+        return (
+            not self.user_scope
+            or self._read_json_config_for_update(Path(self.get_config_path())) is not None
+        )
 
     def get_current_config(self):
         """Read the current ``opencode.json`` contents."""
@@ -89,11 +151,18 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def render_server_config(self, server_info: dict) -> dict:
+        """Render the ``mcp`` entry APM writes, for exact baseline comparisons."""
+        return self._to_opencode_format(
+            super().render_server_config(server_info),
+            enabled=opencode_enabled_value(server_info),
+        )
+
     def configure_mcp_server(
         self,
         server_url,
         server_name=None,
-        enabled=True,
+        enabled: Any = True,
         env_overrides=None,
         server_info_cache=None,
         runtime_vars=None,
@@ -108,7 +177,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             return False
 
         opencode_dir = self.project_root / ".opencode"
-        if not opencode_dir.is_dir():
+        if not self.user_scope and not opencode_dir.is_dir():
             return False
 
         try:
@@ -116,10 +185,15 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            self.update_config({config_key: server_config}, enabled=enabled)
+            written = self.update_config(
+                {config_key: server_config},
+                enabled=opencode_enabled_value(server_info, enabled),
+            )
+            if written is False:
+                return False
 
             print(f"Successfully configured MCP server '{config_key}' for OpenCode")
             return True
@@ -129,7 +203,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             return False
 
     @staticmethod
-    def _to_opencode_format(copilot_entry: dict, enabled: bool = True) -> dict:
+    def _to_opencode_format(copilot_entry: dict, enabled: Any = True) -> dict:
         """Convert a Copilot-format server config to OpenCode format.
 
         Copilot: ``{"command": "npx", "args": ["-y", "pkg"], "env": {...}}``
@@ -152,5 +226,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         env = copilot_entry.get("env") or {}
         if env:
             entry["environment"] = dict(env)
+
+        translated_keys = _EXTRA_DENYLIST
+        for key, value in copilot_entry.items():
+            if key not in translated_keys and key not in entry:
+                entry[key] = value
 
         return entry

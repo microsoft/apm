@@ -40,6 +40,21 @@ class _FakeTokenManager:
 
 
 class TestSetupEnvironment:
+    def test_strips_repository_locating_state(self):
+        tm = _FakeTokenManager(
+            {
+                "GIT_DIR": "/hook/repo.git",
+                "GIT_WORK_TREE": "/hook/worktree",
+                "GIT_OBJECT_DIRECTORY": "/hook/objects",
+            }
+        )
+
+        env = GitAuthEnvBuilder(tm).setup_environment()
+
+        assert "GIT_DIR" not in env
+        assert "GIT_WORK_TREE" not in env
+        assert "GIT_OBJECT_DIRECTORY" not in env
+
     def test_pat_path_sets_git_askpass_and_fence_vars(self):
         # Token manager already injected GITHUB_APM_PAT-style env.
         tm = _FakeTokenManager(
@@ -192,6 +207,20 @@ class TestNoninteractiveEnv:
         # Token left as-is for subprocess to ignore; no leak via env.
         assert env["GITHUB_TOKEN"] == "ghp_xxx"
 
+    def test_strips_repository_locating_state(self):
+        base = {
+            **self._base(),
+            "GIT_DIR": "/hook/repo.git",
+            "GIT_WORK_TREE": "/hook/worktree",
+            "GIT_OBJECT_DIRECTORY": "/hook/objects",
+        }
+
+        env = GitAuthEnvBuilder.noninteractive_env(base)
+
+        assert "GIT_DIR" not in env
+        assert "GIT_WORK_TREE" not in env
+        assert "GIT_OBJECT_DIRECTORY" not in env
+
     def test_preserve_config_isolation_keeps_global_and_nosystem(self):
         env = GitAuthEnvBuilder.noninteractive_env(self._base(), preserve_config_isolation=True)
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
@@ -278,15 +307,26 @@ class TestSubprocessEnvDict:
         # overlays auth env on top.
         with patch.dict(
             os.environ,
-            {"GIT_DIR": "/some/biased/dir", "GIT_CEILING_DIRECTORIES": "/oops"},
+            {
+                "GIT_DIR": "/some/biased/dir",
+                "GIT_CEILING_DIRECTORIES": "/oops",
+                "GIT_HTTP_EXTRAHEADER": "Authorization: Bearer ambient-secret",
+            },
             clear=False,
         ):
-            base = {"GITHUB_TOKEN": "ghp_xxx", "GIT_ASKPASS": "echo"}
+            base = {
+                "GITHUB_TOKEN": "ghp_xxx",
+                "GIT_ASKPASS": "echo",
+                "GIT_DIR": "/also/biased",
+                "GIT_CEILING_DIRECTORIES": "/also/oops",
+            }
             env = GitAuthEnvBuilder.subprocess_env_dict(base)
         assert env["GITHUB_TOKEN"] == "ghp_xxx"
         assert env["GIT_ASKPASS"] == "echo"
         # Sanitized base must not propagate ambient GIT_DIR.
         assert "GIT_DIR" not in env
+        assert "GIT_CEILING_DIRECTORIES" not in env
+        assert "GIT_HTTP_EXTRAHEADER" not in env
 
     def test_skips_non_string_values(self):
         # Defensive: dicts with non-string vals don't raise; only strings

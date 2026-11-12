@@ -104,6 +104,7 @@ class TestRunMcpIntegrationInstallBranch:
             mcp_configs={"io.github.acme/server": dep.to_dict()},
             mcp_target_servers={},
             mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
+            native_hashes={},
             logger=ANY,
             fail_on_write_error=True,
         )
@@ -123,6 +124,7 @@ class TestRunMcpIntegrationInstallBranch:
                 mcp_deps=[dep],
                 old_mcp_servers={"io.github.acme/orphan-server"},
                 old_mcp_configs={"io.github.acme/orphan-server": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"io.github.acme/orphan-server"}},
                 project_root=tmp_path,
             )
         )
@@ -130,6 +132,139 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.remove_stale.assert_called_once()
         stale_arg = mock_mcp.remove_stale.call_args.args[0]
         assert stale_arg == {"io.github.acme/orphan-server"}
+
+    @patch(_PATCH_TARGET)
+    def test_ownerless_lockfile_cleans_stale_servers_from_targeted_runtimes(
+        self, mock_mcp, tmp_path: Path
+    ):
+        """A lockfile from before per-target ownership names no runtime for a stale server."""
+        dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={"io.github.acme/orphan-server"},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=False,
+                target_decision=EffectiveTargetDecision("claude", "apm config target"),
+                project_root=tmp_path,
+            )
+        )
+
+        mock_mcp.remove_stale.assert_called_once()
+        assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan-server"}
+        assert mock_mcp.remove_stale.call_args.args[1] == "claude"
+
+    @patch(_PATCH_TARGET)
+    def test_ownerless_lockfile_cleans_stale_servers_from_explicit_runtime(
+        self, mock_mcp, tmp_path: Path
+    ):
+        """--runtime vscode prunes VS Code, not the runtime the target decision names."""
+        dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={"io.github.acme/orphan-server"},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=False,
+                runtime="vscode",
+                target_decision=EffectiveTargetDecision("copilot", "apm config target"),
+                project_root=tmp_path,
+            )
+        )
+
+        mock_mcp.remove_stale.assert_called_once()
+        assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan-server"}
+        assert mock_mcp.remove_stale.call_args.args[1] == "vscode"
+
+    @patch(_PATCH_TARGET)
+    def test_ownerless_lockfile_without_target_cleans_stale_servers_from_every_runtime(
+        self, mock_mcp, tmp_path: Path
+    ):
+        """With no target and no --runtime, cleanup spans every runtime, as before ownership."""
+        dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={"io.github.acme/orphan-server"},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=False,
+                target_decision=EffectiveTargetDecision(None, "auto-detect"),
+                project_root=tmp_path,
+            )
+        )
+
+        mock_mcp.remove_stale.assert_called_once()
+        assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan-server"}
+        assert mock_mcp.remove_stale.call_args.args[1] is None
+
+    @patch(_PATCH_TARGET)
+    def test_ownerless_user_scope_lockfile_keeps_unowned_servers(self, mock_mcp, tmp_path: Path):
+        """User-level configs hold entries APM never wrote, so cleanup needs recorded ownership."""
+        dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={"io.github.acme/orphan-server"},
+                old_mcp_target_servers={},
+                old_mcp_target_servers_present=False,
+                target_decision=EffectiveTargetDecision("claude", "apm config target"),
+                user_scope=True,
+                project_root=tmp_path,
+            )
+        )
+
+        mock_mcp.remove_stale.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_explicit_runtime_keeps_ownership_recorded_for_that_runtime(
+        self, mock_mcp, tmp_path: Path
+    ):
+        """--runtime vscode must not move VS Code ownership to the key the target decision names."""
+        name = "io.github.acme/server"
+        dep = MCPDependency(name=name, transport="stdio")
+        mock_mcp.deduplicate.side_effect = lambda x: x
+        mock_mcp.install.return_value = 1
+        mock_mcp.get_server_names.return_value = {name}
+        mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
+
+        run_mcp_integration(
+            **_base_kwargs(
+                mcp_deps=[dep],
+                old_mcp_servers={name},
+                old_mcp_target_servers={"vscode": {name}},
+                runtime="vscode",
+                target_decision=EffectiveTargetDecision("copilot", "apm config target"),
+                project_root=tmp_path,
+            )
+        )
+
+        assert mock_mcp.install.call_args.kwargs["managed_target_servers"] == {"vscode": {name}}
+        mock_mcp.remove_stale.assert_not_called()
 
     @patch(_PATCH_TARGET)
     def test_forwards_apm_config_targets_key_when_declared(self, mock_mcp, tmp_path: Path):
@@ -215,6 +350,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
                 mcp_deps=[],
                 old_mcp_servers={"io.github.acme/orphan"},
                 old_mcp_configs={"io.github.acme/orphan": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"io.github.acme/orphan"}},
             )
         )
 
@@ -238,12 +374,33 @@ class TestRunMcpIntegrationEmptyDepsBranch:
                 mcp_deps=[],
                 old_mcp_servers={"stale"},
                 old_mcp_configs={"stale": {"name": "stale"}},
+                old_mcp_target_servers={"claude": {"stale"}},
                 target_decision=EffectiveTargetDecision("claude", "apm config target"),
             )
         )
 
         assert mock_mcp.remove_stale.call_count == 1
         assert mock_mcp.remove_stale.call_args.args[1] == "claude"
+
+    @patch(_PATCH_TARGET)
+    def test_no_deps_with_explicit_empty_ownership_skips_cleanup(self, mock_mcp):
+        with patch(
+            "apm_cli.install.mcp.ownership.adopt_legacy_mcp_target_servers",
+            return_value={"copilot": {"same-name-user-entry"}},
+        ) as adopt:
+            run_mcp_integration(
+                **_base_kwargs(
+                    mcp_deps=[],
+                    old_mcp_servers={"same-name-user-entry"},
+                    old_mcp_configs={"same-name-user-entry": {"name": "same-name-user-entry"}},
+                    old_mcp_target_servers={},
+                    old_mcp_target_servers_present=True,
+                )
+            )
+
+        adopt.assert_not_called()
+        mock_mcp.remove_stale.assert_not_called()
+        mock_mcp.update_lockfile.assert_called_once()
 
 
 class TestRunMcpIntegrationRestoreBranch:

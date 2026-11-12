@@ -188,7 +188,7 @@ def _run_produce_contract(
         lifecycle_actions=(
             LifecycleAction(("install", "--target", "copilot")),
             LifecycleAction(("compile", "--target", "copilot", "--force-instructions")),
-            LifecycleAction(("pack", "--format", "plugin", "--offline")),
+            LifecycleAction(("pack", "--format", "claude-plugin", "--offline")),
         ),
     )
     runner = ApmLifecycleRunner((str(binary),), scenario_timeout_seconds=240)

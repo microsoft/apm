@@ -48,14 +48,16 @@ class MarketplaceYmlError(MarketplaceError):
 class MarketplaceFetchError(MarketplaceError):
     """Raised when fetching marketplace data fails."""
 
-    def __init__(self, name: str, reason: str = ""):
+    def __init__(self, name: str, reason: str = "", *, retry_hint: str | None = None):
         self.name = name
         self.reason = reason
         detail = f": {reason}" if reason else ""
-        super().__init__(
-            f"Failed to fetch marketplace '{name}'{detail}. "
-            f"Run 'apm marketplace update {name}' to retry."
+        retry = (
+            retry_hint
+            if retry_hint is not None
+            else f"Run 'apm marketplace update {name}' to retry."
         )
+        super().__init__(f"Failed to fetch marketplace '{name}'{detail}. {retry}")
 
 
 # ---------------------------------------------------------------------------

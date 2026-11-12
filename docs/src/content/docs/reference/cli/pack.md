@@ -28,7 +28,8 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 
 | Flag | Default | Description |
 |---|---|---|
-| `--format plugin\|apm` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json` and plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). |
+| `--claude-plugin` | on (no-flag default) | Select the Claude Code plugin bundle: `plugin.json` plus plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). This is what `apm pack` produces with zero flags. |
+| `--format plugin\|agent-plugin\|claude\|claude-plugin\|apm` | `claude-plugin` | Bundle format selector. `agent-plugin` is the sole opt-in for the portable Agent Plugins v1 bundle. `plugin` is a compatibility alias for the Claude Code plugin bundle, not for `agent-plugin`. `claude` and `claude-plugin` also select the Claude Code plugin bundle (the no-flag default). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). Passing more than one selector (`--claude-plugin`, `--format`) is a usage error. |
 | `--archive` | off | Produce a `.zip` archive instead of a directory (previous default: `.tar.gz`; use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |
 | `--archive-format zip\|tar.gz` | `zip` | Archive format when `--archive` is set. `zip` is natively extractable on Windows and matches the format expected by Claude Code and plugin hosts. `tar.gz` is typically smaller for text-heavy bundles and preserves the previous default for pipelines that depend on it. |
 | `-o`, `--output PATH` | `./build` | Bundle output directory. Does not affect the `marketplace.json` path. |
@@ -39,10 +40,11 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
 | `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
-| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
+| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Includes `metadata_enrichment.certifiable` and per-package outcomes. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
-| `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift. Combine with `--dry-run` to compare without normal pack output generation. |
+| `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output in memory and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift or uncertifiable remote Claude metadata. It automatically suppresses normal pack writes. |
+| `--strict-metadata` | off | Claude marketplace: fail before writing when remote package metadata cannot be fetched. Use it in publishing CI to require those fetches to succeed. Exits `5` before `--check-clean` runs when both flags are present. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 :::caution[Migrating automation from `.tar.gz`?]
@@ -51,14 +53,67 @@ upload step still matches `build/*.tar.gz`, add `--archive-format tar.gz` or
 update the downstream glob to `.zip`.
 :::
 
+### Metadata outcome JSON
+
+The `metadata_enrichment` object has a closed per-package status vocabulary:
+
+| Status | Meaning | Certifiable |
+|---|---|---|
+| `fetched` | Remote `apm.yml` supplied metadata. | yes |
+| `empty` | Remote `apm.yml` was reachable but had no description or version. | yes |
+| `manifestless` | Remote `apm.yml` was absent, but `SKILL.md` had valid `name` and `description` frontmatter at the resolved path. | yes |
+| `local` | Metadata came from a local package. | yes |
+| `explicit` | Fixed description and version came from the marketplace entry. | yes |
+| `failed` | The remote manifest could not be fetched. | no |
+| `offline` | Fetching was intentionally skipped by `--offline`. | no |
+
+```json
+{
+  "metadata_enrichment": {
+    "certifiable": false,
+    "outcomes": [
+      {
+        "package": "remote-tool",
+        "status": "failed",
+        "cause": "request timed out"
+      }
+    ]
+  },
+  "errors": [
+    {
+      "code": "marketplace_metadata_uncertifiable",
+      "message": "remote metadata unavailable; regeneration is uncertifiable"
+    }
+  ]
+}
+```
+
+Default packing reports an uncertifiable result as a warning. `--check-clean`
+uses `marketplace_metadata_uncertifiable` and exits `4`; `--strict-metadata`
+uses `metadata_incomplete` and exits `5` before writing.
+
+GitHub-hosted packages can inherit description and version from their remote
+`apm.yml`. When that file returns `404`, APM verifies `SKILL.md` at the same
+resolved repository, ref, and subdirectory. A verified manifestless skill is
+certifiable when its frontmatter has non-empty string `name` and `description`
+fields. Malformed frontmatter, missing fields, non-string values, and
+whitespace-only values remain `failed` and make `--check-clean` exit `4`, as do
+a missing repository, ref, or package path.
+For private GitHub sources, authenticated fallback checks both files through
+the `api.github.com` Contents API.
+For GitLab, Azure DevOps, and other hosts, set fixed `description` and `version`
+fields on the marketplace package entry so strict checks can certify without a
+GitHub metadata request.
+
 ## Examples
 
 ### Bundle only
 
 ```bash
-apm pack                              # plugin format (default), ./build/
-apm pack --archive                    # plugin bundle as .zip (default)
+apm pack                              # Claude plugin bundle (default), ./build/
+apm pack --archive                    # Claude plugin bundle as .zip (default)
 apm pack --archive --archive-format tar.gz  # legacy CI: produce .tar.gz instead
+apm pack --format agent-plugin        # explicit Agent Plugin v1 bundle
 apm pack --format apm -o ./dist       # legacy APM bundle layout
 ```
 
@@ -93,6 +148,8 @@ marketplace:
     claude: {}
     codex:
       path: ./build/codex-marketplace.json
+    copilot:
+      path: ./build/copilot-marketplace.json
 ```
 
 ### Preview without writing
@@ -104,7 +161,7 @@ apm pack --archive --dry-run -v
 
 ## Output format
 
-### Plugin bundle (`--format plugin`, default)
+### Claude plugin bundle (`--claude-plugin`, default)
 
 A Claude Code plugin directory under `--output`. Contains:
 
@@ -116,13 +173,38 @@ A Claude Code plugin directory under `--output`. Contains:
 - Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
-- A merged `hooks.json` from the producer's own hooks. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+- A merged `hooks.json` from the producer's own hooks. When present, root `plugin.json` and `.claude-plugin/plugin.json` declare `"hooks": "./hooks.json"` for native Claude discovery. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/pack-a-bundle/#hook-resources-in-claude-plugin-bundles).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 
+### Agent Plugin bundle (`--format agent-plugin`)
+
+An explicit opt-in. `apm pack --format agent-plugin` emits a strict, portable [Agent Plugins v1](https://agent-plugins.org) bundle instead of the Claude-compatible layout above. `--format plugin` does **not** select this bundle -- it is a compatibility alias for the Claude plugin bundle below.
+
+- `plugin.json` -- identifies the pinned Agent Plugins v1 schema (`$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"`), synthesised from `apm.yml` the same way as the Claude plugin manifest.
+- `skills/` -- standard skill bundles. This is the **only** primitive directory the Agent Plugin bundle carries.
+- `mcp.json` -- MCP server declarations from `apm.yml`/`apm.lock.yaml` (present even when empty).
+- `apm.lock.yaml`, and `README.md`/`LICENSE`/`CHANGELOG.md` when present at the project root.
+
+The portable schema deliberately scopes to `skills/` and MCP config so a bundle can be consumed by any Agent-Plugin-aware host, not just APM. Agents, commands, instructions, extensions, hooks, and LSP configuration stay in the Claude-compatible layout instead. If your source project has any of them, `apm pack --format agent-plugin` **fails before writing anything**:
+
+```text
+Cannot pack Agent Plugin: non-portable primitives would be discarded (agents, hooks).
+Agent Plugins v1 portable components are limited to root plugin.json, skills/, and
+root mcp.json. Use 'apm pack --format claude-plugin' to preserve agents, hooks in the
+legacy Claude client format.
+```
+
+LSP configuration gets its own guidance in the same error, since neither bundle format carries it: configure LSP servers directly in the target client instead.
+
+:::note[Installing what you packed]
+Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it without locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer loads the projection live; older clients may create private copies outside APM ownership. Non-Copilot targets remain outside this native route -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
+:::
+
 ### APM bundle (`--format apm`)
 
-The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the `plugin` format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
+The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the Claude plugin format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
 
 Example enriched lockfile fragment:
 
@@ -133,16 +215,37 @@ pack:
   bundle_files:
     .github/agents/architect.md: a1b2c3...
 lockfile_version: '1'
-generated_at: ...
 dependencies:
   - repo_url: owner/repo
 ```
 
 ### Marketplace artifacts
 
-`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
+`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex or `.github/plugin/marketplace.json` for Copilot CLI. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
 
-Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time.
+Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time. Each format also declares a reserved `APM_MARKETPLACE_<FORMAT>_PATH` environment variable name (for example `APM_MARKETPLACE_COPILOT_PATH`); it is validated at startup but not yet consumed by `apm pack`.
+
+Copilot output preserves local `plugins[].source` paths as strings. Remote
+entries use the [supported GitHub or Git URL source objects](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#plugin-source-types):
+`{source: "github", repo: "owner/repo"}` or `{source: "url", url: "..."}`,
+with optional `path`, `ref`, and full 40-character commit `sha`. Annotated
+tag pins use their peeled commit, while a raw commit is emitted as `sha`
+without `ref`. Unrepresentable inputs fail instead of becoming invented
+local paths. Existing branch restrictions still apply. Marketplace
+description/version are nested under `metadata`; plugin description/version
+remain on each plugin. There is no `category` requirement. The default
+remains Claude-only unless another output is selected.
+
+For Copilot path overrides, `--marketplace-path copilot=PATH` wins over
+`marketplace.copilot.output`, then `marketplace.outputs.copilot.path`,
+then `.github/plugin/marketplace.json`.
+
+Remote Claude entries can inherit `description` and `version` from their own
+`apm.yml`. If APM cannot fetch that metadata, normal packing writes the artifact
+with an actionable warning so authors can add those fields to the marketplace
+entry or retry with network access. Use `--strict-metadata` in publishing CI to
+fail before writing with uncertifiable remote metadata. `--check-clean` also fails with exit
+`4` rather than certifying a regeneration whose metadata could not be fetched.
 
 ### Plugin manifests
 
@@ -152,6 +255,12 @@ Ship one APM package; consumers get a native plugin for their tool of choice. Wh
 |---|---|
 | `claude` | `.claude-plugin/plugin.json` |
 | `copilot` | `.github/plugin/plugin.json` |
+
+This runs for the default Claude plugin build (`--claude-plugin`, or `--format plugin|claude|claude-plugin`, since `plugin` is a compatibility alias for the Claude plugin bundle). Under an
+explicit `--format agent-plugin` build, the Claude ecosystem
+manifest is skipped -- if `target:` names only `claude` and the project has no
+other agent sources, `apm pack --format agent-plugin` fails and tells you to use
+`apm pack --claude-plugin` instead.
 
 Add one line to `apm.yml` and pack:
 
@@ -208,11 +317,12 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 | Code | Meaning |
 |---|---|
-| `0` | Success. Requested artifacts written (or, with `--dry-run`, planned). |
+| `0` | Success. Requested artifacts written, planned with `--dry-run`, or validated without writes by `--check-clean`. |
 | `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
 | `2` | `apm.yml` schema validation error. |
 | `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
-| `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file). |
+| `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file), or remote Claude metadata could not be fetched to certify the comparison. |
+| `5` | `--strict-metadata` failed: remote marketplace metadata was unavailable, so APM did not write the artifact. |
 
 ## Related
 

@@ -26,6 +26,7 @@ from apm_cli.commands.deps.cli import (
     _show_scope_deps,
 )
 from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,23 +50,14 @@ def _make_dep(
     version: str | None = None,
     resolved_commit: str | None = None,
     resolved_ref: str | None = None,
-    repo_url: str = "owner/repo",
-) -> MagicMock:
-    dep = MagicMock()
-    dep.get_unique_key.return_value = key
-    dep.get_canonical_dependency_string.return_value = key
-    dep.version = version
-    dep.resolved_commit = resolved_commit
-    dep.resolved_ref = resolved_ref
-    dep.repo_url = repo_url
-    dep.depth = 1
-    dep.resolved_by = None
-    dep.host = None
-    dep.is_local = False
-    dep.source = "github"
-    dep.is_azure_devops = MagicMock(return_value=False)
-    dep.is_insecure = False
-    return dep
+    repo_url: str | None = None,
+) -> LockedDependency:
+    return LockedDependency(
+        repo_url=repo_url or key,
+        version=version,
+        resolved_commit=resolved_commit,
+        resolved_ref=resolved_ref,
+    )
 
 
 def _make_pkg_dict(
@@ -263,8 +255,7 @@ class TestBuildDepTree:
         dep = _make_dep(key="owner/repo", repo_url="owner/repo")
         dep.depth = 1
 
-        mock_lockfile = MagicMock()
-        mock_lockfile.get_package_dependencies.return_value = [dep]
+        mock_lockfile = LockFile(dependencies={dep.get_unique_key(): dep})
 
         with patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls:
             with patch("apm_cli.deps.lockfile.get_lockfile_path") as mock_glp:
@@ -285,8 +276,9 @@ class TestBuildDepTree:
         transitive.depth = 2
         transitive.resolved_by = "owner/direct"
 
-        mock_lockfile = MagicMock()
-        mock_lockfile.get_package_dependencies.return_value = [direct, transitive]
+        mock_lockfile = LockFile(
+            dependencies={dep.get_unique_key(): dep for dep in (direct, transitive)}
+        )
 
         with patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls:
             with patch("apm_cli.deps.lockfile.get_lockfile_path") as mock_glp:
@@ -338,13 +330,9 @@ class TestResolveScopeDepsAdditional:
         pkg_dir.mkdir(parents=True)
         (pkg_dir / APM_YML_FILENAME).write_text("name: repo\nversion: 0.1.0\n")
 
-        insecure_dep = MagicMock()
-        insecure_dep.get_unique_key.return_value = "owner/repo"
-        insecure_dep.get_canonical_dependency_string.return_value = "owner/repo"
-        insecure_dep.host = None
-        insecure_dep.source = "github"
-        insecure_dep.is_insecure = True
-        insecure_dep.resolved_by = None
+        insecure_dep = LockedDependency(
+            host=None, source="github", is_insecure=True, resolved_by=None, repo_url="owner/repo"
+        )
 
         mock_lockfile = MagicMock()
         mock_lockfile.dependencies = {"owner/repo": insecure_dep}

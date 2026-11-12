@@ -11,27 +11,32 @@ from ...utils.yaml_io import load_yaml
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
     """Scan *apm_modules_dir* for installed package paths.
 
-    Walks the tree to find top-level directories containing ``apm.yml`` or
-    ``.apm``, supporting GitHub (2-level), ADO (3-level), and subdirectory
-    packages. Package manifests nested below another package are part of that
+    Walks the tree to find top-level directories containing ``apm.yml``,
+    ``.apm``, or ``SKILL.md``, supporting aliases (1-level), GitHub (2-level), ADO (3-level),
+    and subdirectory packages. Manifests nested below another package are part of that
     parent package and are excluded.
 
     Returns:
-        List of ``"owner/repo"`` or ``"org/project/repo"`` path keys.
+        List of installed relative paths, including flattened aliases.
     """
     installed: list = []
     if not apm_modules_dir.exists():
         return installed
     for candidate in apm_modules_dir.rglob("*"):
-        if not candidate.is_dir() or candidate.name.startswith("."):
+        if candidate.is_symlink() or not candidate.is_dir():
             continue
-        if not ((candidate / APM_YML_FILENAME).exists() or (candidate / APM_DIR).exists()):
+        if candidate.name.startswith(".") and candidate.parent != apm_modules_dir:
+            continue
+        if not (
+            (candidate / APM_YML_FILENAME).exists()
+            or (candidate / APM_DIR).exists()
+            or (candidate / SKILL_MD_FILENAME).is_file()
+        ):
             continue
         if _is_nested_under_package(candidate, apm_modules_dir):
             continue
         rel_parts = candidate.relative_to(apm_modules_dir).parts
-        if len(rel_parts) >= 2:
-            installed.append("/".join(rel_parts))
+        installed.append("/".join(rel_parts))
     return installed
 
 
@@ -41,16 +46,39 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     When a package ships nested package or skill manifests, the ``rglob`` scan
     would otherwise treat each sub-directory as an independent package. This
     helper walks up from *candidate* towards *apm_modules_path* and returns
-    ``True`` if any intermediate parent already contains ``apm.yml`` or
-    ``.apm`` -- meaning the candidate is a deployment artifact, not a standalone
-    package.
+    ``True`` if any intermediate parent already contains ``apm.yml``, ``.apm``, ``SKILL.md``,
+    or a canonical Agent Plugin manifest -- meaning the candidate is part of
+    that package, not a standalone one.
     """
     parent = candidate.parent
     while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
-        if (parent / APM_YML_FILENAME).exists() or (parent / APM_DIR).exists():
+        if (
+            (parent / APM_YML_FILENAME).exists()
+            or (parent / APM_DIR).exists()
+            or (parent / SKILL_MD_FILENAME).is_file()
+            or _is_agent_plugin_root(parent)
+        ):
             return True
         parent = parent.parent
     return False
+
+
+def _is_agent_plugin_root(path: Path) -> bool:
+    """Return ``True`` when *path* is a canonical Agent Plugin root.
+
+    An Agent Plugin is installed and loaded as one unit, so its ``skills/``
+    and other inner directories are never independent packages -- scanning
+    them as such would report false orphans and put them in prune's path.
+    """
+    if not (path / "plugin.json").is_file():
+        return False
+    from ...agent_plugins.errors import AgentPluginError
+    from ...bundle.local_bundle import route_agent_plugin_package
+
+    try:
+        return route_agent_plugin_package(path) is not None
+    except (AgentPluginError, OSError):
+        return False
 
 
 def _count_primitives(package_path: Path) -> dict[str, int]:

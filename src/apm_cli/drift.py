@@ -38,10 +38,9 @@ Scope / non-goals
   formatting-only change that produces the same unique key and is correctly
   treated as no drift.
 
-* **Host changes** — *not* detected.  If a user changes the host of an otherwise
-  identical package, the unique key may not change and ``detect_ref_change()``
-  will not signal a re-download.  Host-level changes still require the user to
-  ``apm remove`` + ``apm install`` the package, or use ``--update``.
+* **Host-provider changes** -- detected through the canonical host-provider
+  registry. Equivalent explicit/inferred provider forms remain unchanged,
+  while a backend or credential-route change forces a re-download.
 * **HTTP transport flips** — detected.  Switching between HTTPS and insecure
   HTTP toggles ``is_insecure`` and forces a re-download even when the package
   identity and ref are otherwise unchanged.
@@ -51,9 +50,12 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.host_providers import effective_host_provider_identity
 from apm_cli.install.phases._skip_logic import _should_use_locked_ref
+from apm_cli.utils.github_host import default_host
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -85,6 +87,51 @@ def _normalize_dep_source(dep: Any) -> str:
     return raw
 
 
+def _optional_string_attr(dep: Any, name: str) -> str | None:
+    """Read an optional string field without accepting dynamic mock attributes."""
+    value = getattr(dep, name, None)
+    return value if isinstance(value, str) and value else None
+
+
+def marketplace_ref_mismatch(
+    dep_ref: DependencyReference,
+    locked_dep: LockedDependency,
+) -> str | None:
+    """Compare a marketplace selection to locked evidence without catalog I/O."""
+    from apm_cli.deps.revision_pins import is_full_revision_pin
+    from apm_cli.marketplace.semver import parse_semver, satisfies_range
+    from apm_cli.marketplace.version_resolver import is_version_constraint
+
+    spec = dep_ref.marketplace_version_spec
+    if not is_full_revision_pin(locked_dep.resolved_commit):
+        return "missing locked commit evidence"
+    if not spec:
+        return None
+    if is_full_revision_pin(spec):
+        if locked_dep.resolved_commit.lower() != spec.lower():
+            return (
+                f"manifest commit '{spec}' != "
+                f"lockfile resolved_commit '{locked_dep.resolved_commit}'"
+            )
+    elif is_version_constraint(spec):
+        # Git semver locks already distinguish selected versions from package
+        # inventory using constraint + resolved_tag. Never infer tag patterns
+        # from a suffix or accept the requested selector as resolution proof.
+        if (
+            not locked_dep.constraint
+            or not locked_dep.resolved_tag
+            or locked_dep.resolved_ref != locked_dep.resolved_tag
+            or not locked_dep.version
+        ):
+            return f"missing locked version evidence for manifest version '{spec}'"
+        version = parse_semver(locked_dep.version)
+        if version is None or not satisfies_range(version, spec):
+            return f"manifest version '{spec}' != lockfile selected version '{locked_dep.version}'"
+    elif spec != locked_dep.resolved_ref:
+        return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
+    return None
+
+
 def detect_ref_change(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency | None,
@@ -102,8 +149,8 @@ def detect_ref_change(
 
     .. note::
 
-       Host changes (e.g. github.com -> ghes.corp.net) are a known non-goal
-       for this function.  A future enhancement may detect host drift.
+       Host names are normally part of the dependency key. Provider changes
+       for the same host are detected through canonical host classification.
 
     Args:
         dep_ref: The dependency as declared in the current manifest.
@@ -122,15 +169,40 @@ def detect_ref_change(
         return False
     if locked_dep is None:
         return False  # new package — not drift, just a first install
+    if getattr(dep_ref, "is_marketplace", False) is True:
+        return marketplace_ref_mismatch(dep_ref, locked_dep) is not None
+    if not locked_dep.matches_replacement(dep_ref):
+        return True
+    selected_locked = (
+        locked_dep.to_dependency_ref() if locked_dep.replacement is not None else locked_dep
+    )
 
     # Source flip drift: manifest changed resolver between installs (e.g.
     # was ``- git: ...``, now ``acme/foo@corp#^1.0.0``). The install path,
     # auth chain, and trust anchor all change — force a re-resolve.
     # Note: source=None and source="git" are equivalent (legacy default).
     manifest_source = _normalize_dep_source(dep_ref)
-    locked_source = _normalize_dep_source(locked_dep)
+    locked_source = _normalize_dep_source(selected_locked)
     if manifest_source != locked_source:
         return True
+
+    # Compare effective providers, not raw host_type: explicit and inferred
+    # forms selecting the same backend and credential route remain equivalent.
+    if manifest_source == "git":
+        try:
+            manifest_provider = effective_host_provider_identity(
+                _optional_string_attr(dep_ref, "host") or default_host(),
+                host_type=_optional_string_attr(dep_ref, "host_type"),
+            )
+            locked_provider = effective_host_provider_identity(
+                _optional_string_attr(selected_locked, "host") or default_host(),
+                host_type=_optional_string_attr(selected_locked, "host_type"),
+            )
+        except (ValueError, RuntimeError):
+            # An unclassifiable lock cannot safely authorize replay.
+            return True
+        if manifest_provider != locked_provider:
+            return True
 
     # Registry-sourced deps: the manifest carries a semver range
     # (e.g. ``^1.2.0``) while the lockfile records an exact version
@@ -150,6 +222,11 @@ def detect_ref_change(
             return ref != locked_dep.version
         return not _registry_range_covers_locked_version(ref, locked_dep.version)
 
+    if (getattr(dep_ref, "is_insecure", False) is True) != (
+        getattr(selected_locked, "is_insecure", False) is True
+    ):
+        return True
+
     # Git-source semver-range deps (issue #1488): the manifest carries
     # a semver range (``^1.2.0``) while the lockfile records the
     # resolved tag (``v1.5.3``) plus the original constraint. Direct
@@ -163,12 +240,7 @@ def detect_ref_change(
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
     # and value→value. No truthiness guard on locked_dep.resolved_ref —
     # None != "v1.0.0" is True.
-    if dep_ref.reference != locked_dep.resolved_ref:
-        return True
-
-    return (getattr(dep_ref, "is_insecure", False) is True) != (
-        getattr(locked_dep, "is_insecure", False) is True
-    )
+    return dep_ref.reference != locked_dep.resolved_ref
 
 
 def should_force_ref_recheck(
@@ -176,21 +248,75 @@ def should_force_ref_recheck(
     locked_dep: LockedDependency | None,
     *,
     update_refs: bool,
+    package_path: Path | None = None,
+    update_keys: set[str] | None = None,
 ) -> bool:
     """Return whether an existing install path must reach the download owner.
 
     This is the single gate shared by the dependency resolver and its download
-    callback. A normal install rechecks only manifest/lock drift. An explicit
-    update rechecks semver ranges so they can discover a newer matching tag,
-    while literal revision pins retain their dedicated update semantics.
+    callback. The resolver reads a package's ``apm.yml`` from whatever path this
+    gate leaves in place, so returning False means "the materialized copy is
+    current". A normal install rechecks local packages (their source can change
+    without any ref moving) and manifest/lock drift. An explicit update also
+    rechecks mutable Git refs, semver ranges and hook-only packages. Hook
+    replacements must pass staged admission before any live content is replaced.
+
+    This gate decides ref/content freshness only. Slot ownership is a separate
+    staging fact: when several local sources share one ``_local/<name>`` slot,
+    the download callback reuses the copy this run already staged for it
+    (``ResolutionStagingSession.owns_path``) instead of staging it twice.
     """
-    if dep_ref.is_local or getattr(dep_ref, "artifactory_prefix", None):
+    if locked_dep is not None and not locked_dep.matches_replacement(dep_ref):
+        return True
+    if dep_ref.is_local:
+        # #3401 / #3501: the apm_modules copy is from the previous install, so
+        # reading it would resolve transitive deps from a stale manifest.
+        return True
+    if getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:
         return True
     if update_refs:
-        return getattr(dep_ref, "ref_kind", None) == "semver"
+        from apm_cli.deps.revision_pins import is_full_revision_pin
+
+        if update_keys is not None and dep_ref.get_unique_key() not in update_keys:
+            return False
+        if dep_ref.replacement is not None:
+            return not is_full_revision_pin(dep_ref.reference)
+        if getattr(dep_ref, "ref_kind", None) == "semver":
+            return True
+        if package_path is not None:
+            from apm_cli.models.validation import PackageType, detect_package_type
+
+            package_type, _ = detect_package_type(package_path)
+            if package_type is PackageType.HOOK_PACKAGE:
+                return True
+        if _refetches_mutable_ref_during_resolution(dep_ref):
+            # #3392: a branch (or tag, or default-branch) ref of a plain Git
+            # package may point at a new commit whose apm.yml re-pins children.
+            # Fetch it here, during resolution, so transitive deps come from that
+            # commit. The download phase skips packages the callback already
+            # fetched, so this moves the update fetch earlier rather than adding
+            # one.
+            return not is_full_revision_pin(dep_ref.reference)
+        return False
     return detect_ref_change(dep_ref, locked_dep, update_refs=False)
+
+
+def _refetches_mutable_ref_during_resolution(dep_ref: DependencyReference) -> bool:
+    """Return whether an update fetches *dep_ref*'s mutable ref while resolving.
+
+    Only whole-repository Git packages qualify. Registry, marketplace and
+    virtual (subdirectory or file) packages are re-resolved later in the update
+    pipeline; fetching them here would pin the stale selection. Callers have
+    already excluded local and Artifactory-proxied dependencies.
+    """
+    return not (
+        dep_ref.source == "registry"
+        or getattr(dep_ref, "is_marketplace", False)
+        or getattr(dep_ref, "marketplace_name", None)
+        or getattr(dep_ref, "is_virtual", False)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +448,7 @@ def build_download_ref(
     update_refs: bool,
     ref_changed: bool,
     logger=None,
+    require_locked: bool = False,
 ) -> DependencyReference:
     """Build the dependency reference passed to the package downloader.
 
@@ -345,28 +472,36 @@ def build_download_ref(
         A :class:`DependencyReference` suitable for
         ``GitHubPackageDownloader.download_package``.
     """
+    if require_locked:
+        from apm_cli.deps.revision_pins import is_full_revision_pin
+
+        locked = (
+            existing_lockfile.get_dependency(dep_ref.get_unique_key())
+            if existing_lockfile is not None
+            else None
+        )
+        if locked is None or update_refs or ref_changed or locked.source == "local":
+            raise ValueError("source has no unchanged remote lock pin")
+        if locked.source == "registry":
+            if not (locked.version and locked.resolved_url and locked.resolved_hash):
+                raise ValueError("registry source has no complete locked version, URL and hash")
+        elif not is_full_revision_pin(locked.resolved_commit):
+            raise ValueError("remote source has no immutable locked commit")
+
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-        if locked_dep:
+        if locked_dep and locked_dep.matches_replacement(dep_ref):
             overrides: dict[str, Any] = {}
 
-            # Prefer the lockfile host so re-installs fetch from the exact same
-            # source (proxy host preserved) — fixes air-gapped reproducibility.
+            # Registry-proxy rows preserve their configured proxy host for
+            # reproducibility. Ordinary dependency hosts and insecure transport
+            # are always taken from the current manifest, never from lock state.
             # When registry_prefix is set, also restore the artifactory_prefix
             # field on dep_ref so the downloader takes the proxy code-path and
             # uses PROXY_REGISTRY_TOKEN for auth instead of the GitHub PAT.
             if locked_dep.registry_prefix and locked_dep.host:
                 overrides["host"] = locked_dep.host
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
-            elif (
-                isinstance(getattr(locked_dep, "host", None), str)
-                and locked_dep.host != dep_ref.host
-            ):
-                overrides["host"] = locked_dep.host
-
-            if getattr(locked_dep, "is_insecure", False) is True:
-                overrides["is_insecure"] = True
-                overrides["allow_insecure"] = getattr(locked_dep, "allow_insecure", False)
 
             reg_replay = _registry_replay_overrides_from_lock(locked_dep)
             if reg_replay is not None:
@@ -381,6 +516,6 @@ def build_download_ref(
                 overrides["reference"] = locked_dep.resolved_ref
 
             if overrides:
-                return _dataclass_replace(dep_ref, **overrides)
+                return _dataclass_replace(dep_ref.source_reference, **overrides)
 
-    return dep_ref
+    return dep_ref.source_reference

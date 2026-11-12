@@ -127,7 +127,7 @@ def _cache_key(source: MarketplaceSource) -> str:
         # Generic git / ADO: include host so a.com/o/r vs b.com/o/r never
         # collapse, and prefix by kind so the same host on the two paths keeps
         # distinct sidecar files.
-        host = _host_from_url(source.url) or source.host or "unknown"
+        host = source.host or "unknown"
         return f"{kind}__{_sanitize_cache_name(host)}__{_sanitize_cache_name(source.name)}"
     normalized_host = (source.host or "github.com").lower()
     if normalized_host == "github.com":
@@ -565,33 +565,110 @@ def _fetch_git(
 ) -> dict | None:
     """Fetch marketplace.json from a generic git URL via subprocess + GitCache.
 
-    Sparse-cone clones only the requested manifest path. Uses
-    ``AuthResolver.resolve(host, org).git_env`` to build the git env; for
-    hosts APM doesn't recognise, the env passes through to the user's
-    credential helpers (matches ``apm install`` posture).
+    Sparse-cone clones only the requested manifest path. AuthResolver owns
+    remote-aware credential selection and Git environment policy. ADO hosts
+    route the checkout through ``AuthResolver.try_with_fallback`` with the
+    repository path so path-scoped ``git credential fill`` can run after PAT
+    and bearer authentication fail, while retaining the hardened Git base
+    environment.
     """
     _validate_ref(source.ref, source.name)
 
-    from ..cache.git_cache import GitCache, _sanitize_url
+    from ..cache.git_cache import GitCache
     from ..cache.paths import get_cache_root
+    from ..core.auth import AdoAuthChainExhaustedError
+    from ..utils.git_env import GitUrlRewriteError, GitUrlRewriteProbeError
 
     org = source.owner or None
-    auth_ctx = (
-        auth_resolver.resolve(host_info.host, org, port=source.port)
-        if source.port is not None
-        else auth_resolver.resolve(host_info.host, org)
-    )
-    git_env = auth_resolver.hardened_git_env_for_context(auth_ctx)
+
+    def _rewrite_policy_error(exc: ValueError) -> MarketplaceFetchError:
+        reasons = {
+            "credentials": "Git URL rewrite contains credentials",
+            "credential-origin": "authenticated Git URL rewrite changes the remote origin",
+            "https-downgrade": (
+                "HTTPS Git remote was rejected because Git configuration "
+                "rewrites it to insecure HTTP"
+            ),
+            "insecure-transport": "HTTPS Git URL rewrite selects an insecure transport",
+        }
+        reason = (
+            reasons.get(exc.reason, "unsafe Git URL rewrite")
+            if isinstance(exc, GitUrlRewriteError)
+            else str(exc)
+        )
+        if isinstance(exc, GitUrlRewriteError):
+            reason = f"{reason}; {exc.recovery_hint}"
+        return MarketplaceFetchError(
+            source.name,
+            reason,
+            retry_hint=(
+                "Correct the matching Git configuration, then run "
+                f"'apm marketplace update {source.name}' to retry."
+            ),
+        )
 
     cache = GitCache(get_cache_root(), refresh=False)
-    try:
-        # Sparse-cone clone -- only the marketplace.json directory tree is fetched.
-        checkout_dir = cache.get_checkout(
+
+    def _checkout(_token, git_env):
+        return cache.get_checkout(
             source.url,
             source.ref,
             env=git_env,
             sparse_paths=[file_path] if "/" in file_path else None,
         )
+
+    ado_host = getattr(host_info, "kind", "") == "ado"
+    git_env: dict | None = None
+    ado_base_env: dict | None = None
+    try:
+        if ado_host:
+            from ..utils.git_env import validate_git_url_rewrite_safety
+
+            ado_base_env = auth_resolver.hardened_git_base_env()
+            validate_git_url_rewrite_safety(source.url, ado_base_env)
+        else:
+            auth_ctx = (
+                auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
+                if source.port is not None
+                else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
+            )
+            git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
+    except (GitUrlRewriteError, GitUrlRewriteProbeError, ValueError) as exc:
+        logger.debug(
+            "Generic-git policy rejected '%s': %s",
+            source.name,
+            type(exc).__name__,
+        )
+        raise _rewrite_policy_error(exc) from exc
+
+    try:
+        if ado_host:
+            fallback_kwargs = {
+                "org": org,
+                "path": urlsplit(source.url).path.lstrip("/"),
+                "unauth_first": False,
+            }
+            if source.port is not None:
+                fallback_kwargs["port"] = source.port
+            fallback_kwargs["base_env"] = ado_base_env
+            checkout_dir = auth_resolver.try_with_fallback(
+                host_info.host,
+                _checkout,
+                **fallback_kwargs,
+            )
+        else:
+            checkout_dir = _checkout(None, git_env)
+    except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
+        logger.debug("Generic-git rewrite policy rejected '%s'", source.name)
+        raise _rewrite_policy_error(exc) from exc
+    except AdoAuthChainExhaustedError as exc:
+        raise MarketplaceFetchError(
+            source.name,
+            str(exc),
+            retry_hint=(
+                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
+            ),
+        ) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
         # caller's _auto_detect_path probe can try the next candidate path.
@@ -600,11 +677,22 @@ def _fetch_git(
         stderr_raw = (getattr(exc, "stderr", b"") or b"").decode("utf-8", errors="replace")
         if "not found" in stderr_raw.lower() or "does not exist" in stderr_raw.lower():
             return None
-        stderr = _sanitize_url(stderr_raw)
-        raise MarketplaceFetchError(source.name, f"git fetch failed: {stderr or exc}") from exc
+        raise MarketplaceFetchError(
+            source.name,
+            "git fetch failed; verify the remote, configured Git credentials, or SSH key",
+            retry_hint=(
+                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
+            ),
+        ) from exc
     except Exception as exc:
-        logger.debug("Generic-git fetch failed for '%s'", source.name, exc_info=True)
-        raise MarketplaceFetchError(source.name, _sanitize_url(str(exc))) from exc
+        logger.debug("Generic-git fetch failed for '%s': %s", source.name, type(exc).__name__)
+        raise MarketplaceFetchError(
+            source.name,
+            "git fetch failed; verify the remote, configured Git credentials, or SSH key",
+            retry_hint=(
+                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
+            ),
+        ) from exc
 
     target = Path(checkout_dir) / file_path
     if not target.exists():
@@ -882,14 +970,18 @@ def _fetch_local_via_git_show(
     source: MarketplaceSource, file_path: str, git_dir: Path
 ) -> dict | None:
     """Use ``git show <ref>:<file>`` against a bare repo or .git directory."""
-    from ..utils.git_env import git_subprocess_env
+    from ..utils.git_env import (
+        get_git_executable,
+        git_no_hooks_args,
+        git_subprocess_env,
+        redact_git_diagnostic,
+    )
 
     cmd = [
-        "git",
+        get_git_executable(),
         "--git-dir",
         str(git_dir),
-        "-c",
-        "core.hooksPath=/dev/null",
+        *git_no_hooks_args(),
         "show",
         f"{source.ref}:{file_path}",
     ]
@@ -913,7 +1005,10 @@ def _fetch_local_via_git_show(
             or "fatal: path" in stderr.lower()
         ):
             return None
-        raise MarketplaceFetchError(source.name, f"git show failed: {stderr}")
+        raise MarketplaceFetchError(
+            source.name,
+            f"git show failed: {redact_git_diagnostic(stderr)}",
+        )
 
     try:
         return json.loads(result.stdout.decode("utf-8"))
@@ -1077,26 +1172,30 @@ def _fetch_file(
     elif kind in ("git", "ado"):
         # For ADO and generic git, classify the host extracted from the URL so
         # each gets a correctly-typed auth context (ADO PAT/bearer routing).
-        host = _host_from_url(source.url)
+        host = source.host
         host_info = AuthResolver.classify_host(host, port=source.port) if host else None
 
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
-def _host_from_url(url: str) -> str:
-    """Extract host from a URL (handles SCP-like SSH URLs too)."""
-    if not url:
-        return ""
-    # SCP-like: git@host:path
-    if "@" in url and not url.startswith(("http", "git://", "ssh://", "file://")):
-        try:
-            return url.split("@", 1)[1].split(":", 1)[0]
-        except (IndexError, ValueError):
-            return ""
-    try:
-        return urlsplit(url).hostname or ""
-    except ValueError:
-        return ""
+def _auto_detect_path_with_payload(
+    source: MarketplaceSource,
+    auth_resolver: object | None = None,
+) -> tuple[str | None, dict | None]:
+    """Probe candidate locations and return the first that exists.
+
+    Returns ``(path, data)`` where ``data`` is the successfully fetched
+    catalog JSON for the winning candidate, so callers can reuse the
+    response instead of immediately re-fetching the same URL
+    (microsoft/apm#3283).  Returns ``(None, None)`` if no location
+    contains a marketplace.json.  Raises ``MarketplaceFetchError`` on
+    non-404 failures (auth errors, etc.).
+    """
+    for candidate in _MARKETPLACE_PATHS:
+        data = _fetch_file(source, candidate, auth_resolver=auth_resolver)
+        if data is not None:
+            return candidate, data
+    return None, None
 
 
 def _auto_detect_path(
@@ -1108,11 +1207,8 @@ def _auto_detect_path(
     Returns ``None`` if no location contains a marketplace.json.
     Raises ``MarketplaceFetchError`` on non-404 failures (auth errors, etc.).
     """
-    for candidate in _MARKETPLACE_PATHS:
-        data = _fetch_file(source, candidate, auth_resolver=auth_resolver)
-        if data is not None:
-            return candidate
-    return None
+    detected, _payload = _auto_detect_path_with_payload(source, auth_resolver=auth_resolver)
+    return detected
 
 
 # ---------------------------------------------------------------------------
@@ -1125,6 +1221,7 @@ def fetch_marketplace(
     *,
     force_refresh: bool = False,
     auth_resolver: object | None = None,
+    discovery_payload: dict | None = None,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -1136,6 +1233,12 @@ def fetch_marketplace(
         source: Marketplace source to fetch.
         force_refresh: Skip cache and re-fetch from network.
         auth_resolver: Optional ``AuthResolver`` instance (created if None).
+        discovery_payload: Optional catalog JSON already fetched during
+            path discovery in the same invocation (microsoft/apm#3283).
+            When provided, the network fetch of ``source.path`` is skipped
+            and the discovery response is parsed and cached instead.  The
+            payload MUST come from the same source URL and ref; callers
+            that cannot guarantee that must pass ``None``.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -1201,7 +1304,15 @@ def fetch_marketplace(
                 source_digest=result.digest,
             )
 
-        data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
+        if discovery_payload is not None:
+            # Reuse the catalog response already fetched by path discovery
+            # in this same invocation instead of re-fetching the identical
+            # URL (microsoft/apm#3283).  The payload is still written to
+            # the sidecar cache below, so later invocations see the same
+            # freshness behavior as a network fetch.
+            data = discovery_payload
+        else:
+            data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
         if data is None:
             raise MarketplaceFetchError(
                 source.name,

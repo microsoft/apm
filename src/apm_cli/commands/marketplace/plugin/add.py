@@ -7,6 +7,7 @@ import sys
 import click
 
 from ....core.command_logger import CommandLogger
+from ....install.locking import serialized_lifecycle
 from ....marketplace.errors import MarketplaceYmlError
 from ....marketplace.yml_schema import split_host_from_source
 from . import (
@@ -39,6 +40,7 @@ from . import (
 @click.option("--include-prerelease", is_flag=True, help="Include prerelease versions")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def add(
     source,
     name,

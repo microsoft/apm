@@ -6,7 +6,7 @@ Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent c
 
 GitHub Copilot | Claude Code | Grok Build | Cursor | OpenCode | Codex | Gemini | Windsurf | Kiro
 
-**[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304)**
+**[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/quickstart/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5)**
 
 ---
 
@@ -23,6 +23,8 @@ AI coding agents need context to be useful — standards, prompts, skills, plugi
 # apm.yml — ships with your project
 name: your-project
 version: 1.0.0
+targets:
+  - copilot # choose the harness(es) this project supports
 dependencies:
   apm:
     # Skills from any repository
@@ -34,7 +36,7 @@ dependencies:
     # A full APM package with instructions, skills, prompts, hooks...
     - microsoft/apm-sample-package#v1.0.0
   mcp:
-    # MCP servers -- installed into every detected client
+    # MCP servers -- installed into every selected target
     - name: io.github.github/github-mcp-server
       transport: http   # MCP transport name, not URL scheme -- connects over HTTPS
 ```
@@ -68,11 +70,11 @@ One command, no configuration -- VS Code and GitHub Copilot read the file automa
 One `apm.yml` describes every primitive your agents need — instructions, skills, prompts, agents, hooks, plugins, MCP servers — and `apm install` reproduces the exact same setup across every client on every machine. `apm.lock.yaml` pins the resolved tree the way `package-lock.json` does for npm.
 
 - **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** -- declared once, deployed across Copilot, Claude, Grok Build, Cursor, OpenCode, Codex, Gemini, Windsurf, Kiro
-- **[Install from anywhere](https://microsoft.github.io/apm/guides/dependencies/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, Gitea, Gogs, any git host
-- **[Transitive dependencies](https://microsoft.github.io/apm/guides/dependencies/)** — packages can depend on packages; APM resolves the full tree
-- **[Author plugins](https://microsoft.github.io/apm/guides/plugins/)** — build Copilot, Claude, and Cursor plugins with dependency management, then export standard `plugin.json`
-- **[Marketplaces](https://microsoft.github.io/apm/guides/marketplaces/)** — install plugins from curated registries in one command, deployed across all targets and locked
-- **[Pack & distribute](https://microsoft.github.io/apm/guides/pack-distribute/)** — `apm pack` bundles your configuration as a zipped package or a standalone plugin
+- **[Install from anywhere](https://microsoft.github.io/apm/consumer/install-packages/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, Gitea, Gogs, any git host
+- **[Transitive dependencies](https://microsoft.github.io/apm/consumer/install-packages/#transitive-dependencies-and-the-lockfile)** — packages can depend on packages; APM resolves the full tree
+- **[Author plugins](https://microsoft.github.io/apm/producer/)** — build Copilot, Claude, and Cursor plugins with dependency management, then export standard `plugin.json`
+- **[Marketplaces](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/)** — install plugins from curated registries in one command, deployed across all targets and locked
+- **[Pack & distribute](https://microsoft.github.io/apm/producer/pack-a-bundle/)** — `apm pack` bundles your configuration as a zipped package or a standalone plugin
 - **[CI/CD ready](https://github.com/microsoft/apm-action)** — GitHub Action for automated workflows
 
 ### 2. Secure by default
@@ -80,10 +82,10 @@ One `apm.yml` describes every primitive your agents need — instructions, skill
 Agent context is executable in effect — a prompt is a program for an LLM. APM treats it that way. Every install scans for hidden Unicode that can hijack agent behavior; the lockfile pins integrity hashes; transitive MCP servers are gated by trust prompts.
 
 - **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm install` blocks compromised packages before agents read them; `apm audit` runs the same checks on demand
-- **[Lockfile integrity](https://microsoft.github.io/apm/enterprise/governance/)** — `apm.lock` records resolved sources and content hashes for full provenance
+- **[Lockfile integrity](https://microsoft.github.io/apm/reference/lockfile-spec/)** — `apm.lock` records resolved sources and content hashes for full provenance
 - **[SBOM export](https://microsoft.github.io/apm/reference/cli/lock/)** — `apm lock export --format cyclonedx|spdx` emits a standard inventory of what reached disk, straight from the lockfile — provenance for procurement, not a compliance attestation
-- **[Drift detection](https://microsoft.github.io/apm/guides/drift-detection/)** — `apm audit` rebuilds your agent context in scratch and diffs it against your working tree to catch hand-edits before they ship
-- **[MCP trust boundaries](https://microsoft.github.io/apm/guides/mcp-servers/)** — transitive MCP servers require explicit consent
+- **[Drift detection](https://microsoft.github.io/apm/enterprise/drift-detection/)** — `apm audit` rebuilds your agent context in scratch and diffs it against your working tree to catch hand-edits before they ship
+- **[MCP trust boundaries](https://microsoft.github.io/apm/consumer/install-mcp-servers/)** — transitive MCP servers require explicit consent
 
 ### 3. Governed by policy
 
@@ -98,7 +100,16 @@ apm-policy.yml governs what gets installed; your agent harness governs what runs
 
 ## Get Started
 
-#### Linux / macOS
+#### macOS with Homebrew
+
+```bash
+brew install apm
+```
+
+No custom tap is required. Homebrew manages installation and updates:
+use `brew upgrade apm`, not `apm self-update`.
+
+#### Linux / macOS without Homebrew
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
@@ -110,31 +121,38 @@ curl -sSL https://aka.ms/apm-unix | sh
 irm https://aka.ms/apm-windows | iex
 ```
 
-Native release binaries are published for macOS, Linux, and Windows x86_64. `apm self-update` reuses the matching platform installer.
+Native release binaries are published for macOS, Linux, and Windows x86_64.
+For standalone installations, `apm self-update` reuses the matching platform installer.
+You do not need Homebrew to use APM.
 
 <details>
-<summary>Other install methods</summary>
+<summary>Other install methods: pip, WinGet, and Scoop</summary>
 
 #### Linux / macOS
 
 ```bash
-# Homebrew
-brew install microsoft/apm/apm
-# pip
+# pip (Python 3.10+)
 pip install apm-cli
 ```
 
 #### Windows
 
 ```powershell
+# WinGet
+winget install --id Microsoft.APM --exact --source winget
+```
+
+```powershell
 # Scoop
-scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 # pip
 pip install apm-cli
 ```
 
 </details>
+
+Already using the Microsoft Homebrew tap? See the
+[migration guide](https://microsoft.github.io/apm/getting-started/installation/#migrate-from-the-microsoft-tap).
 
 Then start adding packages:
 
@@ -155,7 +173,7 @@ Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemin
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS
 ```
 
-See the **[Getting Started guide](https://microsoft.github.io/apm/getting-started/quick-start/)** for the full walkthrough.
+See the **[Getting Started guide](https://microsoft.github.io/apm/quickstart/)** for the full walkthrough.
 
 ## Works with agentrc
 
@@ -167,7 +185,8 @@ Use agentrc to author high-quality instructions, then package them with APM to s
 
 Created by [@danielmeppiel](https://github.com/danielmeppiel). Maintained by [@danielmeppiel](https://github.com/danielmeppiel) and [@sergio-sisternes-epam](https://github.com/sergio-sisternes-epam).
 
-- [Roadmap & Discussions](https://github.com/microsoft/apm/discussions/116)
+- [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5)
+- [Discussions](https://github.com/microsoft/apm/discussions)
 - [Contributing](CONTRIBUTING.md)
 - [AI Native Development guide](https://danielmeppiel.github.io/awesome-ai-native) — a practical learning path for AI-native development
 

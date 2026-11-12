@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
@@ -20,6 +21,7 @@ from ..core.target_detection import (
     detect_signals,
     manifest_targets_from_target_option,
 )
+from ..install.locking import serialized_lifecycle_unless
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -34,6 +36,7 @@ from ._helpers import (
     _rich_blank_line,
     _validate_plugin_name,
 )
+from .discover import discover_options, run_discover
 
 
 def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
@@ -67,6 +70,13 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 
 
 @click.command(help="Initialize a new APM project")
+@click.option(
+    "--discover",
+    "discover_flag",
+    is_flag=True,
+    help="Inventory existing local packages without writes",
+)
+@discover_options
 @click.argument("project_name", required=False)
 @click.option(
     "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
@@ -91,7 +101,20 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+@serialized_lifecycle_unless("discover_flag")
+def init(
+    ctx: click.Context,
+    project_name: str | None,
+    yes: bool,
+    plugin: bool,
+    marketplace_flag: bool,
+    target_flag: str | list[str] | None,
+    verbose: bool,
+    discover_flag: bool = False,
+    write: bool = False,
+    output_format: str = "text",
+    global_: bool = False,
+) -> None:
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -101,6 +124,22 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
     --marketplace flags on 'apm init' are kept for backward
     compatibility and will be removed in v0.16.
     """
+    if discover_flag:
+        if project_name or plugin or marketplace_flag or target_flag:
+            raise click.UsageError(
+                "--discover cannot scaffold a name/plugin/marketplace or select targets."
+            )
+        run_discover(
+            write=write, output_format=output_format, global_=global_, yes=yes, verbose=verbose
+        )
+        return
+    if write or global_ or output_format != "text":
+        raise click.UsageError("--apply, --write, --global and --format require --discover.")
+    _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
+
+
+def _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+    """Keep the pre-existing init flow serialized, outside read-only discovery."""
     # Soft deprecation warnings -- legacy flags still work.
     if plugin:
         click.echo(
@@ -135,6 +174,7 @@ def _perform_init(
     target_flag,
     verbose,
     source="init",
+    plugin_mode: str | None = None,
 ):
     """Shared init body. Called by `apm init` and `apm plugin init`.
 
@@ -144,6 +184,12 @@ def _perform_init(
     """
     logger = CommandLogger(source, verbose=verbose)
     try:
+        effective_plugin_mode = plugin_mode
+        if effective_plugin_mode is None:
+            effective_plugin_mode = (
+                "agent" if PREFERRED_PLUGIN_FORMAT is BundleFormat.AGENT_PLUGIN else "claude"
+            )
+
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
@@ -180,17 +226,27 @@ def _perform_init(
         if plugin and not _validate_plugin_name(final_project_name):
             logger.error(
                 f"Invalid plugin name '{final_project_name}'. "
-                "Must be kebab-case (lowercase letters, numbers, hyphens), "
-                "start with a letter, and be at most 64 characters."
+                "Use 1-64 lowercase letters, numbers, dots, or hyphens; "
+                "begin and end with a letter or number; and do not use '..' or '--'."
             )
             sys.exit(1)
 
-        # Check for existing apm.yml
+        # Check for existing generated files
         apm_yml_exists = Path(APM_YML_FILENAME).exists()
+        generated_paths = [Path(APM_YML_FILENAME)]
+        if plugin:
+            generated_paths.append(Path("plugin.json"))
+            if effective_plugin_mode == "agent":
+                generated_paths.append(Path("mcp.json"))
+        existing_generated_paths = [path for path in generated_paths if path.exists()]
 
-        # Handle existing apm.yml in brownfield projects
-        if apm_yml_exists:
-            logger.warning("apm.yml already exists")
+        # Handle existing generated files in brownfield projects
+        if existing_generated_paths:
+            rendered_paths = ", ".join(path.as_posix() for path in existing_generated_paths)
+            if existing_generated_paths == [Path(APM_YML_FILENAME)]:
+                logger.warning("apm.yml already exists")
+            else:
+                logger.warning(f"Generated files already exist: {rendered_paths}")
 
             if not yes:
                 confirm = click.confirm("Continue and overwrite?")
@@ -199,7 +255,7 @@ def _perform_init(
                     logger.progress("Initialization cancelled.")
                     return
             else:
-                logger.progress("--yes specified, overwriting apm.yml...")
+                logger.progress(f"--yes specified, overwriting: {rendered_paths}")
 
         # Get project configuration (interactive mode or defaults)
         if not yes:
@@ -230,8 +286,6 @@ def _perform_init(
 
         logger.start(f"Initializing APM project: {config['name']}", symbol="running")
 
-        # Create apm.yml (with devDependencies for plugin mode)
-        _create_minimal_apm_yml(config, plugin=plugin)
         native_sources = find_plugin_root_sources(project_root)
         if native_sources and not (project_root / ".apm").is_dir():
             rendered_sources = ", ".join(
@@ -244,9 +298,12 @@ def _perform_init(
                 "to source from that directory.",
             )
 
-        # Create plugin.json for plugin mode
-        if plugin:
-            _create_plugin_json(config)
+        if plugin and effective_plugin_mode == "agent":
+            _write_and_validate_agent_plugin_scaffold(project_root, config)
+        else:
+            _create_minimal_apm_yml(config, plugin=plugin)
+            if plugin:
+                _create_plugin_json(config, mode=effective_plugin_mode)
 
         # Append marketplace authoring block when requested.
         if marketplace_flag:
@@ -280,6 +337,8 @@ def _perform_init(
                 ]
                 if plugin:
                     files_data.append(("*", "plugin.json", "Plugin metadata"))
+                    if effective_plugin_mode == "agent":
+                        files_data.append(("*", "mcp.json", "MCP server configuration"))
                 table = _create_files_table(files_data, title="Created Files")
                 console.print(table)
         except (ImportError, NameError):
@@ -287,6 +346,8 @@ def _perform_init(
             click.echo("  * apm.yml - Project configuration")
             if plugin:
                 click.echo("  * plugin.json - Plugin metadata")
+                if effective_plugin_mode == "agent":
+                    click.echo("  * mcp.json - MCP server configuration")
 
         _rich_blank_line()
 
@@ -300,7 +361,8 @@ def _perform_init(
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Pack as plugin:          apm pack",
+                "Pack as Agent Plugins v1:             apm pack --format agent-plugin",
+                "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
         elif source == "init":
             next_steps = [
@@ -314,7 +376,7 @@ def _perform_init(
                 "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
                 "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
                 "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
-                "Author your own plugin:         apm pack",
+                "Author your own plugin:         apm pack --format agent-plugin",
             ]
 
         # Agentrc integration (#518): suggest agentrc when no instructions exist.
@@ -378,6 +440,75 @@ def _perform_init(
     except Exception as e:
         logger.error(f"Error initializing project: {e}")
         sys.exit(1)
+
+
+def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) -> None:
+    """Stage, validate, and commit all native scaffold files as one transaction."""
+    import json
+    import tempfile
+
+    from ..agent_plugins import (
+        MCP_SCHEMA_ID,
+        DiagnosticSeverity,
+        load_agent_plugin,
+    )
+
+    mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
+    with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
+        staged_root = Path(stage)
+        _create_minimal_apm_yml(
+            config,
+            plugin=True,
+            target_path=staged_root / APM_YML_FILENAME,
+        )
+        _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
+        (staged_root / "mcp.json").write_text(
+            json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        plugin = load_agent_plugin(staged_root)
+        errors = [
+            diagnostic.message
+            for diagnostic in plugin.diagnostics
+            if diagnostic.severity is DiagnosticSeverity.ERROR
+        ]
+        if errors:
+            raise ValueError("Generated Agent Plugin scaffold is invalid: " + "; ".join(errors))
+
+        _commit_staged_scaffold(
+            staged_root,
+            project_root,
+            (APM_YML_FILENAME, "plugin.json", "mcp.json"),
+        )
+
+
+def _commit_staged_scaffold(
+    staged_root: Path,
+    project_root: Path,
+    filenames: tuple[str, ...],
+) -> None:
+    """Replace a generated file set, restoring every prior file on failure."""
+    backup_root = staged_root / ".backup"
+    backup_root.mkdir()
+    backups: dict[str, Path] = {}
+    committed: list[str] = []
+    try:
+        for filename in filenames:
+            destination = project_root / filename
+            if destination.exists():
+                backup = backup_root / filename
+                os.replace(destination, backup)
+                backups[filename] = backup
+        for filename in filenames:
+            os.replace(staged_root / filename, project_root / filename)
+            committed.append(filename)
+    except Exception:
+        for filename in committed:
+            (project_root / filename).unlink(missing_ok=True)
+        for filename, backup in backups.items():
+            if backup.exists():
+                os.replace(backup, project_root / filename)
+        raise
 
 
 def _interactive_project_setup(default_name, logger):

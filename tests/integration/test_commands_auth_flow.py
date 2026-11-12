@@ -338,7 +338,7 @@ class TestAuthResolverResolve:
         assert ctx.git_env.get("GIT_TERMINAL_PROMPT") == "0"
         assert ctx.git_env.get("GIT_ASKPASS") == "echo"
 
-    def test_git_env_injects_git_token_for_basic_scheme(self) -> None:
+    def test_git_env_injects_basic_authorization_header(self) -> None:
         with (
             patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_tok"}, clear=True),
             _NO_GIT_CRED,
@@ -346,7 +346,12 @@ class TestAuthResolverResolve:
         ):
             resolver = AuthResolver()
             ctx = resolver.resolve("github.com")
-        assert ctx.git_env.get("GIT_TOKEN") == "ghp_tok"
+        assert "GIT_TOKEN" not in ctx.git_env
+        config_values = [
+            value for key, value in ctx.git_env.items() if key.startswith("GIT_CONFIG_VALUE_")
+        ]
+        assert any(value.startswith("Authorization: Basic ") for value in config_values)
+        assert all("ghp_tok" not in value for value in config_values)
         assert ctx.auth_scheme == "basic"
 
 
@@ -1004,17 +1009,17 @@ class TestNormalizePluginDirectory:
         data = yaml.safe_load(apm_yml_path.read_text())
         assert data["name"] == "json-name"
 
-    def test_invalid_plugin_json_falls_back_to_dir_name(self, tmp_path: Path) -> None:
-        import yaml
+    def test_invalid_plugin_json_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins import AgentPluginLegacyBoundaryError
 
         plugin_dir = tmp_path / "fallback-name"
         plugin_dir.mkdir()
         plugin_json = plugin_dir / "plugin.json"
         plugin_json.write_text("{ bad json {{")
 
-        apm_yml_path = normalize_plugin_directory(plugin_dir, plugin_json)
-        data = yaml.safe_load(apm_yml_path.read_text())
-        assert data["name"] == "fallback-name"
+        with pytest.raises(AgentPluginLegacyBoundaryError, match="Invalid JSON"):
+            normalize_plugin_directory(plugin_dir, plugin_json)
+        assert not (plugin_dir / "apm.yml").exists()
 
 
 class TestMapPluginArtifacts:

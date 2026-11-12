@@ -217,11 +217,23 @@ class TestMcpRegistryUrlConfig:
 
     def test_get_returns_none_when_absent(self, isolated_config):
         assert config_mod.get_mcp_registry_url() is None
+        assert not isolated_config.exists()
 
     def test_set_and_get_round_trip(self, isolated_config):
         config_mod.set_mcp_registry_url("https://corp.mcp.example.com")
         config_mod._invalidate_config_cache()
         assert config_mod.get_mcp_registry_url() == "https://corp.mcp.example.com"
+
+    @pytest.mark.parametrize(
+        "url",
+        (
+            "https://corp.mcp.example.com?token=secret",
+            "https://corp.mcp.example.com#token=secret",
+        ),
+    )
+    def test_set_rejects_query_and_fragment(self, isolated_config, url):
+        with pytest.raises(ValueError, match="must not contain a query or fragment"):
+            config_mod.set_mcp_registry_url(url)
 
     def test_set_strips_trailing_slash(self, isolated_config):
         config_mod.set_mcp_registry_url("https://corp.mcp.example.com/")
@@ -247,8 +259,19 @@ class TestMcpRegistryUrlConfig:
         with pytest.raises(ValueError, match="Invalid URL"):
             config_mod.set_mcp_registry_url("https://")
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://mcp.example.com/path?token=query-value",
+            "https://mcp.example.com/path#fragment-value",
+        ],
+    )
+    def test_set_rejects_query_and_fragment_without_leaking_values(self, isolated_config, url):
+        with pytest.raises(ValueError, match="query strings and fragments"):
+            config_mod.set_mcp_registry_url(url)
+
     def test_set_rejects_embedded_credentials(self, isolated_config):
-        with pytest.raises(ValueError, match="must not contain credentials"):
+        with pytest.raises(ValueError, match="embedded credentials are not supported"):
             config_mod.set_mcp_registry_url("https://user:token@corp.mcp.example.com")
 
     def test_unset_removes_key(self, isolated_config):
@@ -259,3 +282,16 @@ class TestMcpRegistryUrlConfig:
     def test_unset_is_noop_when_absent(self, isolated_config):
         config_mod.unset_mcp_registry_url()
         assert config_mod.get_mcp_registry_url() is None
+
+    def test_set_redacts_credentials_from_missing_scheme_error(self, isolated_config):
+        secret = "REGISTRY_SECRET_SENTINEL"
+        with pytest.raises(ValueError) as raised:
+            config_mod.set_mcp_registry_url(f"//user:{secret}@corp.mcp.example.com")
+        assert secret not in str(raised.value)
+        assert "<redacted-invalid-registry-url>" in str(raised.value)
+
+    def test_set_rejects_invalid_port_without_echoing_value(self, isolated_config):
+        secret = "config-port-secret"
+        with pytest.raises(ValueError) as raised:
+            config_mod.set_mcp_registry_url(f"https://corp.mcp.example.com:{secret}")
+        assert secret not in str(raised.value)

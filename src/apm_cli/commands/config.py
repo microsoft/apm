@@ -10,7 +10,9 @@ import click
 
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle
 from ..version import get_version
+from . import self_update as self_update_command
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
 
 # Restore builtin since a subcommand is named ``set``
@@ -342,6 +344,7 @@ def config(ctx):
 @config.command(help="Set a configuration value")
 @click.argument("key")
 @click.argument("value")
+@serialized_lifecycle
 def set(key, value):  # noqa: F811
     """Set a configuration value.
 
@@ -471,7 +474,13 @@ def set(key, value):  # noqa: F811
 
         try:
             install_dir = set_self_update_install_dir(value)
-            logger.success(f"Self-update install directory saved: {install_dir}")
+            if self_update_command._is_windows_platform():
+                logger.success(f"Self-update install directory saved: {install_dir}")
+            else:
+                logger.success(
+                    f"Self-update launcher directory preference saved: {install_dir} "
+                    "(must match the existing Unix installation)"
+                )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -492,7 +501,12 @@ def set(key, value):  # noqa: F811
 
         try:
             set_mcp_registry_url(value)
-            logger.success(f"MCP registry URL set to: {get_mcp_registry_url()}")
+            configured_url = get_mcp_registry_url()
+            logger.success(f"MCP registry URL set to: {configured_url}")
+            if configured_url and configured_url.startswith("http://"):
+                logger.info(
+                    "Set MCP_REGISTRY_ALLOW_HTTP=1 when using this trusted plaintext endpoint."
+                )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -629,7 +643,13 @@ def get(key):
 
             value = get_self_update_install_dir()
             if value is None:
-                click.echo("self-update.install-dir: Not set (using installer default)")
+                if self_update_command._is_windows_platform():
+                    click.echo("self-update.install-dir: Not set (using installer default)")
+                else:
+                    click.echo(
+                        "self-update.install-dir: Not set "
+                        "(preserving the detected Unix installation)"
+                    )
             else:
                 click.echo(f"self-update.install-dir: {value}")
             return
@@ -698,6 +718,7 @@ def list_config():
 
 @config.command(help="Unset a configuration value")
 @click.argument("key")
+@serialized_lifecycle
 def unset(key):
     """Unset (remove) a configuration value.
 
@@ -758,7 +779,13 @@ def unset(key):
         from ..config import unset_self_update_install_dir
 
         unset_self_update_install_dir()
-        logger.success("Self-update install directory removed (will use installer default)")
+        if self_update_command._is_windows_platform():
+            logger.success("Self-update install directory removed (will use installer default)")
+        else:
+            logger.success(
+                "Self-update launcher directory preference removed "
+                "(will preserve the detected Unix installation)"
+            )
         return
 
     if key == "mcp-registry-url":

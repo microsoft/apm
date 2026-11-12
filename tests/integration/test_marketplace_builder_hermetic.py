@@ -447,7 +447,9 @@ class TestResolveExplicitRef:
         resolver = MagicMock()
         resolver.list_remote_refs.return_value = [remote_ref]
 
-        result = builder._resolve_explicit_ref(entry, resolver, "owner/repo")
+        source_url = "https://git.example.invalid/owner/repo"
+        result = builder._resolve_explicit_ref(entry, resolver, "owner/repo", source_url=source_url)
+        resolver.list_remote_refs.assert_called_once_with("owner/repo", remote_url=source_url)
         assert result.ref == "v1.2.3"
         assert result.sha == "b" * 40
 
@@ -627,7 +629,11 @@ class TestResolveVersionRange:
         resolver = MagicMock()
         resolver.list_remote_refs.return_value = refs
 
-        result = builder._resolve_version_range(entry, resolver, "owner/repo", builder._yml)
+        source_url = "https://git.example.invalid/owner/repo"
+        result = builder._resolve_version_range(
+            entry, resolver, "owner/repo", builder._yml, source_url=source_url
+        )
+        resolver.list_remote_refs.assert_called_once_with("owner/repo", remote_url=source_url)
         assert result.ref == "v2.0.0"
         assert result.sha == "2" * 40
 

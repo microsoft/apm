@@ -13,21 +13,29 @@ import click
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from ..agent_plugins.validation import is_valid_plugin_name as _is_valid_agent_plugin_name
 from ..constants import (
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
+    SKILL_MD_FILENAME,
 )
 from ..core import project_name as _project_name
+from ..models.dependency.materialization import (
+    CachedMaterializationPathReader,
+    find_case_equivalent_materialization_path,
+)
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
 )
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
+from ..utils.git_env import get_git_executable
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
-from ..version import get_build_sha, get_version
+from ..version import get_version
+from ..version_output import print_version  # noqa: F401 -- compatibility re-export
 from .deps._utils import _scan_installed_packages
 
 # Thin compatibility aliases only; core/project_name.py remains the AC18 owner.
@@ -136,16 +144,39 @@ def _lazy_confirm():
 # ------------------------------------------------------------------
 
 
-def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path) -> set:
+def _build_expected_install_paths(
+    declared_deps, lockfile, apm_modules_dir: Path, *, preserve_installed_case: bool = False
+) -> set:
     """Build expected package paths under *apm_modules_dir*.
 
     Combines direct deps (from ``apm.yml``) with transitive deps
     (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
-    consistency with how packages are actually installed.
+    consistency with how packages are actually installed. Prune opts into
+    recognizing existing case-equivalent paths without renaming them.
     """
+    reader = CachedMaterializationPathReader()
+
+    def expected_path(dependency):
+        desired = dependency.get_install_path(apm_modules_dir)
+        if (
+            preserve_installed_case
+            and dependency.alias is None
+            and dependency.has_case_insensitive_repo_identity
+        ):
+            existing = find_case_equivalent_materialization_path(
+                desired,
+                apm_modules_dir,
+                dependency=dependency,
+                reader=reader,
+                match_complete_path=True,
+            )
+            if existing is not None:
+                return existing
+        return desired
+
     expected = set()
     for dep in declared_deps:
-        install_path = dep.get_install_path(apm_modules_dir)
+        install_path = expected_path(dep)
         try:
             relative_path = install_path.relative_to(apm_modules_dir)
             expected.add(relative_path.as_posix())
@@ -156,7 +187,7 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
         for dep in lockfile.get_package_dependencies():
             if dep.depth is not None and dep.depth > 1:
                 dep_ref = dep.to_dependency_ref()
-                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path = expected_path(dep_ref)
                 try:
                     relative_path = install_path.relative_to(apm_modules_dir)
                     expected.add(relative_path.as_posix())
@@ -189,7 +220,7 @@ def _expand_with_ancestors(
     unless that path is also directly declared in *paths*. Callers should
     pass only the subset of installed paths that look like *real
     standalone packages* (i.e., directories that ship their own
-    ``apm.yml``) -- not filesystem intermediaries (which typically have
+    ``apm.yml`` or ``SKILL.md``) -- not filesystem intermediaries (which typically have
     only a ``.apm/`` subtree from a cloned subdir dep). This preserves
     orphan detection for the case where a user has a genuinely orphaned
     ``owner/repo`` package on disk alongside a declared sibling
@@ -254,19 +285,17 @@ def _standalone_installed_packages(
     1. Path appears as a dependency key in *lockfile* -- the canonical
        record of what APM installed. The lockfile is integrity-checked
        and not forgeable by dropping/omitting files in ``apm_modules/``.
-    2. Fallback: path has its own ``apm.yml``. Used when the lockfile
+    2. Fallback: path has its own ``apm.yml`` or ``SKILL.md`` file. Used when the lockfile
        is absent (older installs / fresh checkouts) or does not list
        the key. A directory with only a ``.apm/`` marker is treated as
        a filesystem intermediary, not a standalone package.
 
-    Combining both signals closes the suppression-via-absence gap
-    (panel finding: forgeable ``apm.yml`` heuristic) while preserving
-    behaviour for projects that pre-date the lockfile or have not yet
-    re-installed.
+    Package markers preserve standalone orphan detection even when a
+    declaration points at a subdirectory of a removed package root.
 
     Failure mode: only narrowly-typed shape errors against
     ``lockfile.dependencies`` (``AttributeError`` / ``TypeError`` /
-    ``KeyError``) are absorbed and degrade to the ``apm.yml``-only
+    ``KeyError``) are absorbed and degrade to the package-marker
     fallback. Any other exception (e.g. lockfile parse / I/O failure)
     propagates so the outer caller can decide whether to log or fail
     closed -- preventing a corrupted or attacker-crafted lockfile from
@@ -285,7 +314,9 @@ def _standalone_installed_packages(
         if p in lockfile_keys:
             standalone.append(p)
             continue
-        if (apm_modules_dir / p / APM_YML_FILENAME).exists():
+        if (apm_modules_dir / p / APM_YML_FILENAME).exists() or (
+            apm_modules_dir / p / SKILL_MD_FILENAME
+        ).is_file():
             standalone.append(p)
     return standalone
 
@@ -320,21 +351,42 @@ def _check_orphaned_packages():
             return []
 
         installed = _scan_installed_packages(apm_modules_dir)
-        # Combined lockfile-membership + apm.yml fallback determines
-        # which installed paths are real standalone packages (and so
-        # must NOT be masked by ancestor expansion). The lockfile is
-        # the canonical, tamper-evident record; apm.yml-existence is
-        # the fallback for projects without a lockfile yet.
-        # See _expand_with_ancestors for the user-safety rationale.
-        standalone_installed = _standalone_installed_packages(
-            installed, apm_modules_dir, lockfile=lockfile
-        )
-        expected_with_ancestors = _expand_with_ancestors(expected, standalone_installed)
-        # Sort for deterministic, diffable output across runs (rglob
-        # traversal order is filesystem-dependent).
-        return sorted(p for p in installed if p not in expected_with_ancestors)
+        return _find_orphaned_packages(installed, expected)
     except Exception:
         return []
+
+
+def _find_orphaned_packages(installed: Iterable[str], expected: set[str]) -> list[str]:
+    """Select roots unrelated to the retained dependency graph.
+
+    Keep both bundled descendants and whole roots containing needed children.
+    Ancestor prefixes protect only those containing roots, not their siblings.
+    Unlike dependency-list classification, deletion must retain recognized
+    ancestors at every depth, including aliases and hidden subdirectories.
+    """
+    roots = set()
+    retained = set(expected)
+    for path in expected:
+        try:
+            validate_path_segments(path, context="orphan selection")
+        except PathTraversalError:
+            # Invalid tokens protect only an exact match, never a wider subtree.
+            continue
+        normalized = path.replace("\\", "/")
+        roots.add(normalized)
+        parts = normalized.split("/")
+        retained.update("/".join(parts[:depth]) for depth in range(1, len(parts) + 1))
+
+    orphaned = []
+    for path in installed:
+        normalized = path.replace("\\", "/")
+        if normalized in retained:
+            continue
+        parts = normalized.split("/")
+        if any("/".join(parts[:depth]) in roots for depth in range(1, len(parts))):
+            continue
+        orphaned.append(path)
+    return sorted(orphaned)
 
 
 # ------------------------------------------------------------------
@@ -403,50 +455,6 @@ def resolve_requested_packages(
             seen.add(canonical)
             resolved.append(canonical)
     return resolved
-
-
-def print_version(ctx, param, value):
-    """Print version and exit."""
-    if not value or ctx.resilient_parsing:
-        return
-
-    version_str = get_version()
-    sha = get_build_sha()
-    if sha:
-        version_str += f" ({sha})"
-
-    console = _get_console()
-    if console:
-        try:
-            console.print(
-                f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
-            )
-        except Exception:
-            click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
-    else:
-        # Graceful fallback when Rich isn't available (e.g., stripped automation environment)
-        click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
-
-    # Gated verbose-version output (experimental flag)
-    try:
-        from ..core.experimental import is_enabled
-
-        if is_enabled("verbose_version"):
-            import platform
-            import sys
-
-            python_ver = platform.python_version()
-            plat = f"{sys.platform}-{platform.machine()}"
-            install_path = str(Path(__file__).resolve().parent.parent)
-
-            _rich_echo(f"  {'Python:':<14}{python_ver}", color="dim")
-            _rich_echo(f"  {'Platform:':<14}{plat}", color="dim")
-            _rich_echo(f"  {'Install path:':<14}{install_path}", color="dim")
-    except Exception:
-        # Never let experimental flag logic break --version
-        pass
-
-    ctx.exit()
 
 
 def _check_and_notify_updates():
@@ -567,7 +575,7 @@ def _auto_detect_author():
 
     try:
         result = subprocess.run(
-            ["git", "config", "user.name"],
+            [get_git_executable(), "config", "user.name"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -587,7 +595,7 @@ def _auto_detect_description(project_name):
     try:
         # Try to get git repository description
         result = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
+            [get_git_executable(), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -613,33 +621,52 @@ def _get_default_config(project_name):
 
 
 def _validate_plugin_name(name):
-    """Validate plugin name is kebab-case (lowercase, numbers, hyphens).
-
-    Returns True if valid, False otherwise.
-    """
-    import re
-
-    return bool(re.match(r"^[a-z][a-z0-9-]{0,63}$", name))
+    """Validate a plugin name through the Agent Plugins contract owner."""
+    return _is_valid_agent_plugin_name(name)
 
 
-def _create_plugin_json(config):
+def _create_plugin_json(config, mode: str = "agent", target_path: Path | None = None):
     """Create plugin.json file with package metadata.
 
     Args:
         config: dict with name, version, description, author keys.
+        mode: "agent" to emit Agent Plugins v1 scaffold, or "claude" to
+              preserve the legacy Claude-compatible scaffold.
+        target_path: Optional output path. Defaults to ``plugin.json``.
     """
     import json
 
-    plugin_data = {
-        "name": config["name"],
-        "version": config.get("version", "0.1.0"),
-        "description": config.get("description", ""),
-        "author": {"name": config.get("author", "")},
-        "license": "MIT",
-    }
+    if mode == "claude":
+        # Preserve legacy Claude scaffold byte-for-byte
+        plugin_data = {
+            "name": config["name"],
+            "version": config.get("version", "0.1.0"),
+            "description": config.get("description", ""),
+            "author": {"name": config.get("author", "")},
+            "license": "MIT",
+        }
+    else:
+        # Agent Plugins v1 canonical scaffold
+        from ..agent_plugins.constants import (
+            COM_MICROSOFT_APM_NAMESPACE,
+            COM_MICROSOFT_APM_SCHEMA_VERSION,
+            PLUGIN_SCHEMA_ID,
+        )
 
-    with open("plugin.json", "w", encoding="utf-8") as f:
-        f.write(json.dumps(plugin_data, indent=2) + "\n")
+        plugin_data = {
+            "$schema": PLUGIN_SCHEMA_ID,
+            "name": config["name"],
+            "version": config.get("version", "0.1.0"),
+            "description": config.get("description", ""),
+            "author": {"name": config.get("author", "")},
+            "license": "MIT",
+            "extensions": {
+                COM_MICROSOFT_APM_NAMESPACE: {"schemaVersion": COM_MICROSOFT_APM_SCHEMA_VERSION}
+            },
+        }
+
+    output_path = target_path or Path("plugin.json")
+    output_path.write_text(json.dumps(plugin_data, indent=2) + "\n", encoding="utf-8")
 
 
 def _create_minimal_apm_yml(config, plugin=False, target_path=None):

@@ -3,7 +3,7 @@
 Both pack formats copy dependency files that ``apm install`` recorded in
 ``apm.lock.yaml`` under ``deployed_files`` + ``deployed_file_hashes``:
 
-* ``--format plugin`` (:mod:`apm_cli.bundle.plugin_exporter`)
+* ``--format claude-plugin`` (:mod:`apm_cli.bundle.plugin_exporter`)
 * ``--format apm``    (:mod:`apm_cli.bundle.packer`)
 
 Before a byte enters a bundle its on-disk copy is verified against the

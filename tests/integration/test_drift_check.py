@@ -469,6 +469,71 @@ class TestSectionBRegressions:
         assert audit_result.exit_code == 0, audit_result.output
         assert _drift_paths(audit_result.stdout) == []
 
+    def test_b7_shared_hook_config_projects_apm_entries_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """User hooks survive CI audit while tampered APM hooks still fail it."""
+        project = _make_apm_project(tmp_path, target="claude")
+        source_hook = project / ".apm" / "hooks" / "pre.json"
+        source_hook.parent.mkdir(parents=True)
+        source_hook.write_bytes(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "echo apm-managed"}],
+                            }
+                        ]
+                    }
+                }
+            ).encode("utf-8")
+        )
+        _install(project, monkeypatch)
+
+        settings_path = project / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        entries = settings["hooks"]["PreToolUse"]
+        user_hook = {
+            "matcher": "Write",
+            "hooks": [{"type": "command", "command": "echo user-owned"}],
+        }
+        entries.append(user_hook)
+        settings["hooks"]["PostToolUse"] = [user_hook]
+        settings_path.write_bytes(json.dumps(settings).encode("utf-8"))
+
+        clean_audit = _audit(project, monkeypatch, "--ci", "-f", "json")
+        assert clean_audit.exit_code == 0, clean_audit.output
+        assert _drift_paths(clean_audit.stdout) == []
+        assert (
+            user_hook
+            in json.loads(settings_path.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+        )
+
+        managed_hook = next(
+            entry for entry in entries if entry["hooks"][0]["command"] == "echo apm-managed"
+        )
+        managed_hook["hooks"][0]["command"] = "echo tampered"
+        settings_path.write_bytes(json.dumps(settings).encode("utf-8"))
+
+        tampered_audit = _audit(project, monkeypatch, "--ci", "-f", "json")
+        assert tampered_audit.exit_code == 1
+        assert dict(_drift_kinds(tampered_audit.stdout))[".claude/settings.json"] == "modified"
+        assert (
+            user_hook
+            in json.loads(settings_path.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+        )
+
+        settings["hooks"]["PreToolUse"] = None
+        malformed_bytes = json.dumps(settings).encode("utf-8")
+        settings_path.write_bytes(malformed_bytes)
+
+        malformed_audit = _audit(project, monkeypatch, "--ci", "-f", "json")
+        assert malformed_audit.exit_code == 1
+        assert dict(_drift_kinds(malformed_audit.stdout))[".claude/settings.json"] == "modified"
+        assert settings_path.read_bytes() == malformed_bytes
+
 
 # ---------------------------------------------------------------------------
 # Section C -- edge cases

@@ -1,0 +1,96 @@
+{
+  "spec_anchor": "req-sc-015",
+  "input": {
+    "skill_subset": [
+      "selected"
+    ],
+    "package_files": [
+      {
+        "path": "skills/selected/SKILL.md",
+        "content": "selected materialized skill\n"
+      },
+      {
+        "path": "skills/selected/assets/guide.txt",
+        "content": "selected materialized asset\n"
+      },
+      {
+        "path": "source-only.txt",
+        "content": "source-only content\n"
+      }
+    ],
+    "external_files": [
+      {
+        "path": "external/skills/escaped/SKILL.md",
+        "content": "outside skills root\n"
+      },
+      {
+        "path": "external/apm-skills/escaped/SKILL.md",
+        "content": "outside apm skills root\n"
+      }
+    ],
+    "symlinks": [
+      {
+        "path": "skills/selected/assets/guide-link.txt",
+        "target": "skills/selected/assets/guide.txt",
+        "kind": "file",
+        "internal": true
+      },
+      {
+        "path": "skills/external",
+        "target": "external/skills",
+        "kind": "directory",
+        "internal": false
+      },
+      {
+        "path": ".apm/skills",
+        "target": "external/apm-skills",
+        "kind": "directory",
+        "internal": false
+      }
+    ]
+  },
+  "expected": {
+    "authorized_paths": [
+      "skills/selected/SKILL.md",
+      "skills/selected/assets/guide.txt"
+    ],
+    "source_only_paths": [
+      "source-only.txt"
+    ],
+    "symlink_paths": [
+      "skills/selected/assets/guide-link.txt",
+      "skills/external/escaped/SKILL.md",
+      ".apm/skills/escaped/SKILL.md"
+    ],
+    "lifecycles": {
+      "install": {
+        "authorized_paths": [
+          "skills/selected/SKILL.md",
+          "skills/selected/assets/guide.txt"
+        ],
+        "scanned_paths": [
+          "skills/selected/SKILL.md",
+          "skills/selected/assets/guide.txt"
+        ],
+        "materialized_paths": [
+          "skills/selected/SKILL.md",
+          "skills/selected/assets/guide.txt"
+        ]
+      },
+      "reintegration": {
+        "authorized_paths": [
+          "skills/selected/SKILL.md",
+          "skills/selected/assets/guide.txt"
+        ],
+        "scanned_paths": [
+          "skills/selected/SKILL.md",
+          "skills/selected/assets/guide.txt"
+        ],
+        "materialized_paths": [
+          "skills/selected/SKILL.md",
+          "skills/selected/assets/guide.txt"
+        ]
+      }
+    }
+  }
+}

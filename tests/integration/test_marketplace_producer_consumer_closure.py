@@ -102,14 +102,14 @@ _UNSAFE_MUTATIONS = (
         package_name=_CROSS_PACKAGE,
         field="url",
         value="../local-package",
-        expected_error="local path",
+        expected_error="non-local url",
     ),
     _UnsafeMutation(
         id="git-subdir-local-path",
         package_name=_GITLAB_PACKAGE,
         field="url",
         value="~/local-monorepo",
-        expected_error="local path",
+        expected_error="non-local",
     ),
     _UnsafeMutation(
         id="git-subdir-traversal",
@@ -520,6 +520,17 @@ def test_tampered_pack_output_fails_closed_before_project_writes(
             env=fixture.environment,
         )
         assert add.returncode == 0, _command_evidence(add)
+        validate = fixture.runner.run(
+            ("marketplace", "validate", _MARKETPLACE_NAME),
+            scenario_id=f"marketplace-negative-validate-{mutation.id}",
+            cwd=consumer.root,
+            env=fixture.environment,
+        )
+        validate_output = " ".join((validate.stdout + validate.stderr).lower().split())
+        if validate.returncode == 0:
+            assert mutation.id == "git-subdir-traversal", _command_evidence(validate)
+        else:
+            assert mutation.expected_error in validate_output
         before_install = ArtifactSnapshot.capture(consumer.root)
 
         install = fixture.runner.run(
@@ -536,5 +547,9 @@ def test_tampered_pack_output_fails_closed_before_project_writes(
         )
 
         assert install.returncode != 0, _command_evidence(install)
-        assert mutation.expected_error in (install.stdout + install.stderr).lower()
+        install_output = " ".join((install.stdout + install.stderr).lower().split())
+        expected_install_error = (
+            mutation.expected_error if validate.returncode == 0 else "not found"
+        )
+        assert expected_install_error in install_output
         assert_unchanged(before_install, ArtifactSnapshot.capture(consumer.root))

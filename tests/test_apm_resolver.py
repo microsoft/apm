@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from apm_cli.marketplace.errors import BuildError, PluginNotFoundError
+from apm_cli.marketplace.models import parse_marketplace_json
 from apm_cli.marketplace.resolver import MarketplacePluginResolution
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver
 from src.apm_cli.deps.dependency_graph import (
@@ -611,12 +612,18 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
             )
 
     def test_remote_parent_same_repo_sibling_path_expands_to_remote_virtual_dep(self):
+        for alias in (None, ".safe", "safe.", "foo..bar", "my-skill.v2"):
+            with self.subTest(alias=alias):
+                self._assert_same_repo_remote_sibling(alias)
+
+    def _assert_same_repo_remote_sibling(self, alias):
         with TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir) / "consumer"
             modules_dir = project_root / "apm_modules"
             project_root.mkdir()
+            alias_line = f"      alias: {alias}\n" if alias else ""
             (project_root / "apm.yml").write_text(
-                """
+                f"""
 name: consumer
 version: 1.0.0
 dependencies:
@@ -624,7 +631,7 @@ dependencies:
     - git: microsoft/mono
       path: packages/frontend
       ref: feature
-""".lstrip()
+{alias_line}""".lstrip()
             )
             callback_refs = []
 
@@ -668,6 +675,8 @@ version: 1.0.0
             self.assertFalse(Path(shared.dependency_ref.virtual_path).is_absolute())
             self.assertFalse(PureWindowsPath(shared.dependency_ref.virtual_path).is_absolute())
             self.assertEqual(shared.dependency_ref.reference, "feature")
+            self.assertEqual(shared.dependency_ref.host, callback_refs[0].host)
+            self.assertEqual(shared.dependency_ref.port, callback_refs[0].port)
             self.assertFalse(shared.dependency_ref.is_local)
             self.assertEqual(resolver._rejected_remote_local_keys, set())
             self.assertTrue(
@@ -678,34 +687,42 @@ version: 1.0.0
             )
 
     def test_remote_parent_path_escape_outside_repo_root_is_rejected(self):
-        self._assert_remote_local_path_rejected(
-            parent_path="packages/frontend",
-            child_path="../../../outside",
-            rejected_key="../../../outside",
-        )
+        for alias in (None, ".safe"):
+            with self.subTest(alias=alias):
+                self._assert_remote_local_path_rejected(
+                    parent_path="packages/frontend",
+                    child_path="../../../outside",
+                    rejected_key="../../../outside",
+                    alias=alias,
+                )
 
     def test_remote_parent_path_to_different_repo_clone_is_rejected(self):
-        self._assert_remote_local_path_rejected(
-            parent_path=None,
-            child_path="../repo-b/shared",
-            rejected_key="../repo-b/shared",
-        )
+        for alias in (None, ".safe"):
+            with self.subTest(alias=alias):
+                self._assert_remote_local_path_rejected(
+                    parent_path=None,
+                    child_path="../repo-b/shared",
+                    rejected_key="../repo-b/shared",
+                    alias=alias,
+                )
 
     def _assert_remote_local_path_rejected(
-        self, *, parent_path: str | None, child_path: str, rejected_key: str
+        self, *, parent_path: str | None, child_path: str, rejected_key: str, alias=None
     ):
         with TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir) / "consumer"
             modules_dir = project_root / "apm_modules"
             project_root.mkdir()
             if parent_path is None:
-                dep_block = "    - microsoft/repo-a\n"
+                dep_block = "    - git: microsoft/repo-a\n"
                 parent_virtual_path = None
             else:
                 dep_block = (
                     f"    - git: microsoft/repo-a\n      path: {parent_path}\n      ref: main\n"
                 )
                 parent_virtual_path = parent_path
+            if alias:
+                dep_block += f"      alias: {alias}\n"
             (project_root / "apm.yml").write_text(
                 f"""
 name: consumer
@@ -870,6 +887,112 @@ class TestMarketplaceResolution(unittest.TestCase):
             result = resolver.resolve_dependencies(project_root)
             assert result.flattened_dependencies.total_dependencies() == 1
             assert "acme/gopls-lsp" in result.flattened_dependencies.dependencies
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_metadata_only_marketplace_dep_uses_catalog_components(self, mock_resolve):
+        entry = {
+            "name": "gopls-lsp",
+            "source": "./plugins/gopls-lsp",
+            "lspServers": {
+                "gopls": {
+                    "command": "gopls",
+                    "extensionToLanguage": {".go": "go"},
+                }
+            },
+            "dependencies": ["untrusted/injected-dependency"],
+        }
+        plugin = parse_marketplace_json(
+            {
+                "name": "claude-plugins-official",
+                "plugins": [entry],
+            },
+            source_name="claude-plugins-official",
+        ).plugins[0]
+        entry["lspServers"]["gopls"]["command"] = "mutated"
+        assert plugin.manifest["lspServers"]["gopls"]["command"] == "gopls"
+        assert "dependencies" not in plugin.manifest
+        hash(plugin)
+        mock_resolve.return_value = MarketplacePluginResolution(
+            canonical="acme/gopls-lsp#main",
+            plugin=plugin,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            modules = root / "apm_modules"
+            (root / "apm.yml").write_text(
+                "name: consumer\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: gopls-lsp\n      marketplace: claude-plugins-official\n"
+            )
+
+            def download(dep_ref, _modules_dir, _parent_chain=""):
+                path = dep_ref.get_install_path(modules)
+                path.mkdir(parents=True)
+                (path / "README.md").write_text("metadata-only plugin")
+                return path
+
+            result = APMDependencyResolver(
+                apm_modules_dir=modules,
+                download_callback=download,
+                max_parallel=1,
+            ).resolve_dependencies(root)
+
+            packages = [node.package for node in result.dependency_tree.nodes.values()]
+            lsp = [dep for package in packages if package for dep in package.get_lsp_dependencies()]
+            assert [dep.name for dep in lsp] == ["gopls"]
+            assert (modules / "acme" / "gopls-lsp" / "apm.yml").is_file()
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_invalid_catalog_metadata_is_a_resolution_error(self, mock_resolve):
+        plugin = parse_marketplace_json(
+            {
+                "name": "catalog",
+                "plugins": [
+                    {
+                        "name": "mixed",
+                        "source": "./plugins/mixed",
+                        "mcpServers": {
+                            "valid": {"command": "echo"},
+                            "invalid": {"args": ["missing-command"]},
+                        },
+                    }
+                ],
+            },
+            source_name="catalog",
+        ).plugins[0]
+        mock_resolve.return_value = MarketplacePluginResolution(
+            canonical="acme/mixed#main",
+            plugin=plugin,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            modules = root / "apm_modules"
+            (root / "apm.yml").write_text(
+                "name: consumer\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: mixed\n      marketplace: catalog\n"
+            )
+
+            def download(dep_ref, _modules_dir, _parent_chain=""):
+                path = dep_ref.get_install_path(modules)
+                path.mkdir(parents=True)
+                return path
+
+            result = APMDependencyResolver(
+                apm_modules_dir=modules,
+                download_callback=download,
+                max_parallel=1,
+            ).resolve_dependencies(root)
+
+            assert result.has_errors()
+            assert result.resolution_errors == [
+                "Marketplace package materialization failed: invalid marketplace metadata for "
+                "'mixed@catalog': catalog MCP metadata did not materialize "
+                "every declared server: invalid"
+            ]
+            assert not (modules / "acme" / "mixed").exists()
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
     def test_marketplace_dep_failure_surfaces_error(self, mock_resolve):

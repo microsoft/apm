@@ -56,6 +56,10 @@ apm lifecycle init --force    # overwrite an existing lifecycle: block
 |---|---|
 | `--force` | Overwrite an existing `lifecycle:` block. |
 
+`lifecycle init` and other state-mutating APM commands share one per-user
+cross-process lock. A concurrent command waits up to 120 seconds, then reports
+which lock is busy and asks you to retry after the active operation finishes.
+
 ### `apm lifecycle validate`
 
 Validate all discovered script files (project/user `apm.yml`, admin `*.json`) for schema errors.

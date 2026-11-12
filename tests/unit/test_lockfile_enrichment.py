@@ -41,12 +41,20 @@ class TestLockfileEnrichment:
         assert parsed["dependencies"][0]["repo_url"] == "owner/repo"
         assert parsed["dependencies"][0]["resolved_commit"] == "abc123"
 
-    def test_preserves_lockfile_version(self):
+    @pytest.mark.parametrize(
+        ("fmt", "expected_format"),
+        [
+            ("plugin", "claude-plugin"),
+            ("agent-plugin", "agent-plugin"),
+        ],
+    )
+    def test_preserves_lockfile_version_and_normalizes_format(self, fmt, expected_format):
         lf = _make_lockfile()
-        result = enrich_lockfile_for_pack(lf, fmt="plugin", target="claude")
+        result = enrich_lockfile_for_pack(lf, fmt=fmt, target="claude")
         parsed = yaml.safe_load(result)
 
         assert parsed["lockfile_version"] == "1"
+        assert parsed["pack"]["format"] == expected_format
 
     def test_does_not_mutate_original(self):
         lf = _make_lockfile()
@@ -266,6 +274,18 @@ class TestFilterFilesByTarget:
         filtered, mappings = _filter_files_by_target(files, "grok-cloud")
         assert ".grok/skills/x/SKILL.md" in filtered
         assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
+
+    def test_cross_map_github_to_grok_bot(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md", ".github/agents/a.md"]
+        filtered, mappings = _filter_files_by_target(files, "grok-bot")
+        # grok-bot is skills-only: skills remap to agent-data/workflows/,
+        # agents have no cross-map entry and are dropped (not direct, not mapped).
+        assert filtered == ["agent-data/workflows/x/SKILL.md"]
+        assert mappings == {
+            "agent-data/workflows/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
 
     def test_cross_map_github_to_grok_build(self):
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target

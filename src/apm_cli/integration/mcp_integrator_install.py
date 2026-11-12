@@ -7,7 +7,8 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
-from enum import StrEnum
+import logging
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,11 @@ from apm_cli.core.apm_yml import (
 )
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.target_catalog import accepted_target_values
-from apm_cli.install.errors import InstallFailureAlreadyRendered, RequiredIntegrationError
+from apm_cli.install.errors import (
+    InstallFailureAlreadyRendered,
+    MCPNativeConflictError,
+    RequiredIntegrationError,
+)
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.yaml_io import load_yaml
@@ -30,13 +35,104 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import EffectiveTargetDecision
 
+_log = logging.getLogger(__name__)
+
 # IntelliJ owns a fail-closed atomic user-config contract. Other adapters retain
 # their existing best-effort behavior when a composed target set includes an
 # unavailable optional runtime.
 _STRICT_CONFIG_FAILURE_RUNTIMES = frozenset({"intellij"})
 
 
-class _TargetSelectionSource(StrEnum):
+class _PrevalidatedRegistryServers(dict[str, dict]):
+    """Registry metadata plus trusted provenance from direct prevalidation."""
+
+    def __init__(
+        self, servers: dict[str, dict], *, source: str | None, registry_url: str | None
+    ) -> None:
+        from apm_cli.registry.client import normalize_mcp_registry_url
+
+        super().__init__(servers)
+        self.source = source
+        self.registry_url = (
+            normalize_mcp_registry_url(registry_url) if registry_url is not None else None
+        )
+
+
+def _validate_registry_servers(
+    operations: Any,
+    server_names: list[str],
+    *,
+    dependency_count: int,
+    verbose: bool,
+    logger: Any,
+    fail_closed: bool = False,
+    server_info_cache: dict[str, dict] | None = None,
+) -> list[str]:
+    """Validate registry identities and raise before any target write."""
+    logger.mcp_lookup_heartbeat(len(server_names))
+    if verbose:
+        logger.verbose_detail(f"Validating {dependency_count} registry servers...")
+    if fail_closed:
+        valid_servers, invalid_servers = operations.validate_servers_exist(
+            server_names,
+            fail_closed=True,
+            server_info_cache=server_info_cache,
+        )
+    else:
+        valid_servers, invalid_servers = operations.validate_servers_exist(
+            server_names,
+            server_info_cache=server_info_cache,
+        )
+    if invalid_servers:
+        from apm_cli.registry.client import redact_mcp_registry_url
+
+        registry_client = operations.registry_client
+        registry_url = redact_mcp_registry_url(registry_client.registry_url)
+        logger.error(
+            f"Server(s) not found in registry {registry_url}: {', '.join(invalid_servers)}"
+        )
+        if getattr(registry_client, "registry_url_source", None) == "explicit":
+            logger.progress(
+                "Set MCP_REGISTRY_URL to this endpoint, then run "
+                "'apm mcp search <query>' to find available servers"
+            )
+        else:
+            logger.progress("Run 'apm mcp search <query>' to find available servers")
+        raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
+    return valid_servers
+
+
+def prevalidate_registry_dependencies(
+    mcp_deps: list,
+    *,
+    registry_url: str | None,
+    verbose: bool,
+    logger: Any,
+    registry_source: str | None = None,
+) -> dict[str, dict]:
+    """Resolve direct-install registry identities before persistent writes."""
+    from apm_cli.registry.operations import MCPServerOperations
+
+    server_names = [dep.name if hasattr(dep, "name") else dep for dep in mcp_deps]
+    operations = MCPServerOperations(registry_url=registry_url, registry_source=registry_source)
+    server_info_cache: dict[str, dict] = {}
+    valid_servers = _validate_registry_servers(
+        operations,
+        server_names,
+        dependency_count=len(mcp_deps),
+        verbose=verbose,
+        logger=logger,
+        fail_closed=True,
+        server_info_cache=server_info_cache,
+    )
+    return _PrevalidatedRegistryServers(
+        {name: server_info_cache[name] for name in valid_servers},
+        source=registry_source,
+        registry_url=registry_url,
+    )
+
+
+class _TargetSelectionSource(str, Enum):
     """Source that supplied the MCP target set before compatibility gates."""
 
     RUNTIME = "runtime"
@@ -46,8 +142,31 @@ class _TargetSelectionSource(StrEnum):
     FALLBACK = "fallback"
     INVALID_MANIFEST = "invalid-manifest"
 
+    __str__ = str.__str__
+    __format__ = str.__format__
 
-def _install_registry_group(
+
+def _announce_registry_endpoint(registry_client: Any, logger: Any) -> None:
+    """Name the registry endpoint a dependency group resolves against.
+
+    Defaults are quiet, overrides are visible: a redirect away from the public
+    registry -- an apm.yml ``registry:`` URL, ``MCP_REGISTRY_URL``, or a
+    persisted ``apm config set mcp-registry-url`` -- changes which bytes an
+    install trusts, so it is stated rather than inferred. Mirrors the
+    diagnostic ``apm install --mcp NAME`` already emits (#2740).
+    """
+    from apm_cli.registry.client import REGISTRY_SOURCE_LABELS, redact_mcp_registry_url
+
+    source = registry_client.registry_url_source
+    if source == "default":
+        return
+    # The only non-ambient source on this path is a per-dependency registry: URL.
+    label = REGISTRY_SOURCE_LABELS.get(source, "from --registry or the apm.yml registry field")
+    safe_url = redact_mcp_registry_url(registry_client.registry_url)
+    logger.progress(f"Using MCP registry: {safe_url} ({label})", symbol="info")
+
+
+def _install_registry_group(  # noqa: PLR0913
     operations: Any,
     group_dep_names: list,
     group_dep_map: dict,
@@ -62,7 +181,10 @@ def _install_registry_group(
     console: Any,
     logger: Any,
     managed_target_servers: dict[str, set[str]] | None,
+    prevalidated_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
+    native_hashes: dict[str, dict[str, str]] | None = None,
+    written_connections: set[tuple[str, str]] | None = None,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
 
@@ -72,23 +194,38 @@ def _install_registry_group(
     number of servers newly configured or updated in this group.
     """
     # Lazy import: only available after MCPIntegrator finishes loading.
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import (
+        NativeMcpConnectionState,
+        compare_native_mcp_connection,
+    )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     configured_count = 0
     failed_installations: list[str] = []
+    native_conflicts: list[str] = []
+    if written_connections is None:
+        written_connections = set()
+    protected_clients = {
+        rt: ClientFactory.create_client(rt, project_root=project_root, user_scope=user_scope)
+        for rt in target_runtimes
+        if rt in {"claude", "codex"}
+    }
+    registry_server_cache: dict[str, dict] = prevalidated_servers or {}
 
-    # Early validation: check all servers exist in registry (fail-fast).
-    # F4 (#1116): emit a single batch heartbeat so users see the
-    # registry round-trip in progress instead of silent stall.
-    logger.mcp_lookup_heartbeat(len(group_dep_names))
-    if verbose:
-        logger.verbose_detail(f"Validating {len(group_deps)} registry servers...")
-    valid_servers, invalid_servers = operations.validate_servers_exist(group_dep_names)
+    _announce_registry_endpoint(operations.registry_client, logger)
 
-    if invalid_servers:
-        logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
-        logger.progress("Run 'apm mcp search <query>' to find available servers")
-        raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
+    if prevalidated_servers is not None and set(group_dep_names) <= prevalidated_servers.keys():
+        valid_servers = group_dep_names
+    else:
+        valid_servers = _validate_registry_servers(
+            operations,
+            group_dep_names,
+            dependency_count=len(group_deps),
+            verbose=verbose,
+            logger=logger,
+            server_info_cache=registry_server_cache,
+        )
 
     if valid_servers:
         servers_to_install = operations.check_servers_needing_installation(
@@ -116,6 +253,10 @@ def _install_registry_group(
         already_configured_servers = [
             dep for dep in already_configured_candidates if dep not in servers_to_update
         ]
+        if protected_clients:
+            # Names/registry IDs cannot prove that a native connection is unchanged.
+            servers_to_install = list(valid_servers)
+            already_configured_servers = []
 
         if not servers_to_install:
             if console:
@@ -143,7 +284,16 @@ def _install_registry_group(
             # Batch fetch server info once
             if verbose:
                 logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
-            server_info_cache = operations.batch_fetch_server_info(servers_to_install)
+            server_info_cache = {
+                name: registry_server_cache[name]
+                for name in servers_to_install
+                if name in registry_server_cache
+            }
+            unresolved_servers = [
+                name for name in servers_to_install if name not in server_info_cache
+            ]
+            if unresolved_servers:
+                server_info_cache.update(operations.batch_fetch_server_info(unresolved_servers))
 
             # Apply overlays
             for server_name in servers_to_install:
@@ -181,6 +331,57 @@ def _install_registry_group(
                 successful_runtimes: list[str] = []
                 failed_runtimes: list[str] = []
                 for rt in target_runtimes:
+                    installed_servers: set[str] = set()
+                    written_hashes: dict[str, str] = {}
+                    managed_fields: set[str] = set()
+                    replace_existing = is_update and (
+                        managed_target_servers is None
+                        or dep in managed_target_servers.get(rt, set())
+                    )
+                    if rt in protected_clients:
+                        client = protected_clients[rt]
+                        state = compare_native_mcp_connection(
+                            client,
+                            dep,
+                            requested_info=server_info_cache.get(dep),
+                            stored_config=stored_mcp_configs.get(dep),
+                            managed=managed_target_servers is not None
+                            and dep in managed_target_servers.get(rt, set()),
+                            managed_fields=managed_fields,
+                            native_hash=(native_hashes or {}).get(rt, {}).get(dep),
+                            registry_request=True,
+                            env_overrides=shared_env_vars,
+                            runtime_vars=shared_runtime_vars,
+                        )
+                        if state in {
+                            NativeMcpConnectionState.MATCHING_FOREIGN,
+                            NativeMcpConnectionState.CONFLICT,
+                        }:
+                            if managed_target_servers is not None:
+                                managed_target_servers.get(rt, set()).discard(dep)
+                            if native_hashes is not None:
+                                native_hashes.get(rt, {}).pop(dep, None)
+                        if state is NativeMcpConnectionState.CONFLICT:
+                            _report_native_conflict(
+                                dep,
+                                rt,
+                                client,
+                                logger,
+                                native_conflicts,
+                                render=lambda client=client, dep=dep: client.render_server_config(
+                                    server_info_cache[dep],
+                                    env_overrides=shared_env_vars,
+                                    runtime_vars=shared_runtime_vars,
+                                ),
+                            )
+                            continue
+                        if state in {
+                            NativeMcpConnectionState.MATCHING_MANAGED,
+                            NativeMcpConnectionState.MATCHING_FOREIGN,
+                        }:
+                            logger.verbose_detail(f"{dep} already matches {rt}; no write")
+                            continue
+                        replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
                     if verbose:
                         logger.verbose_detail(f"Configuring {rt}...")
                     if MCPIntegrator._install_for_runtime(
@@ -192,10 +393,21 @@ def _install_registry_group(
                         project_root=project_root,
                         user_scope=user_scope,
                         logger=logger,
-                        replace_existing=is_update,
+                        replace_existing=replace_existing,
+                        installed_servers=installed_servers,
+                        written_native_hashes=written_hashes,
+                        managed_fields=managed_fields,
                     ):
                         successful_runtimes.append(rt)
-                        _record_managed_server(managed_target_servers, rt, dep)
+                        if dep in installed_servers:
+                            _record_managed_server(
+                                managed_target_servers,
+                                rt,
+                                dep,
+                                native_hashes=native_hashes,
+                                written_hashes=written_hashes,
+                                written_connections=written_connections,
+                            )
                     else:
                         failed_runtimes.append(rt)
 
@@ -226,18 +438,196 @@ def _install_registry_group(
                     else:
                         logger.error(f"{dep} -- failed for {', '.join(sorted(failed_runtimes))}")
 
+    if native_conflicts:
+        message = "MCP installation incomplete: " + ", ".join(native_conflicts)
+        logger.error(message)
+        raise MCPNativeConflictError(message, wrote_connections=bool(written_connections))
     _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
+
+
+def _ascii_names(names: list[str]) -> str:
+    """Join manifest-authored names for console output, escaping non-ASCII."""
+    return ", ".join(ascii(name)[1:-1] for name in names)
+
+
+def _codex_expanded_env_names(client: Any, name: str, requested_info: dict) -> list[str]:
+    """Env names a Codex project entry stores as values but the declaration now forwards."""
+    if getattr(client, "target_name", "") != "codex" or client.user_scope:
+        return []
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+
+    native = MCPConflictDetector(client).get_existing_server_configs()
+    return client.expanded_env_names(
+        native.get(client._determine_config_key(name, None)),
+        client.render_server_config(requested_info),
+    )
+
+
+def _report_native_conflict(
+    name: str,
+    runtime: str,
+    client: Any,
+    logger: Any,
+    conflicts: list[str],
+    expanded_env: list[str] | None = None,
+    render: Any = None,
+) -> None:
+    """Report a preserved native collision identically for both dependency sources.
+
+    *render* returns the requested native entry, letting the adapter add
+    target-specific guidance (names only) about the preserved connection.
+    """
+    conflicts.append(f"{name} ({runtime})")
+    guidance = None
+    if render is not None:
+        try:
+            guidance = client.native_conflict_guidance(name, render())
+        except (TypeError, ValueError):
+            _log.debug("No conflict guidance for %s on %s", name, runtime, exc_info=True)
+    if guidance:
+        logger.error(
+            f"MCP server '{name}' conflicts with the existing {runtime} "
+            f"connection in {client.get_config_path()}. Preserved that connection. "
+            f"{guidance}\n    --force does not take ownership of user connections."
+        )
+        return
+    logger.error(
+        f"MCP server '{name}' conflicts with the existing {runtime} "
+        f"connection in {client.get_config_path()}. Preserved that connection. "
+        "Rename or remove the conflicting native connection yourself, then "
+        "retry the same install command. --force does not take ownership "
+        "of user connections."
+        + (
+            f" The connection stores values for {_ascii_names(expanded_env)} that the "
+            "declaration now forwards through env_vars. Reconcile them by hand, then "
+            "retry. If that file was ever shared or committed, rotate the credential "
+            "because Git history still holds it."
+            if expanded_env
+            else ""
+        )
+    )
+
+
+def _validate_target_configs(
+    target_runtimes: list[str],
+    *,
+    project_root: Path | None,
+    user_scope: bool,
+    console: Any,
+    logger: Any,
+) -> None:
+    """Validate native configs before no-op detection or retarget side effects."""
+    if not user_scope:
+        return
+    from apm_cli.factory import ClientFactory
+
+    unsafe_runtimes = [
+        rt
+        for rt in target_runtimes
+        if not ClientFactory.create_client(
+            rt, project_root=project_root, user_scope=user_scope
+        ).validate_config_for_install()
+    ]
+    _raise_strict_config_failures(unsafe_runtimes, console=console, logger=logger)
 
 
 def _record_managed_server(
     managed_target_servers: dict[str, set[str]] | None,
     runtime: str,
     server_name: str,
+    *,
+    native_hashes: dict[str, dict[str, str]] | None = None,
+    written_hashes: dict[str, str] | None = None,
+    written_connections: set[tuple[str, str]] | None = None,
 ) -> None:
     """Record a server only after APM successfully writes its target config."""
     if managed_target_servers is not None:
         managed_target_servers.setdefault(runtime, set()).add(server_name)
+    if native_hashes is not None and written_hashes and server_name in written_hashes:
+        native_hashes.setdefault(runtime, {})[server_name] = written_hashes[server_name]
+    if written_connections is not None:
+        written_connections.add((runtime, server_name))
+
+
+# Runtimes that always keyed self-defined servers by their full declared name,
+# so a short-name entry there can never be a truncated write by older APM.
+_DECLARED_KEY_RUNTIMES = frozenset({"vscode"})
+
+
+def _reconcile_legacy_truncated_key(
+    dep_name: str,
+    runtimes: list[str],
+    *,
+    previously_owned: dict[str, set[str]],
+    previous_native_hashes: dict[str, dict[str, str]],
+    stored_config: dict | None,
+    claimed_keys: builtins.set,
+    project_root,
+    user_scope: bool,
+    logger,
+    fail_on_write_error: bool = False,
+) -> None:
+    """Replace or flag the pre-fix truncated config key of a self-defined server.
+
+    Older releases wrote ``com.example/srv`` under its final segment (``srv``).
+    Now that the declared name is the key, the short entry is removed only when
+    the ownership ledger proves APM wrote *dep_name* to that runtime (and, on
+    runtimes with native baselines, that its content is unchanged); otherwise
+    it is left in place and named (never its contents) so the user can decide.
+    """
+    from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    legacy_key = MCPClientAdapter._determine_config_key(dep_name, None)
+    if legacy_key == dep_name or legacy_key in claimed_keys:
+        return
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    for rt in runtimes:
+        if rt in _DECLARED_KEY_RUNTIMES:
+            continue
+        try:
+            client = ClientFactory.create_client(
+                rt, project_root=project_root, user_scope=user_scope
+            )
+            existing = MCPConflictDetector(client).get_existing_server_configs()
+        except Exception as exc:
+            logger.verbose_detail(f"Skipped legacy MCP entry check for {rt}: {exc}")
+            continue
+        if legacy_key not in existing:
+            continue
+        config_path = client.get_config_path()
+        if dep_name in previously_owned.get(rt, builtins.set()):
+            legacy_hash = previous_native_hashes.get(rt, {}).get(dep_name)
+            try:
+                MCPIntegrator.remove_stale(
+                    {legacy_key},
+                    runtime=rt,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                    logger=logger,
+                    scope=scope,
+                    fail_on_write_error=fail_on_write_error,
+                    stored_configs={legacy_key: stored_config} if stored_config else {},
+                    native_hashes={rt: {legacy_key: legacy_hash}} if legacy_hash else None,
+                )
+            except RequiredIntegrationError:
+                logger.warning(
+                    f"Left existing MCP server '{legacy_key}' in {config_path}: it changed "
+                    f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
+                    f"an outdated copy of '{dep_name}'."
+                )
+                continue
+            logger.progress(f"Renamed MCP server '{legacy_key}' to '{dep_name}' in {config_path}")
+        else:
+            logger.warning(
+                f"Left existing MCP server '{legacy_key}' in {config_path}: APM has no "
+                f"record of writing it for '{dep_name}'. Remove it manually if it is "
+                f"an outdated copy of '{dep_name}'."
+            )
 
 
 def _raise_strict_config_failures(
@@ -252,7 +642,8 @@ def _raise_strict_config_failures(
     message = (
         "MCP configuration failed for selected runtime(s): "
         + ", ".join(failed_installations)
-        + ". Fix the failed runtime MCP config and rerun apm install."
+        + ". Fix the failed runtime MCP config and rerun the original install command, "
+        "retaining --global and any --target selection."
     )
     if console:
         console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
@@ -297,25 +688,6 @@ def _migrate_intellij_managed_config(
         )
 
 
-def _hermes_runtime_opted_in() -> bool:
-    """Return ``True`` when Hermes MCP writes are opted into.
-
-    Gate: the ``hermes`` experimental flag is enabled AND Hermes is actually
-    present on the host (its home dir exists, or the ``hermes`` binary is on
-    PATH).  Prevents surprise writes to ``~/.hermes/`` on hosts where Hermes
-    was never installed.  Any import/path error is treated as "not opted in".
-    """
-    try:
-        from apm_cli.core.experimental import is_enabled
-        from apm_cli.integration.targets import resolve_hermes_root
-
-        if not is_enabled("hermes"):
-            return False
-        return resolve_hermes_root().is_dir() or find_runtime_binary("hermes") is not None
-    except (ImportError, ValueError):
-        return False
-
-
 def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list[str]:
     """Detect which MCP-capable runtimes are installed on the host.
 
@@ -325,11 +697,14 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
     to a binary/directory probe when optional deps are unavailable.
     """
     from apm_cli.integration.mcp_integrator import _is_vscode_available
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
-    # Directory-signal opt-in runtimes: name -> required project dir.
+    # Directory-signal opt-in runtimes: name -> required dir under the scope
+    # root.  OpenCode's user root (~/.config/opencode) differs from its
+    # project marker, so its signal comes from the target profile.
     dir_signal = {
         "cursor": ".cursor",
-        "opencode": ".opencode",
+        "opencode": KNOWN_TARGETS["opencode"].effective_root(user_scope),
         "gemini": ".gemini",
         "windsurf": ".windsurf",
         "kiro": ".kiro",
@@ -352,7 +727,6 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
             "kiro",
             "claude",
             "intellij",
-            "hermes",
         ]:
             try:
                 if not _runtime_is_present(
@@ -396,8 +770,6 @@ def _runtime_is_present(
         from apm_cli.adapters.client.intellij import _intellij_config_dir
 
         return _intellij_config_dir().is_dir()
-    if runtime_name == "hermes":
-        return _hermes_runtime_opted_in()
     return manager.is_runtime_available(runtime_name)
 
 
@@ -405,12 +777,14 @@ def _discover_installed_runtimes_fallback(
     project_root_path, _is_vscode_available, *, user_scope: bool
 ) -> list[str]:
     """Binary/directory-only runtime probe used when adapters fail to import."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
     installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
     if _is_vscode_available(project_root=project_root_path):
         installed_runtimes.append("vscode")
     for name, signal in (
         ("cursor", ".cursor"),
-        ("opencode", ".opencode"),
+        ("opencode", KNOWN_TARGETS["opencode"].effective_root(user_scope)),
         ("gemini", ".gemini"),
         ("windsurf", ".windsurf"),
         ("kiro", ".kiro"),
@@ -430,9 +804,6 @@ def _discover_installed_runtimes_fallback(
         # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME is
         # misconfigured -- treat as "not installed" rather than crash.
         pass
-    # Hermes: experimental flag enabled AND home-dir/binary present.
-    if _hermes_runtime_opted_in():
-        installed_runtimes.append("hermes")
     return installed_runtimes
 
 
@@ -467,6 +838,70 @@ def _declared_manifest_target_runtimes(
 
     projected = EffectiveTargetDecision(parsed, "apm.yml").runtime_targets
     return list(projected or ()), True
+
+
+def partition_user_scope_runtimes(
+    target_runtimes: list[str],
+) -> tuple[list[str], list[str]]:
+    """Partition runtime names by their adapter's user-scope capability."""
+    from apm_cli.factory import ClientFactory
+
+    supported: list[str] = []
+    skipped: list[str] = []
+    for runtime in target_runtimes:
+        try:
+            client = ClientFactory.create_client(runtime)
+        except ValueError:
+            skipped.append(runtime)
+            continue
+        destination = supported if client.supports_user_scope else skipped
+        destination.append(runtime)
+    return supported, skipped
+
+
+def unavailable_user_scope_targets_message(
+    target_decision: EffectiveTargetDecision,
+    scoped_targets: list[str] | None,
+    skipped_targets: list[str],
+) -> str:
+    """Render recovery that distinguishes disabled from workspace-only targets."""
+    original_targets = set(target_decision.runtime_targets or [])
+    disabled_targets = original_targets - set(scoped_targets or [])
+    experimental_hint = "enable selected experimental targets, " if disabled_targets else ""
+    rendered_targets = ", ".join(sorted(original_targets or set(skipped_targets)))
+    return (
+        "Selected targets are unavailable for user-scope MCP installation "
+        f"({rendered_targets}; source: {target_decision.source}); "
+        f"{experimental_hint}choose a global-capable --target or omit --global"
+    )
+
+
+def discover_user_scope_mcp_runtimes(
+    project_root: Path,
+    *,
+    exclude: str | None = None,
+) -> tuple[list[str], list[str]]:
+    """Discover installed MCP runtimes and partition them for user scope."""
+    discovered = _discover_installed_runtimes(project_root, user_scope=True)
+    discovered = filter_excluded_mcp_runtimes(discovered, exclude)
+    return partition_user_scope_runtimes(discovered)
+
+
+def filter_excluded_mcp_runtimes(
+    target_runtimes: list[str],
+    exclude: str | None,
+) -> list[str]:
+    """Apply one canonical runtime exclusion, including target aliases."""
+    if not exclude:
+        return list(target_runtimes)
+    exclusions = {exclude}
+    try:
+        from apm_cli.core.target_detection import EffectiveTargetDecision
+
+        exclusions.update(EffectiveTargetDecision(exclude, "--exclude").runtime_equivalents or ())
+    except KeyError:
+        pass
+    return [runtime for runtime in target_runtimes if runtime not in exclusions]
 
 
 def _resolve_target_runtimes(
@@ -747,7 +1182,7 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot)"
+                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, JetBrains Copilot)"
             )
             return None
 
@@ -767,34 +1202,52 @@ def _install_self_defined_deps(
     logger,
     managed_target_servers: dict[str, set[str]] | None,
     fail_on_write_error: bool = False,
+    native_hashes: dict[str, dict[str, str]] | None = None,
+    written_connections: set[tuple[str, str]] | None = None,
+    registry_dep_names: list[str] | None = None,
 ) -> int:
     """Install self-defined (``registry: false``) MCP deps for all target runtimes.
 
     Mutates ``servers_to_update`` and ``successful_updates`` in-place.
     Returns the number of servers newly configured or updated.
     """
+    from apm_cli.adapters.client.base import MCPClientAdapter
+    from apm_cli.install.mcp.ownership import (
+        NativeMcpConnectionState,
+        compare_native_mcp_connection,
+    )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     configured_count = 0
     failed_installations: list[str] = []
+    native_conflicts: list[str] = []
+    if written_connections is None:
+        written_connections = set()
     self_defined_names = [dep.name for dep in self_defined_deps]
+    previously_owned = {
+        rt: builtins.set(names) for rt, names in (managed_target_servers or {}).items()
+    }
+    previous_native_hashes = {rt: dict(hashes) for rt, hashes in (native_hashes or {}).items()}
+    claimed_keys = builtins.set(self_defined_names) | {
+        MCPClientAdapter._determine_config_key(name, None) for name in registry_dep_names or ()
+    }
     self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
         self_defined_names,
         target_runtimes,
         project_root=project_root,
         user_scope=user_scope,
     )
+    if {"claude", "codex"}.intersection(target_runtimes):
+        # Native content must be checked even when every requested name exists.
+        self_defined_to_install = list(self_defined_names)
     already_configured_candidates_sd = [
         name for name in self_defined_names if name not in self_defined_to_install
     ]
 
     # Detect config drift for "already configured" self-defined servers
-    if stored_mcp_configs and already_configured_candidates_sd:
-        drifted_sd_deps = [
-            dep for dep in self_defined_deps if dep.name in already_configured_candidates_sd
-        ]
+    if stored_mcp_configs:
         drifted_sd = MCPIntegrator._detect_mcp_config_drift(
-            drifted_sd_deps,
+            self_defined_deps,
             stored_mcp_configs,
         )
         if drifted_sd:
@@ -817,6 +1270,9 @@ def _install_self_defined_deps(
             for name in already_configured_self_defined:
                 logger.verbose_detail(f"{name} already configured, skipping")
 
+    from apm_cli.factory import ClientFactory
+
+    protected_clients = {}
     for dep in self_defined_deps:
         if dep.name not in self_defined_to_install:
             continue
@@ -846,6 +1302,67 @@ def _install_self_defined_deps(
         successful_runtimes: list[str] = []
         failed_runtimes: list[str] = []
         for rt in target_runtimes:
+            installed_servers: set[str] = set()
+            managed_fields: set[str] = set()
+            written_hashes: dict[str, str] = {}
+            replace_existing = is_update and (
+                managed_target_servers is None or dep.name in managed_target_servers.get(rt, set())
+            )
+            if rt in {"claude", "codex"}:
+                if rt not in protected_clients:
+                    protected_clients[rt] = ClientFactory.create_client(
+                        rt, project_root=project_root, user_scope=user_scope
+                    )
+                client = protected_clients[rt]
+                state = compare_native_mcp_connection(
+                    client,
+                    dep.name,
+                    requested_info=synthetic_info,
+                    stored_config=stored_mcp_configs.get(dep.name),
+                    managed=managed_target_servers is not None
+                    and dep.name in managed_target_servers.get(rt, set()),
+                    managed_fields=managed_fields,
+                    native_hash=(native_hashes or {}).get(rt, {}).get(dep.name),
+                )
+                if (
+                    state
+                    in {
+                        NativeMcpConnectionState.MATCHING_FOREIGN,
+                        NativeMcpConnectionState.CONFLICT,
+                    }
+                    and managed_target_servers is not None
+                ):
+                    managed_target_servers.get(rt, set()).discard(dep.name)
+                    if native_hashes is not None:
+                        native_hashes.get(rt, {}).pop(dep.name, None)
+                forwarded = _codex_expanded_env_names(client, dep.name, synthetic_info)
+                if state is NativeMcpConnectionState.CONFLICT:
+                    _report_native_conflict(
+                        dep.name,
+                        rt,
+                        client,
+                        logger,
+                        native_conflicts,
+                        expanded_env=forwarded,
+                        render=lambda client=client, info=synthetic_info: (
+                            client.render_server_config(info)
+                        ),
+                    )
+                    continue
+                if forwarded and state is NativeMcpConnectionState.UPDATE_MANAGED:
+                    logger.warning(
+                        f"APM replaced a previously written value for {_ascii_names(forwarded)} "
+                        f"in {client.get_config_path()} with env_vars. If that file was ever "
+                        "shared or committed, rotate the credential because Git history "
+                        "still holds it."
+                    )
+                if state in {
+                    NativeMcpConnectionState.MATCHING_MANAGED,
+                    NativeMcpConnectionState.MATCHING_FOREIGN,
+                }:
+                    logger.verbose_detail(f"{dep.name} already matches {rt}; no write")
+                    continue
+                replace_existing = state is NativeMcpConnectionState.UPDATE_MANAGED
             if verbose:
                 logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
             if MCPIntegrator._install_for_runtime(
@@ -856,12 +1373,36 @@ def _install_self_defined_deps(
                 project_root=project_root,
                 user_scope=user_scope,
                 logger=logger,
-                replace_existing=is_update,
+                replace_existing=replace_existing,
+                installed_servers=installed_servers,
+                managed_fields=managed_fields,
+                written_native_hashes=written_hashes,
             ):
                 successful_runtimes.append(rt)
-                _record_managed_server(managed_target_servers, rt, dep.name)
+                if dep.name in installed_servers:
+                    _record_managed_server(
+                        managed_target_servers,
+                        rt,
+                        dep.name,
+                        native_hashes=native_hashes,
+                        written_hashes=written_hashes,
+                        written_connections=written_connections,
+                    )
             else:
                 failed_runtimes.append(rt)
+
+        _reconcile_legacy_truncated_key(
+            dep.name,
+            successful_runtimes,
+            previously_owned=previously_owned,
+            previous_native_hashes=previous_native_hashes,
+            stored_config=stored_mcp_configs.get(dep.name),
+            claimed_keys=claimed_keys,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            fail_on_write_error=fail_on_write_error,
+        )
 
         if successful_runtimes:
             if console:
@@ -890,6 +1431,10 @@ def _install_self_defined_deps(
             else:
                 logger.error(f"{dep.name} -- failed for {', '.join(sorted(failed_runtimes))}")
 
+    if native_conflicts:
+        message = "MCP installation incomplete: " + ", ".join(native_conflicts)
+        logger.error(message)
+        raise MCPNativeConflictError(message, wrote_connections=bool(written_connections))
     _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
 
@@ -918,7 +1463,7 @@ def _print_mcp_summary(
         console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
-def run_mcp_install(
+def run_mcp_install(  # noqa: PLR0913
     mcp_deps: list,
     runtime: str | None = None,
     exclude: str | None = None,
@@ -933,7 +1478,9 @@ def run_mcp_install(
     diagnostics=None,
     scope: InstallScope | None = None,
     managed_target_servers: dict[str, set[str]] | None = None,
+    prevalidated_registry_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
+    native_hashes: dict[str, dict[str, str]] | None = None,
 ) -> int:
     """Install MCP dependencies.
 
@@ -1039,6 +1586,20 @@ def run_mcp_install(
             )
         return 0
 
+    _validate_target_configs(
+        target_runtimes,
+        project_root=project_root,
+        user_scope=user_scope,
+        console=console,
+        logger=logger,
+    )
+    claude_targeted = "claude" in target_runtimes
+    if claude_targeted:
+        # Claude's diagnostics cover every server of this run, so they are
+        # emitted once at the end rather than after the first server.
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+        ClaudeClientAdapter.reset_install_run_state()
     if managed_target_servers is not None:
         from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
@@ -1068,9 +1629,45 @@ def run_mcp_install(
                 del managed_target_servers[target]
             else:
                 managed_target_servers[target].intersection_update(current_names)
+        for target in target_runtimes:
+            managed_target_servers.setdefault(target, set())
+
+    if "codex" in target_runtimes and managed_target_servers is not None:
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+        from apm_cli.core.conflict_detector import MCPConflictDetector
+        from apm_cli.install.mcp.ownership import (
+            NativeMcpConnectionState,
+            compare_native_mcp_connection,
+        )
+
+        client = CodexClientAdapter(project_root=project_root, user_scope=user_scope)
+        owned_names = managed_target_servers.get("codex", set())
+        existing = MCPConflictDetector(client).get_existing_server_configs() if owned_names else {}
+        verified_names = {
+            name
+            for name in owned_names
+            if compare_native_mcp_connection(
+                client,
+                name,
+                requested_info=None,
+                stored_config=stored_mcp_configs.get(name),
+                managed=True,
+                existing_configs=existing,
+            )
+            is NativeMcpConnectionState.UPDATE_MANAGED
+        }
+        migrated = client.migrate_legacy_managed_servers(verified_names)
+        if migrated:
+            count = len(migrated)
+            logger.success(
+                f"Repaired {count} Codex MCP {'entry' if count == 1 else 'entries'}",
+                symbol="check",
+            )
 
     # Use the new registry operations module for better server detection
     configured_count = 0
+    written_connections: set[tuple[str, str]] = set()
+    native_conflicts: list[str] = []
 
     # --- Registry-based deps ---
     if registry_dep_names:
@@ -1084,7 +1681,12 @@ def run_mcp_install(
             registry_groups: builtins.dict[str | None, list] = {}
             for dep in registry_deps:
                 dep_registry = getattr(dep, "registry", None)
-                key = dep_registry if isinstance(dep_registry, str) else None
+                if isinstance(dep_registry, str):
+                    from apm_cli.registry.client import normalize_mcp_registry_url
+
+                    key = normalize_mcp_registry_url(dep_registry)
+                else:
+                    key = None
                 if key not in registry_groups:
                     registry_groups[key] = []
                 registry_groups[key].append(dep)
@@ -1094,24 +1696,46 @@ def run_mcp_install(
                     dep.name if hasattr(dep, "name") else dep for dep in group_deps_list
                 ]
                 group_dep_map = {dep.name: dep for dep in group_deps_list if hasattr(dep, "name")}
-                operations = MCPServerOperations(registry_url=group_registry_url)
-                configured_count += _install_registry_group(
-                    operations=operations,
-                    group_dep_names=group_dep_names,
-                    group_dep_map=group_dep_map,
-                    group_deps=group_deps_list,
-                    target_runtimes=target_runtimes,
-                    stored_mcp_configs=stored_mcp_configs,
-                    servers_to_update=servers_to_update,
-                    successful_updates=successful_updates,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    verbose=verbose,
-                    console=console,
-                    logger=logger,
-                    managed_target_servers=managed_target_servers,
-                    fail_on_write_error=fail_on_write_error,
-                )
+                group_prevalidated = prevalidated_registry_servers
+                group_registry_source = None
+                if isinstance(group_prevalidated, _PrevalidatedRegistryServers):
+                    if (
+                        group_registry_url == group_prevalidated.registry_url
+                        and set(group_dep_names) <= group_prevalidated.keys()
+                    ):
+                        group_registry_source = group_prevalidated.source
+                    else:
+                        group_prevalidated = None
+                if group_registry_source is not None:
+                    operations = MCPServerOperations(
+                        registry_url=group_registry_url,
+                        registry_source=group_registry_source,
+                    )
+                else:
+                    operations = MCPServerOperations(registry_url=group_registry_url)
+                try:
+                    configured_count += _install_registry_group(
+                        operations=operations,
+                        group_dep_names=group_dep_names,
+                        group_dep_map=group_dep_map,
+                        group_deps=group_deps_list,
+                        target_runtimes=target_runtimes,
+                        stored_mcp_configs=stored_mcp_configs,
+                        servers_to_update=servers_to_update,
+                        successful_updates=successful_updates,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        verbose=verbose,
+                        console=console,
+                        logger=logger,
+                        managed_target_servers=managed_target_servers,
+                        prevalidated_servers=group_prevalidated,
+                        fail_on_write_error=fail_on_write_error,
+                        native_hashes=native_hashes,
+                        written_connections=written_connections,
+                    )
+                except MCPNativeConflictError as exc:
+                    native_conflicts.append(str(exc))
 
         except ImportError:
             logger.warning("Registry operations not available")
@@ -1120,22 +1744,37 @@ def run_mcp_install(
 
     # --- Self-defined deps (registry: false) ---
     if self_defined_deps:
-        configured_count += _install_self_defined_deps(
-            self_defined_deps=self_defined_deps,
-            target_runtimes=target_runtimes,
-            stored_mcp_configs=stored_mcp_configs,
-            servers_to_update=servers_to_update,
-            successful_updates=successful_updates,
-            project_root=project_root,
-            user_scope=user_scope,
-            verbose=verbose,
-            console=console,
-            logger=logger,
-            managed_target_servers=managed_target_servers,
-            fail_on_write_error=fail_on_write_error,
+        try:
+            configured_count += _install_self_defined_deps(
+                self_defined_deps=self_defined_deps,
+                target_runtimes=target_runtimes,
+                stored_mcp_configs=stored_mcp_configs,
+                servers_to_update=servers_to_update,
+                successful_updates=successful_updates,
+                project_root=project_root,
+                user_scope=user_scope,
+                verbose=verbose,
+                console=console,
+                logger=logger,
+                managed_target_servers=managed_target_servers,
+                fail_on_write_error=fail_on_write_error,
+                native_hashes=native_hashes,
+                written_connections=written_connections,
+                registry_dep_names=registry_dep_names,
+            )
+        except MCPNativeConflictError as exc:
+            native_conflicts.append(str(exc))
+
+    if native_conflicts:
+        if claude_targeted:
+            ClaudeClientAdapter.emit_install_run_summary()
+        raise MCPNativeConflictError(
+            "\n".join(native_conflicts), wrote_connections=bool(written_connections)
         )
 
     # Close the panel
     _print_mcp_summary(console, configured_count, successful_updates)
+    if claude_targeted:
+        ClaudeClientAdapter.emit_install_run_summary()
 
     return configured_count

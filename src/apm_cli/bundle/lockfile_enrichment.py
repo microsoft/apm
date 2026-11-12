@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from ..deps.lockfile import LockFile
 from ..integration.targets import KNOWN_TARGETS
+from .formats import BundleFormat, coerce_bundle_format
 
 # Cross-target path equivalences for skills/ and agents/ directories.
 # Only these two directory types are semantically identical across targets;
@@ -18,13 +19,16 @@ from ..integration.targets import KNOWN_TARGETS
 # Windsurf agents still collapse into .windsurf/skills/ because the target
 # has no distinct agent envelope.
 _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
+    "agent-skills": {
+        ".github/skills/": ".agents/skills/",
+    },
     "claude": {
         ".github/skills/": ".claude/skills/",
         ".github/agents/": ".claude/agents/",
     },
-    "vscode": {
-        ".claude/skills/": ".github/skills/",
-        ".claude/agents/": ".github/agents/",
+    "codex": {
+        ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".codex/agents/",
     },
     "copilot": {
         ".claude/skills/": ".github/skills/",
@@ -34,33 +38,33 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/skills/": ".agents/skills/",
         ".github/agents/": ".cursor/agents/",
     },
-    "opencode": {
-        ".github/skills/": ".agents/skills/",
-        ".github/agents/": ".opencode/agents/",
-    },
-    "codex": {
-        ".github/skills/": ".agents/skills/",
-        ".github/agents/": ".codex/agents/",
-    },
-    "windsurf": {
-        ".github/skills/": ".agents/skills/",
-        ".github/agents/": ".windsurf/skills/",
-    },
-    "grok-cloud": {
-        ".github/skills/": ".grok/skills/",
+    "grok-bot": {
+        ".github/skills/": "agent-data/workflows/",
     },
     "grok-build": {
         ".github/skills/": ".grok/skills/",
         ".github/agents/": ".grok/agents/",
     },
-    "agent-skills": {
+    "grok-cloud": {
+        ".github/skills/": ".grok/skills/",
+    },
+    "hermes": {
         ".github/skills/": ".agents/skills/",
     },
     "openclaw": {
         ".github/skills/": ".agents/skills/",
     },
-    "hermes": {
+    "opencode": {
         ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".opencode/agents/",
+    },
+    "vscode": {
+        ".claude/skills/": ".github/skills/",
+        ".claude/agents/": ".github/agents/",
+    },
+    "windsurf": {
+        ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".windsurf/skills/",
     },
 }
 
@@ -181,10 +185,11 @@ def _filter_files_by_target(
 
 def enrich_lockfile_for_pack(
     lockfile: LockFile,
-    fmt: str,
+    fmt: str | BundleFormat,
     target: str | list[str],
     *,
     bundle_files: dict[str, str] | None = None,
+    packed_at: str | None = None,
 ) -> str:
     """Create an enriched copy of the lockfile YAML with a ``pack:`` section.
 
@@ -197,7 +202,7 @@ def enrich_lockfile_for_pack(
 
     Args:
         lockfile: The resolved lockfile to enrich.
-        fmt: Bundle format (``"plugin"`` or ``"apm"``).
+        fmt: Bundle format accepted by ``bundle.formats.coerce_bundle_format``.
         target: Effective target used for packing (e.g. ``"copilot"``, ``"claude"``,
             ``"all"``).  May also be a list of target strings for multi-target
             packing.  The internal alias ``"vscode"`` is also accepted.
@@ -206,12 +211,15 @@ def enrich_lockfile_for_pack(
             bundles whose flat layout differs from the project-relative
             ``deployed_files`` paths and so requires a separate manifest
             for integrity verification at install time (see issue #1098).
+        packed_at: Optional stable pack timestamp. Defaults to the current time.
 
     Returns:
         A YAML string with the ``pack:`` block followed by the original
         lockfile content.
     """
     import yaml
+
+    bundle_format = coerce_bundle_format(fmt)
 
     # Build a filtered lockfile YAML: each dep's deployed_files is narrowed
     # to only the paths matching the pack target (with cross-target mapping).
@@ -241,9 +249,11 @@ def enrich_lockfile_for_pack(
     # with consumers that expect a plain string in pack.target.
     target_str = ",".join(target) if isinstance(target, list) else target
     pack_meta: dict = {
-        "format": fmt,
+        "format": bundle_format.lock_value,
         "target": target_str,
-        "packed_at": datetime.now(timezone.utc).isoformat(),
+        "packed_at": (
+            packed_at if packed_at is not None else datetime.now(timezone.utc).isoformat()
+        ),
     }
     if all_mappings:
         # Record the source prefixes that were remapped so consumers know the

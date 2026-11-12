@@ -1,5 +1,6 @@
 """Tests for instruction integration functionality."""
 
+import json
 import shutil
 import tempfile
 from datetime import datetime
@@ -7,10 +8,13 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import yaml
 
+from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -124,6 +128,108 @@ class TestInstructionIntegrator:
 
         self.integrator.copy_instruction(source, target)
         assert target.read_text() == content
+
+    def test_direct_identity_target_rejects_invalid_frontmatter_before_writes(self):
+        """Direct target integration keeps the same validation boundary as install."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.project_root / "package"
+        instruction_dir = package_dir / ".apm" / "instructions"
+        instruction_dir.mkdir(parents=True)
+        (instruction_dir / "broken.instructions.md").write_text(
+            "---\napplyTo: [\n---\n# Invalid\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(yaml.YAMLError, match="Rejected frontmatter"):
+            self.integrator.integrate_instructions_for_target(
+                KNOWN_TARGETS["copilot"],
+                self._make_package_info(package_dir),
+                self.project_root,
+            )
+
+        assert not (self.project_root / ".github/instructions").exists()
+
+    def test_preflight_force_report_does_not_claim_deployment(self):
+        """Preflight labels a force override without claiming files were written."""
+        from unittest.mock import patch
+
+        from apm_cli.security.gate import SecurityGate
+
+        source = self.project_root / "forced.instructions.md"
+        source.write_text("# Rule\n", encoding="utf-8")
+        diagnostics = Mock()
+        verdict = Mock(has_findings=True, should_block=False)
+
+        with (
+            patch.object(SecurityGate, "scan_text", return_value=verdict),
+            patch.object(SecurityGate, "report") as report,
+        ):
+            self.integrator._prepare_instruction(
+                source,
+                force=True,
+                diagnostics=diagnostics,
+                package_name="pkg",
+            )
+
+        report.assert_called_once_with(
+            verdict,
+            diagnostics,
+            package="pkg",
+            force=True,
+            force_action="Allowed by preflight",
+            force_detail=(
+                "Decoded frontmatter contains critical hidden characters; "
+                "edit the escaped value in forced.instructions.md"
+            ),
+        )
+
+    @pytest.mark.windows_compat
+    def test_identity_target_materializes_preflight_validated_content(self):
+        """Identity deployment writes the bytes validated during preflight."""
+        from unittest.mock import patch
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.project_root / "package"
+        instruction_dir = package_dir / ".apm" / "instructions"
+        instruction_dir.mkdir(parents=True)
+        source = instruction_dir / "python.instructions.md"
+        source.write_text("# Validated content\n", encoding="utf-8")
+        package_info = self._make_package_info(package_dir)
+        source_plan = DeployableSourcePlan(
+            package_dir.resolve(),
+            frozenset({".apm/instructions/python.instructions.md"}),
+        )
+
+        self.integrator.preflight_instructions_for_targets(
+            [KNOWN_TARGETS["copilot"]],
+            package_info,
+            self.project_root,
+            source_plan,
+        )
+        changed = "---\napplyTo: [\n---\n# Changed after preflight\n"
+        source.write_text(changed, encoding="utf-8")
+        deployed = self.project_root / ".github/instructions/python.instructions.md"
+        deployed.parent.mkdir(parents=True)
+        deployed.write_bytes(b"# Resolved link\n")
+
+        def resolve_prepared(content, _source, _target):
+            assert content == "# Validated content\n"
+            return "# Resolved link\n", 1
+
+        with patch.object(self.integrator, "resolve_links", side_effect=resolve_prepared):
+            result = self.integrator.integrate_instructions_for_target(
+                KNOWN_TARGETS["copilot"],
+                package_info,
+                self.project_root,
+                source_plan=source_plan,
+            )
+
+        assert result.files_integrated == 0
+        assert result.files_adopted == 1
+        assert result.target_paths == [deployed]
+        assert deployed.read_text(encoding="utf-8") == "# Resolved link\n"
 
     # ===== Integration =====
 
@@ -513,17 +619,32 @@ class TestInstructionNameCollision:
 class TestConvertToCursorRules:
     """Test the frontmatter conversion helper."""
 
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize("field", ["description", "applyTo"])
+    @pytest.mark.parametrize("codepoint", [0, 0x0B, 0x1C, 0x80, 0x9F, 0xFFFE, 0xFFFF])
+    def test_escaped_source_controls_preserve_frontmatter(self, field: str, codepoint: int) -> None:
+        content = f'---\n{field}: "before\\u{codepoint:04x}after"\n---\n# Body\n'
+        rendered = InstructionIntegrator._convert_to_cursor_rules(content)
+        parsed = loads_frontmatter(rendered)
+        key = "globs" if field == "applyTo" else field
+        assert parsed.metadata[key] == f"before{chr(codepoint)}after"
+        assert parsed.content == "# Body"
+        assert chr(codepoint) not in rendered
+        rendered.encode("utf-8")
+
     def test_maps_apply_to_to_globs(self):
         content = "---\napplyTo: 'src/**/*.py'\n---\n\n# Python rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'globs: "src/**/*.py"' in result
+        # Plain (unquoted) scalar, matching Cursor's documented .mdc format.
+        assert "globs: src/**/*.py" in result
         assert "applyTo" not in result
 
     def test_preserves_description(self):
         content = "---\napplyTo: '**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert "description: TypeScript guidelines" in result
-        assert 'globs: "**/*.ts"' in result
+        # Ordinary leading-star globs use Cursor syntax, not YAML aliases.
+        assert "globs: **/*.ts" in result
 
     def test_generates_description_from_heading(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# Python coding standards\n\nUse type hints."
@@ -554,6 +675,44 @@ class TestConvertToCursorRules:
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert "globs" not in result
         assert "description: General rules" in result
+
+    def test_multiple_globs_join_into_single_comma_scalar(self):
+        """Issue #3002: comma-separated applyTo must NOT become a YAML list."""
+        content = "---\napplyTo: 'services/**/*.py,plugins/services/**/*.py'\n---\n\n# Body"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs: services/**/*.py, plugins/services/**/*.py" in result
+        assert "  - " not in result
+
+    def test_non_ascii_description_stays_literal_utf8(self):
+        """Issue #3002: non-ASCII description text must not be \\uXXXX-escaped."""
+        content = "---\napplyTo: '**/*.py'\ndescription: 'Python patterns \u2014 async \u2192 sync'\n---\n\n# Body"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "description: Python patterns \u2014 async \u2192 sync" in result
+        assert "\\u" not in result
+
+    def test_escaped_literal_comma_in_glob_survives_the_comma_join(self):
+        """PR #3011 Copilot follow-up: joining parsed globs with ", " must not
+        erase the ``\\,`` escape that protects a literal comma inside one
+        glob -- otherwise it becomes indistinguishable from the separator
+        between two globs.
+        """
+        content = "---\napplyTo: 'src/foo\\,bar/*.py,other/**'\n---\n\n# Body"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs: src/foo\\,bar/*.py, other/**" in result
+
+    def test_lone_surrogate_description_does_not_crash_utf8_encode(self):
+        """PR #3011 Copilot follow-up: a description whose YAML source
+        escapes a lone UTF-16 surrogate (the project's hidden-unicode
+        security-gate attack shape, e.g. ``\\uDB40\\uDC01``) decodes to a
+        Python string containing that lone surrogate. The pure-ASCII
+        source text passes the frontmatter parser's own printable-input
+        check; the *decoded* value must still render to something
+        UTF-8-encodable rather than crash the eventual file write.
+        """
+        content = '---\napplyTo: src/**\ndescription: "\\uDB40\\uDC01hidden"\n---\n\n# Body'
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        result.encode("utf-8")
+        assert "\\udb40\\udc01hidden" in result
 
 
 class TestCursorRulesIntegration:
@@ -598,7 +757,7 @@ class TestCursorRulesIntegration:
         target = self.project_root / ".cursor" / "rules" / "python.mdc"
         assert target.exists()
         content = target.read_text()
-        assert 'globs: "**/*.py"' in content
+        assert "globs: **/*.py" in content
         assert "# Python rules" in content
 
     def test_creates_rules_subdirectory(self):
@@ -767,7 +926,7 @@ class TestCursorRulesIntegration:
         self.integrator.integrate_package_instructions_cursor(pkg_info, self.project_root)
 
         deployed = (self.project_root / ".cursor" / "rules" / "ts.mdc").read_text()
-        assert 'globs: "src/**/*.ts"' in deployed
+        assert "globs: src/**/*.ts" in deployed
         assert "description: TypeScript rules" in deployed
         assert "applyTo" not in deployed
         assert "# TypeScript" in deployed
@@ -1307,7 +1466,48 @@ class TestConvertToWindsurfRules:
 
 
 class TestApplyToCommaSplitting:
-    """Verify all three converters split comma-separated applyTo globs."""
+    """Verify target converters preserve canonical applyTo semantics."""
+
+    @pytest.mark.parametrize(
+        ("converter", "scope_marker"),
+        [
+            ("_convert_to_claude_rules", '  - "src/**"'),
+            ("_convert_to_cursor_rules", "globs: src/**"),
+            ("_convert_to_windsurf_rules", 'globs: "src/**"'),
+            ("_convert_to_kiro_steering", 'fileMatchPattern: "src/**"'),
+            ("_convert_to_antigravity_rules", 'globs: "src/**"'),
+        ],
+    )
+    def test_four_hyphen_frontmatter_uses_canonical_parser(self, converter, scope_marker):
+        content = "----\napplyTo: src/**\n----\n# Scoped rule\n"
+
+        result = getattr(InstructionIntegrator, converter)(content)
+
+        assert scope_marker in result
+        assert "----" not in result
+        assert "# Scoped rule" in result
+
+    def test_strip_frontmatter_supports_four_hyphen_fence(self):
+        content = "----\napplyTo: src/**\n----\n# Scoped rule\n"
+
+        assert InstructionIntegrator._strip_frontmatter(content) == "# Scoped rule\n"
+
+    def test_cursor_quotes_multiline_description(self):
+        content = '---\napplyTo: src/**\ndescription: "safe\\n---\\n"\n---\n# Scoped rule\n'
+
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        post = loads_frontmatter(result)
+
+        # "src/**" is plain-scalar-safe (no leading YAML indicator) and stays bare.
+        assert post.metadata["globs"] == "src/**"
+        assert "globs: src/**" in result
+        assert post.metadata["description"] == "safe\n---"
+        # A description containing a real newline can't be a bare or
+        # single-quoted scalar without corruption (YAML line-folding), so
+        # it must still fall back to a double-quoted scalar -- this is the
+        # frontmatter-injection defence this test guards.
+        assert 'description: "safe\\n---"' in result
+        assert post.content == "# Scoped rule"
 
     # ---- Claude ----
 
@@ -1315,7 +1515,6 @@ class TestApplyToCommaSplitting:
         ("converter", "target_key"),
         [
             ("_convert_to_claude_rules", "paths:"),
-            ("_convert_to_cursor_rules", "globs:"),
             ("_convert_to_windsurf_rules", "globs:"),
         ],
     )
@@ -1327,6 +1526,14 @@ class TestApplyToCommaSplitting:
         assert target_key in result
         assert '  - "**/*.py"' in result
         assert '  - "**/*.pyi"' in result
+
+    def test_cursor_yaml_list_apply_to_joins_into_single_scalar(self):
+        """Issue #3002: a YAML-list applyTo still becomes one comma-joined Cursor scalar."""
+        content = "---\napplyTo:\n  - '**/*.py'\n  - '**/*.pyi'\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+
+        assert "globs: **/*.py, **/*.pyi" in result
+        assert "  - " not in result
 
     def test_claude_comma_list_emits_yaml_list(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Rules"
@@ -1371,28 +1578,26 @@ class TestApplyToCommaSplitting:
         assert "# R" in result
 
     # ---- Cursor ----
+    # Issue #3002: Cursor's native `.mdc` format never uses a YAML list for
+    # `globs` -- multiple globs are one comma-joined scalar, matching
+    # Cursor's own documented format (cursor.com/docs/context/rules).
 
-    def test_cursor_comma_list_emits_yaml_list(self):
+    def test_cursor_comma_list_joins_into_single_scalar(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "globs:" in result
-        assert '  - "**/src/**"' in result
-        assert '  - "**/api/**"' in result
-        assert '  - "**/services/**"' in result
-        assert 'globs: "**/src/**,' not in result
+        assert "globs: **/src/**, **/api/**, **/services/**" in result
+        assert "  - " not in result
 
     def test_cursor_single_glob_stays_scalar(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'globs: "**/*.py"' in result
+        assert "globs: **/*.py" in result
         assert '  - "**/*.py"' not in result
 
     def test_cursor_comma_whitespace_trimmed(self):
         content = "---\napplyTo: 'a, b , c'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert '  - "a"' in result
-        assert '  - "b"' in result
-        assert '  - "c"' in result
+        assert "globs: a, b, c" in result
 
     def test_cursor_single_comma_treated_as_empty(self):
         content = "---\napplyTo: ','\n---\n\n# R"
@@ -1402,7 +1607,7 @@ class TestApplyToCommaSplitting:
     def test_cursor_trailing_comma_normalises_to_single(self):
         content = "---\napplyTo: '**/*.py,'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert 'globs: "**/*.py"' in result
+        assert "globs: **/*.py" in result
 
     # ---- Windsurf ----
 
@@ -1453,78 +1658,117 @@ class TestApplyToCommaSplitting:
             assert "paths:" not in written
 
     # ---- Antigravity ----
+    # Antigravity's documented rule schema (issue #3472): ``globs`` is ONE
+    # comma-separated string and every rule carries a valid ``trigger``.
 
-    def test_antigravity_comma_list_emits_yaml_list(self):
+    @staticmethod
+    def _antigravity_frontmatter(result):
+        post = loads_frontmatter(result)
+        assert set(post.metadata) <= {"trigger", "globs"}
+        assert post.metadata["trigger"] in {"glob", "always_on"}
+        if post.metadata["trigger"] == "glob":
+            assert isinstance(post.metadata["globs"], str)
+        else:
+            assert "globs" not in post.metadata
+        return post.metadata
+
+    def test_antigravity_comma_list_emits_one_comma_separated_string(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert "globs:" in result
-        assert '  - "**/src/**"' in result
-        assert '  - "**/api/**"' in result
-        assert '  - "**/services/**"' in result
-        assert 'globs: "**/src/**,' not in result
+        assert result == (
+            '---\ntrigger: glob\nglobs: "**/src/**, **/api/**, **/services/**"\n---\n\n# R'
+        )
+        assert self._antigravity_frontmatter(result) == {
+            "trigger": "glob",
+            "globs": "**/src/**, **/api/**, **/services/**",
+        }
 
-    def test_antigravity_single_glob_stays_scalar(self):
+    def test_antigravity_single_glob_stays_quoted_string(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert 'globs: "**/*.py"' in result
-        assert '  - "**/*.py"' not in result
+        assert result == '---\ntrigger: glob\nglobs: "**/*.py"\n---\n\n# R'
+        assert self._antigravity_frontmatter(result)["globs"] == "**/*.py"
+
+    @pytest.mark.parametrize(
+        ("apply_to", "expected_globs"),
+        [
+            ("'*.py'", "*.py"),
+            ("'*.py, *.md'", "*.py, *.md"),
+            ("\n  - '*.py'\n  - '**/*.md'", "*.py, **/*.md"),
+        ],
+    )
+    def test_antigravity_star_leading_patterns_are_valid_yaml(self, apply_to, expected_globs):
+        content = f"---\napplyTo: {apply_to}\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert f"globs: {json.dumps(expected_globs)}\n" in result
+        assert self._antigravity_frontmatter(result)["globs"] == expected_globs
 
     def test_antigravity_comma_whitespace_trimmed(self):
         content = '---\napplyTo: "a, b , c"\n---\n\n# R'
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert '  - "a"' in result
-        assert '  - "b"' in result
-        assert '  - "c"' in result
+        assert self._antigravity_frontmatter(result) == {"trigger": "glob", "globs": "a, b, c"}
 
-    def test_antigravity_single_comma_falls_back_to_no_frontmatter(self):
+    def test_antigravity_brace_alternation_kept_in_one_pattern(self):
+        content = "---\napplyTo: '**/*.py,src/**/*.{ts,tsx}'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert self._antigravity_frontmatter(result)["globs"] == "**/*.py, src/**/*.{ts,tsx}"
+
+    def test_antigravity_single_comma_falls_back_to_always_on(self):
         content = '---\napplyTo: ","\n---\n\n# R'
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" not in result
-        assert "globs" not in result
-        assert "# R" in result
+        assert result == "---\ntrigger: always_on\n---\n\n# R"
+        assert self._antigravity_frontmatter(result) == {"trigger": "always_on"}
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "---\ndescription: General principles\n---\n\n# R",
+            "---\ndescription: General principles\napplyTo: ''\n---\n\n# R",
+            "---\ndescription: General principles\napplyTo: []\n---\n\n# R",
+            "# R",
+        ],
+    )
+    def test_antigravity_unscoped_instruction_gets_always_on_trigger(self, content):
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert result == "---\ntrigger: always_on\n---\n\n# R"
+        assert self._antigravity_frontmatter(result) == {"trigger": "always_on"}
 
     def test_antigravity_crlf_newlines_supported(self):
         content = "---\r\napplyTo: 'src/**/*.py'\r\n---\r\n\r\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert 'globs: "src/**/*.py"' in result
-        assert result.endswith("\n\n# R")
+        assert result == '---\ntrigger: glob\nglobs: "src/**/*.py"\n---\n\n# R'
 
     def test_antigravity_unconditional_crlf_newlines_supported(self):
         content = "---\r\ndescription: Test\r\n---\r\n\r\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger" not in result
-        assert result == "# R"
+        assert result == "---\ntrigger: always_on\n---\n\n# R"
 
     def test_antigravity_list_valued_apply_to(self):
         content = "---\napplyTo:\n  - 'src/**/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert "globs:" in result
-        assert '  - "src/**/*.py"' in result
-        assert '  - "tests/**/*.py"' in result
-        assert 'globs: "[' not in result
+        assert result == ('---\ntrigger: glob\nglobs: "src/**/*.py, tests/**/*.py"\n---\n\n# R')
+        assert "  - " not in result
+
+    def test_antigravity_scalar_and_list_apply_to_render_identically(self):
+        scalar = "---\napplyTo: 'src/**/*.py, tests/**/*.py'\n---\n\n# R"
+        listed = "---\napplyTo:\n  - 'src/**/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
+        assert InstructionIntegrator._convert_to_antigravity_rules(
+            scalar
+        ) == InstructionIntegrator._convert_to_antigravity_rules(listed)
 
     def test_antigravity_list_valued_apply_to_with_literal_commas(self):
         content = "---\napplyTo:\n  - 'src/foo,bar/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert "globs:" in result
-        assert '  - "src/foo,bar/*.py"' in result
-        assert '  - "tests/**/*.py"' in result
+        # Literal commas keep APM's documented ``\\,`` escape so the joined
+        # string never gains an extra top-level separator.
+        assert self._antigravity_frontmatter(result)["globs"] == (
+            "src/foo\\,bar/*.py, tests/**/*.py"
+        )
 
-    def test_antigravity_malformed_yaml_fallback(self, caplog):
-        import logging
-
+    def test_antigravity_malformed_yaml_fails_closed(self):
         content = "---\napplyTo: [\n---\n\n# Body"
-        with caplog.at_level(logging.WARNING):
-            result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "Failed to parse instruction frontmatter YAML" in caplog.text
-        assert "trigger: glob" not in result
-        assert "# Body" in result
+        with pytest.raises(yaml.YAMLError):
+            InstructionIntegrator._convert_to_antigravity_rules(content)
 
 
 class TestWindsurfRulesIntegration:

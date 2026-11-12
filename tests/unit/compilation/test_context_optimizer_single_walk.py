@@ -8,8 +8,6 @@ ordering, and cache lifecycle.
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +21,7 @@ pytestmark = pytest.mark.component
 
 def _make_instruction(
     name: str = "inst",
-    apply_to: str = "**/*.py",
+    apply_to: str | None = "**/*.py",
 ) -> Instruction:
     return Instruction(
         name=name,
@@ -40,39 +38,13 @@ def _touch(base: Path, rel: str) -> None:
     p.touch()
 
 
-def _walk_with_nested_subtree(
-    base: Path,
-    subtree_name: str,
-    descended: list[Path],
-) -> Iterator[tuple[str, list[str], list[str]]]:
-    root_dirs = [subtree_name]
-    yield str(base), root_dirs, ["app.py"]
-    if subtree_name not in root_dirs:
-        return
+class TestCompileInventoryProjection:
+    """Regression coverage for full accounting and scoped candidate projection."""
 
-    subtree = base / subtree_name
-    child_dirs = ["deep"]
-    yield str(subtree), child_dirs, []
-    if child_dirs:
-        deep = subtree / "deep"
-        descended.append(deep)
-        yield str(deep), [], ["ignored.py"]
-
-
-class TestSingleWalkPopulatesBothCaches:
-    """Regression: optimize_instruction_placement must call os.walk exactly once
-    and populate both _directory_cache and _file_list_cache in that single pass.
-    """
-
-    def test_single_walk_populates_directory_cache_and_file_list_cache(
+    def test_single_inventory_populates_directory_cache_and_file_list_cache(
         self, tmp_path: Path
     ) -> None:
-        """One os.walk traversal must populate both caches.
-
-        Regression for the dual-walk footprint: before the fix,
-        _analyze_project_structure and _get_all_files each ran their own
-        os.walk, doubling filesystem I/O on every compile.
-        """
+        """One inventory walk must populate both optimizer caches."""
         _touch(tmp_path, "src/main.py")
         _touch(tmp_path, "src/utils.py")
         _touch(tmp_path, "tests/test_main.py")
@@ -80,22 +52,16 @@ class TestSingleWalkPopulatesBothCaches:
         optimizer = ContextOptimizer(base_dir=str(tmp_path))
         instruction = _make_instruction(apply_to="**/*.py")
 
-        real_walk = os.walk
-        walk_call_count = 0
+        from apm_cli.compilation.inventory import CompileInventory
 
-        def counting_walk(top, **kwargs):
-            nonlocal walk_call_count
-            walk_call_count += 1
-            yield from real_walk(top, **kwargs)
-
-        with patch("apm_cli.compilation.context_optimizer.os.walk", side_effect=counting_walk):
+        with patch(
+            "apm_cli.compilation.context_optimizer.CompileInventory.collect",
+            wraps=CompileInventory.collect,
+        ) as collect:
+            optimizer = ContextOptimizer(base_dir=str(tmp_path))
             optimizer.optimize_instruction_placement([instruction])
 
-        assert walk_call_count == 1, (
-            f"expected exactly 1 os.walk call, got {walk_call_count} "
-            "(dual-walk regression: _analyze_project_structure and _get_all_files "
-            "must share the same traversal result)"
-        )
+        assert collect.call_count == 1
 
         assert optimizer._directory_cache, "_directory_cache must be non-empty after optimization"
         assert optimizer._file_list_cache is not None, "_file_list_cache must not be None"
@@ -110,30 +76,187 @@ class TestSingleWalkPopulatesBothCaches:
         assert "utils.py" in file_names
         assert "test_main.py" in file_names
 
+    def test_literal_apply_to_prefix_prunes_unrelated_top_level_subtrees(
+        self, tmp_path: Path
+    ) -> None:
+        _touch(tmp_path, "src/main.py")
+        _touch(tmp_path, "vendor/huge.txt")
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement([_make_instruction(apply_to="src/**/*.py")])
+
+        assert tmp_path / "src/main.py" in optimizer._file_list_cache
+        assert tmp_path / "vendor/huge.txt" not in optimizer._file_list_cache
+        assert tmp_path / "vendor" in optimizer._directory_cache
+
+    def test_literal_prefix_matches_full_walk_placement_at_project_scale(
+        self, tmp_path: Path
+    ) -> None:
+        """A 6,602-file tree scopes matching without changing placement output."""
+        _touch(tmp_path, "src/main.py")
+        _touch(tmp_path, "src/worker.py")
+        for directory_index in range(419):
+            file_count = 16 if directory_index < 315 else 15
+            for file_index in range(file_count):
+                _touch(tmp_path, f"pkg-{directory_index:03d}/file-{file_index:02d}.txt")
+
+        instruction = _make_instruction(apply_to="src/**/*.py")
+        scoped = ContextOptimizer(base_dir=str(tmp_path))
+        scoped_match_calls: list[Path] = []
+        original_file_matches = ContextOptimizer._file_matches_pattern
+
+        def counting_file_matches(self: ContextOptimizer, file_path: Path, pattern: str) -> bool:
+            scoped_match_calls.append(file_path)
+            return original_file_matches(self, file_path, pattern)
+
+        with patch.object(ContextOptimizer, "_file_matches_pattern", counting_file_matches):
+            scoped_placement = scoped.optimize_instruction_placement([instruction])
+
+        full = ContextOptimizer(base_dir=str(tmp_path))
+        with patch(
+            "apm_cli.compilation.context_optimizer.literal_apply_to_top_level_roots",
+            return_value=None,
+        ):
+            full_placement = full.optimize_instruction_placement([instruction])
+
+        def placement_snapshot(
+            placement: dict[Path, list[Instruction]],
+        ) -> list[tuple[str, tuple[str, ...]]]:
+            return sorted(
+                (
+                    str(directory.relative_to(tmp_path)),
+                    tuple(instruction.name for instruction in instructions),
+                )
+                for directory, instructions in placement.items()
+            )
+
+        assert len(full._directory_cache) == 420
+        assert len(scoped._directory_cache) == 420
+        assert len(full._file_list_cache) == 6602
+        assert len(scoped._file_list_cache) == 2
+        assert placement_snapshot(scoped_placement) == placement_snapshot(full_placement)
+        assert placement_snapshot(scoped_placement) == [("src", ("inst",))]
+        assert set(scoped_match_calls) <= set(scoped._file_list_cache)
+        assert len(scoped_match_calls) <= len(scoped._file_list_cache)
+        assert scoped._optimization_decisions[0].matching_directories == 1
+        assert full._optimization_decisions[0].matching_directories == 1
+
+    @pytest.mark.parametrize(
+        "apply_to",
+        [
+            None,
+            "**/*.py",
+            "*.py",
+            "{src,docs}/**",
+            "*/src/**/*.py",
+            "src/**/*.py,**/*.md",
+            "src/{api,cli/**",
+        ],
+    )
+    def test_unprovable_prefix_keeps_full_walk(self, tmp_path: Path, apply_to: str | None) -> None:
+        """A global or ambiguous segment kills the root-pruning mutation."""
+        _touch(tmp_path, "src/main.py")
+        _touch(tmp_path, "vendor/huge.txt")
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement([_make_instruction(apply_to=apply_to)])
+
+        assert tmp_path / "vendor/huge.txt" in optimizer._file_list_cache
+        assert tmp_path / "vendor" in optimizer._directory_cache
+
+    def test_unscoped_candidates_do_not_build_redundant_full_file_projection(
+        self, tmp_path: Path
+    ) -> None:
+        """Global fallback reuses each inventory directory's complete file list."""
+        from apm_cli.compilation.inventory import CompileInventory
+
+        _touch(tmp_path, "src/main.py")
+        _touch(tmp_path, "vendor/huge.txt")
+        inventory = CompileInventory.collect(tmp_path)
+        optimizer = ContextOptimizer(base_dir=str(tmp_path), inventory=inventory)
+
+        with patch.object(
+            CompileInventory,
+            "files_under",
+            side_effect=AssertionError("unscoped projection must reuse complete directory files"),
+        ):
+            optimizer.optimize_instruction_placement([_make_instruction(apply_to="**/*.py")])
+
+        assert set(optimizer._file_list_cache) == {
+            tmp_path / "src/main.py",
+            tmp_path / "vendor/huge.txt",
+        }
+
+    def test_comma_list_unions_ten_literal_roots(self, tmp_path: Path) -> None:
+        """Comma lists retain every literal root and prune unrelated siblings."""
+        roots = [f"package-{index:02d}" for index in range(10)]
+        for root in roots:
+            _touch(tmp_path, f"{root}/src/main.py")
+        _touch(tmp_path, "vendor/huge.txt")
+        apply_to = ",".join(f"{root}/src/**/*.py" for root in roots)
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement([_make_instruction(apply_to=apply_to)])
+
+        assert set(optimizer._scan_top_level_roots or ()) == set(roots)
+        assert tmp_path / "vendor/huge.txt" not in optimizer._file_list_cache
+        assert {path.parent.parent.name for path in optimizer._file_list_cache} == set(roots)
+        assert optimizer._optimization_decisions[0].matching_directories == len(roots)
+
+    def test_hidden_root_and_literal_root_are_scanned_together(self, tmp_path: Path) -> None:
+        """A targeted hidden root remains eligible alongside ordinary roots."""
+        _touch(tmp_path, ".github/instructions/guide.md")
+        _touch(tmp_path, "src/main.py")
+        _touch(tmp_path, "vendor/huge.txt")
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement(
+            [_make_instruction(apply_to=".github/**/*.md,src/**/*.py")]
+        )
+
+        assert tmp_path / ".github/instructions/guide.md" in optimizer._file_list_cache
+        assert tmp_path / "src/main.py" in optimizer._file_list_cache
+        assert tmp_path / "vendor/huge.txt" not in optimizer._file_list_cache
+        assert optimizer._optimization_decisions[0].matching_directories == 2
+
+    def test_excluded_literal_root_stays_excluded(self, tmp_path: Path) -> None:
+        """Configured exclusions still win when applyTo names their root."""
+        _touch(tmp_path, "src/main.py")
+        _touch(tmp_path, "vendor/generated.py")
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path), exclude_patterns=["vendor"])
+        optimizer.optimize_instruction_placement([_make_instruction(apply_to="vendor/**/*.py")])
+
+        assert tmp_path / "vendor/generated.py" not in optimizer._file_list_cache
+        assert tmp_path / "vendor" not in optimizer._directory_cache
+        assert optimizer._optimization_decisions[0].matching_directories == 0
+
+    def test_universal_scan_does_not_follow_directory_symlinks(self, tmp_path: Path) -> None:
+        """The root filter leaves the no-follow traversal contract unchanged."""
+        _touch(tmp_path, "src/main.py")
+        (tmp_path / "linked").symlink_to(tmp_path / "src", target_is_directory=True)
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        optimizer.optimize_instruction_placement([_make_instruction(apply_to="**/*.py")])
+
+        assert tmp_path / "src/main.py" in optimizer._file_list_cache
+        assert tmp_path / "linked" not in optimizer._directory_cache
+        assert optimizer._optimization_decisions[0].matching_directories == 1
+
 
 class TestGetAllFilesRoutesThroughAnalyze:
-    """_get_all_files must route through _analyze_project_structure when cache is None."""
+    """_get_all_files must project the inventory only once."""
 
     def test_get_all_files_before_optimize_triggers_single_walk(self, tmp_path: Path) -> None:
-        """_get_all_files called before optimize must use _analyze_project_structure."""
+        """_get_all_files called before optimize must project the inventory."""
         _touch(tmp_path, "app.py")
         _touch(tmp_path, "lib/helper.py")
 
         optimizer = ContextOptimizer(base_dir=str(tmp_path))
         assert optimizer._file_list_cache is None
 
-        real_walk = os.walk
-        walk_call_count = 0
+        files = optimizer._get_all_files()
 
-        def counting_walk(top, **kwargs):
-            nonlocal walk_call_count
-            walk_call_count += 1
-            yield from real_walk(top, **kwargs)
-
-        with patch("apm_cli.compilation.context_optimizer.os.walk", side_effect=counting_walk):
-            files = optimizer._get_all_files()
-
-        assert walk_call_count == 1
         assert optimizer._file_list_cache is not None
         assert files is optimizer._file_list_cache
         assert set(optimizer._directory_cache) == {tmp_path, tmp_path / "lib"}
@@ -157,24 +280,14 @@ class TestGetAllFilesRoutesThroughAnalyze:
         assert tmp_path / ".github/instructions" in optimizer._directory_cache
 
     def test_get_all_files_reuses_cache_without_second_walk(self, tmp_path: Path) -> None:
-        """After the first walk, a second call to _get_all_files reuses the cache."""
+        """After the first projection, a second call reuses the cache."""
         _touch(tmp_path, "app.py")
 
         optimizer = ContextOptimizer(base_dir=str(tmp_path))
         first = optimizer._get_all_files()
 
-        real_walk = os.walk
-        walk_call_count = 0
+        second = optimizer._get_all_files()
 
-        def counting_walk(top, **kwargs):
-            nonlocal walk_call_count
-            walk_call_count += 1
-            yield from real_walk(top, **kwargs)
-
-        with patch("apm_cli.compilation.context_optimizer.os.walk", side_effect=counting_walk):
-            second = optimizer._get_all_files()
-
-        assert walk_call_count == 0, "second _get_all_files call must not walk again"
         assert first is second
 
 
@@ -211,51 +324,6 @@ class TestExclusionInUnifiedWalk:
 
         assert "vendor" not in dir_names
         assert "lib.py" not in file_names
-
-    def test_default_exclusion_safety_net_prunes_nested_subtree(self, tmp_path: Path) -> None:
-        """The safety net stops descent when parent pruning is bypassed."""
-        _touch(tmp_path, "app.py")
-        descended: list[Path] = []
-        optimizer = ContextOptimizer(base_dir=str(tmp_path))
-
-        with (
-            patch(
-                "apm_cli.compilation.context_optimizer.os.walk",
-                side_effect=lambda _top: _walk_with_nested_subtree(
-                    tmp_path,
-                    "node_modules",
-                    descended,
-                ),
-            ),
-            patch.object(optimizer, "_should_exclude_subdir", return_value=False),
-        ):
-            optimizer._analyze_project_structure()
-
-        assert descended == []
-
-    def test_configurable_exclusion_safety_net_prunes_nested_subtree(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """A current-path exclusion stops descent when parent pruning is bypassed."""
-        _touch(tmp_path, "app.py")
-        descended: list[Path] = []
-        optimizer = ContextOptimizer(base_dir=str(tmp_path), exclude_patterns=["vendor"])
-
-        with (
-            patch(
-                "apm_cli.compilation.context_optimizer.os.walk",
-                side_effect=lambda _top: _walk_with_nested_subtree(
-                    tmp_path,
-                    "vendor",
-                    descended,
-                ),
-            ),
-            patch.object(optimizer, "_should_exclude_subdir", return_value=False),
-        ):
-            optimizer._analyze_project_structure()
-
-        assert descended == []
 
 
 class TestHiddenToolRootsInUnifiedWalk:

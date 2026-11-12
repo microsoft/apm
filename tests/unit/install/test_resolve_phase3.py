@@ -22,6 +22,7 @@ Coverage targets (uncovered branches):
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -29,6 +30,8 @@ import pytest
 import yaml
 
 from apm_cli.install.context import InstallContext
+from apm_cli.models.apm_package import APMPackage, GitReferenceType, ResolvedReference
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # Constants - correct patch targets for lazy imports in resolve.run()
@@ -42,6 +45,16 @@ _COLLECT_INSECURE = "apm_cli.install.insecure_policy._collect_insecure_dependenc
 _WARN_INSECURE = "apm_cli.install.insecure_policy._warn_insecure_dependencies"
 _GUARD_INSECURE = "apm_cli.install.insecure_policy._guard_transitive_insecure_dependencies"
 _AUTH_RESOLVER = "apm_cli.core.auth.AuthResolver"
+
+
+@pytest.fixture(autouse=True)
+def _remote_ref_resolution() -> Iterator[None]:
+    """Isolate ref I/O now that real references no longer supply truthy mock metadata."""
+    with patch(
+        "apm_cli.deps.github_downloader.GitHubPackageDownloader.resolve_git_reference",
+        return_value=ResolvedReference("main", GitReferenceType.BRANCH, "a" * 40, "main"),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +73,7 @@ def _make_ctx(
     """Minimal InstallContext sufficient for resolve.run()."""
     (tmp_path / "apm.yml").write_text(yaml.safe_dump({"name": "testapp", "version": "0.1.0"}))
     ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path)
+    ctx.apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml", create_config=False)
     ctx.update_refs = update_refs
     ctx.only_packages = only_packages
     ctx.verbose = verbose
@@ -393,13 +407,9 @@ class TestOnlyFiltering:
     def test_only_filter_includes_wanted_dep(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path, only_packages=["org/wanted"])
 
-        wanted_ref = MagicMock()
-        wanted_ref.get_identity.return_value = "org/wanted"
-        wanted_ref.get_unique_key.return_value = "org/wanted"
+        wanted_ref = DependencyReference.parse("org/wanted")
 
-        unwanted_ref = MagicMock()
-        unwanted_ref.get_identity.return_value = "org/unwanted"
-        unwanted_ref.get_unique_key.return_value = "org/unwanted"
+        unwanted_ref = DependencyReference.parse("org/unwanted")
 
         graph = _make_mock_graph()
         graph.flattened_dependencies.get_installation_list.return_value = [
@@ -414,8 +424,7 @@ class TestOnlyFiltering:
         mock_resolver._rejected_remote_local_keys = set()
         mock_cache = MagicMock()
 
-        parsed_ref = MagicMock()
-        parsed_ref.get_identity.return_value = "org/wanted"
+        parsed_ref = DependencyReference.parse("org/wanted")
 
         with (
             patch(_GET_MODULES, return_value=tmp_path / "apm_modules"),
@@ -440,10 +449,8 @@ class TestOnlyFiltering:
 
     def test_no_only_filter_installs_all_deps(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path, only_packages=None)
-        dep1 = MagicMock()
-        dep1.get_unique_key.return_value = "org/a"
-        dep2 = MagicMock()
-        dep2.get_unique_key.return_value = "org/b"
+        dep1 = DependencyReference.parse("org/a")
+        dep2 = DependencyReference.parse("org/b")
 
         graph = _make_mock_graph()
         graph.flattened_dependencies.get_installation_list.return_value = [dep1, dep2]
@@ -461,8 +468,7 @@ class TestOnlyFiltering:
 class TestIntendedDepKeys:
     def test_intended_dep_keys_populated_from_deps_to_install(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path)
-        dep = MagicMock()
-        dep.get_unique_key.return_value = "org/mypkg"
+        dep = DependencyReference.parse("org/mypkg")
         graph = _make_mock_graph()
         graph.flattened_dependencies.get_installation_list.return_value = [dep]
 
@@ -491,8 +497,7 @@ class TestDepBaseDirs:
         parent_node = MagicMock()
         parent_node.package = parent_pkg
 
-        child_ref = MagicMock()
-        child_ref.get_unique_key.return_value = "../sibling"
+        child_ref = DependencyReference.parse("../sibling")
         child_node = MagicMock()
         child_node.parent = parent_node
         child_node.package = MagicMock()
@@ -507,8 +512,7 @@ class TestDepBaseDirs:
 
     def test_root_node_parent_none_is_skipped(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path)
-        root_ref = MagicMock()
-        root_ref.get_unique_key.return_value = "org/root"
+        root_ref = DependencyReference.parse("org/root")
         root_node = MagicMock()
         root_node.parent = None
         root_node.dependency_ref = root_ref
@@ -534,8 +538,7 @@ class TestDepBaseDirs:
             pkg.source_path = parent_source
             parent_node = MagicMock()
             parent_node.package = pkg
-            ref = MagicMock()
-            ref.get_unique_key.return_value = "same/dep"
+            ref = DependencyReference.parse("same/dep")
             node = MagicMock()
             node.parent = parent_node
             node.package = MagicMock()
@@ -547,10 +550,6 @@ class TestDepBaseDirs:
 
         graph = _make_mock_graph()
         graph.dependency_tree.nodes = {"same/dep:a": node_a, "same/dep:b": node_b}
-        # Both nodes return the same dep key to simulate collision
-        node_a.dependency_ref.get_unique_key.return_value = "same/dep"
-        node_b.dependency_ref.get_unique_key.return_value = "same/dep"
-
         with caplog.at_level(logging.WARNING):
             _run_ctx(ctx, tmp_path, graph=graph)
 
@@ -606,8 +605,7 @@ class TestVerboseTreeSummary:
         mock_logger.verbose = False
         ctx = _make_ctx(tmp_path, logger=mock_logger)
 
-        dep = MagicMock()
-        dep.get_unique_key.return_value = "org/pkg"
+        dep = DependencyReference.parse("org/pkg")
         graph = _make_mock_graph()
         graph.flattened_dependencies.get_installation_list.return_value = [dep]
         # One direct dep at depth 1, no transitive
