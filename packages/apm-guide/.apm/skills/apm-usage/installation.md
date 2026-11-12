@@ -40,8 +40,7 @@ winget install --id Microsoft.APM --exact --source winget
 ```
 
 ```powershell
-# Scoop (Windows)
-scoop bucket add apm https://github.com/microsoft/scoop-apm
+# Scoop (Windows, default main bucket)
 scoop install apm
 ```
 

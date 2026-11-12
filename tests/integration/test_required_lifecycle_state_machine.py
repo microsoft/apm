@@ -1811,7 +1811,7 @@ def test_required_cursor_metadata_survives_install_compile_update(
         (".claude/rules/stable.md", 'paths:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
         (".windsurf/rules/stable.md", 'globs:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
         (".kiro/steering/stable.md", 'fileMatchPattern:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
-        (".agents/rules/stable.md", 'globs:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
+        (".agents/rules/stable.md", 'trigger: glob\nglobs: "**/*.py, src/**/*.{ts,tsx}"\n'),
     ):
         assert marker in (consumer.root / relative).read_text(encoding="utf-8")
     assert (consumer.root / ".github/instructions/stable.instructions.md").read_text(

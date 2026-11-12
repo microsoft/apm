@@ -330,8 +330,9 @@ Update with `winget upgrade --id Microsoft.APM --exact --source winget`, not `ap
 
 **Scoop (Windows):**
 
+APM is in the default Scoop `main` bucket.
+
 ```powershell
-scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 ```
 

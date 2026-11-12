@@ -1,5 +1,6 @@
 """Tests for instruction integration functionality."""
 
+import json
 import shutil
 import tempfile
 from datetime import datetime
@@ -1657,68 +1658,112 @@ class TestApplyToCommaSplitting:
             assert "paths:" not in written
 
     # ---- Antigravity ----
+    # Antigravity's documented rule schema (issue #3472): ``globs`` is ONE
+    # comma-separated string and every rule carries a valid ``trigger``.
 
-    def test_antigravity_comma_list_emits_yaml_list(self):
+    @staticmethod
+    def _antigravity_frontmatter(result):
+        post = loads_frontmatter(result)
+        assert set(post.metadata) <= {"trigger", "globs"}
+        assert post.metadata["trigger"] in {"glob", "always_on"}
+        if post.metadata["trigger"] == "glob":
+            assert isinstance(post.metadata["globs"], str)
+        else:
+            assert "globs" not in post.metadata
+        return post.metadata
+
+    def test_antigravity_comma_list_emits_one_comma_separated_string(self):
         content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert "globs:" in result
-        assert '  - "**/src/**"' in result
-        assert '  - "**/api/**"' in result
-        assert '  - "**/services/**"' in result
-        assert 'globs: "**/src/**,' not in result
+        assert result == (
+            '---\ntrigger: glob\nglobs: "**/src/**, **/api/**, **/services/**"\n---\n\n# R'
+        )
+        assert self._antigravity_frontmatter(result) == {
+            "trigger": "glob",
+            "globs": "**/src/**, **/api/**, **/services/**",
+        }
 
-    def test_antigravity_single_glob_stays_scalar(self):
+    def test_antigravity_single_glob_stays_quoted_string(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert 'globs: "**/*.py"' in result
-        assert '  - "**/*.py"' not in result
+        assert result == '---\ntrigger: glob\nglobs: "**/*.py"\n---\n\n# R'
+        assert self._antigravity_frontmatter(result)["globs"] == "**/*.py"
+
+    @pytest.mark.parametrize(
+        ("apply_to", "expected_globs"),
+        [
+            ("'*.py'", "*.py"),
+            ("'*.py, *.md'", "*.py, *.md"),
+            ("\n  - '*.py'\n  - '**/*.md'", "*.py, **/*.md"),
+        ],
+    )
+    def test_antigravity_star_leading_patterns_are_valid_yaml(self, apply_to, expected_globs):
+        content = f"---\napplyTo: {apply_to}\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert f"globs: {json.dumps(expected_globs)}\n" in result
+        assert self._antigravity_frontmatter(result)["globs"] == expected_globs
 
     def test_antigravity_comma_whitespace_trimmed(self):
         content = '---\napplyTo: "a, b , c"\n---\n\n# R'
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert '  - "a"' in result
-        assert '  - "b"' in result
-        assert '  - "c"' in result
+        assert self._antigravity_frontmatter(result) == {"trigger": "glob", "globs": "a, b, c"}
 
-    def test_antigravity_single_comma_falls_back_to_no_frontmatter(self):
+    def test_antigravity_brace_alternation_kept_in_one_pattern(self):
+        content = "---\napplyTo: '**/*.py,src/**/*.{ts,tsx}'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert self._antigravity_frontmatter(result)["globs"] == "**/*.py, src/**/*.{ts,tsx}"
+
+    def test_antigravity_single_comma_falls_back_to_always_on(self):
         content = '---\napplyTo: ","\n---\n\n# R'
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" not in result
-        assert "globs" not in result
-        assert "# R" in result
+        assert result == "---\ntrigger: always_on\n---\n\n# R"
+        assert self._antigravity_frontmatter(result) == {"trigger": "always_on"}
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "---\ndescription: General principles\n---\n\n# R",
+            "---\ndescription: General principles\napplyTo: ''\n---\n\n# R",
+            "---\ndescription: General principles\napplyTo: []\n---\n\n# R",
+            "# R",
+        ],
+    )
+    def test_antigravity_unscoped_instruction_gets_always_on_trigger(self, content):
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert result == "---\ntrigger: always_on\n---\n\n# R"
+        assert self._antigravity_frontmatter(result) == {"trigger": "always_on"}
 
     def test_antigravity_crlf_newlines_supported(self):
         content = "---\r\napplyTo: 'src/**/*.py'\r\n---\r\n\r\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert 'globs: "src/**/*.py"' in result
-        assert result.endswith("\n\n# R")
+        assert result == '---\ntrigger: glob\nglobs: "src/**/*.py"\n---\n\n# R'
 
     def test_antigravity_unconditional_crlf_newlines_supported(self):
         content = "---\r\ndescription: Test\r\n---\r\n\r\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger" not in result
-        assert result == "# R"
+        assert result == "---\ntrigger: always_on\n---\n\n# R"
 
     def test_antigravity_list_valued_apply_to(self):
         content = "---\napplyTo:\n  - 'src/**/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert "globs:" in result
-        assert '  - "src/**/*.py"' in result
-        assert '  - "tests/**/*.py"' in result
-        assert 'globs: "[' not in result
+        assert result == ('---\ntrigger: glob\nglobs: "src/**/*.py, tests/**/*.py"\n---\n\n# R')
+        assert "  - " not in result
+
+    def test_antigravity_scalar_and_list_apply_to_render_identically(self):
+        scalar = "---\napplyTo: 'src/**/*.py, tests/**/*.py'\n---\n\n# R"
+        listed = "---\napplyTo:\n  - 'src/**/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
+        assert InstructionIntegrator._convert_to_antigravity_rules(
+            scalar
+        ) == InstructionIntegrator._convert_to_antigravity_rules(listed)
 
     def test_antigravity_list_valued_apply_to_with_literal_commas(self):
         content = "---\napplyTo:\n  - 'src/foo,bar/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
         result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "trigger: glob" in result
-        assert "globs:" in result
-        assert '  - "src/foo,bar/*.py"' in result
-        assert '  - "tests/**/*.py"' in result
+        # Literal commas keep APM's documented ``\\,`` escape so the joined
+        # string never gains an extra top-level separator.
+        assert self._antigravity_frontmatter(result)["globs"] == (
+            "src/foo\\,bar/*.py, tests/**/*.py"
+        )
 
     def test_antigravity_malformed_yaml_fails_closed(self):
         content = "---\napplyTo: [\n---\n\n# Body"
