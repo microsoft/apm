@@ -129,6 +129,7 @@ jobs:
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
+        packages/apm-contributor-dashboard/tests/markdown.test.mjs
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python
@@ -428,6 +429,7 @@ jobs:
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
+        packages/apm-contributor-dashboard/tests/markdown.test.mjs
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python

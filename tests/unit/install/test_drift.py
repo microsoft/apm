@@ -780,6 +780,47 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
 
 
+@pytest.mark.parametrize(("user_scope", "expected"), [(False, ["."]), (True, [])])
+def test_run_replay_includes_root_apm_without_local_deployed_files(
+    monkeypatch, tmp_path, user_scope, expected
+):
+    """Project-scope replay integrates root .apm/ like install does (#3369).
+
+    Root hooks merge into shared configs and record no local_deployed_files,
+    so the lockfile synthesizes no self-entry. Replay must still integrate
+    the project's own .apm/ content, without rewriting the lockfile.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import ReplayConfig, run_replay
+
+    project_root = tmp_path / "proj"
+    (project_root / ".apm" / "hooks").mkdir(parents=True)
+    (project_root / "apm.yml").write_text("name: proj\ntargets: [claude]\n", encoding="utf-8")
+    lockfile_path = project_root / "apm.lock.yaml"
+    LockFile().write(lockfile_path)
+    lock_bytes = lockfile_path.read_bytes()
+
+    replayed: list[str] = []
+
+    def _record(*args, **kwargs):
+        replayed.append(kwargs["package_name"])
+        return {"deployed_files": []}
+
+    monkeypatch.setattr("apm_cli.install.services.integrate_package_primitives", _record)
+
+    run_replay(
+        ReplayConfig(
+            project_root=project_root,
+            lockfile_path=lockfile_path,
+            user_scope=user_scope,
+        ),
+        CheckLogger(verbose=False),
+    )
+
+    assert replayed == expected
+    assert lockfile_path.read_bytes() == lock_bytes
+
+
 def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     """run_replay must pass dep_target_subset from the lockfile to integrate_package_primitives.
 
