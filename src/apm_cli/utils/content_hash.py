@@ -2,6 +2,7 @@
 
 import hashlib
 import stat
+from collections.abc import Collection
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
@@ -24,7 +25,7 @@ _EXCLUDED_ROOT_FILES = {_APM_PIN_MARKER}
 _EMPTY_HASH = "sha256:" + hashlib.sha256(b"").hexdigest()
 
 
-def compute_package_hash(package_path: Path) -> str:
+def compute_package_hash(package_path: Path, *, exclude: Collection[str] = ()) -> str:
     """Compute a deterministic SHA-256 hash of a package's file tree.
 
     The hash is computed over sorted file paths and their contents,
@@ -48,6 +49,11 @@ def compute_package_hash(package_path: Path) -> str:
 
     Args:
         package_path: Root directory of the installed package.
+        exclude: Package-relative POSIX paths APM itself added after
+            materialization (verbatim licence copies, see
+            :mod:`apm_cli.deps.carried_license`). Callers pass them from the
+            download result or the lockfile record, never from disk, so the
+            hash keeps describing the upstream payload.
 
     Returns:
         Hash string in format ``"sha256:<hex_digest>"``.
@@ -59,6 +65,8 @@ def compute_package_hash(package_path: Path) -> str:
     file_count = 0
 
     for rel_path in _package_files(package_path):
+        if exclude and rel_path.as_posix() in exclude:
+            continue
         # Hash the relative path then the file contents
         hasher.update(rel_path.as_posix().encode("utf-8"))
         hasher.update((package_path / rel_path).read_bytes())
@@ -171,15 +179,18 @@ def compute_file_hash(file_path: Path) -> str:
     return f"sha256:{hasher.hexdigest()}"
 
 
-def verify_package_hash(package_path: Path, expected_hash: str) -> bool:
+def verify_package_hash(
+    package_path: Path, expected_hash: str, *, exclude: Collection[str] = ()
+) -> bool:
     """Verify a package's content matches the expected hash.
 
     Args:
         package_path: Root directory of the installed package.
         expected_hash: Expected hash string (e.g., ``"sha256:abc123..."``).
+        exclude: Carried licence paths, as for :func:`compute_package_hash`.
 
     Returns:
         True if hash matches, False if mismatch.
     """
-    actual = compute_package_hash(package_path)
+    actual = compute_package_hash(package_path, exclude=exclude)
     return actual == expected_hash

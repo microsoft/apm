@@ -412,6 +412,32 @@ class TestInteractiveProjectSetup:
         assert result["name"] == "my-project"
         assert result["version"] == "1.0.0"
 
+    def test_fallback_text_path_reprompts_on_invalid_name(self, tmp_path):
+        """The click fallback shows the shared invalid-name rule, then re-prompts."""
+        from apm_cli.commands.init import _interactive_project_setup
+
+        logger = MagicMock()
+
+        with (
+            patch.dict(sys.modules, {"rich.console": None, "rich.prompt": None}),
+            patch(
+                "click.prompt",
+                side_effect=["bad/name", "my-project", "1.0.0", "A test project", "Author"],
+            ),
+            patch("click.echo") as echo,
+            patch("apm_cli.commands._helpers._auto_detect_author", return_value="TestAuthor"),
+            patch(
+                "apm_cli.commands._helpers._auto_detect_description",
+                return_value="Auto desc",
+            ),
+        ):
+            result = _interactive_project_setup("my-project", logger)
+
+        assert result["name"] == "my-project"
+        echoed = " ".join(str(call.args[0]) for call in echo.call_args_list if call.args)
+        assert "Invalid project name 'bad/name'" in echoed
+        assert "empty or whitespace-only" in echoed
+
 
 # ---------------------------------------------------------------------------
 # init CLI command smoke tests

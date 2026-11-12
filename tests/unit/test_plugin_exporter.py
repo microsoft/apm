@@ -22,6 +22,7 @@ from apm_cli.bundle.plugin_exporter import (
     _get_dev_dependency_urls,
     _merge_file_map,
     _plugin_rel_for_deployed_path,
+    _reconcile_plugin_json_version,
     _rename_prompt,
     _update_plugin_json_paths,
     _validate_output_rel,
@@ -680,6 +681,120 @@ class TestUpdatePluginJsonPaths:
         assert captured == []
 
 
+class _CapturingLogger:
+    """Record pack warnings; absorb info/debug so tests stay quiet."""
+
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, msg, *_args, **_kwargs):
+        self.warnings.append(msg)
+
+    def info(self, _msg, *_args, **_kwargs):
+        pass
+
+    def debug(self, _msg, *_args, **_kwargs):
+        pass
+
+    def success(self, _msg, *_args, **_kwargs):
+        pass
+
+
+def _write_stale_release_project(tmp_path: Path, *, with_hooks: bool) -> Path:
+    """Project bumped to 1.0.3 whose authored manifest and old build say 1.0.2."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_apm_yml(project, name="demo-pkg", version="1.0.3")
+    _write_lockfile(project)
+    _make_apm_dir(project, skills={"demo": ["SKILL.md"]})
+    if with_hooks:
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps({"preCommit": ["lint"]}), encoding="utf-8")
+    authored = project / ".claude-plugin" / "plugin.json"
+    authored.parent.mkdir()
+    authored.write_text(
+        json.dumps({"name": "demo-pkg", "version": "1.0.2", "homepage": "https://x.test"}),
+        encoding="utf-8",
+    )
+    old_bundle = tmp_path / "build" / "demo-pkg-1.0.2"
+    old_bundle.mkdir(parents=True)
+    (old_bundle / "plugin.json").write_text(
+        json.dumps({"name": "demo-pkg", "version": "1.0.2"}), encoding="utf-8"
+    )
+    return project
+
+
+class TestReconcilePluginJsonVersion:
+    """Every ``plugin.json`` inside a bundle must agree with the apm.yml version (#3351)."""
+
+    def test_forces_apm_yml_version_when_authored_is_stale(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version(
+            {"name": "pkg", "version": "1.0.2"},
+            "1.0.3",
+            source_label=".claude-plugin/plugin.json",
+            logger=logger,
+        )
+
+        assert result == {"name": "pkg", "version": "1.0.3"}
+        assert len(logger.warnings) == 1
+        assert ".claude-plugin/plugin.json declares version 1.0.2" in logger.warnings[0]
+        assert "apm.yml declares 1.0.3" in logger.warnings[0]
+
+    def test_matching_version_is_untouched_and_silent(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version(
+            {"name": "pkg", "version": "1.0.3"}, "1.0.3", logger=logger
+        )
+
+        assert result["version"] == "1.0.3"
+        assert logger.warnings == []
+
+    def test_missing_version_is_filled_silently(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version({"name": "pkg"}, "1.0.3", logger=logger)
+
+        assert result["version"] == "1.0.3"
+        assert logger.warnings == []
+
+    def test_input_is_not_mutated(self):
+        authored = {"name": "pkg", "version": "1.0.2"}
+
+        _reconcile_plugin_json_version(authored, "1.0.3", logger=_CapturingLogger())
+
+        assert authored["version"] == "1.0.2"
+
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize("with_hooks", [False, True], ids=["root-only", "with-native-copy"])
+    def test_stale_build_and_manifest_pack_with_apm_yml_version(self, tmp_path, with_hooks):
+        """Regression #3351: build/<pkg>-1.0.3 used to ship plugin.json declaring 1.0.2."""
+        project = _write_stale_release_project(tmp_path, with_hooks=with_hooks)
+        authored = project / ".claude-plugin" / "plugin.json"
+        authored_bytes = authored.read_bytes()
+        old_manifest = tmp_path / "build" / "demo-pkg-1.0.2" / "plugin.json"
+        old_bytes = old_manifest.read_bytes()
+        logger = _CapturingLogger()
+
+        result = export_plugin_bundle(project, tmp_path / "build", logger=logger)
+
+        assert result.bundle_path.name == "demo-pkg-1.0.3"
+        bundled = ["plugin.json"] + ([".claude-plugin/plugin.json"] if with_hooks else [])
+        for rel in bundled:
+            packed = json.loads((result.bundle_path / rel).read_text(encoding="utf-8"))
+            assert packed["version"] == "1.0.3", rel
+            assert packed["homepage"] == "https://x.test", rel
+        assert (result.bundle_path / ".claude-plugin" / "plugin.json").exists() is with_hooks
+        assert authored.read_bytes() == authored_bytes
+        assert old_manifest.read_bytes() == old_bytes
+        version_warnings = [w for w in logger.warnings if "declares version" in w]
+        assert len(version_warnings) == 1
+        assert version_warnings[0].startswith(".claude-plugin/plugin.json declares version 1.0.2")
+
+
 # ---------------------------------------------------------------------------
 # Integration tests: export_plugin_bundle
 # ---------------------------------------------------------------------------
@@ -708,6 +823,12 @@ class TestExportPluginBundle:
         assert not (result.bundle_path / "apm_modules").exists()
 
     def test_uses_existing_plugin_json(self, tmp_path):
+        """Authored metadata is kept, but ``version`` follows apm.yml (#3351).
+
+        The bundle directory is named from the apm.yml version, so honouring a
+        stale authored version here shipped a self-contradicting bundle
+        (``build/<pkg>-1.0.0/plugin.json`` declaring 2.0.0).
+        """
         project = _setup_plugin_project(
             tmp_path,
             agents=["a.agent.md"],
@@ -718,7 +839,8 @@ class TestExportPluginBundle:
 
         pj = json.loads((result.bundle_path / "plugin.json").read_text())
         assert pj["name"] == "custom-name"
-        assert pj["version"] == "2.0.0"
+        assert pj["version"] == "1.0.0"
+        assert result.bundle_path.name == "test-pkg-1.0.0"
 
     def test_synthesizes_plugin_json_when_absent(self, tmp_path):
         """G2: bare plugin shape (no marketplace block) gets an [i] info,

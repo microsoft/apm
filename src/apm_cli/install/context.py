@@ -172,6 +172,11 @@ class InstallContext:
     # from this map mean "not declared" (NOASSERTION) -- a missing entry is
     # never backfilled with a sentinel.
     package_declared_licenses: dict[str, str] = field(default_factory=dict)
+    # Verbatim licence copies carried into each materialized package (#3556),
+    # dep_key -> tuple[CarriedLicense, ...]. Set from the download result when
+    # the package was fetched this run, else from the lock entry; consumed by
+    # content-hash exclusion and LockfileBuilder._attach_carried_licenses.
+    package_carried_licenses: dict[str, tuple] = field(default_factory=dict)
     content_hash_verified_deps: set[str] = field(default_factory=set)
     callback_content_hashes: dict[str, tuple[Path, str]] = field(default_factory=dict)
     # Deps whose content hash is expected to change legitimately:

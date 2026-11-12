@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -57,6 +58,7 @@ def matches_fresh_legacy_plugin_hash(
     *,
     lockfile: LockFile | None,
     package_type: PackageType | None,
+    exclude: Collection[str] = (),
 ) -> bool:
     """Accept only the known receipt-only hash delta on a fresh 0.28 restore."""
     locked_dependency = lockfile.get_dependency(dep_key) if lockfile is not None else None
@@ -80,7 +82,7 @@ def matches_fresh_legacy_plugin_hash(
     try:
         shutil.copytree(package_path, replacement, symlinks=True)
         (replacement / _PLUGIN_SKILL_SOURCES_RECEIPT).unlink()
-        legacy_hash = compute_package_hash(replacement)
+        legacy_hash = compute_package_hash(replacement, exclude=exclude)
     except BaseException:
         staging.rollback()
         raise

@@ -21,6 +21,10 @@ from scripts.architecture_linter.checks.install_base_integrator_and_contraction 
     check_provenance_state,
     check_target_file_contraction,
 )
+from scripts.architecture_linter.checks.install_codex_agent_links import (
+    GUARD_CODEX_AGENT_LINKS,
+    check_codex_agent_link_resolution,
+)
 from scripts.architecture_linter.checks.install_deployment_shared import _rule
 from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
@@ -187,6 +191,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_BASE_INTEGRATOR,
         "File-level deploy/sync/cleanup stays owned by BaseIntegrator.",
         check_base_integrator,
+    ),
+    _rule(
+        GUARD_CODEX_AGENT_LINKS,
+        "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
+        check_codex_agent_link_resolution,
     ),
     _rule(
         GUARD_EXECUTABLE_TRUST,

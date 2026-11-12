@@ -16,7 +16,9 @@ apm init --discover [OPTIONS]
 
 Creates a minimal `apm.yml` in the current directory or in a new
 `PROJECT_NAME` subdirectory. Auto-detects name, author, and description
-so you can start running `apm install` immediately.
+so you can start running `apm install` immediately. With `--yes`,
+`--name`, `--description`, `--version`, and `--author` set those `apm.yml`
+fields without prompts.
 
 With `--discover`, inventories existing skill and package
 directories in recognized layouts. It
@@ -46,7 +48,16 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
 | `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`; `all` expands the default stable set. |
+| `--name` | directory name | Project name written to `apm.yml` for in-place init. Same rules as `PROJECT_NAME`. Ignored, with a warning, when `PROJECT_NAME` is given. |
+| `--description` | auto-detected | Project description written to `apm.yml`. |
+| `--version` | `1.0.0` (`0.1.0` with `--plugin --yes`) | Project version written to `apm.yml`. Must not be empty. An explicit value is kept in plugin mode. |
+| `--author` | `git config user.name` | Project author written to `apm.yml`. |
 | `-v`, `--verbose` | off | Show detailed output. |
+
+Metadata flags set their field directly with `--yes`. Without `--yes`
+(including piped, non-TTY input), they become the prompt defaults, so an
+empty answer keeps the flag value. Values are trimmed like prompt answers.
+They cannot be combined with `--discover`.
 
 Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
@@ -65,6 +76,15 @@ Non-interactive scaffold of a new directory:
 ```bash
 $ apm init my-app --yes
 [*] Created project directory: my-app
+[+] APM project initialized successfully!
+Created Files
+  * apm.yml  Project configuration
+```
+
+Scripted init with explicit metadata, in the current directory:
+
+```bash
+$ apm init --yes --name my-app --description "Team agent setup" --version 0.1.0 --author "Jane Dev"
 [+] APM project initialized successfully!
 Created Files
   * apm.yml  Project configuration
@@ -160,9 +180,10 @@ the author and target harness remain responsible for compliance.
     `https://github.com/microsoft/agentrc`.
   - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
-  project or plugin name, refused discovery apply, declined discovery consent,
+  project or plugin name, empty `--version`, refused discovery apply, declined discovery consent,
   or unhandled error. Discovery consent refusal leaves files unchanged.
-  Invalid option combinations, including `--discover --target`, exit `2`.
+  Invalid option combinations, including `--discover --target` and
+  `--discover` with a metadata flag, exit `2`.
 
 ## Deprecations
 

@@ -43,7 +43,7 @@ def test_native_replay_owner_rules_pass() -> None:
             "_copy_tree_dereferencing_validated(source, replay_path, source)",
             "_copy_install_tree(source, replay_path)",
         ),
-        (ADMISSION, "verify_package_hash(candidate, expected_hash)", "True"),
+        (ADMISSION, "verify_locked_package(candidate, expected_hash, carried)", "True"),
     ],
 )
 def test_native_replay_owner_bypass_is_rejected(path: str, before: str, after: str) -> None:
