@@ -61,6 +61,7 @@ The `metadata_enrichment` object has a closed per-package status vocabulary:
 |---|---|---|
 | `fetched` | Remote `apm.yml` supplied metadata. | yes |
 | `empty` | Remote `apm.yml` was reachable but had no description or version. | yes |
+| `manifestless` | Remote `apm.yml` was absent, but `SKILL.md` had valid `name` and `description` frontmatter at the resolved path. | yes |
 | `local` | Metadata came from a local package. | yes |
 | `explicit` | Fixed description and version came from the marketplace entry. | yes |
 | `failed` | The remote manifest could not be fetched. | no |
@@ -92,9 +93,17 @@ uses `marketplace_metadata_uncertifiable` and exits `4`; `--strict-metadata`
 uses `metadata_incomplete` and exits `5` before writing.
 
 GitHub-hosted packages can inherit description and version from their remote
-`apm.yml`. For GitLab, Azure DevOps, and other hosts, set fixed `description`
-and `version` fields on the marketplace package entry so strict checks can
-certify without a GitHub metadata request.
+`apm.yml`. When that file returns `404`, APM verifies `SKILL.md` at the same
+resolved repository, ref, and subdirectory. A verified manifestless skill is
+certifiable when its frontmatter has non-empty string `name` and `description`
+fields. Malformed frontmatter, missing fields, non-string values, and
+whitespace-only values remain `failed` and make `--check-clean` exit `4`, as do
+a missing repository, ref, or package path.
+For private GitHub sources, authenticated fallback checks both files through
+the `api.github.com` Contents API.
+For GitLab, Azure DevOps, and other hosts, set fixed `description` and `version`
+fields on the marketplace package entry so strict checks can certify without a
+GitHub metadata request.
 
 ## Examples
 
@@ -139,6 +148,8 @@ marketplace:
     claude: {}
     codex:
       path: ./build/codex-marketplace.json
+    copilot:
+      path: ./build/copilot-marketplace.json
 ```
 
 ### Preview without writing
@@ -162,7 +173,8 @@ A Claude Code plugin directory under `--output`. Contains:
 - Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
-- A merged `hooks.json` from the producer's own hooks. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+- A merged `hooks.json` from the producer's own hooks. When present, root `plugin.json` and `.claude-plugin/plugin.json` declare `"hooks": "./hooks.json"` for native Claude discovery. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+- Referenced first-party hook scripts and selected sibling assets, with plugin-root command paths rewritten to their packed locations. Missing, excluded, symlinked, escaping or collision-displaced resources fail before replacing an existing bundle. Packing never executes scripts; see [Hook resources in Claude plugin bundles](../../../producer/pack-a-bundle/#hook-resources-in-claude-plugin-bundles).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 
@@ -209,9 +221,24 @@ dependencies:
 
 ### Marketplace artifacts
 
-`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
+`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex or `.github/plugin/marketplace.json` for Copilot CLI. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
 
-Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time.
+Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time. Each format also declares a reserved `APM_MARKETPLACE_<FORMAT>_PATH` environment variable name (for example `APM_MARKETPLACE_COPILOT_PATH`); it is validated at startup but not yet consumed by `apm pack`.
+
+Copilot output preserves local `plugins[].source` paths as strings. Remote
+entries use the [supported GitHub or Git URL source objects](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#plugin-source-types):
+`{source: "github", repo: "owner/repo"}` or `{source: "url", url: "..."}`,
+with optional `path`, `ref`, and full 40-character commit `sha`. Annotated
+tag pins use their peeled commit, while a raw commit is emitted as `sha`
+without `ref`. Unrepresentable inputs fail instead of becoming invented
+local paths. Existing branch restrictions still apply. Marketplace
+description/version are nested under `metadata`; plugin description/version
+remain on each plugin. There is no `category` requirement. The default
+remains Claude-only unless another output is selected.
+
+For Copilot path overrides, `--marketplace-path copilot=PATH` wins over
+`marketplace.copilot.output`, then `marketplace.outputs.copilot.path`,
+then `.github/plugin/marketplace.json`.
 
 Remote Claude entries can inherit `description` and `version` from their own
 `apm.yml`. If APM cannot fetch that metadata, normal packing writes the artifact

@@ -18,6 +18,8 @@ registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
+registry-delegation-build-id-verification Build IDs are verified in their
+                                        canonical owner
 registry-delegation-bootstrap-project-  AC18 ``lint-bootstrap-project-name``
 name                                    (ported semantically)
 ======================================  ==================================
@@ -116,7 +118,31 @@ _DOCTOR_OWNER_NAME = "STATUS_SYMBOLS"
 _COMPILATION_PREFIX = "src/apm_cli/compilation/"
 
 
+# -- Version rendering / entrypoint delegation --
+
+_VERSION_RENDERER = "src/apm_cli/version_output.py"
+
+_VERSION_ENTRYPOINT = "src/apm_cli/entrypoint.py"
+
+_VR_HELPERS = "src/apm_cli/commands/_helpers.py"
+
+_VR_PYPROJECT = "pyproject.toml"
+
+_VR_FORBIDDEN_IMPORT = re.compile(
+    r"^\s*(?:from|import)\s+"
+    r"(?:apm_cli\.(?:cli|commands|deps)\b|\.(?:cli|commands|deps)\b|git\b|gitdb\b)"
+)
+
+_EP_EAGER_FORBIDDEN = re.compile(
+    r"^(?:from|import)\s+"
+    r"(?:apm_cli\.(?:cli|commands|deps)\b|\.(?:cli|commands|deps)\b|git\b|gitdb\b)"
+)
+
+# -- Compiled output / build-id --
+
 _COMPILED_OUTPUT_OWNER = "src/apm_cli/compilation/output_writer.py"
+_BUILD_ID_OWNER = "src/apm_cli/compilation/build_id.py"
+_BUILD_ID_CONSUMER = "src/apm_cli/compilation/agents_compiler.py"
 
 
 _COMPILED_WRITE_PATTERN = r'write_text_lf|atomic_write_text|\.write_text\(|open\([^)]*["\']w'
@@ -150,6 +176,23 @@ _BOOTSTRAP_OWNED_DEFS: tuple[str, ...] = (
 
 
 _RESOLVER_ALT = r"_?resolve_bootstrap_project_name"
+
+
+_USER_INVOCABLE_OWNER = "src/apm_cli/primitives/models.py"
+
+
+_USER_INVOCABLE_CONSUMERS: tuple[str, ...] = (
+    "src/apm_cli/primitives/parser.py",
+    "src/apm_cli/integration/agent_integrator.py",
+)
+
+
+_USER_INVOCABLE_OWNED_DEFS: tuple[str, ...] = ("resolve_user_invocable",)
+
+
+_USER_INVOCABLE_REDERIVE_PATTERN = (
+    r'\.get\(\s*["\']user-invocable["\']\s*\)|\.get\(\s*["\']visibility["\']\s*\)'
+)
 
 
 def _count_fixed_lines(facts: FileFacts, needle: str) -> int:
@@ -225,6 +268,60 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
         message="manifest target consumers must use canonical_targets",
         exempt_marker=EXEMPT_MARKER,
     )
+
+
+def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation]:
+    """Audit consumers must share target intent and recorded identity owners."""
+    rule_id = "registry_delegation.audit_target_selection"
+    profile_owner = "src/apm_cli/integration/targets.py"
+    consumers = {
+        "src/apm_cli/install/drift.py": ("run_replay",),
+        "src/apm_cli/install/audit_replay.py": ("prepare_ci_audit_replay",),
+        "src/apm_cli/policy/ci_checks.py": ("_check_drift", "run_baseline_checks"),
+        "src/apm_cli/security/file_scanner.py": ("scan_project_result",),
+    }
+    findings: list[Violation] = []
+    for name, owner in (
+        ("resolve_audit_targets", profile_owner),
+        ("resolve_audit_target_decision", _EFFECTIVE_TARGET_OWNER),
+    ):
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        if definers != frozenset({owner}):
+            findings.append(violation(rule_id, owner, f"{name} must have exactly one owner"))
+    required = {
+        **{
+            path: {scope: ("resolve_audit_targets",) for scope in scopes}
+            for path, scopes in consumers.items()
+        },
+        profile_owner: {
+            "resolve_audit_targets": (
+                "resolve_audit_target_decision",
+                "DeploymentLedgerCodec.recorded_target_names",
+                "resolve_targets",
+            )
+        },
+    }
+    required["src/apm_cli/policy/ci_checks.py"]["_resolve_deployed_file_path"] = (
+        "BaseIntegrator.validate_deploy_path",
+    )
+    for path, scopes in required.items():
+        facts, failures = checked_facts(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        for scope, names in scopes.items():
+            calls = {call.qualname for call in facts.calls if call.scope == scope}
+            for name in names:
+                if name not in calls:
+                    findings.append(violation(rule_id, path, f"{scope} must delegate to {name}"))
+            if path in consumers and calls.intersection(
+                {"resolve_targets", "active_targets", "detect_target", "get_install_target"}
+            ):
+                findings.append(
+                    violation(rule_id, path, f"{scope} must not rederive audit targets")
+                )
+    return findings
 
 
 def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violation]:
@@ -478,6 +575,74 @@ def _check_compiled_output_writes(provider: FactsProvider) -> Iterable[Violation
     )
 
 
+def _check_build_id_verification(provider: FactsProvider) -> Iterable[Violation]:
+    """Build ID verification and stabilization must use compilation/build_id.py."""
+    rule_id = "registry_delegation.build_id_verification"
+    facts_by_path, failures = _read_required(
+        provider, rule_id, (_BUILD_ID_OWNER, _BUILD_ID_CONSUMER)
+    )
+    if failures:
+        return failures
+
+    owner = facts_by_path[_BUILD_ID_OWNER]
+    consumer = facts_by_path[_BUILD_ID_CONSUMER]
+    findings: list[Violation] = []
+    if not _has_regex(owner, re.compile(r"^def has_valid_build_id\(")):
+        findings.append(
+            violation(rule_id, _BUILD_ID_OWNER, "build_id.py must own has_valid_build_id")
+        )
+    if not _has_regex(owner, re.compile(r"^def stabilize_build_id\(")):
+        findings.append(
+            violation(rule_id, _BUILD_ID_OWNER, "build_id.py must own stabilize_build_id")
+        )
+    imported_helpers = {
+        name
+        for imported in consumer.imports
+        if imported.module == "build_id" and imported.level == 1
+        for name in imported.names
+    }
+    if not {"has_valid_build_id", "stabilize_build_id"} <= imported_helpers:
+        findings.append(
+            violation(
+                rule_id,
+                _BUILD_ID_CONSUMER,
+                "agents_compiler.py must import Build ID helpers from build_id.py",
+            )
+        )
+    if not _has_regex(consumer, re.compile(r"\bhas_valid_build_id\(existing\)")):
+        findings.append(
+            violation(
+                rule_id,
+                _BUILD_ID_CONSUMER,
+                "root cleanup must verify content with has_valid_build_id",
+            )
+        )
+    if not _has_regex(consumer, re.compile(r"return stabilize_build_id\(content\)")):
+        findings.append(
+            violation(
+                rule_id,
+                _BUILD_ID_CONSUMER,
+                "root content finalization must use stabilize_build_id",
+            )
+        )
+    if any(
+        _has_regex(consumer, pattern)
+        for pattern in (
+            re.compile(r"^def _has_valid_build_id\("),
+            re.compile(r"_BUILD_ID_LINE_RE"),
+            re.compile(r"\bhashlib\.sha256\("),
+        )
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _BUILD_ID_CONSUMER,
+                "agents_compiler.py must not duplicate Build ID parsing or hashing",
+            )
+        )
+    return findings
+
+
 def _check_bootstrap_project_name(provider: FactsProvider) -> Iterable[Violation]:
     """Manifest bootstrap names must route through ``core/project_name.py``.
 
@@ -581,6 +746,56 @@ def _check_bootstrap_project_name(provider: FactsProvider) -> Iterable[Violation
     return findings
 
 
+def _check_user_invocable_resolution(provider: FactsProvider) -> Iterable[Violation]:
+    """Agent user-invocability must route through ``resolve_user_invocable``.
+
+    The parser and agent integrator must call the single interpretation
+    authority in ``primitives/models.py`` instead of re-deriving the boolean
+    from the ``user-invocable`` field or its ``visibility: internal`` alias.
+    """
+    rule_id = "registry_delegation.user_invocable_resolution"
+    consumers = (_USER_INVOCABLE_OWNER, *_USER_INVOCABLE_CONSUMERS)
+    facts_by_path, failures = _read_required(provider, rule_id, consumers)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+    for name in _USER_INVOCABLE_OWNED_DEFS:
+        definers, def_failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        if def_failures:
+            findings.extend(def_failures)
+            continue
+        if definers != frozenset({_USER_INVOCABLE_OWNER}):
+            findings.append(
+                violation(
+                    rule_id,
+                    _USER_INVOCABLE_OWNER,
+                    f"{name} must be defined only by primitives/models.py",
+                )
+            )
+
+    rederive_pattern = re.compile(_USER_INVOCABLE_REDERIVE_PATTERN)
+    for consumer in _USER_INVOCABLE_CONSUMERS:
+        facts = facts_by_path[consumer]
+        if not _has_fixed(facts, "resolve_user_invocable("):
+            findings.append(
+                violation(
+                    rule_id,
+                    consumer,
+                    "consumer must call resolve_user_invocable() instead of re-deriving it",
+                )
+            )
+        if _has_regex(facts, rederive_pattern):
+            findings.append(
+                violation(
+                    rule_id,
+                    consumer,
+                    "consumer must not re-derive user-invocable/visibility locally",
+                )
+            )
+    return findings
+
+
 def _is_name(node: ast.AST | None, name: str) -> bool:
     return isinstance(node, ast.Name) and node.id == name
 
@@ -647,7 +862,119 @@ def _has_named_assignment(
     )
 
 
+def _check_version_rendering(provider: FactsProvider) -> Iterable[Violation]:
+    """CLI version rendering must route through ``version_output.py``.
+
+    Guards the lightweight entrypoint extraction:
+    * ``print_version`` is defined only in ``version_output.py``.
+    * ``version_output.py`` never imports CLI, commands, deps, or GitPython.
+    * ``entrypoint.py`` never eagerly (top-level) imports those modules.
+    * ``_helpers.py`` reexports from ``version_output``, not a local copy.
+    * ``pyproject.toml`` points ``apm`` to ``apm_cli.entrypoint:main``.
+    """
+    rule_id = "registry_delegation.version_rendering"
+    python_paths = (_VERSION_RENDERER, _VERSION_ENTRYPOINT, _VR_HELPERS)
+    facts_by_path, failures = _read_required(provider, rule_id, python_paths)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+    vo = facts_by_path[_VERSION_RENDERER]
+    ep = facts_by_path[_VERSION_ENTRYPOINT]
+    helpers = facts_by_path[_VR_HELPERS]
+
+    # 1. print_version defined only in version_output.py
+    definers, def_failures = _defining_files(
+        provider, rule_id, "print_version", kinds=("function",)
+    )
+    if def_failures:
+        findings.extend(def_failures)
+    elif definers != frozenset({_VERSION_RENDERER}):
+        findings.append(
+            violation(
+                rule_id,
+                _VERSION_RENDERER,
+                "print_version must be defined only by version_output.py",
+            )
+        )
+
+    # 2. version_output.py: no imports of CLI/commands/deps/GitPython
+    for number, line in enumerate(vo.lines, start=1):
+        if _VR_FORBIDDEN_IMPORT.search(line) is not None:
+            findings.append(
+                violation(
+                    rule_id,
+                    _VERSION_RENDERER,
+                    "version_output.py must not import CLI, commands, deps, or GitPython",
+                    line=number,
+                )
+            )
+
+    # 3. entrypoint.py: no eager (unindented) imports of those modules
+    for number, line in enumerate(ep.lines, start=1):
+        if _EP_EAGER_FORBIDDEN.search(line) is not None:
+            findings.append(
+                violation(
+                    rule_id,
+                    _VERSION_ENTRYPOINT,
+                    "entrypoint.py must not eagerly import CLI, commands, deps, or GitPython",
+                    line=number,
+                )
+            )
+
+    # 4. entrypoint.py must lazy-delegate to canonical renderer and cli
+    ep_text = source_text(ep)
+    if "from apm_cli.version_output import print_version" not in ep_text:
+        findings.append(
+            violation(
+                rule_id,
+                _VERSION_ENTRYPOINT,
+                "entrypoint.py must lazy-import print_version from apm_cli.version_output",
+            )
+        )
+    if "from apm_cli.cli import main" not in ep_text:
+        findings.append(
+            violation(
+                rule_id,
+                _VERSION_ENTRYPOINT,
+                "entrypoint.py must lazy-delegate non-version argv to apm_cli.cli.main",
+            )
+        )
+
+    # 5. _helpers.py must reexport from version_output
+    if "from ..version_output import print_version" not in source_text(helpers):
+        findings.append(
+            violation(
+                rule_id,
+                _VR_HELPERS,
+                "_helpers.py must reexport print_version from version_output",
+            )
+        )
+
+    # 6. pyproject.toml entrypoint manifest
+    pyproject, pf = checked_facts(provider, _VR_PYPROJECT, rule_id, require_python=False)
+    if pf:
+        findings.extend(pf)
+    elif 'apm = "apm_cli.entrypoint:main"' not in source_text(pyproject):
+        findings.append(
+            violation(
+                rule_id,
+                _VR_PYPROJECT,
+                "pyproject.toml project.scripts.apm must be apm_cli.entrypoint:main",
+            )
+        )
+
+    return findings
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="registry_delegation.audit_target_selection",
+        group=GROUP,
+        guard_ids=("registry-delegation-audit-target-selection",),
+        description="Audit replay and coverage share current intent and recorded target identity.",
+        check=_check_audit_target_selection,
+    ),
     Rule(
         id="registry_delegation.runtime_descriptors",
         group=GROUP,
@@ -684,11 +1011,35 @@ RULES: tuple[Rule, ...] = (
         check=_check_compiled_output_writes,
     ),
     Rule(
+        id="registry_delegation.build_id_verification",
+        group=GROUP,
+        guard_ids=("registry-delegation-build-id-verification",),
+        description="Build ID creation and verification must route through compilation/build_id.py.",
+        check=_check_build_id_verification,
+    ),
+    Rule(
         id="registry_delegation.bootstrap_project_name",
         group=GROUP,
         guard_ids=("registry-delegation-bootstrap-project-name",),
         description="Bootstrap project names must route through core/project_name.py.",
         check=_check_bootstrap_project_name,
+    ),
+    Rule(
+        id="registry_delegation.user_invocable_resolution",
+        group=GROUP,
+        guard_ids=("registry-delegation-user-invocable-resolution",),
+        description=(
+            "Agent user-invocability must route through "
+            "primitives/models.py (resolve_user_invocable)."
+        ),
+        check=_check_user_invocable_resolution,
+    ),
+    Rule(
+        id="registry_delegation.version_rendering",
+        group=GROUP,
+        guard_ids=("registry-delegation-version-rendering",),
+        description="CLI version rendering must route through version_output.py.",
+        check=_check_version_rendering,
     ),
 )
 

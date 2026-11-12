@@ -13,29 +13,13 @@ Covers the docs/proposals/registry-api.md §6.1 invariants:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from functools import partial
 
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import build_download_ref, detect_ref_change
 from apm_cli.models.dependency.reference import DependencyReference
 
-
-@dataclass
-class _LockedDep:
-    """Minimal LockedDependency stand-in for drift tests."""
-
-    repo_url: str = "acme/web"
-    resolved_ref: str | None = None
-    resolved_commit: str | None = None
-    host: str | None = "github.com"
-    registry_prefix: str | None = None
-    virtual_path: str | None = None
-    source: str | None = None
-    local_path: str | None = None
-    version: str | None = None
-    resolved_url: str | None = None
-    resolved_hash: str | None = None
-    is_insecure: bool = False
-    allow_insecure: bool = False
+_LockedDep = partial(LockedDependency, repo_url="acme/web", host="github.com")
 
 
 class _LockfileStub:

@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
 from apm_cli.core.auth import AuthResolver
+from apm_cli.deps.git_file_transport import GitFileTransportError
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 
@@ -24,7 +25,7 @@ def _download_from_bespoke_gitlab_host(env: dict[str, str]) -> tuple[str, dict[s
             patch.object(
                 downloader._strategies,
                 "_download_gitlab_file_via_git",
-                side_effect=RuntimeError("force REST fallback"),
+                side_effect=GitFileTransportError("force REST fallback"),
             ),
             patch.object(downloader, "_resilient_get", return_value=response) as mock_get,
         ):

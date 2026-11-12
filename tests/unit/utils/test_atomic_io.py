@@ -27,7 +27,7 @@ from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 # atomic/LF-safe text writes (microsoft/apm#2233 CRLF-drift class).
 # Selected by the PR-time Windows Compatibility Gate via
 # `pytest -m windows_compat`; also runs on every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 
 class TestAtomicWriteText:
@@ -49,6 +49,68 @@ class TestAtomicWriteText:
         target.write_text("old content", encoding="utf-8")
         atomic_write_text(target, "new content")
         assert target.read_text(encoding="utf-8") == "new content"
+
+    def test_create_only_publishes_complete_lf_bytes(self, tmp_path: Path) -> None:
+        """Exclusive publication retains the canonical encoding and temp cleanup."""
+        target = tmp_path / "new.txt"
+        atomic_write_text(target, "one\r\ntwo\r\n", create_only=True, new_file_mode=0o600)
+        assert target.read_bytes() == b"one\ntwo\n"
+        assert list(tmp_path.glob("apm-atomic-*")) == []
+
+    @pytest.mark.parametrize("kind", ["file", "symlink", "directory"])
+    def test_create_only_preserves_a_destination_appearing_during_staging(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+    ) -> None:
+        """Use a real exclusive publication failure, not a mocked collision result."""
+        from apm_cli.utils import atomic_io
+
+        target = tmp_path / "raced.txt"
+        unrelated = tmp_path / "apm-atomic-unrelated"
+        unrelated.write_bytes(b"not this call's staging file\n")
+        referent = tmp_path / "referent.txt"
+        referent.write_bytes(b"foreign referent\n")
+        link = atomic_io.os.link
+
+        def competing_write(source: str, destination: Path) -> None:
+            if kind == "file":
+                destination.write_bytes(b"foreign bytes\n")
+            elif kind == "symlink":
+                destination.symlink_to(referent)
+            else:
+                destination.mkdir()
+                (destination / "member").write_bytes(b"foreign member\n")
+            link(source, destination)
+
+        monkeypatch.setattr(atomic_io.os, "link", competing_write)
+        with pytest.raises(FileExistsError):
+            atomic_write_text(target, "replacement\n", create_only=True)
+        if kind == "file":
+            assert target.read_bytes() == b"foreign bytes\n"
+        elif kind == "symlink":
+            assert target.is_symlink()
+            assert referent.read_bytes() == b"foreign referent\n"
+        else:
+            assert (target / "member").read_bytes() == b"foreign member\n"
+        assert unrelated.read_bytes() == b"not this call's staging file\n"
+        assert list(tmp_path.glob("apm-atomic-*")) == [unrelated]
+
+    @pytest.mark.parametrize("error", [OSError("unsupported links"), PermissionError("denied")])
+    def test_create_only_failure_never_falls_back_to_replacement(
+        self, tmp_path: Path, error: OSError
+    ) -> None:
+        """Unsupported hard links and permission failures remain explicit."""
+        target = tmp_path / "control.txt"
+        with (
+            patch("apm_cli.utils.atomic_io.os.link", side_effect=error),
+            patch(
+                "apm_cli.utils.atomic_io._replace_atomic_file",
+                side_effect=AssertionError("create-only must not replace"),
+            ),
+            pytest.raises(type(error), match=str(error)),
+        ):
+            atomic_write_text(target, "control\n", create_only=True)
+        assert not target.exists()
+        assert list(tmp_path.glob("apm-atomic-*")) == []
 
     def test_unicode_content_round_trips(self, tmp_path: Path) -> None:
         """Non-ASCII / emoji content is preserved through UTF-8 encoding."""

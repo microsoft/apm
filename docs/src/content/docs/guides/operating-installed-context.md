@@ -25,7 +25,7 @@ to remember the flag matrix.
 | Diagnose a broken environment | [`apm doctor`](../../reference/cli/doctor/) | Aggregated pass/fail table: Git, network, authentication, and marketplace configuration when present. |
 | Inspect the cache | `apm cache info` | Disk usage and location. `apm cache clean` removes everything; `apm cache prune --days N` is incremental. |
 | Inspect resolved runtimes | `apm runtime status` | Active runtime and preference order. |
-| Inspect resolved targets | `apm targets` | Which harnesses APM will deploy to. Add `--json --all` to include meta-targets (e.g. `agent-skills`). |
+| Inspect resolved targets | `apm targets` | Which harnesses APM will deploy to. Add `--json --all` to include explicit-only targets (e.g. `agent-skills`, `grok-bot`). |
 | Show package metadata | `apm view <package>` | Versions, refs, owner, declared scripts. |
 
 ## Recommended CI block

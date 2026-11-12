@@ -102,7 +102,9 @@ class _MockRefResolver:
     def __init__(self, refs_by_remote: dict[str, list[RemoteRef]] | None = None):
         self._refs = refs_by_remote or {}
 
-    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
+    def list_remote_refs(
+        self, owner_repo: str, *, remote_url: str | None = None
+    ) -> list[RemoteRef]:
         if owner_repo not in self._refs:
             from apm_cli.marketplace.errors import GitLsRemoteError
 
@@ -2475,9 +2477,84 @@ class TestFetchRemoteMetadataGHEHost:
         assert parsed.path.startswith("/api/v3/repos/")
         assert req.get_header("Accept") == "application/vnd.github.raw"
 
+    def test_metadata_fetch_ghes_certifies_manifestless_skill(self, tmp_path: Path) -> None:
+        """GHES verifies SKILL.md after an absent package apm.yml."""
+        import urllib.error
+
+        pkg = self._make_pkg(subdir="skills/review")
+        builder = self._make_builder(tmp_path)
+        builder._host = "corp.ghe.com"
+        builder._github_token = "test-token"
+        builder._host_info = SimpleNamespace(
+            kind="ghes",
+            api_base="https://corp.ghe.com/api/v3",
+        )
+        manifest_404 = urllib.error.HTTPError(
+            url="https://corp.ghe.com/api/v3/repos/acme/tools/contents/skills/review/apm.yml",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
+        )
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            side_effect=[
+                manifest_404,
+                _FakeHTTPResponse(b"---\nname: review\ndescription: Review skill\n---\n# Review\n"),
+            ],
+        ) as mock_open:
+            outcome = builder._fetch_remote_metadata_outcome(pkg)
+
+        assert outcome.status == "manifestless"
+        assert outcome.metadata == {}
+        skill_req = mock_open.call_args_list[1][0][0]
+        parsed = urllib.parse.urlparse(skill_req.full_url)
+        assert parsed.hostname == "corp.ghe.com"
+        assert parsed.path == "/api/v3/repos/acme/tools/contents/skills/review/SKILL.md"
+        assert parsed.query == f"ref={_SHA_A}"
+        assert skill_req.get_header("Accept") == "application/vnd.github.raw"
+        assert skill_req.get_header("Authorization") == "token test-token"
+
+    def test_metadata_fetch_does_not_certify_directory_named_skill_md(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A Contents API directory response is not a manifestless skill."""
+        import urllib.error
+
+        pkg = self._make_pkg(subdir="skills/review")
+        builder = self._make_builder(tmp_path)
+        builder._host = "corp.ghe.com"
+        builder._github_token = "test-token"
+        builder._host_info = SimpleNamespace(
+            kind="ghes",
+            api_base="https://corp.ghe.com/api/v3",
+        )
+        manifest_404 = urllib.error.HTTPError(
+            url="https://corp.ghe.com/api/v3/repos/acme/tools/contents/skills/review/apm.yml",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
+        )
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            side_effect=[manifest_404, _FakeHTTPResponse(b'[{"type":"file","name":"child"}]')],
+        ):
+            outcome = builder._fetch_remote_metadata_outcome(pkg)
+
+        assert outcome.status == "failed"
+        assert outcome.cause == "HTTP 404"
+
+    @pytest.mark.parametrize(
+        "host_info_available", [True, False], ids=["classified", "unclassified"]
+    )
+    @pytest.mark.parametrize("manifestless", [False, True], ids=["manifest", "skill"])
     def test_metadata_fetch_github_com_falls_back_to_rest_api_on_raw_404(
         self,
         tmp_path: Path,
+        host_info_available: bool,
+        manifestless: bool,
     ) -> None:
         """github.com raw 404 falls back to REST API for INTERNAL/private repos."""
         import urllib.error
@@ -2486,9 +2563,10 @@ class TestFetchRemoteMetadataGHEHost:
         builder = self._make_builder(tmp_path)
         builder._host = "github.com"
         builder._github_token = "ghp_test_token"
-        builder._host_info = SimpleNamespace(
-            kind="github",
-            api_base="https://api.github.com",
+        builder._host_info = (
+            SimpleNamespace(kind="github", api_base="https://api.github.com")
+            if host_info_available
+            else None
         )
         raw_404 = urllib.error.HTTPError(
             url="https://raw.githubusercontent.com/acme/private-tools/sha/plugins/core/apm.yml",
@@ -2497,27 +2575,59 @@ class TestFetchRemoteMetadataGHEHost:
             hdrs=None,
             fp=None,  # type: ignore[arg-type]
         )
-        yaml_body = b"description: Private tool\nversion: 2.1.0\n"
-        mock_resp = _FakeHTTPResponse(yaml_body)
+        raw_skill_404 = urllib.error.HTTPError(
+            url="https://raw.githubusercontent.com/acme/private-tools/sha/plugins/core/SKILL.md",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
+        )
+        responses = [raw_404, raw_skill_404]
+        if manifestless:
+            responses.extend(
+                [
+                    raw_404,
+                    _FakeHTTPResponse(b"---\nname: core\ndescription: Private skill\n---\n"),
+                ]
+            )
+        else:
+            responses.append(_FakeHTTPResponse(b"description: Private tool\nversion: 2.1.0\n"))
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
-            side_effect=[raw_404, mock_resp],
+            side_effect=responses,
         ) as mock_open:
-            result = builder._fetch_remote_metadata(pkg)
-        assert result == {"description": "Private tool", "version": "2.1.0"}
+            outcome = builder._fetch_remote_metadata_outcome(pkg)
+        assert outcome.status == ("manifestless" if manifestless else "fetched")
+        assert outcome.metadata == (
+            {} if manifestless else {"description": "Private tool", "version": "2.1.0"}
+        )
         raw_req = mock_open.call_args_list[0][0][0]
         raw_parsed = urllib.parse.urlparse(raw_req.full_url)
         assert raw_parsed.hostname == "raw.githubusercontent.com"
         assert raw_parsed.path == (f"/acme/private-tools/{_SHA_A}/plugins/core/apm.yml")
         assert raw_req.get_header("Authorization") == "token ghp_test_token"
 
-        rest_req = mock_open.call_args_list[1][0][0]
+        raw_skill_req = mock_open.call_args_list[1][0][0]
+        raw_skill_parsed = urllib.parse.urlparse(raw_skill_req.full_url)
+        assert raw_skill_parsed.hostname == "raw.githubusercontent.com"
+        assert raw_skill_parsed.path == (f"/acme/private-tools/{_SHA_A}/plugins/core/SKILL.md")
+        assert raw_skill_req.get_header("Authorization") == "token ghp_test_token"
+
+        rest_req = mock_open.call_args_list[2][0][0]
         rest_parsed = urllib.parse.urlparse(rest_req.full_url)
         assert rest_parsed.hostname == "api.github.com"
         assert rest_parsed.path == ("/repos/acme/private-tools/contents/plugins/core/apm.yml")
         assert rest_parsed.query == f"ref={_SHA_A}"
         assert rest_req.get_header("Accept") == "application/vnd.github.raw"
         assert rest_req.get_header("Authorization") == "token ghp_test_token"
+        if manifestless:
+            skill_req = mock_open.call_args_list[3][0][0]
+            skill_parsed = urllib.parse.urlparse(skill_req.full_url)
+            assert skill_parsed.hostname == "api.github.com"
+            assert skill_parsed.path == "/repos/acme/private-tools/contents/plugins/core/SKILL.md"
+            assert skill_parsed.query == f"ref={_SHA_A}"
+            assert skill_req.get_header("Accept") == "application/vnd.github.raw"
+            assert skill_req.get_header("Authorization") == "token ghp_test_token"
 
     def test_metadata_fetch_github_com_non_404_does_not_fallback(
         self,

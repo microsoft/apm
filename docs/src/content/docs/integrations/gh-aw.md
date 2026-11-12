@@ -74,7 +74,7 @@ Use `token-source: github-token` when every private package in `packages:` is re
 If you customize the Pack step to inject `GITHUB_APM_PAT_{ORG}`, that per-org credential still takes precedence under [APM's authentication rules](../../getting-started/authentication/). The selector pins the global token chain, not custom per-org credentials.
 
 :::caution[Optional gh-aw telemetry credentials]
-gh-aw v0.87.8 exposes `GH_AW_DEFAULT_OTLP_HEADERS` to the agent and MCP telemetry runtime when that enterprise secret is configured. This compiler-owned telemetry credential is separate from APM package authentication. Leave it unset unless agent-visible telemetry credentials are an accepted boundary.
+gh-aw v0.89.15 exposes `GH_AW_DEFAULT_OTLP_HEADERS` and the optional secret-backed `GH_AW_DEFAULT_OTLP_ENDPOINT` to the agent and MCP telemetry runtime. These compiler-owned telemetry settings are separate from APM package authentication. Leave these secrets unset unless agent-visible telemetry credentials are an accepted boundary.
 :::
 
 **Pinning the apm CLI version (optional):**

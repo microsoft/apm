@@ -432,6 +432,52 @@ Provide constructive feedback and suggestions for improvement.
         errors = primitive.validate()
         self.assertEqual(len(errors), 0)
 
+    def _parse_agent_with_frontmatter(self, frontmatter):
+        """Write a minimal .agent.md with the given frontmatter and parse it."""
+        content = f"---\n{frontmatter}\n---\n\n# Agent\n\nBody.\n"
+        file_path = os.path.join(self.temp_dir_path, "sample.agent.md")
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return parse_primitive_file(file_path)
+
+    def test_user_invocable_defaults_true_when_absent(self):
+        """An agent with no user-invocable field defaults to user-invocable."""
+        primitive = self._parse_agent_with_frontmatter("description: Default agent")
+        self.assertIsInstance(primitive, Chatmode)
+        self.assertTrue(primitive.user_invocable)
+
+    def test_user_invocable_false_marks_programmatic_only(self):
+        """user-invocable: false marks the agent programmatic-only."""
+        primitive = self._parse_agent_with_frontmatter(
+            "description: Internal agent\nuser-invocable: false"
+        )
+        self.assertFalse(primitive.user_invocable)
+
+    def test_visibility_internal_alias_marks_programmatic_only(self):
+        """visibility: internal is accepted as an alias for user-invocable: false."""
+        primitive = self._parse_agent_with_frontmatter(
+            "description: Internal agent\nvisibility: internal"
+        )
+        self.assertFalse(primitive.user_invocable)
+
+    def test_canonical_user_invocable_wins_over_visibility_alias(self):
+        """Canonical user-invocable overrides the visibility alias."""
+        primitive = self._parse_agent_with_frontmatter(
+            "description: Mixed agent\nuser-invocable: true\nvisibility: internal"
+        )
+        self.assertTrue(primitive.user_invocable)
+
+    def test_user_invocable_string_tokens_coerce_to_false(self):
+        """Defensive string tokens for falsiness coerce to not-user-invocable."""
+        for token in ("false", "no", "0", "off", "False", "OFF"):
+            primitive = self._parse_agent_with_frontmatter(
+                f'description: Agent\nuser-invocable: "{token}"'
+            )
+            self.assertFalse(
+                primitive.user_invocable,
+                f"token {token!r} should mark the agent programmatic-only",
+            )
+
     def test_parse_instruction_file(self):
         """Test parsing an instruction file."""
         instruction_content = """---

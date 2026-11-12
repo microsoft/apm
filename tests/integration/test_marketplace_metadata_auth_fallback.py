@@ -85,7 +85,9 @@ def test_metadata_prefetch_uses_real_resolver_token_and_anonymous_paths(
     outcome = builder._fetch_remote_metadata_outcome(_package())
 
     assert outcome.status == "fetched"
-    expected = [None] if token is None else [None, f"token {token}"]
+    # A hidden repository 404s anonymously for apm.yml and then for the
+    # manifestless SKILL.md probe before the authenticated retry succeeds.
+    expected = [None] if token is None else [None, None, f"token {token}"]
     assert authorization == expected
 
 

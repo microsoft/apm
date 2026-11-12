@@ -1247,7 +1247,7 @@ Use when building MCP servers or tools.
         skill_dir = self.project_root / ".agents" / "skills" / "my-skill"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# OLD CONTENT")
-        (skill_dir / "old-file.txt").write_text("This should be removed")
+        (skill_dir / "old-file.txt").write_text("Unrelated destination asset")
 
         # Create new source skill
         skill_source = self.apm_modules / "owner" / "my-skill"
@@ -1268,8 +1268,8 @@ Use when building MCP servers or tools.
         assert "# NEW CONTENT" in skill_content
         assert "# OLD CONTENT" not in skill_content
 
-        # Reinstall replaces stale files while preserving new bundle resources.
-        assert not (skill_dir / "old-file.txt").exists()
+        # Source membership alone cannot authorize deletion of destination siblings.
+        assert (skill_dir / "old-file.txt").read_text() == "Unrelated destination asset"
         assert (skill_dir / "new-file.txt").exists()
 
     # ========== Test T6: Packages without SKILL.md are skipped ==========
@@ -1821,7 +1821,7 @@ Use this skill for comprehensive guidance.
         with patch.object(
             SkillIntegrator,
             "_build_ownership_maps",
-            return_value=({}, {"humanizer": "brandonwise/humanizer"}),
+            return_value=({}, {".agents/skills/humanizer": "brandonwise/humanizer"}),
         ):
             self.integrator.integrate_package_skill(pkg, self.project_root, diagnostics=diag)
 
@@ -2144,8 +2144,8 @@ Detailed instructions here.
         paths = copy_skill_to_target(package_info, skill_source, self.project_root)
 
         assert len(paths) >= 2
-        github_path = paths[0]
-        claude_path = paths[1]
+        claude_path = paths[0]
+        github_path = paths[1]
         assert github_path == self.project_root / ".agents" / "skills" / "my-skill"
         assert claude_path == self.project_root / ".claude" / "skills" / "my-skill"
 

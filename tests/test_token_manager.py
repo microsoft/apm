@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
+from apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
 
 
 class TestSanitizeCredentialPath:

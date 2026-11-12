@@ -17,7 +17,9 @@ from apm_cli.commands.install import _integrate_package_primitives
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
+from apm_cli.models.apm_package import APMPackage, PackageInfo
 
 # ------------------------------------------------------------------
 # Helpers
@@ -55,13 +57,14 @@ def _make_hook_result(n=0):
 
 
 def _make_skill_result():
-    """Return a MagicMock mimicking SkillIntegrationResult."""
-    sr = MagicMock()
-    sr.skill_created = False
-    sr.sub_skills_promoted = 0
-    sr.bin_deployed = 0
-    sr.target_paths = []
-    return sr
+    """Return an empty result using the actual skill integration contract."""
+    return SkillIntegrationResult(
+        skill_created=False,
+        skill_updated=False,
+        skill_skipped=True,
+        skill_path=None,
+        references_copied=0,
+    )
 
 
 def _make_mock_integrators():
@@ -96,14 +99,16 @@ def _make_mock_integrators():
     }
 
 
-def _dispatch(targets, integrators=None, package_info=None, project_root=None):
-    """Call _integrate_package_primitives with defaults for convenience."""
+def _dispatch(targets, project_root: Path, integrators=None):
+    """Exercise target dispatch with an existing, empty package source."""
     if integrators is None:
         integrators = _make_mock_integrators()
-    if package_info is None:
-        package_info = MagicMock()
-    if project_root is None:
-        project_root = Path("/fake/root")
+    source = project_root / "package"
+    source.mkdir()
+    package_info = PackageInfo(
+        package=APMPackage(name="dispatch-fixture", version="1.0.0"),
+        install_path=source,
+    )
     return _integrate_package_primitives(
         package_info,
         project_root,
@@ -124,10 +129,10 @@ class TestTargetGatingRegression:
     """Verify that the dispatch loop only invokes integrators for the
     primitives declared by each target, preventing cross-target writes."""
 
-    def test_opencode_only_does_not_write_github_dirs(self):
+    def test_opencode_only_does_not_write_github_dirs(self, tmp_path: Path):
         """With targets=[opencode], no .github/ primitive is dispatched."""
         targets = [KNOWN_TARGETS["opencode"]]
-        _result, mocks = _dispatch(targets)
+        _result, mocks = _dispatch(targets, tmp_path)
 
         # opencode does not declare prompts or instructions (those are copilot/cursor)
         for call_args in mocks["prompt_integrator"].integrate_prompts_for_target.call_args_list:
@@ -145,10 +150,10 @@ class TestTargetGatingRegression:
             target = call_args[0][0]
             assert target.root_dir != ".github"
 
-    def test_cursor_only_does_not_write_claude_or_github(self):
+    def test_cursor_only_does_not_write_claude_or_github(self, tmp_path: Path):
         """With targets=[cursor], no .claude/ or .github/ primitives fire."""
         targets = [KNOWN_TARGETS["cursor"]]
-        _result, mocks = _dispatch(targets)
+        _result, mocks = _dispatch(targets, tmp_path)
 
         all_calls = []
         for name in (
@@ -169,10 +174,10 @@ class TestTargetGatingRegression:
         assert ".claude" not in all_calls
         assert ".github" not in all_calls
 
-    def test_copilot_only_does_not_write_cursor_or_opencode(self):
+    def test_copilot_only_does_not_write_cursor_or_opencode(self, tmp_path: Path):
         """With targets=[copilot], no .cursor/ or .opencode/ primitives fire."""
         targets = [KNOWN_TARGETS["copilot"]]
-        _result, mocks = _dispatch(targets)
+        _result, mocks = _dispatch(targets, tmp_path)
 
         dispatched_roots = set()
         for name in (
@@ -192,10 +197,10 @@ class TestTargetGatingRegression:
         assert ".cursor" not in dispatched_roots
         assert ".opencode" not in dispatched_roots
 
-    def test_codex_only_does_not_write_github_or_claude_dirs(self):
+    def test_codex_only_does_not_write_github_or_claude_dirs(self, tmp_path: Path):
         """With targets=[codex], no .github/ or .claude/ primitive is dispatched."""
         targets = [KNOWN_TARGETS["codex"]]
-        _result, mocks = _dispatch(targets)
+        _result, mocks = _dispatch(targets, tmp_path)
         dispatched_roots = set()
         for name in (
             "prompt_integrator",
@@ -215,9 +220,9 @@ class TestTargetGatingRegression:
         assert ".cursor" not in dispatched_roots
         assert ".opencode" not in dispatched_roots
 
-    def test_empty_targets_returns_zeros(self):
+    def test_empty_targets_returns_zeros(self, tmp_path: Path):
         """With targets=[], all counters are 0 and no integrators are called."""
-        result, mocks = _dispatch(targets=[])
+        result, mocks = _dispatch(targets=[], project_root=tmp_path)
 
         assert result["prompts"] == 0
         assert result["agents"] == 0
@@ -236,10 +241,10 @@ class TestTargetGatingRegression:
         # Skills are also gated by early return
         mocks["skill_integrator"].integrate_package_skill.assert_not_called()
 
-    def test_all_targets_dispatches_all_primitives(self):
+    def test_all_targets_dispatches_all_primitives(self, tmp_path: Path):
         """With all 4 targets, every primitive in every target is dispatched."""
         all_targets = list(KNOWN_TARGETS.values())
-        _result, mocks = _dispatch(targets=all_targets)
+        _result, mocks = _dispatch(targets=all_targets, project_root=tmp_path)
 
         # Collect (target_name, method_name) pairs that were called
         dispatched = set()
@@ -331,6 +336,7 @@ class TestExhaustivenessChecks:
             "commands_grok-build",
             "instructions_grok-build",
             "prompts_copilot-app",  # copilot-app uses dedicated prompts bucket
+            "prompts_kiro",  # kiro uses .kiro/prompts/
             "canvas_copilot",  # canvas extensions (copilot-only, experimental)
         }
 
@@ -479,11 +485,11 @@ class TestSkillTargetGating:
     """Verify that the skill integrator respects the targets parameter
     passed from the dispatch loop, preventing cross-target skill writes."""
 
-    def test_skill_integrator_receives_targets_from_dispatch(self):
+    def test_skill_integrator_receives_targets_from_dispatch(self, tmp_path: Path):
         """_integrate_package_primitives passes its targets list to
         skill_integrator.integrate_package_skill (Issue #482)."""
         cursor_only = [KNOWN_TARGETS["cursor"]]
-        _result, mocks = _dispatch(targets=cursor_only)
+        _result, mocks = _dispatch(targets=cursor_only, project_root=tmp_path)
 
         # Verify skill integrator was called with targets= kwarg
         call_kwargs = mocks["skill_integrator"].integrate_package_skill.call_args
@@ -493,18 +499,18 @@ class TestSkillTargetGating:
         assert len(passed_targets) == 1
         assert passed_targets[0].name == "cursor"
 
-    def test_opencode_target_does_not_pass_copilot_to_skills(self):
+    def test_opencode_target_does_not_pass_copilot_to_skills(self, tmp_path: Path):
         """With targets=[opencode], skill integrator only gets opencode."""
         opencode_only = [KNOWN_TARGETS["opencode"]]
-        _result, mocks = _dispatch(targets=opencode_only)
+        _result, mocks = _dispatch(targets=opencode_only, project_root=tmp_path)
 
         call_kwargs = mocks["skill_integrator"].integrate_package_skill.call_args
         passed_targets = call_kwargs.kwargs["targets"]
         assert all(t.name == "opencode" for t in passed_targets)
 
-    def test_empty_targets_skips_skill_integrator(self):
+    def test_empty_targets_skips_skill_integrator(self, tmp_path: Path):
         """With targets=[], skill integrator is not called at all."""
-        _result, mocks = _dispatch(targets=[])
+        _result, mocks = _dispatch(targets=[], project_root=tmp_path)
         mocks["skill_integrator"].integrate_package_skill.assert_not_called()
 
 
@@ -659,10 +665,11 @@ class TestScopeResolvedPartition:
 
     def test_partition_user_scope_copilot_hooks_not_shadowed(self):
         """User-scope Copilot hook paths must not be swallowed by the
-        instructions catch-all root (``.copilot/``).
+        instructions subdir prefix (``.copilot/instructions/``).
 
-        The user-scope instructions primitive uses an empty ``subdir``, making
-        ``.copilot/`` a shallow catch-all prefix. Hook paths under
+        Copilot CLI supports modular, path-scoped instructions at user scope
+        via ``.copilot/instructions/**/*.instructions.md``, mirroring the
+        project-scope ``.github/instructions/`` layout. Hook paths under
         ``.copilot/hooks/`` must still route to the ``hooks`` bucket so
         uninstall can remove them.
         """
@@ -671,12 +678,12 @@ class TestScopeResolvedPartition:
         managed = {
             ".copilot/hooks/hookpkg-notify.json",
             ".copilot/prompts/test.prompt.md",
-            ".copilot/copilot-instructions.md",
+            ".copilot/instructions/pkg.instructions.md",
         }
         buckets = BaseIntegrator.partition_managed_files(managed, targets=[resolved])
         assert ".copilot/hooks/hookpkg-notify.json" in buckets.get("hooks", set())
         assert ".copilot/prompts/test.prompt.md" in buckets.get("prompts", set())
-        assert ".copilot/copilot-instructions.md" in buckets.get("instructions", set())
+        assert ".copilot/instructions/pkg.instructions.md" in buckets.get("instructions", set())
 
     def test_partition_with_opencode_user_scope(self):
         """Partition routes .config/opencode/ paths correctly."""
@@ -798,7 +805,7 @@ class TestForScope:
         assert resolved.root_dir == ".claude"
 
     def test_filters_unsupported_primitives(self):
-        """for_scope keeps instructions with a different mapping for copilot user scope."""
+        """for_scope keeps instructions supported at copilot user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
@@ -806,9 +813,9 @@ class TestForScope:
         assert "instructions" in copilot.primitives
         resolved = copilot.for_scope(user_scope=True)
         assert "prompts" in resolved.primitives
-        # instructions now supported at user scope via concat (#650)
+        # instructions supported at user scope via modular .copilot/instructions/
         assert "instructions" in resolved.primitives
-        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
+        assert resolved.primitives["instructions"].format_id == "github_instructions"
         # Supported primitives remain
         assert "agents" in resolved.primitives
         assert "skills" in resolved.primitives

@@ -117,7 +117,7 @@ def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> N
     assert set(hooks) == {
         "preToolUse",
         "postToolUse",
-        "userPromptSubmit",
+        "userPromptSubmitted",
         "sessionStart",
         "agentStop",
     }
@@ -125,6 +125,7 @@ def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> N
         "PreToolUse",
         "PostToolUse",
         "UserPromptSubmit",
+        "userPromptSubmit",
         "SessionStart",
         "Stop",
         "stop",

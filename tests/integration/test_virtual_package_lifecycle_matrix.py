@@ -669,6 +669,59 @@ def test_virtual_package_lifecycle_matrix(
     _assert_last_good_preserved(scenario.project, install_state)
 
 
+@pytest.mark.parametrize("selected", ["skill", "instruction"])
+def test_partial_update_preserves_declared_deployment_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected: str,
+) -> None:
+    """Updating one dependency retains target provenance for new and existing files."""
+    scenario = _create_scenario(tmp_path / selected)
+    installed = _invoke(
+        scenario,
+        monkeypatch,
+        ("install", "--no-policy", "--parallel-downloads", "0"),
+        newline_domain="lf",
+    )
+    _assert_result(installed, 0, f"{selected}-initial-install")
+    before = load_yaml(scenario.project / "apm.lock.yaml")
+    assert {row["target"] for row in before["deployments"]} == {"copilot"}
+
+    if selected == "skill":
+        package = f"gitlab.example.invalid/acme/{_REPO_NAME}/{_SKILL_PATH}"
+        scenario.skill_source.write_bytes(_SKILL_BYTES + b"\nValidate authentication inputs.\n")
+        scenario.skill_source.with_name("reference.md").write_bytes(b"# Authentication reference\n")
+    else:
+        package = _VIRTUAL_FILE_DEPENDENCY.removesuffix("#main")
+        scenario.virtual_file_source.write_bytes(_VIRTUAL_FILE_BYTES + b"\nValidate inputs.\n")
+    new_commit = scenario.repositories.commit(
+        scenario.repository,
+        message=f"update {selected} guidance",
+    ).sha
+
+    updated = _invoke(
+        scenario,
+        monkeypatch,
+        ("update", package, "--yes", "--parallel-downloads", "0"),
+        newline_domain="lf",
+    )
+    _assert_result(updated, 0, f"{selected}-partial-update")
+    after = load_yaml(scenario.project / "apm.lock.yaml")
+    assert {row["target"] for row in after["deployments"]} == {"copilot"}
+    skill, instruction = _lock_dependencies(scenario.project)
+    changed, unchanged = (skill, instruction) if selected == "skill" else (instruction, skill)
+    assert changed["resolved_commit"] == new_commit
+    assert unchanged["resolved_commit"] == scenario.initial_commit
+    assert [row for row in after["deployments"] if package not in row["owners"]] == [
+        row for row in before["deployments"] if package not in row["owners"]
+    ]
+    if selected == "skill":
+        reference = f".agents/skills/{_SKILL_NAME}/reference.md"
+        assert (scenario.project / reference).read_bytes() == b"# Authentication reference\n"
+        assert reference in changed["deployed_files"]
+        assert any(row["value"] == reference for row in after["deployments"])
+
+
 @pytest.mark.lifecycle_merge_group
 def test_virtual_throttle_fallback_records_fetch_head_sha_and_content_hash(
     tmp_path: Path,

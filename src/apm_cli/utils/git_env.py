@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,11 +135,10 @@ _SCP_HOST_RE = re.compile(r"^(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:@\s]+):")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _GIT_CONFIG_PROBE_TIMEOUTS = (10, 30)
 
-_URL_REWRITE_RECOVERY = (
-    "inspect matching rules with "
-    "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$' "
-    "and remove the unsafe rule"
+_URL_REWRITE_INSPECTION = (
+    "inspect matching rules with 'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'"
 )
+_URL_REWRITE_RECOVERY = f"{_URL_REWRITE_INSPECTION} and remove the unsafe rule"
 
 
 class GitUrlRewriteError(ValueError):
@@ -159,7 +159,7 @@ class GitUrlRewriteProbeError(ValueError):
         self.category = category
         super().__init__(
             f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_RECOVERY}"
+            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
         )
 
 
@@ -244,7 +244,19 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
+        # A qualified lookup never searches the implicit Windows cwd. Python
+        # before 3.12 needs explicit PATHEXT candidates for qualified commands.
         candidate = shutil.which(str(directory / name))
+        if candidate is None and os.name == "nt" and sys.version_info < (3, 12):
+            extensions = os.environ.get("PATHEXT") or (
+                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+            )
+            for extension in extensions.split(os.pathsep):
+                if not extension.startswith(".") or any(c in extension for c in "/\\:"):
+                    continue
+                candidate = shutil.which(str(directory / f"{name}{extension}"))
+                if candidate is not None:
+                    break
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
@@ -478,6 +490,83 @@ def git_no_templates_args() -> tuple[str]:
     return ("--template=",)
 
 
+_SYMLINK_PIN_KEY = "core.symlinks"
+_SYMLINK_PIN_VALUE = "true"
+_SYMLINK_CREATE_FAILURE = "unable to create symlink"
+
+
+def git_symlink_pin_entry() -> tuple[str, str]:
+    """Return the canonical ``(key, value)`` that APM pins for package links."""
+    return _SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE
+
+
+def git_symlink_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin that materializes real symlinks.
+
+    Dependency Git children never see user or system config, so Git for
+    Windows records ``core.symlinks=false`` and writes each in-repo link as a
+    text file holding its target path. The package hash then differs from
+    POSIX for the same commit (#3457). ``-c`` outranks every config file and
+    ``GIT_CONFIG_KEY_n`` entry, so the pin holds regardless of caller config.
+    """
+    key, value = git_symlink_pin_entry()
+    return "-c", f"{key}={value}"
+
+
+class GitSymlinkCapabilityError(RuntimeError):
+    """A dependency contains symbolic links that this host cannot create."""
+
+    def __init__(self, package: str) -> None:
+        self.package = package
+        super().__init__(
+            f"Package {package} contains symbolic links, but this host cannot create them. "
+            "APM checks out package links as real symlinks so the content hash is the "
+            "same on every platform. On Windows, enable Developer Mode or grant the "
+            "'Create symbolic links' privilege, then retry."
+        )
+
+
+def raise_for_symlink_capability(
+    error: BaseException | subprocess.CompletedProcess, package: str
+) -> None:
+    """Raise :class:`GitSymlinkCapabilityError` when Git could not create a link.
+
+    Accepts a failed exception or a completed process: ``git checkout``
+    reports ``unable to create symlink`` but still exits 0, so callers must
+    pass successful checkout results too. Walks the exception chain so
+    wrapped subprocess failures are recognized. An already classified error
+    is re-raised unchanged. Any other outcome returns to the caller.
+    """
+    seen: set[int] = set()
+    current: BaseException | subprocess.CompletedProcess | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, GitSymlinkCapabilityError):
+            raise current
+        for stream in (getattr(current, "stderr", None), getattr(current, "stdout", None)):
+            if isinstance(stream, bytes):
+                stream = stream.decode("utf-8", errors="replace")
+            if isinstance(stream, str) and _SYMLINK_CREATE_FAILURE in stream:
+                cause = error if isinstance(error, BaseException) else None
+                raise GitSymlinkCapabilityError(package) from cause
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+
+def git_autocrlf_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin against host CRLF conversion.
+
+    ``core.autocrlf`` snapshots frozen into ``GIT_CONFIG_KEY_n`` by
+    :func:`git_clone_env` (apm#2971) outrank repository-local config, so on a
+    host whose system gitconfig sets ``core.autocrlf=true`` a working-tree
+    clone rewrites LF-committed blobs as CRLF. A checkout that runs without
+    the snapshot then compares that CRLF worktree against the LF index and
+    refuses the switch with "local changes would be overwritten" (apm#3368).
+    ``-c`` outranks the snapshots, so clone and checkout agree and the
+    materialized bytes are the committed bytes.
+    """
+    return "-c", "core.autocrlf=false"
+
+
 class _GitProgress(Protocol):
     """Git progress callback consumed by the clone subprocess adapter."""
 
@@ -597,7 +686,13 @@ def _has_applicable_http_authorization(
     headers: Sequence[GitConfigEntry],
     env: dict[str, str],
 ) -> bool:
-    """Ask Git which URL-scoped extra headers apply to one remote."""
+    """Ask Git which URL-scoped extra headers apply to one HTTP(S) remote."""
+    try:
+        scheme = urlsplit(remote_url).scheme.lower()
+    except ValueError:
+        return False
+    if scheme not in {"http", "https"}:
+        return False
     direct_header = env.get("GIT_HTTP_EXTRAHEADER", "")
     if _is_valid_http_extraheader_value(direct_header) and _is_credential_bearing_http_header(
         direct_header
@@ -657,7 +752,7 @@ def _urlmatched_header_group(
     if result.returncode == 1:
         return ()
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git URL-match probe failed")
+        raise GitUrlRewriteProbeError(f"Git URL-match probe exited with status {result.returncode}")
     selected = result.stdout.rstrip(b"\0\n")
     prefix = b"X-Apm-Config-Probe: "
     if not selected.startswith(prefix):
@@ -989,6 +1084,10 @@ def _materialize_git_config_snapshot(
     retained: list[tuple[str, str]] = []
     for entry in snapshot.entries:
         normalized = entry.key.lower()
+        if normalized == git_symlink_pin_entry()[0]:
+            # Replaced by the pin below; Git init's capability result and
+            # inherited values must not turn package links into link text.
+            continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
         if normalized == "include.path" or (
@@ -1011,6 +1110,8 @@ def _materialize_git_config_snapshot(
             if auth_fence.suppress_helpers and _is_credential_helper_key(normalized):
                 continue
         retained.append((entry.key, entry.value))
+
+    retained.append(git_symlink_pin_entry())
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:
@@ -1358,6 +1459,7 @@ def clone_git_worktree(
     args = [
         get_git_executable(),
         *git_no_hooks_args(),
+        *git_autocrlf_pin_args(),
         "clone",
         *git_no_templates_args(),
     ]
@@ -1384,6 +1486,9 @@ def clone_git_worktree(
             )
         except subprocess.TimeoutExpired:
             raise subprocess.TimeoutExpired([get_git_executable(), "clone"], 300) from None
+        except subprocess.CalledProcessError as exc:
+            raise_for_symlink_capability(exc, redact_git_diagnostic(url))
+            raise
         return
 
     from git.cmd import handle_process_output
@@ -1417,12 +1522,14 @@ def clone_git_worktree(
         process.wait()
         raise subprocess.TimeoutExpired([get_git_executable(), "clone"], 300) from None
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(
+        failure = subprocess.CalledProcessError(
             process.returncode,
             args,
             output="".join(stdout),
             stderr="".join(stderr),
         )
+        raise_for_symlink_capability(failure, redact_git_diagnostic(url))
+        raise failure
 
 
 def checkout_git_worktree(
@@ -1430,23 +1537,32 @@ def checkout_git_worktree(
     ref: str,
     *,
     env: dict[str, object] | None = None,
+    package: str | None = None,
 ) -> None:
-    """Check out a ref in an explicitly located worktree."""
-    subprocess.run(
-        [
-            get_git_executable(),
-            *git_no_hooks_args(),
-            "-C",
-            str(worktree),
-            "checkout",
-            ref,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=git_subprocess_env(env),
-    )
+    """Check out a ref in an explicitly located worktree with real symlinks."""
+    label = package or str(worktree)
+    try:
+        result = subprocess.run(
+            [
+                get_git_executable(),
+                *git_no_hooks_args(),
+                *git_symlink_pin_args(),
+                *git_autocrlf_pin_args(),
+                "-C",
+                str(worktree),
+                "checkout",
+                ref,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=git_subprocess_env(env),
+        )
+    except subprocess.CalledProcessError as exc:
+        raise_for_symlink_capability(exc, label)
+        raise
+    raise_for_symlink_capability(result, label)
 
 
 def git_worktree_head(
@@ -1463,12 +1579,13 @@ def git_resolve_commit(
     ref: str,
     *,
     env: dict[str, object] | None = None,
+    bare: bool = False,
 ) -> str:
-    """Resolve a ref to a commit in an explicitly located worktree."""
+    """Resolve a ref in a worktree or an explicitly selected bare repository."""
     result = subprocess.run(
         [
             get_git_executable(),
-            "-C",
+            "--git-dir" if bare else "-C",
             str(worktree),
             "rev-parse",
             "--verify",

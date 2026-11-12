@@ -16,6 +16,7 @@ from apm_cli.models.dependency.materialization import (
     prepare_materialization_path,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+from tests.helpers.prune_casing import CaseSensitiveMaterializationReader
 
 
 @pytest.mark.parametrize(
@@ -184,7 +185,8 @@ def test_stale_lowercase_materialization_moves_transactionally(tmp_path: Path) -
     assert [path.name for path in modules.iterdir()] == ["mixedorg"]
 
 
-def test_cached_reader_reuses_directory_listings(tmp_path: Path) -> None:
+@pytest.mark.parametrize("match_complete_path", [False, True])
+def test_cached_reader_reuses_directory_listings(tmp_path: Path, match_complete_path: bool) -> None:
     """One resolution attempt does not rescan the same owner for every dep."""
 
     class CountingReader:
@@ -226,6 +228,7 @@ def test_cached_reader_reuses_directory_listings(tmp_path: Path) -> None:
                 modules,
                 dependency=dependency,
                 reader=reader,
+                match_complete_path=match_complete_path,
             )
             == desired
         )
@@ -234,6 +237,23 @@ def test_cached_reader_reuses_directory_listings(tmp_path: Path) -> None:
         modules.absolute(): 1,
         (modules / "MixedOrg").absolute(): 1,
     }
+
+
+def test_complete_lookup_does_not_relax_default_relocation_collision_policy(tmp_path: Path) -> None:
+    """Only the explicit read-only mode may traverse case-variant owner prefixes."""
+    dependency = DependencyReference.parse("Microsoft/APM")
+    desired = dependency.get_install_path(tmp_path)
+    reader = CaseSensitiveMaterializationReader(tmp_path, ("Microsoft/APM", "microsoft/Other"))
+    with pytest.raises(MaterializationPathCollisionError, match="multiple"):
+        find_case_equivalent_materialization_path(
+            desired, tmp_path, dependency=dependency, reader=reader
+        )
+    assert (
+        find_case_equivalent_materialization_path(
+            desired, tmp_path, dependency=dependency, reader=reader, match_complete_path=True
+        )
+        == desired
+    )
 
 
 def test_case_variant_lookup_fails_closed_on_distinct_collisions(tmp_path: Path) -> None:

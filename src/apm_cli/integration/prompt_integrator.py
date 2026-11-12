@@ -5,18 +5,64 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_frontmatter
+from apm_cli.utils.yaml_io import load_frontmatter, loads_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 class PromptIntegrator(BaseIntegrator):
     """Handles integration of APM package prompts into target prompt directories."""
+
+    _LF_NORMALIZED_DEPLOY = True
+
+    @staticmethod
+    def _prepare_kiro_prompt(
+        source: Path,
+        package_name: str,
+        diagnostics: DiagnosticCollector | None,
+    ) -> str | None:
+        """Prepare body-only Kiro CLI prompts without translating execution metadata."""
+
+        def warn(message: str) -> None:
+            message = printable_ascii_text(message)
+            if diagnostics is not None:
+                diagnostics.warn(message=message, package=printable_ascii_text(package_name))
+            else:
+                _rich_warning(message)
+
+        try:
+            if source.is_symlink():
+                raise ValueError("symlink source")
+            post = loads_frontmatter(source.read_text(encoding="utf-8"), preserve_body=True)
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+            warn(f"Skipping Kiro prompt {source.name}: {exc}. Fix the source prompt and reinstall.")
+            return None
+        if _is_workflow_shape(post.metadata):
+            return None
+
+        dropped = sorted(str(key) for key in post.metadata if key not in {"name", "description"})
+        if dropped:
+            warn(
+                f"Kiro prompt {source.name}: stripped frontmatter fields {', '.join(dropped)} "
+                "(Kiro CLI does not interpret them). Configure tool/model behavior in Kiro; "
+                "use native ${1}..${10}, $ARGUMENTS or ${@} in the prompt body for arguments."
+            )
+        if "${input:" in post.content:
+            warn(
+                f"Kiro prompt {source.name}: ${{input:name}} is not expanded by Kiro CLI. "
+                "Replace it with native ${1}..${10}, $ARGUMENTS or ${@}."
+            )
+        return post.content
 
     def find_prompt_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all .prompt.md files in a package.
@@ -265,7 +311,7 @@ class PromptIntegrator(BaseIntegrator):
 
         effective_root = mapping.deploy_root or target.root_dir
         prompts_dir = project_root / effective_root / mapping.subdir
-        prompts_dir.mkdir(parents=True, exist_ok=True)
+        is_kiro_prompt = mapping.format_id == "kiro_prompt"
 
         # Process each prompt file
         files_integrated = 0
@@ -281,16 +327,48 @@ class PromptIntegrator(BaseIntegrator):
             # in a file-based prompt directory.  Without this guard, the same source
             # file ships to both surfaces and the App-only metadata
             # leaks into a slash-command users would not expect.
-            try:
-                _meta = load_frontmatter(str(source_file)).metadata
-            except Exception:
-                _meta = {}
-            if _is_workflow_shape(_meta):
-                files_skipped += 1
-                continue
+            rendered = None
+            if is_kiro_prompt:
+                rendered = self._prepare_kiro_prompt(
+                    source_file, package_info.package.name, diagnostics
+                )
+                if rendered is None:
+                    files_skipped += 1
+                    continue
+            else:
+                try:
+                    _meta = load_frontmatter(str(source_file)).metadata
+                except Exception:
+                    _meta = {}
+                if _is_workflow_shape(_meta):
+                    files_skipped += 1
+                    continue
 
             target_filename = self.get_target_filename(source_file, package_info.package.name)
+            if is_kiro_prompt:
+                target_filename = source_file.name.removesuffix(".prompt.md") + mapping.extension
             target_path = prompts_dir / target_filename
+            if is_kiro_prompt and (
+                target_path.is_symlink()
+                or not self.validate_deploy_path(
+                    (Path(effective_root) / mapping.subdir / target_filename).as_posix(),
+                    project_root,
+                    targets=[target],
+                )
+            ):
+                message = printable_ascii_text(
+                    f"Rejected Kiro prompt target path: {target_path}. "
+                    "Remove symlinks from the destination file or its parent directories "
+                    "and reinstall."
+                )
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=message, package=printable_ascii_text(package_info.package.name)
+                    )
+                else:
+                    _rich_warning(message)
+                files_skipped += 1
+                continue
             # Defense-in-depth: target_filename is derived from source
             # file name; assert containment under prompts_dir to mirror
             # the guard already present in command/instruction
@@ -307,19 +385,28 @@ class PromptIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.try_adopt_identical(
-                target_path, source_file, target_paths, lf_normalized_deploy=True
-            ):
-                files_adopted += 1
+            if rendered is not None:
+                rendered, links_resolved = self.resolve_links(rendered, source_file, target_path)
+            skip, adopted = self._check_adopt_or_skip(
+                target_path,
+                source_file,
+                rel_path,
+                managed_files,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=rendered,
+            )
+            if skip:
+                files_adopted += int(adopted)
+                files_skipped += int(not adopted)
                 continue
 
-            if self.check_collision(
-                target_path, rel_path, managed_files, force, diagnostics=diagnostics
-            ):
-                files_skipped += 1
-                continue
-
-            links_resolved = self.copy_prompt(source_file, target_path)
+            prompts_dir.mkdir(parents=True, exist_ok=True)
+            if rendered is not None:
+                write_text_lf(target_path, rendered)
+            else:
+                links_resolved = self.copy_prompt(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)

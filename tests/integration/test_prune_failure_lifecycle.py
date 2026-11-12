@@ -61,8 +61,12 @@ def _runner(blocked: Path, mode: str) -> ApmLifecycleRunner:
     )
 
 
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("package_marker", ["apm.yml", "SKILL.md"])
 @pytest.mark.parametrize("mode", ["blocked", "mixed", "partial"])
-def test_prune_failure_reports_partial_state_and_retry_converges(tmp_path: Path, mode: str) -> None:
+def test_prune_failure_reports_partial_state_and_retry_converges(
+    tmp_path: Path, mode: str, package_marker: str
+) -> None:
     """Failure status tracks actual removals; retry preserves all unowned bytes."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
     environment = isolated.subprocess_env()
@@ -70,6 +74,9 @@ def test_prune_failure_reports_partial_state_and_retry_converges(tmp_path: Path,
     modules = consumer.root / "apm_modules"
     packages = LocalPackageFactory(modules / "orphan-org")
     blocked = packages.create("blocked")
+    if package_marker == "SKILL.md":
+        blocked.manifest_path.unlink()
+        (blocked.root / package_marker).write_text("# Orphan skill\n", encoding="utf-8")
     payload = blocked.root / "payload.txt"
     payload.write_bytes(b"orphan payload\n")
     removed_count = 2 if mode == "mixed" else 0
@@ -111,7 +118,7 @@ def test_prune_failure_reports_partial_state_and_retry_converges(tmp_path: Path,
     assert difference.removed == expected_removed
     assert difference.added == difference.changed == frozenset()
     assert LifecycleStateSnapshot.capture(consumer.root) == state
-    assert blocked.manifest_path.is_file()
+    assert (blocked.root / package_marker).is_file()
 
     retry_runner = _runner(blocked.root, "none")
     retry, repeat = retry_runner.run_sequence(

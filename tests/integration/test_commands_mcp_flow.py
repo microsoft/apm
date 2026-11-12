@@ -1695,7 +1695,10 @@ class TestLocalPathFailureReason:
         dep_ref.local_path = str(tmp_path / "nonexistent")
 
         result = _local_path_failure_reason(dep_ref)
-        assert result == "path does not exist"
+        assert result == (
+            f"Local package path does not exist: {dep_ref.local_path}. "
+            "Restore the source or correct the dependency path, then rerun apm install."
+        )
 
     def test_file_path_returns_reason(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason
@@ -1708,7 +1711,11 @@ class TestLocalPathFailureReason:
         dep_ref.local_path = str(f)
 
         result = _local_path_failure_reason(dep_ref)
-        assert result == "path is not a directory"
+        assert result == (
+            "Unsupported single-file dependency: somefile.txt. "
+            "Use .prompt.md, .instructions.md, .agent.md, "
+            "or a directory package with apm.yml for companion assets."
+        )
 
     def test_empty_dir_no_markers(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason
@@ -1721,28 +1728,26 @@ class TestLocalPathFailureReason:
         dep_ref.local_path = str(empty_dir)
 
         result = _local_path_failure_reason(dep_ref)
-        assert result == "no apm.yml, SKILL.md, or plugin.json found"
+        assert result == (
+            "Local package is not a valid APM package "
+            f"(no apm.yml, SKILL.md, or plugin.json): {empty_dir}. "
+            "Select a package directory or a supported single-file primitive."
+        )
 
-    def test_dir_with_apm_yml_still_returns_marker_msg(self, tmp_path: Path) -> None:
-        """_local_path_failure_reason is a failure describer, not a validator.
-
-        It always returns the 'no markers' message for any existing directory
-        because it is only ever called after _validate_package_exists already
-        returned False (at which point the directory lacks valid markers).
-        """
+    def test_dir_with_valid_apm_yml_returns_none(self, tmp_path: Path) -> None:
+        """A real manifest is admitted by the shared local-source validator."""
         from apm_cli.install.validation import _local_path_failure_reason
 
         pkg_dir = tmp_path / "mypkg"
         pkg_dir.mkdir()
-        (pkg_dir / "apm.yml").write_text("name: mypkg\n")
+        (pkg_dir / "apm.yml").write_text("name: mypkg\nversion: 1.0.0\n", encoding="utf-8")
 
         dep_ref = MagicMock()
         dep_ref.is_local = True
         dep_ref.local_path = str(pkg_dir)
 
-        # Function always returns the markers message for existing directories
         result = _local_path_failure_reason(dep_ref)
-        assert result == "no apm.yml, SKILL.md, or plugin.json found"
+        assert result is None
 
 
 class TestLocalPathNoMarkersHint:

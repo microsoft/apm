@@ -11,6 +11,7 @@ from apm_cli.commands.uninstall.engine import (
     _is_marketplace_ref,
     _parse_dependency_entry,
 )
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -108,11 +109,9 @@ class TestBuildChildrenIndex:
         """Build index with transitive dependencies."""
         parent_url = "https://github.com/owner/parent"
 
-        mock_dep1 = MagicMock()
-        mock_dep1.resolved_by = parent_url
+        mock_dep1 = LockedDependency(resolved_by=parent_url, repo_url="owner/mock_dep1")
 
-        mock_dep2 = MagicMock()
-        mock_dep2.resolved_by = parent_url
+        mock_dep2 = LockedDependency(resolved_by=parent_url, repo_url="owner/mock_dep2")
 
         mock_lockfile = MagicMock()
         mock_lockfile.get_package_dependencies.return_value = [mock_dep1, mock_dep2]
@@ -129,11 +128,9 @@ class TestBuildChildrenIndex:
         parent1_url = "https://github.com/owner/parent1"
         parent2_url = "https://github.com/owner/parent2"
 
-        mock_dep1 = MagicMock()
-        mock_dep1.resolved_by = parent1_url
+        mock_dep1 = LockedDependency(resolved_by=parent1_url, repo_url="owner/mock_dep1")
 
-        mock_dep2 = MagicMock()
-        mock_dep2.resolved_by = parent2_url
+        mock_dep2 = LockedDependency(resolved_by=parent2_url, repo_url="owner/mock_dep2")
 
         mock_lockfile = MagicMock()
         mock_lockfile.get_package_dependencies.return_value = [mock_dep1, mock_dep2]
@@ -147,8 +144,7 @@ class TestBuildChildrenIndex:
 
     def test_build_with_orphaned_deps(self):
         """Deps with no parent (resolved_by=None) are ignored."""
-        orphan_dep = MagicMock()
-        orphan_dep.resolved_by = None
+        orphan_dep = LockedDependency(resolved_by=None, repo_url="owner/orphan_dep")
 
         mock_lockfile = MagicMock()
         mock_lockfile.get_package_dependencies.return_value = [orphan_dep]
@@ -161,8 +157,7 @@ class TestBuildChildrenIndex:
         """Build index with single child per parent."""
         parent_url = "https://github.com/owner/parent"
 
-        mock_dep = MagicMock()
-        mock_dep.resolved_by = parent_url
+        mock_dep = LockedDependency(resolved_by=parent_url, repo_url="owner/mock_dep")
 
         mock_lockfile = MagicMock()
         mock_lockfile.get_package_dependencies.return_value = [mock_dep]

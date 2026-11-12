@@ -95,10 +95,11 @@ apm compile --all                            # default stable target set
 ```
 
 Canonical targets are `copilot`, `claude`, `grok-build`, `cursor`, `opencode`,
-`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and `hermes`.
-The `all` selector is not a target; it expands to every canonical target except
-the explicit-only `antigravity`, `agent-skills`, and `hermes` targets. Compiling for
-`agent-skills` is a successful no-op because `apm install` deploys skills.
+`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `hermes`,
+and `grok-bot`. The `all` selector is not a target; it expands to every
+canonical target except the explicit-only `antigravity`, `agent-skills`,
+`hermes`, and `grok-bot` targets. Compiling for `agent-skills` or `grok-bot`
+is a successful no-op because `apm install` deploys skills.
 
 The accepted `intellij` entry is MCP-only, not a canonical target, and excluded
 from `all`. Compile uses the Copilot profile for its file primitives and produces
@@ -164,19 +165,33 @@ when iterating on instructions without install's dependency side effects.
 <a id="copilot-deduplication"></a>
 When `.github/instructions/` is already populated with `.instructions.md` files
 (deployed by `apm install --target copilot`), `apm compile --target copilot`
-omits `AGENTS.md` entirely when the only content it would carry is the
-instructions section -- Copilot already reads `.github/instructions/` directly,
-so an instructions-only `AGENTS.md` would be redundant. `AGENTS.md` is still
+omits each matching global instruction from the generated
+`.github/copilot-instructions.md`; Copilot already reads the deployed rule file,
+so carrying that same content in both files is redundant. Global instructions
+without a matching deployed rule remain in `copilot-instructions.md`. When every
+global instruction is already deployed, compile removes an old generated root
+file only when its APM marker and Build ID still match its content. Hand-authored,
+edited, or linked root files are retained, as are legacy generated files without
+a valid Build ID.
+Use `apm compile --dry-run` to preview removal of a matching generated file
+without changing it.
+
+The existing `AGENTS.md` deduplication also omits the file entirely when the
+only content it would carry is the instructions section. `AGENTS.md` is still
 written when it carries non-instruction content such as a constitution. If
 `.github/instructions/` is later cleared, re-running `apm compile` restores
-`AGENTS.md` with the full instructions section.
+`AGENTS.md` and `copilot-instructions.md` with the instructions they can carry.
 
-This deduplication is **target-aware**: it only activates when the sole
+`AGENTS.md` deduplication is **target-aware**: it only activates when the sole
 AGENTS.md consumer is Copilot. When compiling for targets that do not read
 `.github/instructions/` (Codex, OpenCode, Windsurf, etc.), instructions
 are always included in `AGENTS.md` regardless of whether
-`.github/instructions/` exists. To opt out of deduplication even for
-Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`):
+`.github/instructions/` exists. Copilot root filtering still applies when Copilot
+is one of several selected targets: a mixed Copilot/Codex compile keeps instructions
+in `AGENTS.md` but omits deployed globals from `copilot-instructions.md`.
+To opt out of deduplication even for
+Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`) to
+include matching global instructions in `copilot-instructions.md` as well:
 
 ```bash
 apm compile --target copilot --force-instructions
@@ -195,6 +210,14 @@ run -- both write per-file instruction rules into `.claude/rules/`.
 dependency `@import` paths. If `.claude/rules/` is later removed,
 re-running `apm compile` restores the instructions section to
 `CLAUDE.md`.
+
+When instructions are folded into `CLAUDE.md`, plain inline Markdown
+links to local or dependency `.context.md` and `.memory.md` files are
+rebased so they resolve from each generated `CLAUDE.md`'s directory
+(for example, to `apm_modules/<pkg>/.apm/context/...`). The referenced
+files are not copied, and other relative links are left as written --
+this is distinct from the install-time rewriting described in
+[Package-relative links](../package-relative-links/).
 
 To opt out of the deduplication and always include the instructions
 section in `CLAUDE.md` (for debugging or when you intentionally want
@@ -298,6 +321,11 @@ root-context targets:
 
 OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
 retains explicit sections for `applyTo` instructions as well.
+
+Claude omits each unconditional instruction already delivered by an equivalent
+native user rule, while preserving unmatched fallback and other targets.
+See the [global compilation reference](../../reference/cli/compile/#global-compilation)
+for matching rules, explicit `--clean` cleanup, and file-preservation conditions.
 
 ### Overwrite protection
 

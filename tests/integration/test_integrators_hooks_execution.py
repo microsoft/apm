@@ -330,6 +330,7 @@ class TestDirectoryExistsAtRef:
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.json.return_value = []
         with patch.object(downloader, "_resilient_get", return_value=mock_resp):
             result = _directory_exists_at_ref(downloader, dep, "skills/foo", "main", lambda m: None)
 
@@ -372,6 +373,7 @@ class TestDirectoryExistsAtRef:
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.json.return_value = []
         with patch.object(downloader, "_resilient_get", return_value=mock_resp) as mock_get:
             result = _directory_exists_at_ref(downloader, dep, "path", "ref", lambda m: None)
 
@@ -1063,7 +1065,11 @@ class TestIntegratePackageHooksCodex:
                 {
                     "hooks": {
                         "PreToolUse": [
-                            {"type": "command", "command": "echo user"},
+                            {
+                                "hooks": [
+                                    {"type": "command", "command": "echo user"},
+                                ]
+                            },
                         ]
                     }
                 }
@@ -1093,7 +1099,10 @@ class TestIntegratePackageHooksCodex:
 
         native = json.loads(native_path.read_text(encoding="ascii"))
         entries = native["hooks"]["PreToolUse"]
-        assert [entry["command"] for entry in entries] == ["echo user", "echo apm"]
+        assert entries == [
+            {"hooks": [{"type": "command", "command": "echo user"}]},
+            {"hooks": [{"type": "command", "command": "echo apm"}]},
+        ]
         assert "_apm_source" not in json.dumps(native)
         sidecar_path = codex_dir / "apm-hooks.json"
         assert sidecar_path.exists()
@@ -1106,7 +1115,7 @@ class TestIntegratePackageHooksCodex:
 
         cleaned = json.loads(native_path.read_text(encoding="ascii"))
         assert cleaned["hooks"]["PreToolUse"] == [
-            {"type": "command", "command": "echo user"},
+            {"hooks": [{"type": "command", "command": "echo user"}]},
         ]
         assert not sidecar_path.exists()
 

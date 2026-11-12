@@ -6,6 +6,7 @@ import base64
 import os
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import pytest
@@ -86,6 +87,43 @@ def _context(kind: str) -> AuthContext:
         ),
         git_env={},
     )
+
+
+@pytest.mark.parametrize(
+    "remote_url",
+    (
+        "ssh://git@gitlab.com/group/repo.git",
+        "git@gitlab.com:group/repo.git",
+        "file:///local/mirror.git",
+        "http://gitlab.com/group/repo.git",
+    ),
+)
+def test_gitlab_non_https_resolution_never_probes_https_credentials(remote_url: str) -> None:
+    """GitLab honors the auth owner's no-native-lookup transport policy."""
+    manager = _RecordingTokenManager()
+    resolver = AuthResolver(token_manager=manager)
+
+    context = resolver.resolve_for_remote("gitlab.com", remote_url, "group")
+
+    assert context.token is None
+    assert manager.credential_envs == []
+
+
+def test_gitlab_https_resolution_retains_native_credential_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An admitted HTTPS attempt still resolves credentials for its declared port."""
+    manager = _RecordingTokenManager()
+    lookup = Mock(return_value="helper-token")
+    monkeypatch.setattr(manager, "resolve_credential_from_git", lookup)
+    resolver = AuthResolver(token_manager=manager)
+
+    context = resolver.resolve_for_remote(
+        "gitlab.com", "https://gitlab.com:8443/group/repo.git", "group", port=8443
+    )
+
+    assert context.token == "helper-token"
+    lookup.assert_called_once_with("gitlab.com", port=8443)
 
 
 @pytest.mark.parametrize(

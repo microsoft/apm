@@ -1738,7 +1738,8 @@ class TestGetVersion:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "abc1234\n"
+        root = Path(version_mod.__file__).resolve().parents[2]
+        mock_result.stdout = f"{root}\nabc1234\n"
 
         with (
             patch.object(version_mod, "__BUILD_SHA__", None),
