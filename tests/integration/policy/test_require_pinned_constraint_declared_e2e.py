@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -76,7 +77,9 @@ def _write_subpackage(repo_root: Path, version: str, marker: str) -> None:
     (pkg / ".apm" / "skills" / _SKILL / "SKILL.md").write_text(_skill_document(marker))
 
 
-def _publish_monorepo(isolated: IsolatedApmEnvironment, env: dict[str, str]) -> dict[str, str]:
+def _publish_monorepo(
+    isolated: IsolatedApmEnvironment, env: dict[str, str]
+) -> tuple[dict[str, str], Callable[[], None]]:
     packages = LocalPackageFactory(isolated.package_root)
     bundle = packages.create("mono", targets=("copilot",))
     packages.add_skill(
@@ -95,7 +98,16 @@ def _publish_monorepo(isolated: IsolatedApmEnvironment, env: dict[str, str]) -> 
     repositories.tag(repository, "pkg-a-v1.1.0", second)
     repositories.tag(repository, "pkg-a--v1.1.0", second)
 
-    return repositories.url_rewrite_subprocess_env(repository, _GIT_URL)
+    env = repositories.url_rewrite_subprocess_env(repository, _GIT_URL)
+
+    def publish_next() -> None:
+        # A newer compatible release, so ``apm update`` has something to
+        # select and must run the gate against the declared range again.
+        _write_subpackage(repository.worktree, "1.2.0", "pkg-a three")
+        third = repositories.commit(repository, message="pkg-a 1.2.0")
+        repositories.tag(repository, "pkg-a-v1.2.0", third)
+
+    return env, publish_next
 
 
 def _git(args: tuple[str, ...], *, cwd: Path, env: dict[str, str]) -> None:
@@ -187,18 +199,18 @@ def _lock_entry(project_root: Path) -> dict[str, object]:
 
 
 @pytest.fixture(scope="module")
-def scenario(tmp_path_factory, apm_binary_path: Path):
+def scenario(tmp_path_factory):
     root = tmp_path_factory.mktemp("pinned-declared")
     isolated = IsolatedApmEnvironment.create(root / "isolated", base_env=dict(os.environ))
-    env = _publish_monorepo(isolated, isolated.subprocess_env())
+    env, publish_next = _publish_monorepo(isolated, isolated.subprocess_env())
+    return isolated, env, publish_next
+
+
+def test_declared_range_passes_across_install_replay_update_and_audit(scenario, apm_binary_path):
+    isolated, env, publish_next = scenario
     runner = ApmLifecycleRunner(
         (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
     )
-    return isolated, env, runner
-
-
-def test_declared_range_passes_across_install_replay_update_and_audit(scenario):
-    isolated, env, runner = scenario
     project = _consumer(isolated.work_root, "range-consumer", f"{_SUBDIR_DEP}#^1.0.0", env)
     _warm_policy(runner, project, env, "range")
 
@@ -221,15 +233,33 @@ def test_declared_range_passes_across_install_replay_update_and_audit(scenario):
     assert "pkg-a two" in (project / _DEPLOYED_SKILL).read_text()
     assert _pinned_verdict(runner, project, env, "range-fresh")["passed"] is True
 
-    # Frozen replay, a repeat ordinary install and a deliberate update all
-    # re-run the gate against the manifest range; the verdict must not move.
+    # Frozen replay and a repeat ordinary install re-run the gate against
+    # the manifest range; the verdict must not move.
     for tag, args in (
         ("range-frozen", ("install", *_COMMON, "--frozen")),
         ("range-repeat-install", ("install", *_COMMON)),
-        ("range-update", ("update", "--yes", *_COMMON)),
     ):
         _governed(_run(runner, args, cwd=project, env=env, scenario_id=tag, expected=0))
         assert _pinned_verdict(runner, project, env, tag)["passed"] is True
+
+    # A deliberate update selects the newer compatible release; the gate
+    # still judges the declared range, not the newly selected tag.
+    publish_next()
+    _governed(
+        _run(
+            runner,
+            ("update", "--yes", *_COMMON),
+            cwd=project,
+            env=env,
+            scenario_id="range-update",
+            expected=0,
+        )
+    )
+    entry = _lock_entry(project)
+    assert entry["constraint"] == "^1.0.0", entry
+    assert entry["resolved_tag"] == "pkg-a-v1.2.0", entry
+    assert "pkg-a three" in (project / _DEPLOYED_SKILL).read_text()
+    assert _pinned_verdict(runner, project, env, "range-update")["passed"] is True
 
     manifest = load_yaml(project / "apm.yml")
     assert manifest["dependencies"]["apm"] == [f"{_SUBDIR_DEP}#^1.0.0"], manifest
@@ -242,8 +272,13 @@ def test_declared_range_passes_across_install_replay_update_and_audit(scenario):
         ("literal-double-dash", "pkg-a--v1.1.0"),
     ],
 )
-def test_package_qualified_literal_tags_install_and_audit(scenario, name, reference):
-    isolated, env, runner = scenario
+def test_package_qualified_literal_tags_install_and_audit(
+    scenario, apm_binary_path, name, reference
+):
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
     project = _consumer(isolated.work_root, f"{name}-consumer", f"{_SUBDIR_DEP}#{reference}", env)
     _warm_policy(runner, project, env, name)
     _governed(
@@ -271,8 +306,11 @@ def test_package_qualified_literal_tags_install_and_audit(scenario, name, refere
     assert _pinned_verdict(runner, project, env, f"{name}-frozen")["passed"] is True
 
 
-def test_root_repository_range_still_passes(scenario):
-    isolated, env, runner = scenario
+def test_root_repository_range_still_passes(scenario, apm_binary_path):
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
     project = _consumer(isolated.work_root, "root-range-consumer", f"{_ROOT_DEP}#^1.0.0", env)
     _warm_policy(runner, project, env, "root-range")
     _governed(
@@ -298,8 +336,11 @@ def test_root_repository_range_still_passes(scenario):
         ("open-upper", ">=1.0.0", "unbounded upper"),
     ],
 )
-def test_unbounded_declarations_stay_blocked(scenario, name, reference, hint):
-    isolated, env, runner = scenario
+def test_unbounded_declarations_stay_blocked(scenario, apm_binary_path, name, reference, hint):
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
     project = _consumer(isolated.work_root, f"{name}-consumer", f"{_SUBDIR_DEP}#{reference}", env)
     _warm_policy(runner, project, env, name)
     blocked = _governed(
@@ -319,3 +360,69 @@ def test_unbounded_declarations_stay_blocked(scenario, name, reference, hint):
     verdict = _pinned_verdict(runner, project, env, name)
     assert verdict["passed"] is False, verdict
     assert any(hint in detail for detail in verdict["details"]), verdict
+
+
+def _set_manifest_dependencies(project: Path, *, apm: list, dev_apm: list | None = None) -> None:
+    manifest = load_yaml(project / "apm.yml")
+    manifest["dependencies"] = {"apm": apm}
+    if dev_apm is not None:
+        manifest["devDependencies"] = {"apm": dev_apm}
+    dump_yaml(manifest, project / "apm.yml")
+
+
+def test_object_form_range_passes_install_and_audit(scenario, apm_binary_path):
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
+    project = _consumer(isolated.work_root, "object-consumer", f"{_SUBDIR_DEP}#^1.0.0", env)
+    _set_manifest_dependencies(
+        project, apm=[{"git": _GIT_URL, "path": "packages/pkg-a", "ref": "^1.0.0"}]
+    )
+    _warm_policy(runner, project, env, "object")
+    _governed(
+        _run(
+            runner,
+            ("install", *_COMMON),
+            cwd=project,
+            env=env,
+            scenario_id="object-install",
+            expected=0,
+        )
+    )
+    entry = _lock_entry(project)
+    assert entry["constraint"] == "^1.0.0", entry
+    # The range test may already have published pkg-a-v1.2.0 in this module.
+    assert entry["resolved_tag"] in {"pkg-a-v1.1.0", "pkg-a-v1.2.0"}, entry
+    assert _pinned_verdict(runner, project, env, "object")["passed"] is True
+
+
+def test_bounded_dev_declaration_does_not_cover_a_branch(scenario, apm_binary_path):
+    # One package declared twice shares a unique key: a bounded
+    # devDependencies entry must not stand in for the branch in dependencies.
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
+    project = _consumer(isolated.work_root, "dup-consumer", f"{_SUBDIR_DEP}#main", env)
+    _set_manifest_dependencies(
+        project, apm=[f"{_SUBDIR_DEP}#main"], dev_apm=[f"{_SUBDIR_DEP}#pkg-a-v1.1.0"]
+    )
+    _warm_policy(runner, project, env, "dup")
+    blocked = _governed(
+        _run(
+            runner,
+            ("install", *_COMMON),
+            cwd=project,
+            env=env,
+            scenario_id="dup-install",
+            expected=1,
+        )
+    )
+    text = blocked.stdout + blocked.stderr
+    assert "blocked by org policy" in text.lower(), text
+    assert "bare branch 'main'" in text, text
+    assert not (project / "apm.lock.yaml").exists()
+    verdict = _pinned_verdict(runner, project, env, "dup")
+    assert verdict["passed"] is False, verdict
+    assert any("bare branch 'main'" in detail for detail in verdict["details"]), verdict
