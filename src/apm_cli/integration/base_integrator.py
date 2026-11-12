@@ -154,6 +154,14 @@ def _read_bytes_no_follow(path: Path) -> bytes:
         os.close(fd)
 
 
+def untrusted_baseline_message(entry: str) -> str:
+    """Refuse to replace an existing file that has no trustworthy deployment baseline."""
+    return (
+        f"Skipped {entry}: no trustworthy local deployment baseline. Move the conflicting "
+        "file aside and retry; use --force only to intentionally overwrite it."
+    )
+
+
 class BaseIntegrator:
     """Shared infrastructure for file-level integrators.
 
@@ -350,19 +358,11 @@ class BaseIntegrator:
                         or (expected is not None and compute_file_hash(target_file) != expected)
                     )
                 ):
-                    reason = (
-                        "no trustworthy local deployment baseline"
-                        if expected is None
-                        else "modified since deployment"
-                    )
                     if expected is None:
-                        message = (
-                            f"Skipped {entry}: {reason}. Move the conflicting file aside "
-                            "and retry; use --force only to intentionally overwrite it."
-                        )
+                        message = untrusted_baseline_message(entry)
                     else:
                         message = (
-                            f"Skipped {entry}: {reason}. "
+                            f"Skipped {entry}: modified since deployment. "
                             "Preserve your changes before reinstalling with --force."
                         )
                     if diagnostics is not None:

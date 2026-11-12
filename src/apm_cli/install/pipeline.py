@@ -43,7 +43,8 @@ from __future__ import annotations
 import builtins
 import contextlib
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan
 
@@ -69,6 +70,7 @@ if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
     from ..core.deployment_ledger import DeploymentMaterializationSession
     from ..core.target_detection import EffectiveTargetDecision
+    from ..integration.skill_adoption import LockedSkillSources
     from .context import InstallContext
 
 
@@ -103,6 +105,34 @@ def _run_phase(name: str, phase, ctx):
             logger.verbose_detail(f"Phase: {name} -> {elapsed:.3f}s")
 
 
+def _locked_skill_sources(ctx: InstallContext) -> LockedSkillSources | None:
+    """Fetch currently locked sources on demand for receipt-less update adoption (#3625)."""
+    if not ctx.update_refs or ctx.existing_lockfile is None or ctx.downloader is None:
+        return None
+    from apm_cli.drift import build_download_ref
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    lockfile = ctx.existing_lockfile
+    downloader = ctx.downloader
+
+    def fetch(owner: str, destination: Path) -> Any:
+        locked = lockfile.get_dependency(owner)
+        if locked is None or locked.source in ("local", "registry"):
+            return None
+        reference = build_download_ref(
+            locked.to_dependency_ref(),
+            lockfile,
+            update_refs=False,
+            ref_changed=False,
+            require_locked=True,
+        )
+        if reference.reference != locked.resolved_commit:
+            return None
+        return downloader.download_package(reference, destination)
+
+    return LockedSkillSources(fetch)
+
+
 def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
@@ -114,15 +144,21 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
         if ctx.lockfile_only or ctx.dry_run
         else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
     )
-    with (
-        contextlib.nullcontext()
-        if ctx.lockfile_only
-        else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
-            materialization_session=session,
-        )
-    ):
-        _run_phase("integrate", _integrate_phase, ctx)
+    if session is not None:
+        session.locked_sources = _locked_skill_sources(ctx)
+    try:
+        with (
+            contextlib.nullcontext()
+            if ctx.lockfile_only
+            else ctx.integrators["skill"].ownership_snapshot(
+                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                materialization_session=session,
+            )
+        ):
+            _run_phase("integrate", _integrate_phase, ctx)
+    finally:
+        if session is not None and session.locked_sources is not None:
+            session.locked_sources.close()
     return session
 
 

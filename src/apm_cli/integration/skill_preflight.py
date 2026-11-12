@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from apm_cli.install.deployed_paths import deployed_path_entry
-from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
+from apm_cli.integration.skill_adoption import skill_tree_baselines
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
@@ -95,16 +97,23 @@ def preflight_skill_selection(
 
 @dataclass(frozen=True)
 class SkillConflict:
-    """A differing unowned file at a selected physical skill destination."""
+    """A differing file at a selected physical skill destination.
+
+    ``untrusted`` marks a managed file that materialization would refuse to
+    replace because it has no trustworthy local deployment baseline (#3625).
+    """
 
     skill: str
     package: str
     source: Path
     path: str
     targets: tuple[str, ...]
+    untrusted: bool = False
 
     def message(self) -> str:
         """Name the source, local file and affected targets in ordinary output."""
+        if self.untrusted:
+            return printable_ascii_text(untrusted_baseline_message(self.path))
         return printable_ascii_text(
             f"Installation refused: skill '{self.skill}' from '{self.package}' "
             f"(source: {self.source}) conflicts with unmanaged file '{self.path}'. "
@@ -150,7 +159,11 @@ def find_unmanaged_conflicts(
     force: bool = False,
     skip_bin: bool = False,
 ) -> tuple[SkillConflict, ...]:
-    """Inspect admitted files without copying, claiming, or choosing a managed winner."""
+    """Inspect admitted files without copying, claiming, or choosing a managed winner.
+
+    Managed files that materialization would refuse for lack of a trustworthy
+    baseline are reported as ``untrusted`` so no package writes before them.
+    """
     if force:
         return ()
     from apm_cli.integration.skill_integrator import (
@@ -179,6 +192,19 @@ def find_unmanaged_conflicts(
             if parent in files_by_root:
                 files_by_root[parent].append(source)
                 break
+    dependency = package_info.dependency_ref
+    owner = dependency.get_unique_key() if dependency else "."
+    session = integrator._materialization_session
+    replay_owners = integrator._replay_owners
+    adopted: dict[tuple[Path, Path], dict[Path, str]] = {}
+
+    def claimed(path: Path, destination: Path) -> bool:
+        entry = deployed_path_entry(path, project_root, targets)
+        return entry in managed or (
+            path == destination / "SKILL.md"
+            and deployed_path_entry(destination, project_root, targets) in managed
+        )
+
     for source_root, files in files_by_root.items():
         name = normalize_skill_name(source_root.name)
         ignore = _build_deployable_copy_ignore(
@@ -214,8 +240,17 @@ def find_unmanaged_conflicts(
                         raise PathTraversalError(
                             f"Unsafe skill destination '{relative_target}'; refusing deployment."
                         )
-                    if not BaseIntegrator.check_collision(
+                    unmanaged = BaseIntegrator.check_collision(
                         path, relative_target, managed, False, diagnostics=collision_diagnostics
+                    )
+                    if not unmanaged and (
+                        session is None
+                        or not path.is_file()
+                        or (
+                            replay_owners is not None
+                            and replay_owners.get(relative_target, owner) != owner
+                        )
+                        or session.baseline(path, targets) is not None
                     ):
                         continue
                     if not resolver_ready:
@@ -223,7 +258,22 @@ def find_unmanaged_conflicts(
                         resolver_ready = True
                     if _matches_deployed_file(integrator, source, path, source_root):
                         continue
-                    dependency = package_info.dependency_ref
+                    if not unmanaged:
+                        key = (source_root, destination)
+                        if key not in adopted:
+                            adopted[key] = skill_tree_baselines(
+                                integrator,
+                                source_root,
+                                destination,
+                                ignore=ignore,
+                                owned=partial(claimed, destination=destination),
+                                force=False,
+                                plan=source_plan,
+                                owner=owner,
+                                targets=targets,
+                            )
+                        if path in adopted[key]:
+                            continue
                     conflicts.append(
                         SkillConflict(
                             name,
@@ -231,6 +281,7 @@ def find_unmanaged_conflicts(
                             source,
                             relative_target,
                             affected,
+                            untrusted=not unmanaged,
                         )
                     )
     return tuple(conflicts)

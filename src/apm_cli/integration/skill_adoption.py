@@ -1,23 +1,32 @@
-"""Cold-restore adoption of unchanged deployed skill trees (#3391).
+"""Cold-restore adoption of unchanged deployed skill trees (#3391, #3625).
 
 Without any local deployment receipt for it, an existing skill directory is
 adopted only when its whole file tree equals what this install would write:
 every admitted source member after final link rendering, with no extra or
-missing files. The verified on-disk hash then stands in for the missing
-baseline, so the guarded write path rewrites identical bytes and records a
-receipt. Lockfile hashes are never consulted. Any difference returns no
-adoption, so the caller keeps its fail-closed refusal.
+missing files. During ``apm update`` the tree may instead equal what the
+currently locked version renders, materialized from its locked commit, so
+unchanged committed output can be replaced by the new version. The verified
+on-disk hash then stands in for the missing baseline, so the guarded write
+path rewrites the files and records receipts. Lockfile hashes are never
+consulted. Any difference returns no adoption, so the caller keeps its
+fail-closed refusal.
 """
 
 from __future__ import annotations
 
 import filecmp
 import os
-from collections.abc import Callable, Iterator
+import tempfile
+from collections.abc import Callable, Iterator, Sequence
+from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.content_hash import compute_file_hash
+
+if TYPE_CHECKING:
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 
 ResolveLinks = Callable[..., tuple[str, int]]
 WalkSource = Callable[[Path], Iterator[tuple[str, list[str], list[str]]]]
@@ -124,3 +133,108 @@ def adoption_baselines(
     if not all(owned(path) for path in members):
         return {}
     return {path: compute_file_hash(path) for path in members}
+
+
+class LockedSkillSources:
+    """Materialize each updated package's currently locked source at most once (#3625).
+
+    *fetch* downloads the locked commit of one owner into a private scratch
+    directory and returns its package info, or ``None`` when the lockfile has
+    no immutable remote pin for it. Any failure yields no plan, so callers
+    keep their refusal.
+    """
+
+    def __init__(self, fetch: Callable[[str, Path], Any]) -> None:
+        self._fetch = fetch
+        self._scratch: Path | None = None
+        self._plans: dict[str, DeployableSourcePlan | None] = {}
+
+    def plan(
+        self, owner: str, current: DeployableSourcePlan, targets: Sequence[Any]
+    ) -> DeployableSourcePlan | None:
+        """Return the locked source authorized like *current*, or ``None``."""
+        if owner not in self._plans:
+            self._plans[owner] = self._materialize(owner, current, targets)
+        return self._plans[owner]
+
+    def _materialize(
+        self, owner: str, current: DeployableSourcePlan, targets: Sequence[Any]
+    ) -> DeployableSourcePlan | None:
+        from apm_cli.config import get_apm_temp_dir
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+
+        try:
+            if self._scratch is None:
+                self._scratch = Path(
+                    tempfile.mkdtemp(prefix="apm-locked-source-", dir=get_apm_temp_dir())
+                )
+            package = self._fetch(owner, self._scratch / str(len(self._plans)))
+            if package is None:
+                return None
+            names = current.selected_skill_names
+            return DeployableSourcePlan.create(
+                package,
+                list(targets),
+                skill_subset=tuple(sorted(names)) if names is not None else None,
+                hooks_approved=False,
+                canvas_approved=False,
+                skip_bin=False,
+                package_name=owner,
+            )
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    def close(self) -> None:
+        """Remove the private scratch directory."""
+        from apm_cli.utils.file_ops import robust_rmtree
+
+        if self._scratch is not None:
+            robust_rmtree(self._scratch, ignore_errors=True)
+            self._scratch = None
+
+
+def skill_tree_baselines(
+    integrator: Any,
+    source: Path,
+    destination: Path,
+    *,
+    ignore: Callable[[str, list[str]], list[str]],
+    owned: Callable[[Path], bool],
+    force: bool,
+    plan: DeployableSourcePlan | None = None,
+    owner: str | None = None,
+    targets: Sequence[Any] | None = None,
+) -> dict[Path, str]:
+    """Return adoption baselines for a skill tree without any local receipt.
+
+    The single decision shared by skill preflight and materialization: compare
+    with the source being installed first, then, during update, with the
+    currently locked source rendered under the same copy filter. *plan*,
+    *owner* and *targets* default to the integrator's current package.
+    """
+    session = integrator._materialization_session
+    if session is None or force or session.has_receipt(destination / "SKILL.md"):
+        return {}
+    plan = plan or integrator._skill_source_plan
+    owner = owner or integrator._skill_current_owner
+    targets = targets if targets is not None else integrator._skill_targets or ()
+    compare = partial(
+        adoption_baselines,
+        walk_source=integrator.walk_source_tree,
+        resolve_links=integrator.resolve_links,
+        owned=owned,
+    )
+    adopted = compare(source, destination, ignore=ignore)
+    locked_sources: LockedSkillSources | None = session.locked_sources
+    rebased = getattr(ignore, "rebased", None)
+    if adopted or locked_sources is None or plan is None or owner is None or rebased is None:
+        return adopted
+    try:
+        relative = source.resolve().relative_to(plan.source_root)
+    except ValueError:
+        return {}
+    locked = locked_sources.plan(owner, plan, targets)
+    locked_source = locked.source_root / relative if locked is not None else None
+    if locked_source is None or locked_source.is_symlink() or not locked_source.is_dir():
+        return {}
+    return compare(locked_source, destination, ignore=rebased(locked))

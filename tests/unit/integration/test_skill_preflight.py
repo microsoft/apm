@@ -257,3 +257,73 @@ def test_selection_preflight_ignores_native_skill_filter(tmp_path: Path) -> None
         diagnostics=diagnostics,
     )
     assert diagnostics.error_count == 0
+
+
+def _session_conflicts(
+    info: PackageInfo,
+    root: Path,
+    managed: set[str],
+    *,
+    baseline: str | None,
+    locked: PackageInfo | None = None,
+) -> tuple:
+    from types import SimpleNamespace
+
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    integrator = SkillIntegrator()
+    integrator._materialization_session = SimpleNamespace(
+        has_receipt=lambda _path: False,
+        baseline=lambda _path, _targets: baseline,
+        locked_sources=LockedSkillSources(lambda _owner, _scratch: locked),
+    )
+    targets = [KNOWN_TARGETS["copilot"]]
+    plan = DeployableSourcePlan.create(
+        info, targets, skill_subset=None, hooks_approved=False, canvas_approved=False, skip_bin=True
+    )
+    return integrator.find_unmanaged_conflicts(
+        info, root, targets=targets, source_plan=plan, managed_files=managed, skip_bin=True
+    )
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    "case", ["untrusted", "baseline", "identical", "locked", "edited-locked", "unmanaged", "absent"]
+)
+def test_managed_file_without_trusted_baseline_is_refused_before_writes(
+    tmp_path: Path, case: str
+) -> None:
+    """Receipt-less replacement is refused in preflight, never partially (#3625)."""
+    info = _package(tmp_path)
+    root = tmp_path / "consumer"
+    target = KNOWN_TARGETS["copilot"].skills_deploy_path(root) / "review/SKILL.md"
+    target.parent.mkdir(parents=True)
+    entry = target.relative_to(root).as_posix()
+    managed = {entry}
+    older = b"---\nname: review\ndescription: Review\n---\nOlder review.\n"
+    target.write_bytes(older)
+    locked = None
+    if case in {"locked", "edited-locked"}:
+        locked = _package(tmp_path / "locked")
+        (locked.install_path / ".apm/skills/review/SKILL.md").write_bytes(older)
+        if case == "edited-locked":
+            target.write_bytes(b"Local edits.\n")
+    elif case == "identical":
+        target.write_bytes((info.install_path / ".apm/skills/review/SKILL.md").read_bytes())
+    elif case == "unmanaged":
+        managed = set()
+    elif case == "absent":
+        target.unlink()
+    baseline = "sha256:prior" if case == "baseline" else None
+    conflicts = _session_conflicts(info, root, managed, baseline=baseline, locked=locked)
+    if case in {"untrusted", "edited-locked", "unmanaged"}:
+        assert len(conflicts) == 1
+        assert conflicts[0].untrusted is (case != "unmanaged")
+        if case != "unmanaged":
+            assert conflicts[0].message() == (
+                f"Skipped {entry}: no trustworthy local deployment baseline. Move the "
+                "conflicting file aside and retry; use --force only to intentionally overwrite it."
+            )
+    else:
+        assert conflicts == ()
+    assert target.exists() is (case != "absent")
