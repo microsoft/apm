@@ -284,6 +284,10 @@ def test_queue_helpers_match_across_schedulers_and_worker_contract() -> None:
     assert not (worker / "scripts/fetch_queue.py").exists()
     assert not (worker / "scripts/triage_state.py").exists()
     assert (worker / "scripts/check_required_agents.py").is_file()
+    review_worker = ROOT / "packages/autopilot/autopilot-pr-review-worker"
+    assert (worker / "scripts/check_required_agents.py").read_bytes() == (
+        review_worker / "scripts/check_required_agents.py"
+    ).read_bytes()
 
 
 def test_trusted_gh_uses_cli_owner(monkeypatch: pytest.MonkeyPatch) -> None:
