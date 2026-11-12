@@ -67,6 +67,7 @@ from .transaction import InstallTransaction, transactional_pipeline
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
     from ..core.command_logger import InstallLogger
+    from ..core.deployment_ledger import DeploymentMaterializationSession
     from ..core.target_detection import EffectiveTargetDecision
     from .context import InstallContext
 
@@ -102,18 +103,27 @@ def _run_phase(name: str, phase, ctx):
             logger.verbose_detail(f"Phase: {name} -> {elapsed:.3f}s")
 
 
-def _run_integration_phase(ctx: InstallContext) -> None:
+def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+
     from .phases import integrate as _integrate_phase
 
+    session = (
+        None
+        if ctx.lockfile_only or ctx.dry_run
+        else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
+    )
     with (
         contextlib.nullcontext()
         if ctx.lockfile_only
         else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None
+            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+            materialization_session=session,
         )
     ):
         _run_phase("integrate", _integrate_phase, ctx)
+    return session
 
 
 def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
@@ -780,7 +790,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ctx.installed_packages = installed_packages
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
-        _run_integration_phase(ctx)
+        materialization_session = _run_integration_phase(ctx)
 
         # Fail-loud: if any direct dependency failed validation or
         # download, render the diagnostic summary and raise so the
@@ -900,6 +910,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             from .phases import post_deps_local as _post_deps_local_phase
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
+            if materialization_session is not None:
+                materialization_session.bind_committed_claims(
+                    LockFile.read(get_lockfile_path(ctx.apm_dir))
+                )
 
         # ------------------------------------------------------------------
         # Phase: Optional install-time content audit (external_scanners flag).

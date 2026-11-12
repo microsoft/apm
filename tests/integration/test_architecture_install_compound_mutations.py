@@ -390,15 +390,15 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "src/apm_cli/commands/uninstall/engine.py",
         (
             (
-                "        try:\n            integration_result = integrate_package_primitives(\n",
-                "        try:\n"
-                "            if 0:\n"
-                "                integrate_package_primitives(targets=authorized_targets)\n"
-                "            integration_result = integrate_package_primitives(\n",
+                "            try:\n                integration_result = integrate_package_primitives(\n",
+                "            try:\n"
+                "                if 0:\n"
+                "                    integrate_package_primitives(targets=authorized_targets)\n"
+                "                integration_result = integrate_package_primitives(\n",
             ),
             (
-                "                targets=authorized_targets,\n",
-                "                targets=rogue_targets,\n",
+                "                    targets=authorized_targets,\n",
+                "                    targets=rogue_targets,\n",
             ),
         ),
     ),
@@ -407,10 +407,10 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         TARGET_RULE,
         "src/apm_cli/commands/uninstall/engine.py",
         _replace(
-            "        try:\n            integration_result = integrate_package_primitives(\n",
-            "        try:\n"
-            "            integrate_package_primitives(targets=rogue_targets)\n"
-            "            integration_result = integrate_package_primitives(\n",
+            "            try:\n                integration_result = integrate_package_primitives(\n",
+            "            try:\n"
+            "                integrate_package_primitives(targets=rogue_targets)\n"
+            "                integration_result = integrate_package_primitives(\n",
         ),
     ),
     CompoundMutation(

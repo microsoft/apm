@@ -102,14 +102,25 @@ def test_ordinary_install_retires_obsolete_absent_dependency_claims(
     extra.unlink()
     if not already_absent and historical != "concrete":
         # Source removal alone cannot authorize deletion of an unattributed file.
-        run(*install)
+        previous_lock = lock_path.read_bytes()
+        snapshots = [ArtifactSnapshot.capture(deploy_root / root) for root in roots]
+        for _ in range(2):
+            refused = run(*install, expected=1)
+            assert "no trustworthy local deployment baseline" in " ".join(refused.stdout.split())
+            assert lock_path.read_bytes() == previous_lock
+            for snapshot, root in zip(snapshots, roots, strict=True):
+                assert_unchanged(snapshot, ArtifactSnapshot.capture(deploy_root / root))
         retained = load_yaml(lock_path)
         shared = ".agents/skills/demo/extra.md"
         assert (deploy_root / shared).read_bytes() == b"Old dependency asset.\n"
         assert shared in retained["dependencies"][0]["deployed_files"]
         assert shared in retained["dependencies"][0]["deployed_file_hashes"]
-        assert any(row["value"] == shared for row in retained["deployments"])
-        (deploy_root / shared).unlink()
+        if historical == "legacy":
+            assert any(row["value"] == shared for row in retained["deployments"])
+        else:
+            assert "deployments" not in retained
+        for path in obsolete:
+            (deploy_root / path).unlink()
     if already_absent:
         for path in obsolete:
             (deploy_root / path).unlink()
@@ -157,7 +168,14 @@ def test_ordinary_install_retires_obsolete_absent_dependency_claims(
 
 @pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
 @pytest.mark.parametrize(
-    "protection", ["edited-marker", "unprocessed-target", "required-selection", "untracked-content"]
+    "protection",
+    [
+        "edited-marker",
+        "unprocessed-target",
+        "required-selection",
+        "untracked-content",
+        "trusted-untracked-content",
+    ],
 )
 def test_historical_absence_respects_live_preservation_boundaries(
     tmp_path: Path, apm_binary_path: Path, user_scope: bool, protection: str
@@ -169,10 +187,12 @@ def test_historical_absence_respects_live_preservation_boundaries(
     lock = load_yaml(lock_path)
     shared = ".agents/skills/s/a.md"
     expected_hash = lock["dependencies"][0]["deployed_file_hashes"][shared]
-    for row in lock["deployments"]:
-        if row["value"].startswith(".agents/"):
-            row["target"] = "legacy"
-    dump_yaml(lock, lock_path)
+    # Rebinding claims invalidates the prior local receipt; retain a trusted control.
+    if protection != "trusted-untracked-content":
+        for row in lock["deployments"]:
+            if row["value"].startswith(".agents/"):
+                row["target"] = "legacy"
+        dump_yaml(lock, lock_path)
     (scenario.packages["a"] / "skills/s/a.md").unlink()
     for root in (".agents", ".claude"):
         (scenario.deploy_root / root / "skills/s/a.md").unlink()
@@ -187,25 +207,23 @@ def test_historical_absence_respects_live_preservation_boundaries(
                 "apm": [{"path": str(scenario.packages["a"]), "skills": ["no-such-skill"]}]
             }
         )
-    elif protection == "untracked-content":
+    elif protection in {"untracked-content", "trusted-untracked-content"}:
         untracked.write_bytes(b"Untracked personal content.\n")
     arguments = ("--target", "claude") if protection == "unprocessed-target" else ()
-    expected_exit = 1 if protection == "required-selection" else 0
+    refused_install = protection in {"edited-marker", "untracked-content", "required-selection"}
+    expected_exit = 1 if refused_install else 0
     prior_bytes = lock_path.read_bytes()
+    skill_roots = [scenario.deploy_root / root / "skills/s" for root in (".agents", ".claude")]
+    snapshots = [ArtifactSnapshot.capture(root) for root in skill_roots]
     for _ in range(2):
-        scenario.run("install", *arguments, expected=expected_exit)
+        result = scenario.run("install", *arguments, expected=expected_exit)
         repaired = load_yaml(lock_path)
         dependency = repaired["dependencies"][0]
         rows = [row for row in repaired["deployments"] if row["value"] == shared]
-        if protection == "untracked-content":
+        if protection == "trusted-untracked-content":
             assert shared not in dependency["deployed_files"]
             assert shared not in dependency["deployed_file_hashes"]
             assert rows == []
-            assert untracked.read_bytes() == b"Untracked personal content.\n"
-            personal = ".agents/skills/s/personal.txt"
-            assert personal not in dependency["deployed_files"]
-            assert personal not in dependency["deployed_file_hashes"]
-            assert all(row["value"] != personal for row in repaired["deployments"])
         else:
             assert shared in dependency["deployed_files"]
             assert dependency["deployed_file_hashes"][shared] == expected_hash
@@ -214,11 +232,21 @@ def test_historical_absence_respects_live_preservation_boundaries(
             assert rows[0]["owners"] == [str(scenario.packages["a"])]
             assert rows[0]["content_hash"] == expected_hash
             scenario.run("audit", "--ci", "--format", "json", expected=1)
+        if protection in {"untracked-content", "trusted-untracked-content"}:
+            assert untracked.read_bytes() == b"Untracked personal content.\n"
+            personal = ".agents/skills/s/personal.txt"
+            assert personal not in dependency["deployed_files"]
+            assert personal not in dependency["deployed_file_hashes"]
+            assert all(row["value"] != personal for row in repaired["deployments"])
+        if protection in {"untracked-content", "edited-marker"}:
+            assert "no trustworthy local deployment baseline" in " ".join(result.stdout.split())
         assert not (scenario.deploy_root / shared).exists()
         if protection == "edited-marker":
             assert marker.read_bytes() == b"User-edited skill marker.\n"
-        elif protection == "required-selection":
+        if refused_install:
             assert lock_path.read_bytes() == prior_bytes
+            for snapshot, root in zip(snapshots, skill_roots, strict=True):
+                assert_unchanged(snapshot, ArtifactSnapshot.capture(root))
 
 
 @pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])

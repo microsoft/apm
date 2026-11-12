@@ -1143,24 +1143,33 @@ class TestRunInstallPipelineEarlyExits:
         pkg.get_mcp_dependencies.return_value = []
         return pkg
 
-    def test_returns_empty_when_no_deps_no_local_primitives(self, tmp_path: Path) -> None:
+    def test_returns_empty_when_no_deps_no_local_primitives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.pipeline import run_install_pipeline
+        from apm_cli.models.apm_package import APMPackage
         from apm_cli.models.results import InstallResult
 
-        pkg = self._make_minimal_apm_package()
-
-        with (
-            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
-            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path / ".apm"),
-            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
-            patch(
-                "apm_cli.install.phases.local_content._project_has_root_primitives",
-                return_value=False,
-            ),
-        ):
-            result = run_install_pipeline(pkg)
+        monkeypatch.chdir(tmp_path)
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text("name: empty-project\nversion: 1.0.0\n", encoding="utf-8")
+        pkg = APMPackage.from_apm_yml(manifest)
+        result = run_install_pipeline(pkg)
 
         assert isinstance(result, InstallResult)
+        assert result.exit_code == 0
+        assert result.installed_count == 0
+        assert result.package_types == {}
+        assert not (tmp_path / "apm.lock.yaml").exists()
+        locked = run_install_pipeline(pkg, lockfile_only=True)
+        assert locked.exit_code == 0
+        assert locked.installed_count == 0
+        lock = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lock is not None
+        assert lock.dependencies == {}
+        assert lock.mcp_servers == []
+        assert not (tmp_path / ".apm").exists()
 
     def test_plan_callback_cancel_returns_empty(self, tmp_path: Path) -> None:
         """plan_callback returning False must abort cleanly."""

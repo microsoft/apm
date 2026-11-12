@@ -10,6 +10,8 @@ import shutil
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 import yaml
@@ -23,6 +25,8 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
 )
 
+from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_frozen_no_rewrite_e2e import (
@@ -65,8 +69,12 @@ _SKILL_NAME = "model-skill"
 _PACKAGE_NAME = "model-kit"
 _SKILL_BYTES = _skill(_SKILL_NAME).encode()
 _TAMPER_BYTES = b"# user tamper\n"
+_IDENTITY_WRITE_PATHS = frozenset(
+    {".apm-local", ".apm-local/.gitignore", ".apm-local/installation"}
+)
 _PROJECT_WRITE_PATHS = frozenset(
     {
+        *_IDENTITY_WRITE_PATHS,
         ".agents",
         ".agents/skills",
         f".agents/skills/{_SKILL_NAME}",
@@ -78,6 +86,8 @@ _PROJECT_WRITE_PATHS = frozenset(
 )
 _USER_WRITE_PATHS = frozenset(
     {
+        # filelock >= 4 keeps the released OS-user lifecycle lock file on disk.
+        ".apm/.apm-lifecycle.lock",
         ".apm/config.json",
         ".local",
         ".local/state",
@@ -242,9 +252,21 @@ class _ModelFixture:
     @property
     def exact_paths(self) -> dict[str, frozenset[str]]:
         if not self.global_scope:
-            return _INSTALL_EXACT_PATHS
+            home = self.scenario.isolated.home
+            with patch("apm_cli.core.deployment_ledger.Path.home", return_value=home):
+                receipt = DeploymentMaterializationSession(
+                    self.project.root, InstallScope.PROJECT, None
+                ).state_path
+            return {
+                **_INSTALL_EXACT_PATHS,
+                "user": _USER_WRITE_PATHS
+                | {
+                    receipt.parent.relative_to(home).as_posix(),
+                    receipt.relative_to(home).as_posix(),
+                },
+            }
         return {
-            "user": _USER_WRITE_PATHS,
+            "user": _USER_WRITE_PATHS | _IDENTITY_WRITE_PATHS,
             "target": frozenset({"skills", "rules", "rules/revision.md", "CLAUDE.md"}),
         }
 
@@ -340,14 +362,23 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
     @rule()
     @precondition(lambda self: self.declared and not self.materialized)
     def install(self) -> None:
-        before = self._capture()
-        self._run(self.fixture.install_args, "install")
+        before, state = self._capture(), self._state()
+        result = self._run(
+            self.fixture.install_args,
+            "install",
+            expected_returncode=1 if self.retained_user_file else 0,
+        )
         assert_snapshot_changes_within(
             before,
             self._capture(),
             exact_paths=self.fixture.exact_paths,
             tree_prefixes=self.fixture.tree_prefixes,
         )
+        if self.retained_user_file:
+            assert "conflicts with unmanaged file" in " ".join(result.stdout.split())
+            assert self.skill_path.read_bytes() == _TAMPER_BYTES
+            _assert_same_state(state, self._state())
+            return
         self.materialized = True
         self.clean = not self.retained_user_file
         self.locked = True
@@ -386,11 +417,22 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert self._state().deployment_records
 
     @rule()
-    @precondition(lambda self: self.declared and self.materialized and self.clean)
+    @precondition(lambda self: self.declared and self.materialized and not self.retained_user_file)
     def reinstall(self) -> None:
-        before = self._capture()
+        before, state = self._capture(), self._state()
+        if not self.clean:
+            assert any(
+                record.content_hash is not None
+                and record.locator.value.endswith(f"/{_SKILL_NAME}/SKILL.md")
+                for record in state.deployment_records
+            )
         self._run(self.fixture.install_args, "reinstall")
         assert_snapshot_set_unchanged(before, self._capture())
+        if not self.clean:
+            assert self.skill_path.read_bytes() == _TAMPER_BYTES
+            assert self._state().deployment_records == state.deployment_records, (
+                "Ordinary reinstall must preserve the original deployment hashes"
+            )
 
     @rule()
     @precondition(lambda self: self.declared)
@@ -435,19 +477,25 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
-    @precondition(lambda self: self.declared and self.materialized and not self.clean)
+    @precondition(
+        lambda self: (
+            self.declared and (self.retained_user_file or (self.materialized and not self.clean))
+        )
+    )
     def repair(self) -> None:
         before = self._capture()
-        args = self.fixture.install_args
-        if self.retained_user_file:
-            args = (*args, "--force")
-        self._run(args, "repair")
+        self._run((*self.fixture.install_args, "--force"), "repair")
         assert_snapshot_changes_within(
             before,
             self._capture(),
             exact_paths=self.fixture.exact_paths,
             tree_prefixes=self.fixture.tree_prefixes,
         )
+        if not self.materialized:
+            self.materialized = True
+            self.locked = True
+            self.installed_revision = self.published_revision
+            self.installed_commit = self.published_commit
         self.clean = True
         self.retained_user_file = False
 
@@ -499,8 +547,8 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_changes_within(
             before,
             self._capture(),
-            exact_paths=_INSTALL_EXACT_PATHS,
-            tree_prefixes=_INSTALL_TREE_PREFIXES,
+            exact_paths=self.fixture.exact_paths,
+            tree_prefixes=self.fixture.tree_prefixes,
         )
         self.materialized = False
         self.retained_user_file = retained_bytes is not None
@@ -868,6 +916,53 @@ def test_generated_lifecycle_mandatory_replay(
     _mandatory_replay(model)
 
 
+@pytest.mark.parametrize(
+    ("extra_write", "variant"),
+    [
+        *itertools.product(("identity-sibling", "wrong-root"), _VARIANTS),
+        ("receipt-sibling", "project"),
+    ],
+)
+def test_generated_identity_write_scope_is_exact(
+    tmp_path: Path, apm_binary_path: Path, variant: str, extra_write: str
+) -> None:
+    """Admit local evidence, but reject sibling files and cross-scope writes."""
+    model = _LifecycleReferenceModel(
+        _ModelFixture.create(tmp_path / "identity-scope", apm_binary_path, variant)
+    )
+    model.install()
+    home = model.scenario.isolated.home
+    project = model.fixture.invoke_cwd
+    identity_root = home if model.fixture.global_scope else project
+    identity = identity_root / ".apm-local/installation"
+    assert identity.is_file() and not identity.is_symlink()
+    identity_bytes = identity.read_bytes()
+    assert identity_bytes == (UUID(hex=identity_bytes.decode("ascii").strip()).hex + "\n").encode(
+        "ascii"
+    )
+    ignore = identity.parent / ".gitignore"
+    assert ignore.is_file() and not ignore.is_symlink()
+    assert ignore.read_bytes() == b"*\n"
+
+    before = model._capture()
+    if extra_write == "identity-sibling":
+        unexpected = identity.parent / "unrelated.txt"
+    elif extra_write == "receipt-sibling":
+        unexpected = home / ".apm/deployment-receipts/unrelated.json"
+    else:
+        wrong_root = project if model.fixture.global_scope else home
+        unexpected = wrong_root / ".apm-local/installation"
+    unexpected.parent.mkdir(parents=True, exist_ok=True)
+    unexpected.write_bytes(identity_bytes)
+    with pytest.raises(AssertionError, match="outside its declared write set"):
+        assert_snapshot_changes_within(
+            before,
+            model._capture(),
+            exact_paths=model.fixture.exact_paths,
+            tree_prefixes=model.fixture.tree_prefixes,
+        )
+
+
 def _mandatory_replay(model: _LifecycleReferenceModel) -> None:
     operations = [
         model.dry_run,
@@ -900,6 +995,7 @@ def _mandatory_replay(model: _LifecycleReferenceModel) -> None:
     operations.extend(
         [
             model.tamper,
+            model.reinstall,
             model.audit_tampered,
             model.repair,
             model.audit_clean,

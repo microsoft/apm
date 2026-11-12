@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -455,6 +456,7 @@ def _make_bare_repo(path: Path) -> None:
 class TestBareCacheRaceCondition:
     """6.1: regression test for the parallel sparse-checkout race (#1126)."""
 
+    @pytest.mark.windows_compat
     def test_parallel_different_subdirs_both_succeed(self, tmp_path: Path) -> None:
         """Two threads request same key, then extract different subdirs from
         the shared bare. Both must succeed (the v1 race lost one thread's
@@ -537,12 +539,10 @@ class TestBareCacheRaceCondition:
             except Exception as e:
                 results["errors"].append(("b", e))
 
-        ta = threading.Thread(target=thread_a)
-        tb = threading.Thread(target=thread_b)
-        ta.start()
-        tb.start()
-        ta.join(timeout=10)
-        tb.join(timeout=10)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(thread_a), executor.submit(thread_b)]
+            for future in futures:
+                future.result()
 
         assert results["errors"] == [], f"Errors: {results['errors']}"
         assert "X" in results["subdirs_seen"]

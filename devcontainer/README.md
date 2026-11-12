@@ -2,6 +2,9 @@
 
 A comprehensive reference for the APM (Agent Package Manager) Dev Container Feature: what it does, how it's structured, how to use it, how it's tested, and where it's supported.
 
+> [!NOTE]
+> This feature is not published to GHCR. See [section 4](#4-how-to-use-devcontainer-in-your-project) for supported ways to use APM in a dev container.
+
 ---
 
 ## 1. Feature Overview
@@ -85,57 +88,17 @@ When a devcontainer is built, the CLI injects each option as an uppercased envir
 
 ## 4. How to use `devcontainer` in your project
 
-### Quick start -- add the published feature
-
-Add the published feature to any `.devcontainer/devcontainer.json`:
-
-```json
-{
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
-  "features": {
-    "ghcr.io/microsoft/apm/apm-cli:1": {}
-  }
-}
-```
-
-Rebuild the container in VS Code (Dev Containers: Rebuild Container), GitHub Codespaces, or JetBrains Gateway. The `apm` binary is on `PATH`; verify with `apm --version`.
-
-### Pin a specific apm-cli release
-
-```json
-{
-  "features": {
-    "ghcr.io/microsoft/apm/apm-cli:1": {
-      "version": "0.10.0"
-    }
-  }
-}
-```
-
-### Combine with the official Python feature
-
-The APM feature declares `installsAfter` for the upstream Python feature, so ordering is automatic:
-
-```json
-{
-  "image": "ubuntu:24.04",
-  "features": {
-    "ghcr.io/devcontainers/features/python:1": {},
-    "ghcr.io/microsoft/apm/apm-cli:1": {}
-  }
-}
-```
-
-### Tag selection
-
-| Tag                                       | Resolves to              | Use when                              |
-| ----------------------------------------- | ------------------------ | ------------------------------------- |
-| `ghcr.io/microsoft/apm/apm-cli:1`         | latest 1.x.y             | recommended default                   |
-| `ghcr.io/microsoft/apm/apm-cli:1.0`       | latest 1.0.x             | locked to a minor line                |
-| `ghcr.io/microsoft/apm/apm-cli:1.0.0`     | exact patch              | maximum reproducibility               |
-| `ghcr.io/microsoft/apm/apm-cli:latest`    | newest published         | not recommended (crosses majors)      |
-
-The feature manifest version is independent of the `apm-cli` PyPI release. To pin the CLI, use the `version` option above.
+> [!IMPORTANT]
+> This feature is **not published**. `ghcr.io/microsoft/apm/apm-cli` does not
+> exist, and an official Dev Container Feature was declined in [#1273](https://github.com/microsoft/apm/issues/1273)
+> (cleanup tracked in [#3520](https://github.com/microsoft/apm/issues/3520)). To use APM in a dev container, use a supported
+> route from the [installation guide](https://microsoft.github.io/apm/getting-started/installation/):
+>
+> - `postCreateCommand`: `curl -sSL https://aka.ms/apm-unix | sh` (prebuilt
+>   Linux binaries currently need glibc 2.38+; see [#3399](https://github.com/microsoft/apm/issues/3399)), or
+> - add `ghcr.io/devcontainers/features/python:1` and run `pip install apm-cli`, or
+> - the community-maintained `ghcr.io/postfinance/devcontainer-features/apm`
+>   (maintained outside this project).
 
 ### Local development -- test an unpublished build
 

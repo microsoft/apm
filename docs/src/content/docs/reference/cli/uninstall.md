@@ -121,6 +121,12 @@ What gets removed, in order:
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
 
+When uninstall rebuilds a surviving package's loose skills, APM records those
+actual writes locally and binds them after the final lockfile update succeeds.
+Later installs can update the survivor without treating its unchanged files as
+user edits. Removed-output receipts are retired before survivor copies; failed
+removals do not retire evidence. Receipt failures are reported, not ignored.
+
 ### Shared transitive dependencies
 
 If `security-kit` and `release-kit` both need `company-standards`, removing
@@ -140,6 +146,15 @@ below still applies.
 The [proposed OpenAPM obligation](../../../specs/openapm-v01/#req-lk-024)
 formalizes these outcomes. Its review, version decision and publication are
 pending; it is not an adopted specification amendment or a new release claim.
+
+### Claude Code profiles
+
+Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
+removes a package's files and lockfile rows only under the selected
+`CLAUDE_CONFIG_DIR` (or `~/.claude`). Files deployed to another profile stay.
+If another profile still uses the package, it stays in `~/.apm/apm.yml` and
+`apm_modules/`; uninstall it with that profile selected to remove it everywhere.
+The selected profile is matched by path; symlinks are not resolved.
 
 ### Cleanup failures and ownership
 

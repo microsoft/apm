@@ -71,6 +71,34 @@ def _collect_deployed_cleanup_state(
     return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
 
 
+def _persist_uninstall_lockfile(
+    lockfile,
+    lockfile_path,
+    logger: CommandLogger,
+    integration_cleanup: IntegrationCleanupOutcome,
+) -> None:
+    """Bind actual survivor writes only after final lock persistence succeeds."""
+    from ...deps.lockfile import LockfileSymlinkError
+    from .lockfile_state import lockfile_has_persisted_state
+
+    try:
+        if lockfile_has_persisted_state(lockfile):
+            lockfile.write(lockfile_path)
+        elif lockfile_path.is_symlink():
+            raise LockfileSymlinkError(lockfile_path)
+        else:
+            lockfile_path.unlink(missing_ok=True)
+    except LockfileSymlinkError:
+        raise
+    except Exception:
+        logger.warning(
+            "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+        )
+    else:
+        if integration_cleanup.materialization_session is not None:
+            integration_cleanup.materialization_session.bind_committed_claims(lockfile)
+
+
 def _sync_integrations_for_manifest(
     *,
     manifest_path,
@@ -82,6 +110,7 @@ def _sync_integrations_for_manifest(
     modules_dir,
     deployed_file_hashes,
     default_counts,
+    excluded_survivor_keys=frozenset(),
 ) -> tuple[IntegrationCleanupOutcome, Exception | None]:
     """Run post-uninstall integration cleanup when the manifest is parseable."""
     default_outcome = IntegrationCleanupOutcome(
@@ -111,6 +140,7 @@ def _sync_integrations_for_manifest(
                 lockfile=lockfile,
                 modules_dir=modules_dir,
                 deployed_file_hashes=deployed_file_hashes,
+                excluded_survivor_keys=excluded_survivor_keys,
             ),
             None,
         )
@@ -219,6 +249,147 @@ def _report_package_removal_failure(
         "the declared packages. Run with --verbose for detailed diagnostics."
     )
     logger.verbose_detail(traceback.format_exc().rstrip())
+
+
+def _split_selected_profile_packages(
+    packages_to_remove: list, lockfile, *, user_scope: bool
+) -> tuple[list, list]:
+    """Split requested packages into full removals and selected-profile removals.
+
+    A package still deployed to another Claude/Hermes profile is removed only
+    from the selected profile and stays declared (#3425).
+    """
+    if not user_scope or not lockfile:
+        return packages_to_remove, []
+    from .profile_scope import split_profile_retained
+
+    return split_profile_retained(
+        packages_to_remove,
+        lockfile,
+        lambda package: _parse_dependency_entry(package).get_unique_key(),
+    )
+
+
+def _report_selected_profile_packages(
+    retained_packages: list, logger: CommandLogger, *, dry_run: bool
+) -> None:
+    """Explain why packages removed from the selected profile stay declared."""
+    for package in retained_packages:
+        label = _dependency_public_label(package)
+        if dry_run:
+            logger.progress(
+                f"Dry run: Would remove {label} from the selected profile only; "
+                "another profile still uses it"
+            )
+        else:
+            logger.progress(
+                f"Removed {label} from the selected profile; kept in apm.yml "
+                "because another profile still uses it"
+            )
+
+
+def _dry_run_with_selected_profile(
+    packages_to_remove: list,
+    retained_packages: list,
+    modules_dir,
+    logger: CommandLogger,
+    apm_yml_path,
+    *,
+    surviving_dependencies: list,
+) -> None:
+    """Preview full removals and selected-profile-only removals."""
+    if packages_to_remove:
+        _dry_run_uninstall(
+            packages_to_remove,
+            modules_dir,
+            logger,
+            apm_yml_path,
+            surviving_dependencies=surviving_dependencies,
+        )
+    _report_selected_profile_packages(retained_packages, logger, dry_run=True)
+
+
+def _retire_selected_profile_packages(
+    lockfile,
+    profile_keys: frozenset[str],
+    profile_survivors: frozenset[str],
+    retained_packages: list,
+    logger: CommandLogger,
+) -> bool:
+    """Drop selected-profile rows after cleanup and report kept declarations."""
+    if not profile_keys:
+        return False
+    from .profile_scope import retire_selected_profile_rows
+
+    updated = retire_selected_profile_rows(lockfile, profile_keys, profile_survivors)
+    _report_selected_profile_packages(retained_packages, logger, dry_run=False)
+    return updated
+
+
+def _plan_selected_profile_removal(
+    lockfile,
+    retained_packages: list,
+    *,
+    excluded_keys: set[str],
+    modules_dir,
+    apm_yml_path,
+    logger: CommandLogger,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return keys losing only selected-profile rows, and rows kept on disk.
+
+    Transitive dependencies reachable only from retained packages lose the
+    same rows; their declarations and other rows stay.
+    """
+    if not retained_packages:
+        return frozenset(), frozenset()
+    from .profile_scope import selected_profile_survivors
+
+    retained_orphans, _ = _project_transitive_orphans(
+        lockfile,
+        retained_packages,
+        modules_dir,
+        apm_yml_path,
+        logger,
+        warn_on_incomplete=False,
+    )
+    keys = {_parse_dependency_entry(package).get_unique_key() for package in retained_packages}
+    keys = frozenset((keys | set(retained_orphans)) - excluded_keys)
+    return keys, frozenset(selected_profile_survivors(lockfile, keys))
+
+
+def _finish_selected_profile_uninstall(
+    *,
+    lockfile,
+    lockfile_path,
+    lock_updated: bool,
+    retained_count: int,
+    labels: tuple[str, ...],
+    scope,
+    manifest_path,
+    logger: CommandLogger,
+    verbose: bool,
+    deploy_root,
+) -> None:
+    """Persist selected-profile row removal when every package stays declared."""
+    if lock_updated:
+        _persist_uninstall_lockfile(
+            lockfile,
+            lockfile_path,
+            logger,
+            IntegrationCleanupOutcome(counts={}, deployed_files={}, failed_paths=[], error_count=0),
+        )
+    logger.success(
+        f"Uninstall complete: removed {retained_count} package(s) from the selected profile only"
+    )
+    _fire_uninstall_scripts(
+        "post-uninstall",
+        packages=labels,
+        scope=scope,
+        manifest_path=manifest_path,
+        logger=logger,
+        verbose=verbose,
+        deploy_root=deploy_root,
+    )
 
 
 @click.command(
@@ -401,6 +572,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         selected_package_labels = tuple(
             _dependency_public_label(package) for package in packages_to_remove
         )
+        packages_to_remove, retained_packages = _split_selected_profile_packages(
+            packages_to_remove, lockfile, user_scope=scope is InstallScope.USER
+        )
         surviving_deps = list(current_deps)
         removed_keys = builtins.set()
         for package in packages_to_remove:
@@ -413,6 +587,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             apm_yml_path,
             logger,
             warn_on_incomplete=False,
+        )
+        profile_keys, profile_survivors = _plan_selected_profile_removal(
+            lockfile,
+            retained_packages,
+            excluded_keys=removed_keys | builtins.set(projected_orphans),
+            modules_dir=modules_dir,
+            apm_yml_path=apm_yml_path,
+            logger=logger,
         )
         _preflight_uninstall_survivors(
             surviving_deps,
@@ -432,8 +614,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Step 2: Dry run
         if dry_run:
-            _dry_run_uninstall(
+            _dry_run_with_selected_profile(
                 packages_to_remove,
+                retained_packages,
                 modules_dir,
                 logger,
                 apm_yml_path,
@@ -472,7 +655,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 3: Remove target-scoped files while their lockfile ownership is
         # still recoverable. The post-removal manifest can omit a removed
         # package's target, so its target must not be reconstructed from it.
-        if lockfile and removed_keys:
+        if lockfile and (removed_keys or profile_keys):
             from ...install.manifest_reconcile import reconcile_target_deployed_files
             from ...integration.targets import resolve_targets
             from ...utils.diagnostics import DiagnosticCollector
@@ -483,7 +666,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 user_scope=scope is InstallScope.USER,
                 explicit_target=cleanup_target_names or None,
             )
-            cleanup_keys = removed_keys | builtins.set(projected_orphans)
+            cleanup_keys = removed_keys | builtins.set(projected_orphans) | profile_keys
             retained_cleanup_paths = builtins.set()
             reconcile_target_deployed_files(
                 project_root=deploy_root,
@@ -496,8 +679,27 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 retained_selected_paths=retained_cleanup_paths,
                 user_scope=scope is InstallScope.USER,
                 logger=logger,
+                preserved_selected_values=profile_survivors,
             )
             _abort_if_retained_target_cleanup_paths(retained_cleanup_paths, logger)
+
+        profile_lock_updated = _retire_selected_profile_packages(
+            lockfile, profile_keys, profile_survivors, retained_packages, logger
+        )
+        if not packages_to_remove:
+            _finish_selected_profile_uninstall(
+                lockfile=lockfile,
+                lockfile_path=lockfile_path,
+                lock_updated=profile_lock_updated,
+                retained_count=len(retained_packages),
+                labels=selected_package_labels,
+                scope=scope,
+                manifest_path=manifest_path,
+                logger=logger,
+                verbose=verbose,
+                deploy_root=deploy_root,
+            )
+            return
 
         # Step 4: Remove from apm.yml
         for package in packages_to_remove:
@@ -583,6 +785,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             modules_dir=modules_dir,
             deployed_file_hashes=all_deployed_file_hashes,
             default_counts=cleaned,
+            excluded_survivor_keys=profile_keys,
         )
         cleaned = integration_cleanup.counts
         surviving_deployed_files = integration_cleanup.deployed_files
@@ -678,18 +881,13 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         lockfile_updated = lsp_lock_updated or lockfile_updated
 
-        if lockfile and lockfile_updated and lockfile_ready and mcp_cleanup_error is None:
-            try:
-                from .lockfile_state import lockfile_has_persisted_state
-
-                if lockfile_has_persisted_state(lockfile):
-                    lockfile.write(lockfile_path)
-                else:
-                    lockfile_path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                )
+        if (
+            lockfile
+            and (lockfile_updated or profile_lock_updated)
+            and lockfile_ready
+            and mcp_cleanup_error is None
+        ):
+            _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
 
         # Rebuild the APM-owned Copilot plugin registration from the surviving
         # locked state: only APM's own rows disappear, user bytes never do.
@@ -702,7 +900,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
 
         # Final summary
-        summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]
+        summary_lines = [
+            f"Removed {len(packages_to_remove)} package(s) from apm.yml",
+            *(
+                [f"removed {len(retained_packages)} package(s) from the selected profile only"]
+                if retained_packages
+                else []
+            ),
+        ]
         if removed_from_modules > 0:
             summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
         cleanup_incomplete = _report_uninstall_outcome(
