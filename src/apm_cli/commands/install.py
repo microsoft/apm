@@ -889,7 +889,8 @@ def _handle_mcp_install(  # noqa: PLR0913
 
 
 @click.command(
-    help="Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
+    help="Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)",
+    short_help="Install APM, MCP, and LSP dependencies",
 )
 @click.argument("packages", nargs=-1)
 @click.option(

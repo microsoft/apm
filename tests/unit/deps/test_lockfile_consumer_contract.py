@@ -9,6 +9,7 @@ from dataclasses import fields
 
 import pytest
 
+from apm_cli.deps.carried_license import CarriedLicense
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -54,6 +55,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "resolved_tag": "v1.2.3",
     "resolved_at": "2026-01-01T00:00:00+00:00",
     "declared_license": "MIT",
+    "carried_licenses": (CarriedLicense("LICENSE", "LICENSE", f"sha256:{'f' * 64}"),),
     "exec_status": "deployed",
     "name": "consume-contract",
     "extensions": {"x-vendor": {"k": "v"}},

@@ -482,6 +482,44 @@ def _has_marketplace_block(apm_yml_path: Path) -> bool:
     return bool(data.get("marketplace"))
 
 
+def _reconcile_plugin_json_version(
+    plugin_json: dict,
+    pkg_version: str,
+    *,
+    source_label: str = "plugin.json",
+    logger=None,
+) -> dict:
+    """Force the bundled ``plugin_json["version"]`` to the ``apm.yml`` version.
+
+    The bundle directory is named ``<name>-<version>`` from ``apm.yml``, so a
+    disk-first ``plugin.json`` that still carries an older release's version
+    would ship a self-contradicting bundle: ``build/pkg-1.0.3/plugin.json``
+    declaring ``1.0.2`` (#3351). Only the bundle copy changes; the authored
+    source file is never rewritten. A conflicting authored version warns
+    (naming ``source_label``) so the author can fix it; an absent one is
+    filled silently because nothing contradicts ``apm.yml``.
+
+    Returns a new dict; the input is not mutated.
+    """
+    result = dict(plugin_json)
+    authored_version = result.get("version")
+    if authored_version == pkg_version:
+        return result
+    result["version"] = pkg_version
+    if authored_version is None:
+        return result
+    msg = (
+        f"{source_label} declares version {authored_version} but apm.yml declares "
+        f"{pkg_version}; the bundled plugin.json uses {pkg_version}. "
+        f"Update the version in {source_label} to match apm.yml."
+    )
+    if logger:
+        logger.warning(msg)
+    else:
+        _rich_warning(msg)
+    return result
+
+
 def _update_plugin_json_paths(plugin_json: dict, output_files: list[str], logger=None) -> dict:
     r"""Strip component-path keys from ``plugin.json``.
 
@@ -874,6 +912,19 @@ def export_plugin_bundle(
         project_root,
         apm_yml_path,
         suppress_missing_warning=_has_marketplace_block(apm_yml_path),
+        logger=logger,
+    )
+    from ..utils.helpers import find_plugin_json
+
+    authored_manifest = find_plugin_json(project_root)
+    plugin_json = _reconcile_plugin_json_version(
+        plugin_json,
+        pkg_version,
+        source_label=(
+            portable_relpath(authored_manifest, project_root)
+            if authored_manifest is not None
+            else "plugin.json"
+        ),
         logger=logger,
     )
 

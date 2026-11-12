@@ -204,7 +204,8 @@ all -- APM fails closed. Kiro may warn and fall back if the specified
 validation.
 
 Codex receives `name`, `description`, and the Markdown body as
-`developer_instructions`. Supplied string values for `model` and
+`developer_instructions`, with [package-relative links](../../package-relative-links/)
+rewritten for the generated agent's location. Supplied string values for `model` and
 `model_reasoning_effort` become top-level keys in the generated agent TOML,
 as documented in the [Codex custom agent format](https://developers.openai.com/codex/subagents/#custom-agents).
 Omitted fields remain absent; APM does not translate model names, choose
@@ -231,6 +232,34 @@ its theme names (`primary`, `secondary`, `accent`, `success`,
 install time when an agent ships shapes OpenCode would reject at
 load time -- the file is still deployed, but the warning names the
 offending package and field so you can fix the source.
+
+### Per-harness model values
+
+Agent files and model identifiers belong to each harness vendor. APM
+writes a string `model` value verbatim to every target that receives
+agent files, so a Claude alias such as `sonnet` also lands in the Codex
+TOML. A warning for Claude-specific
+values in Codex output is tracked in
+[#3477](https://github.com/microsoft/apm/issues/3477). APM does not add
+a per-target model map or a `codex:` override block
+([#3324](https://github.com/microsoft/apm/issues/3324)): no other tool
+could read it. Workarounds:
+
+1. **Omit `model`** from the shared agent so each harness uses its own
+   default or user setting (simplest).
+2. **Split by target:** one small package per harness with its own
+   `target:` and `model:`, plus a common package for shared content.
+3. **A `post-install` / `post-update`
+   [lifecycle script](../../../enterprise/lifecycle-scripts/) in the
+   consuming project** (its `apm.yml`, trusted with `apm lifecycle trust`;
+   a dependency package cannot ship one) that sets `model` in the
+   generated `.codex/agents/*.toml`. It edits APM-managed
+   output, so `apm audit --ci` reports those files as drifted and the
+   script must run on every install. Not recommended for CI-gated teams.
+
+For a portable fix, raise it upstream with
+[Claude Code](https://github.com/anthropics/claude-code/issues) or
+[Codex](https://github.com/openai/codex/issues).
 
 ### Body conventions
 

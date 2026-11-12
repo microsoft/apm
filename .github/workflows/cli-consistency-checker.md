@@ -65,56 +65,25 @@ If installation fails, stop immediately and create an issue reporting the instal
 
 ## Step 2: Run --help for Every Command and Subcommand
 
-You MUST run `--help` for every single command and subcommand listed below. Save all output for analysis. Do not skip any command.
+Do NOT use a hand-written command list; it goes stale as commands are added. Derive the command surface from `apm --help` itself by walking every command group recursively. A group lists its subcommands under a `Commands:` heading (some groups split them into headings such as `Consumer commands:` and `Authoring commands:`). Run this walker and save all output for analysis:
 
-### Top-level
-```
-apm --help
-```
-
-### Core commands
-```
-apm init --help
-apm install --help
-apm uninstall --help
-apm update --help
-apm compile --help
-apm run --help
-```
-
-### Dependency management subcommands
-```
-apm deps --help
-apm deps list --help
-apm deps tree --help
-apm deps info --help
-apm deps clean --help
-apm deps update --help
+```bash
+apm_subcommands() {
+  apm "$@" --help | awk '/^([A-Za-z]+ )*[Cc]ommands:$/ { in_cmds = 1; next } /^$/ { in_cmds = 0 } in_cmds && /^  [a-z]/ { print $1 }'
+}
+apm_help_walk() {
+  echo "===== apm $* --help"
+  apm "$@" --help
+  for sub in $(apm_subcommands "$@"); do
+    apm_help_walk "$@" "$sub"
+  done
+}
+mkdir -p /tmp/gh-aw/agent
+apm_help_walk > /tmp/gh-aw/agent/apm-help-all.txt 2>&1
+grep '^===== ' /tmp/gh-aw/agent/apm-help-all.txt
 ```
 
-### MCP subcommands
-```
-apm mcp --help
-apm mcp search --help
-apm mcp show --help
-apm mcp install --help
-```
-
-### Config subcommands
-```
-apm config --help
-apm config set --help
-apm config get --help
-apm config list --help
-```
-
-### Runtime subcommands
-```
-apm runtime --help
-apm runtime setup --help
-```
-
-Record the total number of commands inspected.
+Every top-level command and every subcommand at any depth gets its own `--help` section in `/tmp/gh-aw/agent/apm-help-all.txt`. Do not skip any of them. Record the total number of commands inspected (`grep -c '^===== ' /tmp/gh-aw/agent/apm-help-all.txt`).
 
 ---
 
@@ -139,22 +108,26 @@ Analyze ALL collected help output for the following categories of issues. Be tho
 - Do any commands reference features, flags, or subcommands that don't exist?
 
 ### 3.4 Documentation Cross-Reference
-Read the documentation files:
+The CLI reference lives in `docs/src/content/docs/reference/cli/`, one page per top-level command (`<command>.md`); subcommands at any depth are documented on their top-level command's page (for example, `apm marketplace package add` lives in `marketplace.md`). Read the documentation files:
 
 ```
-cat docs/cli-reference.md
+ls docs/src/content/docs/reference/cli/
 ```
+
+Then read each page one command at a time while comparing it with that command's help output from Step 2 (for example `cat docs/src/content/docs/reference/cli/install.md`).
 
 ```
 cat README.md
 ```
 
 Then compare:
-- Every command documented in `docs/cli-reference.md` must exist in the actual CLI, and vice versa.
+- Every top-level command found in Step 2 must have a page in `docs/src/content/docs/reference/cli/`, and every page there must match a command that exists in the actual CLI.
+- Every subcommand found in Step 2 must be documented on its top-level command's page, and every subcommand documented there must exist in the actual CLI.
 - Every command mentioned in `README.md` must exist in the actual CLI.
 - Flag names, argument names, and descriptions should match between docs and CLI help.
 - Usage examples in docs should be syntactically correct per the actual CLI interface.
 - If docs mention commands or flags not present in the CLI (or vice versa), flag as **high severity**.
+- Hidden aliases and hidden options (for example `apm info`) do not appear in `--help`, so Step 2 does not list them. Before flagging a command or flag that the docs mention but Step 2 did not find, invoke it directly before flagging it. For a command, run `<command> --help` (for example `apm info --help`). For an option, pass it together with `--help` (for example `apm marketplace add --branch main --help`). Report it only if that invocation fails (for example `No such command` or `No such option`).
 
 ### 3.5 Flag Consistency Audit
 Check these common flags across all commands that support them:

@@ -103,19 +103,19 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "audit",
         "apm_cli.commands.audit",
         "audit",
-        "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
+        "Scan for hidden Unicode, drift, and policy violations",
     ),
     (
         "export-patch",
         "apm_cli.commands.export_patch",
         "export_patch",
-        "Export local edits to APM-managed files as patches against their source packages",
+        "Export local edits as patches to source packages",
     ),
     (
         "install",
         "apm_cli.commands.install",
         "install",
-        "Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)",
+        "Install APM, MCP, and LSP dependencies",
     ),
     (
         "marketplace",
@@ -133,7 +133,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "prune",
         "apm_cli.commands.prune",
         "prune",
-        "Remove APM packages absent from the resolved dependency graph and repair stale deployment owners",
+        "Remove packages absent from the dependency graph",
     ),
     (
         "search",
@@ -145,7 +145,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "uninstall",
         "apm_cli.commands.uninstall",
         "uninstall",
-        "Remove packages using manifest entries or direct locked keys from 'apm deps list'",
+        "Remove packages by manifest entry or locked key",
     ),
     (
         "unpack",
