@@ -151,7 +151,8 @@ precedence over `marketplace.build.tagPattern`. Repack and publish the generated
 metadata after changing either value so consumers receive the new convention.
 `apm install <package>@<marketplace>` accepts both forms, derives the package host from
 the generated entry rather than from the marketplace host, and preserves
-the generated path and ref.
+the generated path and ref. When the entry carries `source.sha`, consumers
+install and record that commit instead of `source.ref`.
 
 For annotated or signed tags, `source.sha` records the peeled checkout
 commit, not the tag object; `source.ref` remains the selected tag. This
