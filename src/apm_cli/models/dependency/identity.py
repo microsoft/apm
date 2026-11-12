@@ -10,7 +10,6 @@ without collapsing their distinct local-detection semantics.
 comparison identity. It must never be used as a display or filesystem path.
 """
 
-import contextlib
 import re
 from enum import Enum
 from functools import lru_cache
@@ -33,6 +32,7 @@ _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE = r"^(?:[a-zA-Z0-9._~-]|%[0-9A-Fa-f]{2})+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+_POLICY_HOST_PORT_RE = re.compile(r":[0-9]{1,5}$")
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 _ASCII_LOWER_TRANSLATION = str.maketrans(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -187,13 +187,11 @@ def normalize_policy_host(host: str) -> str:
 
     Host names are case-insensitive. Ports are transport details, so the
     shorthand, HTTPS and SSH spellings of one host share a policy identity; a
-    valid ``:port`` suffix (including one on a configured default host such as
-    ``GITHUB_HOST=ghes.corp.example:8443``) is removed, and so is one
+    ``:`` followed by one to five digits (including one on a configured default
+    host such as ``GITHUB_HOST=ghes.corp.example:8443``) is removed, and so is one
     trailing DNS root dot (``ghes.corp.example.`` names the same host).
     """
-    host = host.strip()
-    with contextlib.suppress(ValueError):
-        host, _port = _split_shorthand_host_port(host)
+    host = _POLICY_HOST_PORT_RE.sub("", host.strip())
     if host.endswith("."):
         host = host[:-1]
     return host.translate(_ASCII_LOWER_TRANSLATION)

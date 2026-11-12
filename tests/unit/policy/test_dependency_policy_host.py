@@ -128,6 +128,10 @@ class TestExplicitHostDependencies:
         assert _allowed("ghes.corp.example:8443/team/repo", allow=("ghes.corp.example/**",))
         assert _allowed("ghes.corp.example/team/repo", allow=("ghes.corp.example:8443/**",))
 
+    def test_out_of_range_pattern_port_still_names_the_host(self) -> None:
+        assert not _allowed("ghes.corp.example/team/repo", deny=("ghes.corp.example:99999/**",))
+        assert split_policy_pattern_host("ghes.corp.example:0/**") == ("ghes.corp.example", "**")
+
     def test_host_qualified_patterns_never_match_local_dependencies(self) -> None:
         assert not _allowed("./packages/x", allow=("github.com/**",))
 
