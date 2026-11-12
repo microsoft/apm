@@ -8,6 +8,10 @@
 # outside the ubuntu.com zone. apt still verifies the archive with the Ubuntu
 # keyring (Signed-By in ubuntu.sources), so the mirror is only a transport.
 #
+# Each apt-get call is also time-boxed. A healthy install takes about 10 s,
+# but a stalled mirror used to hang the step for ~7.5 min before failing the
+# job. A timed-out primary attempt now falls over to the mirror instead.
+#
 # Usage: scripts/ci-apt-install.sh <package>...
 set -euo pipefail
 
@@ -16,7 +20,7 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-SOURCES=/etc/apt/sources.list.d/ubuntu.sources
+SOURCES="${CI_APT_SOURCES_FILE:-/etc/apt/sources.list.d/ubuntu.sources}"
 case "$(dpkg --print-architecture)" in
   amd64 | i386)
     ARCHIVE_HOST=archive.ubuntu.com
@@ -28,9 +32,14 @@ case "$(dpkg --print-architecture)" in
     ;;
 esac
 APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+APT_CALL_TIMEOUT="${APT_CALL_TIMEOUT:-60}"
+
+bounded_apt_get() {
+  sudo timeout --kill-after=10 "$APT_CALL_TIMEOUT" apt-get "${APT_OPTS[@]}" "$@"
+}
 
 apt_install() {
-  sudo apt-get "${APT_OPTS[@]}" update && sudo apt-get "${APT_OPTS[@]}" install -y "$@"
+  bounded_apt_get update && bounded_apt_get install -y "$@"
 }
 
 can_fall_back() {
@@ -39,6 +48,8 @@ can_fall_back() {
 
 use_fallback_mirror() {
   echo "[!] Pointing apt at ${FALLBACK_MIRROR}"
+  # A time-boxed install may have been killed mid-unpack.
+  sudo dpkg --configure -a || true
   sudo sed -i "s#^URIs:.*#URIs: ${FALLBACK_MIRROR}#" "$SOURCES"
 }
 

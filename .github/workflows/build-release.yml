@@ -141,7 +141,12 @@ jobs:
         run: |
           uv run pwsh scripts/windows/sign-binary.ps1
 
+      # A stalled upload once hung a release job for 11.5 min. Time-box it
+      # and retry once instead of failing the whole platform leg.
       - name: Upload binary as workflow artifact
+        id: upload-binary
+        timeout-minutes: 5
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.binary_name }}
@@ -157,6 +162,26 @@ jobs:
           include-hidden-files: true  # Required to include .apm directories
           retention-days: 30
           if-no-files-found: error
+
+      - name: Retry binary upload
+        if: steps.upload-binary.outcome == 'failure'
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.binary_name }}
+          path: |
+            ./dist/${{ matrix.binary_name }}
+            ./dist/${{ matrix.binary_name }}.sha256
+            ./scripts/test-release-validation.sh
+            ./scripts/windows/test-release-validation.ps1
+            ./scripts/test-dependency-integration.sh
+            ./scripts/windows/test-dependency-integration.ps1
+            ./scripts/github-token-helper.sh
+            ./scripts/windows/github-token-helper.ps1
+          include-hidden-files: true  # Required to include .apm directories
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
 
   # Consolidated macOS Intel build + validation.
   # Intel runners are plentiful (<1 min queue) so this runs on every push for
@@ -224,7 +249,12 @@ jobs:
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
             -vv -ra --tb=short
 
+      # A stalled upload once hung a release job for 11.5 min. Time-box it
+      # and retry once instead of failing the whole platform leg.
       - name: Upload binary as workflow artifact
+        id: upload-binary
+        timeout-minutes: 5
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: apm-darwin-x86_64
@@ -237,6 +267,23 @@ jobs:
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: error
+
+      - name: Retry binary upload
+        if: steps.upload-binary.outcome == 'failure'
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: apm-darwin-x86_64
+          path: |
+            ./dist/apm-darwin-x86_64
+            ./dist/apm-darwin-x86_64.sha256
+            ./scripts/test-release-validation.sh
+            ./scripts/test-dependency-integration.sh
+            ./scripts/github-token-helper.sh
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
 
       # PHASE 2: FOCUSED INTEGRATION TESTS (tag/schedule/dispatch only)
       - name: Run focused Intel integration tests
@@ -349,7 +396,12 @@ jobs:
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
             -vv -ra --tb=short
 
+      # A stalled upload once hung a release job for 11.5 min. Time-box it
+      # and retry once instead of failing the whole platform leg.
       - name: Upload binary as workflow artifact
+        id: upload-binary
+        timeout-minutes: 5
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: apm-darwin-arm64
@@ -362,6 +414,23 @@ jobs:
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: error
+
+      - name: Retry binary upload
+        if: steps.upload-binary.outcome == 'failure'
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: apm-darwin-arm64
+          path: |
+            ./dist/apm-darwin-arm64
+            ./dist/apm-darwin-arm64.sha256
+            ./scripts/test-release-validation.sh
+            ./scripts/test-dependency-integration.sh
+            ./scripts/github-token-helper.sh
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
 
       # PHASE 2: INTEGRATION TESTS
       - name: Run integration tests
@@ -483,6 +552,7 @@ jobs:
 
       - name: Install Unix shell startup test runtimes
         if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
+        timeout-minutes: 5
         run: bash scripts/ci-apt-install.sh fish zsh
 
       - name: Install test dependencies
