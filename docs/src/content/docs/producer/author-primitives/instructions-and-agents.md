@@ -111,13 +111,16 @@ under supported top-level harness directories: `.agents`, `.apm`, `.claude`,
 | copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
 | grok-build | `.grok/rules/<name>.md` and folded into `AGENTS.md` | native rule plus compiled root context |
-| cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); description auto-derived if missing |
+| cursor | `.cursor/rules/<name>.mdc` | exactly one universal `**` (scalar, padded, or single-item list) -> `alwaysApply: true`, no `globs:`; other non-empty `applyTo`, including `**` mixed with scoped globs -> `globs:` (one comma-joined scalar, normally unquoted; unsafe characters are escaped); absent, empty, or null `applyTo` -> neither key (Cursor decides from `description`); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
 | antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (one quoted, comma-separated string, for example `"src/**, tests/**"`); missing `applyTo` -> `trigger: always_on` |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |
+
+Reinstalling replaces a Cursor rule that APM previously generated as
+`globs: **` with the `alwaysApply: true` form.
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
 `src/apm_cli/integration/targets.py`.
