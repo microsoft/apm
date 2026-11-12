@@ -305,9 +305,10 @@ def test_bare_materialization_pins_line_endings_without_extra_spawns(
     """The per-consumer path records the pins on the clone, not via ``git config``."""
     calls: list[list[str]] = []
 
-    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[object]:
         calls.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        empty = "" if kwargs.get("text") else b""
+        return subprocess.CompletedProcess(argv, 0, stdout=empty, stderr=empty)
 
     monkeypatch.setattr("apm_cli.deps.bare_cache.subprocess.run", fake_run)
     materialize_from_bare(

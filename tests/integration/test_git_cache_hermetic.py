@@ -18,6 +18,7 @@ import pytest
 from apm_cli.cache.git_cache import (
     CachePruneError,
     GitCache,
+    _checkout_materialization_pins,
     _dir_size,
     _safe_git_args,
     _sanitize_url,
@@ -488,10 +489,17 @@ class TestEnsureBareRepo:
 class TestCreateCheckout:
     @pytest.fixture(autouse=True)
     def _validated_rewrites(self):
-        """Keep subprocess mocks focused on checkout after policy validation."""
-        with patch(
-            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
-            return_value=(None, _GitConfigSnapshot((), (), ())),
+        """Keep subprocess mocks focused on checkout after policy validation.
+
+        Link materialization has its own real-git tests; here it would feed
+        the text-mode subprocess mocks to a bytes parser.
+        """
+        with (
+            patch(
+                "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
+                return_value=(None, _GitConfigSnapshot((), (), ())),
+            ),
+            patch("apm_cli.cache.git_cache.materialize_tracked_symlinks", return_value=[]),
         ):
             yield
 
@@ -545,7 +553,8 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "b" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 5  # clone, three config pins, checkout
+        # clone, one config call per persisted pin, checkout
+        assert mock_run.call_count == 2 + len(_checkout_materialization_pins())
 
     def test_clone_failure_cleans_staged_checkout(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
@@ -615,7 +624,8 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "e" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 5  # clone, three config pins, checkout
+        # clone, one config call per persisted pin, checkout
+        assert mock_run.call_count == 2 + len(_checkout_materialization_pins())
 
     def test_atomic_land_false_with_invalid_winner_evicts_and_raises(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
