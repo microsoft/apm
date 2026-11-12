@@ -122,7 +122,12 @@ def test_cold_install_of_ssh_non_github_dep_never_uses_https(
     real_run = subprocess.run
 
     def _recording_run(args, *a, **kw):
-        argvs.append([str(x) for x in args])
+        argv = [str(x) for x in args]
+        argvs.append(argv)
+        for url in _remote_urls([argv]):
+            parsed = urlparse(url)
+            if parsed.hostname == _HOST and parsed.scheme in ("http", "https"):
+                raise subprocess.CalledProcessError(128, argv, stderr="web remote refused")
         return real_run(args, *a, **kw)
 
     def _no_fallback_clone(*_a, **_kw):
