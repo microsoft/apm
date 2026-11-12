@@ -15,17 +15,16 @@ import re
 import runpy
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-plan_batch = runpy.run_path(str(Path(__file__).resolve().with_name("triage_state.py")))[
-    "plan_batch"
-]
+_planner = runpy.run_path(str(Path(__file__).resolve().with_name("triage_state.py")))
+plan_batch = _planner["plan_batch"]
+SCHEDULED_DECIDED_LABELS = _planner["SCHEDULED_DECIDED_LABELS"]
 
 PAGE_SIZE = 100
-SWEEP_CAP = 10
 URL_RE = re.compile(r"https?://\S+", re.ASCII)
 IDENTICAL_RUN_RE = re.compile(r"(.)\1{49}")
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -45,6 +44,8 @@ PLACEHOLDER_RE = re.compile(
     r"reporting and investigating a bug need no permission.*$",
     re.IGNORECASE | re.MULTILINE,
 )
+
+
 def _alnum_count(text: str) -> int:
     """Count ASCII alphanumeric characters."""
     return sum(char.isalnum() for char in text)
@@ -166,6 +167,8 @@ def build_batch(
     records: Sequence[dict[str, Any]],
     mode: str,
     repository_labels: list[str],
+    *,
+    scheduled_sweep: bool = False,
 ) -> dict[str, Any]:
     """Annotate eligibility and emit `triage_state.py` stdin JSON."""
     if mode not in {"sweep", "label-event", "dispatch"}:
@@ -180,15 +183,20 @@ def build_batch(
             "labels": list(record["labels"]),
             "eligible": reason is None,
         }
+        if scheduled_sweep:
+            item["has_scope_record"] = record.get("has_scope_record")
         issues.append(item)
         if reason is not None:
             skipped.append({"number": record["number"], "reason": reason})
-    return {
+    batch = {
         "mode": mode,
         "repository_labels": list(repository_labels),
         "issues": issues,
         "skipped": skipped,
     }
+    if scheduled_sweep:
+        batch["scheduled_sweep"] = True
+    return batch
 
 
 def _trusted_gh() -> str:
@@ -309,12 +317,26 @@ def get_one(
 def list_repo_labels(
     repo: str,
     runner: Callable[[list[str]], Any] | None = None,
+    *,
+    complete: bool = False,
 ) -> list[str]:
     """Return repository label names."""
     call = runner or _gh_json
-    raw = call(["api", "--paginate", f"/repos/{repo}/labels?per_page={PAGE_SIZE}"])
+    args = ["api", "--paginate"]
+    if complete:
+        args.append("--slurp")
+    raw = call([*args, f"/repos/{repo}/labels?per_page={PAGE_SIZE}"])
     if not isinstance(raw, list):
         raise ValueError("GitHub labels response must be a JSON array")
+    if complete:
+        if not raw or any(not isinstance(page, list) for page in raw):
+            raise ValueError("Scheduled repository label pages are incomplete")
+        raw = [item for page in raw for item in page]
+        if any(
+            not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"]
+            for item in raw
+        ):
+            raise ValueError("Scheduled repository label definitions are incomplete")
     names = []
     for item in raw:
         if isinstance(item, dict) and item.get("name"):
@@ -322,22 +344,132 @@ def list_repo_labels(
     return names
 
 
+def scheduled_records(
+    repo: str,
+    contract: dict[str, Any],
+    runner: Callable[[list[str]], Any] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Fetch complete current evidence before the scheduled planner spends a slot."""
+    call = runner or _gh_json
+    excluded = set(contract["processing"]["read_reviewed"]) | SCHEDULED_DECIDED_LABELS
+    negatives = " ".join(f'-label:"{name}"' for name in sorted(excluded))
+    query = quote(f"repo:{repo} is:issue is:open {negatives}", safe="")
+    seen: set[int] = set()
+    for page in range(1, 11):
+        result = call(
+            [
+                "api",
+                f"/search/issues?q={query}&sort=created&order=asc&per_page={PAGE_SIZE}&page={page}",
+            ]
+        )
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("items"), list)
+            or result.get("incomplete_results") is not False
+            or type(result.get("total_count")) is not int
+        ):
+            raise ValueError("Scheduled issue search is incomplete; retry the sweep")
+        for candidate in result["items"]:
+            number = candidate.get("number") if isinstance(candidate, dict) else None
+            if type(number) is not int or number <= 0:
+                raise ValueError("Scheduled issue search item has no positive number")
+            if number in seen or candidate.get("pull_request"):
+                continue
+            seen.add(number)
+            raw = call(["api", f"/repos/{repo}/issues/{number}"])
+            if (
+                not isinstance(raw, dict)
+                or raw.get("number") != number
+                or not isinstance(raw.get("labels"), list)
+                or any(
+                    not isinstance(label, dict)
+                    or not isinstance(label.get("name"), str)
+                    or not label["name"]
+                    for label in raw.get("labels", [])
+                )
+                or type(raw.get("comments")) is not int
+                or raw["comments"] < 0
+                or raw.get("pull_request")
+            ):
+                raise ValueError(f"Scheduled issue #{number} metadata is incomplete")
+            record = normalize_record(raw, "issue")
+            if skip_reason(record, "sweep") or excluded.intersection(record["labels"]):
+                yield record
+                continue
+            pages = call(
+                [
+                    "api",
+                    "--paginate",
+                    "--slurp",
+                    f"/repos/{repo}/issues/{number}/comments?per_page={PAGE_SIZE}",
+                ]
+            )
+            if (
+                not isinstance(pages, list)
+                or not pages
+                or any(not isinstance(items, list) for items in pages)
+            ):
+                raise ValueError(f"Scheduled issue #{number} comment history is incomplete")
+            comments = [comment for items in pages for comment in items]
+            if (
+                any(
+                    not isinstance(comment, dict)
+                    or type(comment.get("id")) is not int
+                    or not isinstance(comment.get("body"), str)
+                    or not isinstance(comment.get("user"), dict)
+                    or not comment["user"].get("login")
+                    for comment in comments
+                )
+                or len(comments) != raw["comments"]
+            ):
+                raise ValueError(f"Scheduled issue #{number} comment evidence is incomplete")
+            if len({comment["id"] for comment in comments}) != len(comments):
+                raise ValueError(
+                    f"Scheduled issue #{number} comment pages overlap; retry the sweep"
+                )
+            # Presence is an exclusion, never an interpretation of approval authority.
+            record["has_scope_record"] = any(
+                "apm-scope:v1" in body
+                for body in [record["body"], *(comment["body"] for comment in comments)]
+            )
+            record["context"] = {**raw, "comments": comments}
+            yield record
+        if (page - 1) * PAGE_SIZE + len(result["items"]) >= result["total_count"]:
+            return
+        if len(result["items"]) < PAGE_SIZE:
+            raise ValueError("Scheduled issue search ended early; retry the sweep")
+    raise ValueError("Scheduled issue search exceeds GitHub's 1000-result window; narrow the queue")
+
+
 def accumulate_for_plan(
-    records: Sequence[dict[str, Any]],
+    records: Iterable[dict[str, Any]],
     mode: str,
     repository_labels: list[str],
     contract: dict[str, Any],
+    *,
+    scheduled_sweep: bool = False,
 ) -> dict[str, Any]:
     """Keep oldest-first records until `plan_batch` is full or input ends."""
     chosen: list[dict[str, Any]] = []
     last_batch: dict[str, Any] | None = None
+    last_plan: dict[str, Any] | None = None
     for record in records:
         chosen.append(record)
-        last_batch = build_batch(chosen, mode, repository_labels)
-        if mode == "sweep" and plan_batch(last_batch, contract)["batch_full"]:
-            break
+        last_batch = build_batch(chosen, mode, repository_labels, scheduled_sweep=scheduled_sweep)
+        if mode == "sweep":
+            last_plan = plan_batch(last_batch, contract)
+            if last_plan["batch_full"]:
+                break
     if last_batch is None:
-        last_batch = build_batch([], mode, repository_labels)
+        last_batch = build_batch([], mode, repository_labels, scheduled_sweep=scheduled_sweep)
+    if scheduled_sweep:
+        if last_plan is None:
+            last_plan = plan_batch(last_batch, contract)
+        selected = {item["number"] for item in last_plan["selected"]}
+        last_batch["contexts"] = [
+            record["context"] for record in chosen if record["number"] in selected
+        ]
+        last_batch["selection_counts"] = {"scanned": len(chosen), "selected": len(selected)}
     return last_batch
 
 
@@ -353,6 +485,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--kind", choices=("issue", "pr"), required=True)
     parser.add_argument("--mode", choices=("sweep", "label-event", "dispatch"), required=True)
     parser.add_argument("--repo", default="")
+    parser.add_argument(
+        "--scheduled-sweep",
+        action="store_true",
+        help="Issue sweep only: fetch complete evidence and select at most five undecided issues",
+    )
     parser.add_argument("--number", type=int, action="append", dest="numbers")
     parser.add_argument(
         "--records-json",
@@ -366,13 +503,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.scheduled_sweep and (
+            args.kind != "issue" or args.mode != "sweep" or args.records_json or args.numbers
+        ):
+            raise ValueError(
+                "--scheduled-sweep requires a live issue sweep without records or numbers"
+            )
         if args.mode != "sweep" and not (args.numbers or args.records_json):
             raise ValueError("Explicit requests require --number or --records-json")
         if args.mode != "sweep" and args.numbers and len(args.numbers) != 1:
             raise ValueError("Explicit requests require exactly one --number")
         contract = _load_contract()
-        records: list[dict[str, Any]]
-        if args.records_json:
+        records: Iterable[dict[str, Any]]
+        if args.scheduled_sweep:
+            records = scheduled_records(args.repo or _default_repo(), contract)
+        elif args.records_json:
             payload = (
                 sys.stdin.read()
                 if args.records_json == "-"
@@ -402,8 +547,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.records_json:
             repository_labels = [contract["processing"]["active_write_reviewed"]]
         else:
-            repository_labels = list_repo_labels(args.repo or _default_repo())
-        batch = accumulate_for_plan(records, args.mode, repository_labels, contract)
+            repository_labels = list_repo_labels(
+                args.repo or _default_repo(), complete=args.scheduled_sweep
+            )
+        batch = accumulate_for_plan(
+            records, args.mode, repository_labels, contract, scheduled_sweep=args.scheduled_sweep
+        )
         if args.mode != "sweep" and len(batch["issues"]) != 1:
             raise ValueError("Explicit requests require exactly one issue")
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:

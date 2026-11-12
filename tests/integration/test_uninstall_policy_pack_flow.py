@@ -26,6 +26,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -408,13 +410,11 @@ class TestDryRunUninstallWithLockfile:
         logger = MagicMock()
 
         # Build a mock lockfile with a transitive dep that would become orphan
-        child_dep = MagicMock()
-        child_dep.resolved_by = "https://github.com/owner/repo.git"
-        child_dep.repo_url = "https://github.com/owner/child.git"
-        child_dep.get_unique_key.return_value = "owner/child"
+        child_dep = LockedDependency(
+            resolved_by="https://github.com/owner/repo.git", repo_url="owner/child"
+        )
 
-        mock_lockfile = MagicMock()
-        mock_lockfile.get_package_dependencies.return_value = [child_dep]
+        mock_lockfile = LockFile(dependencies={child_dep.get_unique_key(): child_dep})
 
         lockfile_path = tmp_path / "apm.lock.yaml"
         lockfile_path.write_text(_LOCKFILE_TEMPLATE, encoding="utf-8")
@@ -532,9 +532,7 @@ class TestCleanupTransitiveOrphansEdgeCases:
             resolved_by="owner/repo",
         )
 
-        lockfile = MagicMock()
-        lockfile.get_package_dependencies.return_value = [child_dep]
-        lockfile.get_dependency.return_value = child_dep
+        lockfile = LockFile(dependencies={child_dep.get_unique_key(): child_dep})
 
         logger = MagicMock()
 

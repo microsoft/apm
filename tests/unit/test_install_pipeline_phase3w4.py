@@ -164,11 +164,13 @@ class TestRunInstallPipelinePlanCallback:
 
         mock_ctx = MagicMock()
         dep = MagicMock()
+        dep.replacement = None
         mock_ctx.deps_to_install = [dep]
         mock_ctx.root_has_local_primitives = False
         mock_ctx.tui = MagicMock()
         mock_ctx.only_packages = ["selected"]
         mock_ctx.update_plan_complete_dep_keys = {"selected", "unselected"}
+        mock_ctx.package_hashes = {}
 
         plan_callback = MagicMock(return_value=False)  # user says "no"
 
@@ -201,6 +203,7 @@ class TestRunInstallPipelinePlanCallback:
             None,
             [dep],
             complete_resolved_dep_keys={"selected", "unselected"},
+            resolved_content_hashes={},
         )
 
     def test_plan_callback_true_continues(self, tmp_path):

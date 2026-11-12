@@ -108,6 +108,7 @@ def build_materialization_path(
     apm_modules_dir: Path,
 ) -> Path:
     """Build the source-cased path for one dependency below ``apm_modules``."""
+    dependency = dependency.ownership_reference
     if dependency.is_marketplace:
         raise ValueError(
             "Cannot compute install path for unresolved marketplace dependency "
@@ -270,10 +271,29 @@ def find_case_equivalent_materialization_path(
     dependency: DependencyReference,
     reader: MaterializationPathReader = _NATIVE_READER,
     candidate_relatives: Iterable[PurePosixPath] | None = None,
+    match_complete_path: bool = False,
 ) -> Path | None:
-    """Find the sole existing path whose components differ only by casing."""
+    """Find a case-equivalent path; optionally allow ambiguous parent prefixes.
+
+    Read-only consumers can match complete paths without treating distinct
+    repositories under case-variant owners as collisions. Relocation callers
+    retain strict prefix collision checks by default.
+    """
     desired_parts = _relative_parts(desired, apm_modules_dir)
     policy = _case_policy(dependency)
+    if match_complete_path and candidate_relatives is None:
+        candidates = [apm_modules_dir]
+        for index, desired_part in enumerate(desired_parts):
+            candidates = [
+                child
+                for parent in candidates
+                if reader.is_dir(parent)
+                for child in reader.iterdir(parent)
+                if _component_matches(index, desired_part, child.name, policy)
+            ]
+        candidate_relatives = (
+            PurePosixPath(*_relative_parts(candidate, apm_modules_dir)) for candidate in candidates
+        )
     if candidate_relatives is not None:
         matches = _candidate_matches(desired_parts, candidate_relatives, policy)
         if len(matches) > 1:
@@ -346,6 +366,7 @@ def prepare_materialization_path(
     on_migrate: Callable[[Path, Path], None] | None = None,
 ) -> Path:
     """Return the display-cased path, transactionally migrating stale casing."""
+    dependency = dependency.ownership_reference
     desired = dependency.get_install_path(apm_modules_dir)
     if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:
         return desired

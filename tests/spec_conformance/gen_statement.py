@@ -54,6 +54,14 @@ DEPLOYED_PROMPT_AUDIT = (
     "guarantee that prompt text is safe. App SQLite state and unrelated transcripts are "
     "excluded. Detection does not grant execution, ownership or remediation authority."
 )
+STAGED_REPLACEMENT_RECOVERY = (
+    "APM implements the proposed staged-replacement recovery capability (req-lk-023). "
+    "Section 9.3 review and public comment remain pending; this source statement "
+    "does not establish specification adoption or released CLI support. "
+    "The conformance oracles exercise real filesystem state with injected operation "
+    "denials. Actual non-admin Windows acceptance is established separately by the "
+    "native lifecycle job, not inferred from collection or portable tests."
+)
 
 
 def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
@@ -168,7 +176,10 @@ def build_json() -> dict:
         "total_requirements": len(entries),
         "summary_by_class": summary,
         "consumer_user_scope": USER_SCOPE_DISCLOSURE,
-        "optional_features": {"deployed-prompt-audit": DEPLOYED_PROMPT_AUDIT},
+        "optional_features": {
+            "deployed-prompt-audit": DEPLOYED_PROMPT_AUDIT,
+            "staged-replacement-recovery": STAGED_REPLACEMENT_RECOVERY,
+        },
         "requirements": entries,
     }
 
@@ -219,6 +230,8 @@ def build_md(doc: dict) -> str:
         "rule (req-rs-016 clause 3; req-pl-018).\n\n"
         "## Optional deployed-prompt audit\n\n"
         f"{doc['optional_features']['deployed-prompt-audit']}\n\n"
+        "## Proposed staged-replacement recovery\n\n"
+        f"{doc['optional_features']['staged-replacement-recovery']}\n\n"
     )
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"

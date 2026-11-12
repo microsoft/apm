@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
@@ -534,19 +535,26 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
     behaviour. Runtime-capable targets are tested separately after an
     individual audit."""
 
-    def _adapter(self, cls):
+    def _adapter(self, cls, **kwargs):
         with (
             patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
-            return cls()
+            return cls(**kwargs)
 
-    def test_claude_still_resolves_to_literal(self):
-        """Claude Desktop config does NOT support runtime substitution --
-        this adapter MUST keep resolving."""
+    def test_claude_project_scope_keeps_placeholders(self):
         from apm_cli.adapters.client.claude import ClaudeClientAdapter
 
-        adapter = self._adapter(ClaudeClientAdapter)
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = self._adapter(ClaudeClientAdapter, project_root=Path(tmp))
+            self.assertTrue(adapter._supports_runtime_env_substitution)
+
+    def test_claude_user_scope_still_resolves_to_literal(self):
+        """Only Claude's project ``.mcp.json`` keeps placeholders (#3252);
+        user-scope ``~/.claude.json`` keeps install-time resolution."""
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+        adapter = self._adapter(ClaudeClientAdapter, user_scope=True)
         self.assertFalse(adapter._supports_runtime_env_substitution)
         with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
             result = adapter._resolve_env_variable(
@@ -558,17 +566,6 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
         from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
 
         adapter = self._adapter(WindsurfClientAdapter)
-        self.assertFalse(adapter._supports_runtime_env_substitution)
-        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
-            result = adapter._resolve_env_variable(
-                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
-            )
-        self.assertEqual(result, "Bearer literal-value")
-
-    def test_opencode_still_resolves_to_literal(self):
-        from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
-
-        adapter = self._adapter(OpenCodeClientAdapter)
         self.assertFalse(adapter._supports_runtime_env_substitution)
         with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
             result = adapter._resolve_env_variable(
@@ -715,9 +712,9 @@ class TestLegacyModeStdioEnvBlock(unittest.TestCase):
     pre-fix latent bug returns ``{}`` and every self-defined stdio MCP
     server silently loses its env block.
 
-    Claude is exercised as the representative legacy-mode subclass; the
-    method now lives on ``MCPClientAdapter`` so the contract is shared
-    with every adapter that inherits the base.
+    Claude at user scope is exercised as the representative legacy-mode
+    subclass; the method now lives on ``MCPClientAdapter`` so the contract
+    is shared with every adapter that inherits the base.
     """
 
     def _adapter(self):
@@ -727,7 +724,7 @@ class TestLegacyModeStdioEnvBlock(unittest.TestCase):
             patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
             patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
-            return ClaudeClientAdapter()
+            return ClaudeClientAdapter(user_scope=True)
 
     def test_dict_shape_resolves_all_three_placeholder_syntaxes(self):
         adapter = self._adapter()

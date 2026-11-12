@@ -15,13 +15,17 @@ Security notes
 
 from __future__ import annotations
 
+import contextlib
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 
+from ..deps.git_remote_ops import tag_commit_shas
 from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
     build_ado_https_clone_url,
@@ -41,6 +45,7 @@ __all__ = [
     "RefCache",
     "RefResolver",
     "RemoteRef",
+    "is_commit_pin_ref",
 ]
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,15 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def is_commit_pin_ref(ref: str | None) -> bool:
+    """Return whether a marketplace entry ``ref`` is a full commit-SHA pin.
+
+    Shared by ``apm pack`` and ``apm marketplace check`` so both agree on
+    which refs name a commit rather than a tag or branch.
+    """
+    return bool(ref and _SHA_RE.match(ref))
 
 
 # Local import below avoids a dependency-model import cycle at module load time.
@@ -102,6 +116,7 @@ class RemoteRef:
 
     name: str  # e.g. "refs/tags/v1.2.0" or "refs/heads/main"
     sha: str  # 40-char hex SHA
+    peeled_sha: str | None = None  # commit behind an annotated tag, when advertised
 
 
 class _RemoteAttemptError(RuntimeError):
@@ -170,8 +185,15 @@ class RefCache:
 
 
 def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
-    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``."""
-    refs: list[RemoteRef] = []
+    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``.
+
+    Tags carry the commit a checkout of them lands on, as resolved by
+    ``deps.git_remote_ops.tag_commit_shas``: an annotated or signed tag takes
+    the SHA of its peeled record, which adds no ref of its own. Branches and
+    other refs keep their only SHA. ``peeled_sha`` retains the same canonical
+    commit for consumers that distinguish annotated tags from other refs.
+    """
+    records: list[tuple[str, str]] = []
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -182,10 +204,18 @@ def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
         if not _SHA_RE.match(sha):
             continue
-        # Skip peeled tag objects (^{})
-        if refname.endswith("^{}"):
-            continue
-        refs.append(RemoteRef(name=refname, sha=sha))
+        records.append((sha, refname))
+    commits, annotated = tag_commit_shas(records)
+    refs: list[RemoteRef] = []
+    # Preserve record order; the owner's keys exclude peeled-only refnames.
+    for sha, refname in records:
+        if refname.startswith("refs/tags/"):
+            if refname not in commits:
+                continue  # the peeled record of an annotated tag
+            sha = commits[refname]
+        refs.append(
+            RemoteRef(name=refname, sha=sha, peeled_sha=sha if refname in annotated else None)
+        )
     return refs
 
 
@@ -676,6 +706,110 @@ class RefResolver:
                 hint="Check that the ref exists and you have access to the repository.",
             )
         return refs[0].sha
+
+    # -----------------------------------------------------------------
+    # Commit reachability (no cache)
+    # -----------------------------------------------------------------
+
+    def commit_exists(self, owner_repo: str, sha: str) -> bool:
+        """Return whether the remote serves commit *sha* to a fetch.
+
+        ``git ls-remote`` only advertises ref tips, so a commit-SHA pin
+        that is not a tip is verified by a shallow, tree-less fetch of
+        that exact commit into a throwaway bare repository. The server
+        decides which commits it serves; a commit it refuses is treated
+        as unreachable.
+
+        Raises
+        ------
+        ValueError
+            When *sha* is not a full 40-character lowercase commit SHA.
+        OfflineMissError
+            In offline mode; reachability needs the network.
+        GitLsRemoteError
+            When git cannot run or the fetch times out.
+        """
+        if not is_commit_pin_ref(sha):
+            raise ValueError(f"not a full commit SHA: {sha!r}")
+        if self._offline:
+            raise OfflineMissError(package="", remote=owner_repo)
+
+        from ..config import get_apm_temp_dir
+        from ..utils.git_env import (
+            get_git_executable,
+            git_network_env,
+            git_no_templates_args,
+            git_subprocess_env,
+        )
+        from ..utils.path_security import safe_rmtree
+
+        url, env = self._git_url_and_env(owner_repo)
+        git_exe = get_git_executable()
+        timeout = max(self._timeout, 30.0)
+        tmpdir = Path(tempfile.mkdtemp(prefix="apm-commit-probe-", dir=get_apm_temp_dir()))
+        try:
+            bare = tmpdir / "probe.git"
+            subprocess.run(
+                [git_exe, "init", *git_no_templates_args(), "--bare", str(bare)],
+                check=True,
+                capture_output=True,
+                env=git_subprocess_env(env),
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            fetch_env = git_network_env(url, env, git_dir=bare)
+            fetch = subprocess.run(
+                [
+                    git_exe,
+                    "--git-dir",
+                    str(bare),
+                    "fetch",
+                    "--no-tags",
+                    "--depth=1",
+                    "--filter=tree:0",
+                    url,
+                    sha,
+                ],
+                capture_output=True,
+                text=True,
+                env=fetch_env,
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            if fetch.returncode != 0:
+                return False
+            verify = subprocess.run(
+                [
+                    git_exe,
+                    "--git-dir",
+                    str(bare),
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    sha + "^{commit}",
+                ],
+                capture_output=True,
+                text=True,
+                env=git_subprocess_env(env),
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            return verify.returncode == 0 and verify.stdout.strip() == sha
+        except subprocess.TimeoutExpired:
+            raise GitLsRemoteError(  # noqa: B904
+                package="",
+                summary=f"git fetch timed out after {timeout}s for '{owner_repo}'.",
+                hint="Check your network connection and retry.",
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise GitLsRemoteError(  # noqa: B904
+                package="",
+                summary=f"Failed to run git fetch for '{owner_repo}'.",
+                hint=f"Ensure git is installed and on PATH. Error: {exc}",
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                safe_rmtree(tmpdir, tmpdir.parent)
 
     def close(self) -> None:
         """Release resources (cache, locks)."""

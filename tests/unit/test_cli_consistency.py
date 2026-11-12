@@ -199,7 +199,7 @@ def test_compile_target_all_exclusion_lists_explicit_only_targets():
     # Assert the full exclusion sentence (normalize whitespace from help-text wrapping)
     normalized = " ".join(help_text.split())
     assert (
-        "excludes agent-skills, antigravity, hermes, experimental targets, and intellij"
+        "excludes agent-skills, antigravity, grok-bot, hermes, experimental targets, and intellij"
         in normalized
     )
 

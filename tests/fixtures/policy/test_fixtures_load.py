@@ -144,7 +144,8 @@ class TestEmptyPolicy(unittest.TestCase):
         self.assertEqual(policy.name, "")
         self.assertEqual(policy.enforcement, "warn")  # schema default
         self.assertIsNone(policy.dependencies.allow)  # no opinion
-        self.assertEqual(policy.dependencies.deny, ())  # empty tuple
+        self.assertIsNone(policy.dependencies.deny)  # no opinion
+        self.assertEqual(policy.dependencies.effective_deny, ())
         self.assertIsNone(policy.extends)
 
 

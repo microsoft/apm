@@ -1,10 +1,12 @@
 """Deterministic SHA-256 content hashing for package integrity verification."""
 
 import hashlib
+import stat
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
+from apm_cli.utils.path_security import PathTraversalError
 
 # Directories excluded from hashing (not relevant to package content)
 _EXCLUDED_DIRS = {".git", "__pycache__"}
@@ -56,25 +58,7 @@ def compute_package_hash(package_path: Path) -> str:
     hasher = hashlib.sha256()
     file_count = 0
 
-    # Collect all regular files, skipping excluded dirs and symlinks
-    regular_files: list[Path] = []
-    for item in package_path.rglob("*"):
-        # Skip symlinks
-        if item.is_symlink():
-            continue
-        # Skip excluded directories and their contents
-        rel = item.relative_to(package_path)
-        if any(part in _EXCLUDED_DIRS for part in rel.parts):
-            continue
-        if item.is_file():
-            if len(rel.parts) == 1 and rel.name in _EXCLUDED_ROOT_FILES:
-                continue
-            regular_files.append(rel)
-
-    # Sort lexicographically by POSIX path for determinism
-    regular_files.sort(key=lambda p: p.as_posix())
-
-    for rel_path in regular_files:
+    for rel_path in _package_files(package_path):
         # Hash the relative path then the file contents
         hasher.update(rel_path.as_posix().encode("utf-8"))
         hasher.update((package_path / rel_path).read_bytes())
@@ -83,6 +67,40 @@ def compute_package_hash(package_path: Path) -> str:
     if file_count == 0:
         return _EMPTY_HASH
 
+    return f"sha256:{hasher.hexdigest()}"
+
+
+def _package_files(package_path: Path, *, native: bool = False) -> list[Path]:
+    """Select canonical payload paths without following publisher symlinks."""
+    regular_files: list[Path] = []
+    excluded = {".git"} if native else _EXCLUDED_DIRS
+    for item in package_path.rglob("*"):
+        rel = item.relative_to(package_path)
+        if any(part in excluded for part in rel.parts):
+            continue
+        if item.is_symlink():
+            if native:
+                raise PathTraversalError(f"Native bundle integrity refuses symlink: {item}")
+            continue
+        if item.is_file() and not (len(rel.parts) == 1 and rel.name in _EXCLUDED_ROOT_FILES):
+            regular_files.append(rel)
+    return sorted(regular_files, key=lambda path: path.as_posix())
+
+
+def compute_native_bundle_hash(package_path: Path) -> str:
+    """Fingerprint all native payload bytes and Git executable bits.
+
+    This opt-in contract excludes only Git transport and the root APM pin.
+    Existing package/lockfile fingerprints retain their historical semantics.
+    """
+    if package_path.is_symlink():
+        raise PathTraversalError(f"Native bundle integrity refuses symlink: {package_path}")
+    hasher = hashlib.sha256()
+    for relative in _package_files(package_path, native=True):
+        path = package_path / relative
+        hasher.update(relative.as_posix().encode("utf-8") + b"\0")
+        hasher.update(b"x" if path.stat().st_mode & stat.S_IXUSR else b"-")
+        hasher.update(hashlib.sha256(path.read_bytes()).digest())
     return f"sha256:{hasher.hexdigest()}"
 
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import runpy
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -52,6 +55,7 @@ def _raw(
         "locked": locked,
         "draft": draft,
         "labels": [{"name": name} for name in (labels or [])],
+        "comments": 0,
     }
     if merged_at is not None:
         item["merged_at"] = merged_at
@@ -290,3 +294,232 @@ def test_trusted_gh_uses_cli_owner(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: "/trusted/bin/gh",
     )
     assert FETCH["_trusted_gh"]() == "/trusted/bin/gh"
+
+
+def _scheduled_runner(
+    issues: dict[int, dict], comments: dict[int, list[dict]], calls: list[list[str]]
+) -> Callable[[list[str]], Any]:
+    """Serve paginated REST evidence without contacting GitHub."""
+
+    def run(args: list[str]) -> Any:
+        calls.append(args)
+        parsed = urlparse(args[-1])
+        if parsed.path == "/search/issues":
+            query = parse_qs(parsed.query)
+            assert query["sort"] == ["created"]
+            assert query["order"] == ["asc"]
+            for label in ("status/accepted", "status/declined"):
+                assert f'-label:"{label}"' in query["q"][0]
+            return {
+                "items": list(issues.values()),
+                "incomplete_results": False,
+                "total_count": len(issues),
+            }
+        number = int(parsed.path.split("/")[5])
+        if parsed.path.endswith("/comments"):
+            assert "--paginate" in args and "--slurp" in args
+            rows = comments.get(number, [])
+            return [rows[:100], rows[100:]]
+        return issues[number]
+
+    return run
+
+
+def _scheduled_batch(
+    issues: dict[int, dict], comments: dict[int, list[dict]], calls: list[list[str]]
+) -> dict:
+    """Exercise live-fetch selection with injected REST responses."""
+    records = FETCH["scheduled_records"](
+        "microsoft/apm", CONTRACT, runner=_scheduled_runner(issues, comments, calls)
+    )
+    return FETCH["accumulate_for_plan"](
+        records, "sweep", ["triage/recommended"], CONTRACT, scheduled_sweep=True
+    )
+
+
+def test_scheduled_sweep_skips_decisions_before_quota_and_five_item_cap() -> None:
+    """Decisions on late comment pages cannot crowd out undecided issues."""
+    issues = {n: _raw(n, login=f"author-{n}", labels=[]) for n in range(1, 11)}
+    issues[1]["labels"] = [{"name": "status/accepted"}]
+    issues[2]["labels"] = [{"name": "status/declined"}]
+    comments = {
+        3: [{"id": n, "body": "Earlier context", "user": {"login": "human"}} for n in range(100)]
+        + [
+            {
+                "id": 100,
+                "body": "<!-- apm-scope:v1 -->\nDecision: approve",
+                "user": {"login": "human"},
+            }
+        ],
+    }
+    issues[4]["body"] = REAL_BODY + "\n<!-- apm-scope:v1 -->"
+    for number, rows in comments.items():
+        issues[number]["comments"] = len(rows)
+    calls: list[list[str]] = []
+    batch = _scheduled_batch(issues, comments, calls)
+    plan = FETCH["plan_batch"](batch, CONTRACT)
+    assert [item["number"] for item in plan["selected"]] == [5, 6, 7, 8, 9]
+    assert plan["batch_full"] is True
+    assert plan["implementation_authorized"] is False
+    assert [item["number"] for item in batch["contexts"]] == [5, 6, 7, 8, 9]
+    assert all(item["comments"] == [] for item in batch["contexts"])
+    assert all(urlparse(call[-1]).path != "/repos/microsoft/apm/issues/10" for call in calls)
+
+
+@pytest.mark.parametrize(
+    "broken", ["failed-page", "incomplete-search", "malformed-comment", "missing-comment"]
+)
+def test_scheduled_sweep_fails_closed_on_incomplete_evidence(broken: str) -> None:
+    """No partial batch is returned as an exhausted or verified queue."""
+    issue = _raw(1)
+    issue["comments"] = 1
+    base = _scheduled_runner({1: issue}, {}, [])
+
+    def runner(args: list[str]) -> Any:
+        path = urlparse(args[-1]).path
+        if path == "/search/issues" and broken == "incomplete-search":
+            return {"items": [issue], "incomplete_results": True, "total_count": 1}
+        if path.endswith("/comments"):
+            if broken == "failed-page":
+                raise ValueError("comment page unavailable")
+            if broken == "malformed-comment":
+                return [[{"id": 1, "body": None}]]
+        return base(args)
+
+    with pytest.raises(ValueError):
+        FETCH["accumulate_for_plan"](
+            FETCH["scheduled_records"]("microsoft/apm", CONTRACT, runner=runner),
+            "sweep",
+            ["triage/recommended"],
+            CONTRACT,
+            scheduled_sweep=True,
+        )
+
+
+def test_scheduled_sweep_records_json_requires_complete_evidence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Offline input cannot silently bypass scheduled evidence acquisition."""
+    path = tmp_path / "records.json"
+    path.write_text(json.dumps([_raw(1)]))
+    assert (
+        FETCH["main"](
+            ["--kind", "issue", "--mode", "sweep", "--scheduled-sweep", "--records-json", str(path)]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "scheduled" in captured.err.lower()
+
+
+@pytest.mark.parametrize(
+    "kind,mode", [("pr", "sweep"), ("issue", "dispatch"), ("issue", "label-event")]
+)
+def test_scheduled_profile_cannot_change_other_invocations(
+    kind: str, mode: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The opt-in cannot change explicit requests or the PR pool."""
+    assert FETCH["main"](["--kind", kind, "--mode", mode, "--scheduled-sweep"]) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_scheduled_search_continues_past_a_full_decided_page() -> None:
+    """A page of exclusions is not an exhausted queue."""
+    issues = {n: _raw(n, labels=["status/accepted"]) for n in range(1, 101)}
+    issues[101] = _raw(101)
+    base = _scheduled_runner(issues, {}, [])
+
+    def runner(args: list[str]) -> Any:
+        parsed = urlparse(args[-1])
+        if parsed.path == "/search/issues":
+            page = int(parse_qs(parsed.query)["page"][0])
+            items = list(issues.values())[:100] if page == 1 else [issues[101]]
+            return {"items": items, "incomplete_results": False, "total_count": 101}
+        return base(args)
+
+    batch = FETCH["accumulate_for_plan"](
+        FETCH["scheduled_records"]("microsoft/apm", CONTRACT, runner=runner),
+        "sweep",
+        ["triage/recommended"],
+        CONTRACT,
+        scheduled_sweep=True,
+    )
+    assert [item["number"] for item in FETCH["plan_batch"](batch, CONTRACT)["selected"]] == [101]
+    assert batch["contexts"][0]["number"] == 101
+
+
+def test_scheduled_cli_fetches_labels_and_complete_selected_contexts(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The workflow's actual command produces both selection and worker evidence."""
+    base = _scheduled_runner({1: _raw(1)}, {}, [])
+
+    def runner(args: list[str]) -> Any:
+        if urlparse(args[-1]).path == "/repos/microsoft/apm/labels":
+            assert "--slurp" in args
+            return [[{"name": "triage/recommended"}], [{"name": "type/bug"}]]
+        return base(args)
+
+    monkeypatch.setitem(FETCH["main"].__globals__, "_gh_json", runner)
+    assert (
+        FETCH["main"](
+            ["--kind", "issue", "--mode", "sweep", "--scheduled-sweep", "--repo", "microsoft/apm"]
+        )
+        == 0
+    )
+    batch = json.loads(capsys.readouterr().out)
+    assert batch["repository_labels"] == ["triage/recommended", "type/bug"]
+    assert batch["scheduled_sweep"] is True
+    assert batch["contexts"] == [{**_raw(1), "comments": []}]
+
+
+@pytest.mark.parametrize("payload", [[], [{}], [[{}]], [[{"name": ""}]], [[{"name": 1}]]])
+def test_scheduled_label_fetch_fails_closed_on_incomplete_pages(payload: list) -> None:
+    """Malformed page or label evidence cannot become a valid inventory."""
+    with pytest.raises(ValueError, match="incomplete"):
+        FETCH["list_repo_labels"]("microsoft/apm", runner=lambda _: payload, complete=True)
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+def test_scheduled_search_fails_closed_on_truncated_results(overflow: bool) -> None:
+    """A short page or search-window ceiling cannot report queue exhaustion."""
+
+    def runner(args: list[str]) -> Any:
+        parsed = urlparse(args[-1])
+        if parsed.path == "/search/issues":
+            page = int(parse_qs(parsed.query)["page"][0])
+            numbers = range((page - 1) * 100 + 1, page * 100 + 1) if overflow else range(1, 2)
+            return {
+                "items": [_raw(n, labels=["status/accepted"]) for n in numbers],
+                "incomplete_results": False,
+                "total_count": 1001 if overflow else 2,
+            }
+        return _raw(int(parsed.path.split("/")[5]), labels=["status/accepted"])
+
+    with pytest.raises(ValueError, match="1000-result window" if overflow else "ended early"):
+        list(FETCH["scheduled_records"]("microsoft/apm", CONTRACT, runner=runner))
+
+
+def test_scheduled_counts_and_plan_reuse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Telemetry counts skipped candidates without recomputing the final plan."""
+    original = FETCH["plan_batch"]
+    plans: list[dict] = []
+
+    def planner(batch: dict, contract: dict) -> dict:
+        plans.append(batch)
+        return original(batch, contract)
+
+    monkeypatch.setitem(FETCH["accumulate_for_plan"].__globals__, "plan_batch", planner)
+    batch = _scheduled_batch({1: _raw(1, labels=["status/accepted"]), 2: _raw(2)}, {}, [])
+    assert batch["selection_counts"] == {"scanned": 2, "selected": 1}
+    assert len(plans) == 2
+
+
+def test_empty_scheduled_batch_has_zero_counts() -> None:
+    """An empty complete search remains distinguishable from a failed read."""
+    batch = FETCH["accumulate_for_plan"](
+        [], "sweep", ["triage/recommended"], CONTRACT, scheduled_sweep=True
+    )
+    assert batch["selection_counts"] == {"scanned": 0, "selected": 0}
+    assert batch["contexts"] == []

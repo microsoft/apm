@@ -114,6 +114,11 @@ class ImmutableRequirements:
                 f"--frozen: {requirement.chain} is missing from apm.lock.yaml. "
                 "Run 'apm install' without --frozen to regenerate the lockfile."
             )
+        if not locked.matches_replacement(dep):
+            raise ImmutableRequirementError(
+                f"--frozen: selected replacement source for {dep.get_unique_key()} "
+                "does not match apm.lock.yaml. Run 'apm install' without --frozen."
+            )
         locked_commit = locked.resolved_commit
         if not is_full_revision_pin(locked_commit):
             raise ImmutableRequirementError(
@@ -172,7 +177,12 @@ class ImmutableRequirements:
     def _resolve_commit(self, dep: DependencyReference) -> str | None:
         ref_type, ref = parse_git_reference(dep.reference)
         locked = self._lockfile.get_dependency(dep.get_unique_key()) if self._lockfile else None
-        if not self._update_refs and locked and locked.resolved_ref == dep.reference:
+        if (
+            not self._update_refs
+            and locked
+            and locked.matches_replacement(dep)
+            and locked.resolved_ref == dep.reference
+        ):
             # Replay anchors content even for a named branch; do not rediscover it.
             commit = locked.resolved_commit
             if not is_full_revision_pin(commit):
@@ -183,14 +193,17 @@ class ImmutableRequirements:
         if self._resolver is None:
             raise ValueError("No reference resolver is available")
         if ref_type == GitReferenceType.COMMIT:
-            commit = self._resolver.resolve_git_reference(dep).resolved_commit
+            commit = self._resolver.resolve_git_reference(dep.source_reference).resolved_commit
             if not is_full_revision_pin(commit) or not commit.lower().startswith(ref.lower()):
                 raise ValueError("Resolved commit does not match the requested prefix")
         else:
-            repo_key = replace(dep, virtual_path=None, alias=None).get_unique_key()
+            source = dep.source_reference
+            repo_key = replace(
+                source, virtual_path=None, is_virtual=False, alias=None
+            ).get_identity()
             if repo_key not in self._remote_refs:
                 index: dict[tuple[str, GitReferenceType], list[RemoteRef]] = {}
-                for remote in self._resolver.list_remote_refs(dep):
+                for remote in self._resolver.list_remote_refs(source):
                     index.setdefault((remote.name, remote.ref_type), []).append(remote)
                 self._remote_refs[repo_key] = index
             refs = self._remote_refs[repo_key]

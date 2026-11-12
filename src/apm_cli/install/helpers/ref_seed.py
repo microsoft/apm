@@ -41,6 +41,7 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     are shared repository-wide.
     """
     from apm_cli.deps.tiered_ref_resolver import ref_freshness_policy_for_install
+    from apm_cli.models.dependency.replacement import build_replacement_index
 
     freshness_policy = ref_freshness_policy_for_install(ctx)
     if not freshness_policy.allows_lock_seed:
@@ -52,6 +53,8 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     seed = getattr(resolver, "seed", None)
     if not callable(seed):
         return
+    package = getattr(ctx, "apm_package", None)
+    rules = build_replacement_index(package.replace_rules or [] if package is not None else [])
     seeded = 0
     for locked in lockfile.get_all_dependencies():
         ref = getattr(locked, "resolved_ref", None)
@@ -60,7 +63,12 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
         to_dependency_ref = getattr(locked, "to_dependency_ref", None)
         if not repo or not callable(to_dependency_ref):
             continue
-        if ref and sha and seed(to_dependency_ref(), ref, sha):
+        selected = to_dependency_ref()
+        expected_rule = rules.lookup(selected.ownership_reference)
+        stored_rule = selected.replacement.rule if selected.replacement is not None else None
+        if expected_rule != stored_rule:
+            continue
+        if ref and sha and seed(selected.source_reference, ref, sha):
             seeded += 1
     if seeded and ctx.logger:
         ctx.logger.verbose_detail(

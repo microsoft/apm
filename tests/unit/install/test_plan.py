@@ -61,6 +61,51 @@ def _resolved_dep(repo_url: str, ref: str, commit: str | None) -> DependencyRefe
 
 
 class TestBuildUpdatePlan:
+    @pytest.mark.parametrize(
+        ("existing", "old_hash", "new_hash", "expected_action"),
+        [
+            (False, None, "sha256:new", "add"),
+            (True, "sha256:old", "sha256:new", "update"),
+            (True, None, "sha256:new", "update"),
+            (True, "sha256:same", "sha256:same", "unchanged"),
+            (True, "sha256:old", None, "unchanged"),
+        ],
+    )
+    def test_resolved_content_hash_controls_action_and_is_preserved(
+        self,
+        existing: bool,
+        old_hash: str | None,
+        new_hash: str | None,
+        expected_action: str,
+    ) -> None:
+        """Content can change independently of an unchanged ref and commit."""
+        dep = _resolved_dep("owner/package", "main", "a" * 40)
+        lock = _new_lockfile()
+        if existing:
+            locked = _locked(dep.repo_url, "main", "a" * 40)
+            locked.content_hash = old_hash
+            lock.add_dependency(locked)
+        hashes = {"unrelated/package": "sha256:unrelated"}
+        if new_hash is not None:
+            hashes[dep.get_unique_key()] = new_hash
+
+        plan = build_update_plan(lock, [dep], resolved_content_hashes=hashes)
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key=dep.get_unique_key(),
+                action=expected_action,
+                display_name=dep.repo_url,
+                old_resolved_ref="main" if existing else None,
+                old_resolved_commit="a" * 40 if existing else None,
+                old_content_hash=old_hash,
+                new_resolved_ref="main",
+                new_resolved_commit="a" * 40,
+                new_content_hash=new_hash,
+            ),
+        )
+        assert plan.has_changes is (expected_action != "unchanged")
+
     def test_entries_preserve_full_state_and_canonical_action_order(self):
         lock = _new_lockfile()
         update = _locked("https://github.com/u/r", "main", "a" * 40, ["update.md"])
@@ -910,16 +955,16 @@ class TestLockfileSatisfiesManifest:
         ]
         assert lockfile_satisfies_manifest(lock, manifest) == (True, [])
 
-    def test_local_deps_skipped(self):
-        """Local file deps have no remote ref, so they're skipped."""
+    def test_local_deps_require_locked_evidence(self):
+        """Local dependencies require a recorded baseline even without a ref."""
         lock = _new_lockfile()
         local = DependencyReference(repo_url="local", local_path="./vendor/pkg")
         local.is_local = True
 
         ok, reasons = lockfile_satisfies_manifest(lock, [local])
 
-        assert ok is True
-        assert reasons == []
+        assert ok is False
+        assert reasons == ["  - ./vendor/pkg is declared in apm.yml but missing from apm.lock.yaml"]
 
     def test_orphan_lockfile_entries_do_not_fail_check(self):
         """Lock has extra entries not in manifest -- structural check passes."""

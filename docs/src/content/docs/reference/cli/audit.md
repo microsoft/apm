@@ -16,15 +16,63 @@ apm audit [PACKAGE] [OPTIONS]
 `apm audit` is the explicit security and integrity tool. It runs in two modes:
 
 - **Content scan mode** (default). Discovers recognized deployed primitives and checks applicable prompt content for hidden Unicode, including untracked primitives and recorded files outside currently selected target directories. It replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate regular prompt documents with `--strip` or scan an arbitrary file with `--file`.
-- **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. When `apm_modules/` is absent but `apm.lock.yaml` is present, CI mode self-hydrates a lock-pinned scratch install for `config-consistency` and drift without mutating the checkout. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
+- **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. In a project checkout with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, CI mode prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without mutating the checkout. Local dependencies must remain available at their declared paths. Windows long and native 8.3 spellings of the same project use the same project scope. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
 Global audit also checks resolved external deployment roots such as
 `HERMES_HOME` and `CLAUDE_CONFIG_DIR`. Default audit compares tracked files in
 those roots for drift. `apm audit --ci` also scans target-governed external
 subtrees for content integrity. Neither mode modifies those roots.
+Auditing the user metadata workspace (`~/.apm`) still requires its installed
+`apm_modules/`; if missing, restore it with `apm install --global`. Project
+scratch replay does not enable cold replay for global installations.
+Scratch replay preserves each scope's installed-source layout so relative
+links, including Kiro prompt links, compare against their deployed equivalents.
 
 Both modes also enforce the lockfile's canonical deployment ownership; see
 [Deployment-owner integrity](#deployment-owner-integrity).
+
+Drift reports distinguish a differing unowned skill file (`unmanaged-conflict`)
+from an edited managed file (`modified`). Ordinary reinstall refuses the former:
+rename the local skill or correct the dependency's existing skill/target
+selection first. Audit does not adopt, overwrite, or delete either file.
+JSON retains the finding's path and kind; SARIF uses
+`apm/drift/unmanaged-conflict` with error severity.
+
+Replay and coverage use the current `apm.yml` target declaration when present,
+otherwise the concrete target identities recorded by install. An unrelated
+`.github/workflows/` file does not add a Copilot deployment to a recorded
+Grok Cloud installation, and `.grok/` alone does not relabel it as Grok Build.
+Older lockfiles without a recorded `deployments` section retain directory
+discovery; identities inferred from legacy file paths do not narrow it.
+The saved `apm config target` is an install/update default, not a request to
+retarget an existing installation during audit.
+
+Experimental targets remain opt-in. If a selected target's experiment is
+disabled, audit exits with code `3` and an enable instruction on stderr, such
+as `apm experimental enable grok-cloud`, instead of silently skipping verification.
+Configuration errors do not produce a JSON audit report.
+Changing the manifest can still expose missing requested output; the existing
+[drift exit rules](#drift-detection) apply. Audit does not install, repair, or
+rewrite that state. Retained paths recorded under a previous target remain
+eligible for [CI presence and recorded-hash checks](../../baseline-checks/),
+subject to those checks' existing exclusions and hash baselines, even when
+that target is no longer selected for replay.
+
+For a native Agent Plugin installed with the `copilot` target, replay uses the
+same package interpretation as install. A plugin does not need an accompanying
+`apm.yml`; reinstalling and auditing a clean plugin remains supported. Select
+targets in the project's `apm.yml` (`targets: [copilot]`), not an audit
+`--target` option. Invalid native manifests fail replay rather than falling back
+to legacy conversion. Audit does not modify plugin sources or live harness state.
+
+Native plugins remain whole under `apm_modules/`, rather than becoming loose
+managed skills. Replay compares admitted local plugins with a scratch copy of
+their original source, using the same validated copying as install. Modified
+or missing cached skills fail audit; run `apm install` to restore them. Remote
+native plugins use their recorded package content hash, including in cold-cache
+CI; a missing hash requires reinstalling to establish that baseline. These
+checks do not turn cache files into deployed-file claims. Native registration
+files are not covered by this content comparison.
 
 This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
@@ -89,8 +137,8 @@ single-file `--file` operation is unchanged.
 | Flag | Default | Description |
 |---|---|---|
 | `--ci` | off | Run lockfile consistency checks and drift as a CI gate. Cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`. |
-| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. Experimental. Without `--ci` it is ignored with a warning. |
-| `--no-policy` | off | Skip policy discovery and enforcement. Equivalent to `APM_POLICY_DISABLE=1`. Overridden when `--policy` is passed explicitly. |
+| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. A path, URL, or `owner/repo` that cannot be loaded (missing, unreachable, malformed) fails the gate with exit 1; `org` keeps the discovery default (warn unless `policy.fetch_failure_default: block`). Experimental. Without `--ci` it is ignored with a warning. |
+| `--no-policy` | off | Skip policy discovery and enforcement. Overridden when `--policy` is passed explicitly. `APM_POLICY_DISABLE=1` also disables enforcement, but it is not overridden by `--policy`: audit prints a `[!]` warning that the explicit policy was not enforced and reports `policy.enforced: false`. |
 | `--no-cache` | off | Force a fresh policy fetch (skip the policy cache). Only relevant with policy discovery active. |
 | `--no-fail-fast` | off | Run every check even after the first failure, for a full diagnostic report. |
 
@@ -193,16 +241,19 @@ discovered/untracked when appropriate, without failing the prompt check.
 `tracked` means a file claim exists, not that every entry in a shared file
 is APM-owned or hash-verified. Hash and ownership checks remain independent.
 
+User-scope replay preserves the `~/.apm/apm_modules/` layout in relative
+asset links, so intact global prompts do not report drift from a scratch-path difference.
+
 The target registry supplies the following project patterns. Patterns are
 recursive inside their named directory; skill entry points are `SKILL.md`,
 not every file in a skill bundle.
 
 | Target | Prompt documents/fields | Hook definitions |
 |---|---|---|
-| Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt |
+| Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt; flat `sessionStart` prompt handlers' `prompt` field (prompt handlers on other events are unsupported) |
 | Claude | `.claude/rules/*.md`, `agents/*.md`, `commands/*.md`, `skills/**/SKILL.md` | `.claude/hooks/*.json`, `.claude/settings.json`; nested `prompt`/`agent` handlers' `prompt` field |
-| Cursor | `.cursor/rules/*.mdc`, `agents/*.md`, `commands/*.md`; shared skills | `.cursor/hooks/*.json`, `.cursor/hooks.json`; flat or APM-preserved nested command handlers |
-| Kiro | `.kiro/steering/*.md`, `agents/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
+| Cursor | `.cursor/rules/*.mdc`, `agents/*.md`, `commands/*.md`; shared skills | `.cursor/hooks/*.json`, `.cursor/hooks.json`; flat command handlers and prompt handlers' `prompt` field; nested handlers are unsupported |
+| Kiro | `.kiro/steering/*.md`, `agents/*.md`, `prompts/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
 | Gemini | `.gemini/commands/*.toml`: `prompt`; shared skills | `.gemini/hooks/*.json`, `.gemini/settings.json`; nested command handlers |
 | Codex | `.codex/agents/*.toml`: `developer_instructions`; shared skills | `.codex/hooks.json`; nested command handlers |
 | Antigravity | `.agents/rules/*.md`, skills | `.agents/hooks.json`; named containers, nested tool events and flat other events |
@@ -252,8 +303,11 @@ integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when
 replay produced the same normalized bytes as the project but no exact or
 directory `deployed_files` claim covers the path. For shared merge-hook
 targets, audit compares only APM-owned hook entries; user-owned hooks do not
-create drift. The APM-owned sidecar remains byte-for-byte checked, so tampered
-or missing APM-owned hooks report `modified`. `unrecorded` findings fail
+create drift. The APM-owned sidecar is compared as JSON, ignoring object-key
+order and formatting while retaining every field and list order. Changed
+commands, ownership markers, or execution order still report `modified`, as
+do malformed JSON, duplicate keys, and non-JSON constants (`NaN`, `Infinity`,
+`-Infinity`). `unrecorded` findings fail
 `--ci`; run `apm install`, then commit the regenerated `apm.lock.yaml`.
 
 Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.
@@ -266,7 +320,10 @@ clean audit to exit `1`. An advisory cache-miss skip remains non-failing
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
 scratch replay through `install/audit_replay.py`; materialization failures
-fail closed without mutating the checkout.
+fail closed without mutating the checkout. Replay fetches each Git dependency
+over the transport its declaring `apm.yml` states, as install does: a
+`git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
+the usual [transport selection](../../../consumer/manage-dependencies/#transport-selection).
 
 ### Deployment-owner integrity
 
@@ -285,7 +342,7 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 ### CI checks (`--ci`)
 
-`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, and an advisory `includes` consent check. A lockfile is required when `apm.yml` declares APM or MCP dependencies. For an MCP-only project, normal [`apm install`](../install/#behavior) creates or repairs the resolved MCP lock state; frozen install fails without writing when that state is missing or stale. Content integrity scans hidden Unicode across the whole-project deployed-file scope and checks SHA-256 drift only where the lockfile provides a baseline. Drift replay runs alongside and contributes to the exit code unless `--no-drift` is set; `--no-drift` never disables hidden-Unicode scanning. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Audit also reports `unrecorded` drift when replay produces governed files that no lockfile entry claims. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so the full-install CI pattern remains the right default there. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
+`--ci` runs the baseline lockfile consistency checks defined in `src/apm_cli/policy/ci_checks.py`: lockfile presence, canonical deployment-owner integrity (`deployment-ledger-owners`), ref consistency, deployed-files presence, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, and an advisory `includes` consent check. A lockfile is required when `apm.yml` declares APM or MCP dependencies. For an MCP-only project, normal [`apm install`](../install/#behavior) creates or repairs the resolved MCP lock state; frozen install fails without writing when that state is missing or stale. Content integrity scans hidden Unicode across the whole-project deployed-file scope and checks SHA-256 drift only where the lockfile provides a baseline. Drift replay runs alongside and contributes to the exit code unless `--no-drift` is set; `--no-drift` never disables hidden-Unicode scanning. On a cold cache, CI mode self-hydrates a scratch install from the lockfile pins instead of reporting a green skip, so setup-only CI can still catch stale committed deployed files without rewriting the checkout. Audit also reports `unrecorded` drift when replay produces governed files that no lockfile entry claims. Missing gitignored deployed outputs do not fail `deployed-files-present`; audit-only CI can pass without them, but lacks deployed-byte integrity and drift coverage when no outputs are committed. Use full-install CI when those outputs need to be materialized. With policy discovery active, declared policy rules are evaluated against the resolved manifest. See [Baseline CI checks](../../baseline-checks/) for the full reference.
 
 ### Mutual exclusions
 
@@ -310,7 +367,9 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | Code | Meaning |
 |---|---|
 | `0` | All checks passed. |
-| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations). |
+| `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), or an explicit `--policy` source could not be loaded. |
+
+CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 
 ## Related
 

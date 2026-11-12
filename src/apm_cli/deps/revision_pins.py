@@ -157,6 +157,8 @@ def resolve_revision_pin_updates(
         dep_key = dep_ref.get_unique_key()
         if only_packages is not None and dep_key not in only_packages:
             continue
+        if dep_ref.replacement is not None:
+            continue
         if dep_ref.is_local or dep_ref.source == "registry" or dep_ref.artifactory_prefix:
             continue
         if is_full_revision_pin(getattr(dep_ref, "reference", None)):
@@ -304,4 +306,4 @@ def dependency_ref_from_locked(locked: LockedDependency) -> DependencyReference:
     This named seam keeps ``apm outdated`` coupled to the revision-pin
     resolver contract instead of reaching through the lockfile type directly.
     """
-    return locked.to_dependency_ref()
+    return locked.to_dependency_ref().source_reference

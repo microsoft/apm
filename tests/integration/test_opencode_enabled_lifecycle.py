@@ -161,6 +161,10 @@ def test_opencode_enabled_install_reinstall_and_scope(
         project_before = config_path.read_bytes()
         user_config = isolated.home / "opencode.json"
         user_config.write_text('{"user-owned": true}\n', encoding="utf-8")
+        global_opencode_path = isolated.home / ".config" / "opencode" / "opencode.json"
+        global_opencode_path.parent.mkdir(parents=True)
+        global_opencode_path.write_text('{"theme": "user-theme"}', encoding="utf-8")
+        dependencies[0]["enabled"] = False
         global_manifest = {
             "name": "global-enabled",
             "version": "1.0.0",
@@ -168,17 +172,22 @@ def test_opencode_enabled_install_reinstall_and_scope(
             "dependencies": {"apm": [], "mcp": [dependencies[0]]},
         }
         dump_yaml(global_manifest, isolated.config_root / "apm.yml")
+        previous_global_opencode = None
         for _ in range(2):
             result = runner.run(
                 ("install", "--global", "--runtime", "opencode", "--no-policy"),
                 cwd=project,
                 env=environment,
-                scenario_id="opencode-global-unsupported",
+                scenario_id="opencode-global-install",
             )
-            assert result.returncode == 1, result.stdout + result.stderr
-            assert "Skipped workspace-only runtimes at user scope: opencode" in " ".join(
-                result.stdout.split()
-            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            global_opencode = global_opencode_path.read_bytes()
+            if previous_global_opencode is not None:
+                assert global_opencode == previous_global_opencode
+            previous_global_opencode = global_opencode
+            rendered = json.loads(global_opencode)
+            assert rendered["theme"] == "user-theme"
+            assert rendered["mcp"]["local"]["enabled"] is False
             assert config_path.read_bytes() == project_before
             assert user_config.read_text(encoding="utf-8") == '{"user-owned": true}\n'
             assert not (isolated.config_root / "opencode.json").exists()
@@ -202,6 +211,10 @@ def test_opencode_enabled_install_reinstall_and_scope(
             assert "enabled" not in tomlkit.parse(global_config.decode())["mcp_servers"]["local"]
             assert config_path.read_bytes() == project_before
             assert user_config.read_text(encoding="utf-8") == '{"user-owned": true}\n'
+        # Moving the global target to Codex removes the entry APM owned.
+        retargeted = json.loads(global_opencode_path.read_text(encoding="utf-8"))
+        assert retargeted["theme"] == "user-theme"
+        assert "local" not in retargeted.get("mcp", {})
 
         other_project = isolated.work_root / "without-opencode"
         other_project.mkdir()

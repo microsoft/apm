@@ -129,6 +129,21 @@ def _git_semver_package_name(dep_ref: DependencyReference) -> str:
     return dep_ref.repo_url.rsplit("/", 1)[-1]
 
 
+def _is_exact_semver_constraint(constraint: str | None) -> bool:
+    """Return whether ``constraint`` names one exact version, not a range.
+
+    ``"1.2.3"`` is exact; ``"^1.2.0"``, ``"1.4.x"`` and ``">=1.0 <2.0"``
+    are ranges. Used to let exact pins bypass tag enumeration in
+    registry-only mode.
+    """
+    if not constraint:
+        return False
+
+    from apm_cli.marketplace.semver import parse_semver
+
+    return parse_semver(constraint.strip()) is not None
+
+
 def is_git_semver_resolution_eligible(dep_ref: DependencyReference) -> bool:
     """Return whether a dependency must resolve its semver constraint from Git tags.
 
@@ -141,6 +156,37 @@ def is_git_semver_resolution_eligible(dep_ref: DependencyReference) -> bool:
         and getattr(dep_ref, "source", None) != "registry"
         and not getattr(dep_ref, "artifactory_prefix", None)
         and dep_ref.ref_kind == "semver"
+    )
+
+
+def replay_locked_git_semver(dep_ref: DependencyReference, existing_lockfile: Any) -> Any:
+    """Return the locked ``GitSemverResolution`` for an unchanged semver range.
+
+    Pure lockfile replay with no I/O: returns ``None`` unless the dependency
+    still declares the exact constraint recorded in the lockfile and the
+    lockfile holds a complete resolution (tag, commit, version).
+    """
+    if existing_lockfile is None or not is_git_semver_resolution_eligible(dep_ref):
+        return None
+    locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+    if not (
+        locked is not None
+        and locked.matches_replacement(dep_ref)
+        and locked.constraint == dep_ref.reference
+        and locked.resolved_tag
+        and locked.resolved_commit
+        and locked.version
+    ):
+        return None
+    from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+    return GitSemverResolution(
+        constraint=locked.constraint,
+        resolved_version=locked.version,
+        resolved_tag=locked.resolved_tag,
+        resolved_sha=locked.resolved_commit,
+        matched_pattern="",
+        resolved_at=locked.resolved_at or "",
     )
 
 
@@ -162,26 +208,24 @@ def maybe_resolve_git_semver(
     constraint = dep_ref.reference
     owner_repo = dep_ref.repo_url
     package_name = _git_semver_package_name(dep_ref)
-    if not update_refs and existing_lockfile is not None:
-        locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-        if (
-            locked is not None
-            and locked.constraint == constraint
-            and locked.resolved_tag
-            and locked.resolved_commit
-            and locked.version
-        ):
-            from apm_cli.deps.git_semver_resolver import GitSemverResolution
+    if not update_refs:
+        locked_resolution = replay_locked_git_semver(dep_ref, existing_lockfile)
+        if locked_resolution is not None:
+            return locked_resolution
 
-            return GitSemverResolution(
-                constraint=locked.constraint,
-                resolved_version=locked.version,
-                resolved_tag=locked.resolved_tag,
-                resolved_sha=locked.resolved_commit,
-                matched_pattern="",
-                resolved_at=locked.resolved_at or "",
-            )
+    # Registry-only mode: an exact version needs no tag listing. Decline
+    # the semver route so the pipeline keeps the version as a literal ref
+    # and the proxy download path resolves it directly. ``ref_kind``
+    # classifies bare ``1.2.3`` as semver (not a literal tag), so without
+    # this an exact pin would hit the range guard in GitSemverResolver --
+    # the very thing that guard's hint tells authors to use instead. A
+    # matching locked resolution is replayed above without any listing.
+    from apm_cli.deps.registry_proxy import is_enforce_only
 
+    if is_enforce_only() and _is_exact_semver_constraint(constraint):
+        return None
+
+    dep_ref = dep_ref.source_reference
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
 
     if transport_selector is None:

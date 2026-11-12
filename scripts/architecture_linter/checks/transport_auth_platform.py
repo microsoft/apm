@@ -502,7 +502,39 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             exempt=True,
         )
     )
+    findings.extend(_check_marketplace_ado_auth_handoffs(provider))
     return tuple(findings)
+
+
+def _check_marketplace_ado_auth_handoffs(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Check executable handoffs, not names retained in imports or docstrings."""
+    path = "src/apm_cli/marketplace/client.py"
+    facts, failures = checked_facts(provider, path, _RID_HOST_CRED, require_python=True)
+    if failures:
+        return failures
+    index = facts.tree_index
+    definition = effective_definition(index, "_fetch_git") if index is not None else None
+    nodes = tuple(index.own_scope(definition)) if definition is not None else ()
+    calls = {ast.unparse(node) for node in nodes if isinstance(node, ast.Call)}
+    required = {
+        "validate_git_url_rewrite_safety(source.url, ado_base_env)",
+        "auth_resolver.try_with_fallback(host_info.host, _checkout, **fallback_kwargs)",
+    }
+    preserves_chain_error = any(
+        isinstance(node, ast.ExceptHandler)
+        and isinstance(node.type, ast.Name)
+        and node.type.id == "AdoAuthChainExhaustedError"
+        for node in nodes
+    )
+    if required <= calls and preserves_chain_error:
+        return ()
+    return (
+        violation(
+            _RID_HOST_CRED,
+            path,
+            "_fetch_git must delegate ADO fallback and rewrite safety and preserve chain errors",
+        ),
+    )
 
 
 def _check_host_reference_coordinates(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -598,6 +630,26 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
                 "resolver_kwargs['port'] = port",
             ),
         ),
+        (
+            "src/apm_cli/install/validation.py",
+            "_uses_clone_root_probe",
+            ("initial_transport_scheme(dep_ref) == 'ssh'",),
+        ),
+        (
+            "src/apm_cli/deps/git_reference_resolver.py",
+            "GitReferenceResolver.resolve_commit_sha_for_ref",
+            ("initial_transport_scheme(dep_ref, host._protocol_pref) == 'ssh'",),
+        ),
+        (
+            "src/apm_cli/deps/bare_cache.py",
+            "bare_clone_with_fallback._bare_action",
+            ("git_resolve_commit(target, ref, env=env, bare=True)",),
+        ),
+        (
+            "src/apm_cli/utils/git_env.py",
+            "git_resolve_commit",
+            ("'--git-dir' if bare else '-C'",),
+        ),
     )
     findings: list[Violation] = []
     for path, function, required in contracts:
@@ -608,12 +660,19 @@ def _check_marketplace_package_remote(provider: FactsProvider) -> tuple[Violatio
         if failures:
             continue
         index = facts.tree_index
-        definition = effective_definition(index, function) if index is not None else None
+        definition = None
+        if index is not None:
+            for name in function.split("."):
+                definition = effective_definition(index, name, parent=definition)
+                if definition is None:
+                    break
         executable = (
             {
                 ast.unparse(node)
                 for node in index.own_scope(definition)
-                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return, ast.Call, ast.Compare))
+                if isinstance(
+                    node, (ast.Assign, ast.AnnAssign, ast.Return, ast.Call, ast.Compare, ast.IfExp)
+                )
             }
             if definition is not None
             else set()
@@ -780,6 +839,9 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 'return "-c", "core.hooksPath=/dev/null"',
                 'return ("--template=",)',
                 "def validate_git_url_rewrite_safety(",
+                "def git_symlink_pin_args(",
+                "retained.append(git_symlink_pin_entry())",
+                "def raise_for_symlink_capability(",
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
         )
@@ -996,6 +1058,37 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "Dependency Git repositories must suppress template-provided config",
             )
         )
+    for path, needles in (
+        (
+            "src/apm_cli/cache/git_cache.py",
+            ("git_symlink_pin_args(", "git_symlink_pin_entry(", "raise_for_symlink_capability("),
+        ),
+        (
+            "src/apm_cli/deps/bare_cache.py",
+            ("git_symlink_pin_args(", "raise_for_symlink_capability("),
+        ),
+    ):
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_GIT_CHILD_ENV,
+                path,
+                needles,
+                "Dependency checkouts must pin real symlinks and name capability failures",
+            )
+        )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(r"core\.symlinks=|[\"']core\.symlinks[\"']"),
+            "The core.symlinks pin must route through utils/git_env.git_symlink_pin_*",
+            exempt=False,
+        )
+    )
     findings.extend(
         _forbid_scan(
             provider,

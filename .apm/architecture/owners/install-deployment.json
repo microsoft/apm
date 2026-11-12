@@ -2,6 +2,17 @@
   "version": 1,
   "owners": [
     {
+      "id": "single-file-package-materialization",
+      "decision": "Single-file dependency package layout and local source admission for replacement, audit replay and frozen hash images",
+      "owner": "deps/virtual_file.py (materialize_virtual_file_package) + install/phases/local_content.py (read_local_package_source, compute_local_package_hash, materialize_local_file_for_replay); DependencyReference owns suffix vocabulary",
+      "selectors": [
+        "src/apm_cli/deps/virtual_file.py",
+        "src/apm_cli/deps/github_downloader.py",
+        "src/apm_cli/install/phases/local_content.py"
+      ],
+      "guards": ["install-deployment-single-file-materialization"]
+    },
+    {
       "id": "orphan-package-selection",
       "decision": "Declaration-aware selection of orphaned installed packages",
       "owner": "commands/_helpers.py (_find_orphaned_packages)",
@@ -24,7 +35,7 @@
     },
     {
       "id": "legacy-mcp-ownership-key-migration",
-      "decision": "Legacy MCP target ownership migration and adoption",
+      "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
       "owner": "install/mcp/ownership.py",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
       "guards": ["install-deployment-mcp-ownership-migration"]
@@ -32,7 +43,7 @@
     {
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
-      "owner": "deployment_ledger.py; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
+      "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
         "src/apm_cli/integration/skill_support.py",
@@ -43,8 +54,13 @@
     {
       "id": "target-scoped-deployed-file-contraction",
       "decision": "Target-scoped deployed-file contraction",
-      "owner": "install/manifest_reconcile.py (reconcile_target_deployed_files)",
-      "selectors": ["src/apm_cli/install/manifest_reconcile.py"],
+      "owner": "install/manifest_reconcile.py routes target contraction, survivor claims and absent dependency claims through core/deployment_state.py (DeploymentReconciler)",
+      "selectors": [
+        "src/apm_cli/install/manifest_reconcile.py",
+        "src/apm_cli/install/helpers/absence_observation.py",
+        "src/apm_cli/install/helpers/reconciliation_scope.py",
+        "src/apm_cli/core/deployment_state.py"
+      ],
       "guards": ["install-deployment-target-file-contraction"]
     },
     {
@@ -69,18 +85,38 @@
       "guards": ["install-deployment-frozen-mutation-eligibility"]
     },
     {
+      "id": "materialized-manifest-evidence",
+      "decision": "Acquired manifest metadata snapshot",
+      "owner": "install/source_helpers.py (materialized_manifest_snapshot) delegates manifest interpretation to APMPackage.from_mapping; existing lock construction retains resolver version precedence",
+      "selectors": [
+        "src/apm_cli/install/source_helpers.py",
+        "src/apm_cli/install/sources.py"
+      ],
+      "guards": ["install-deployment-manifest-snapshot"]
+    },
+    {
       "id": "prospective-dry-run-install-plan",
-      "decision": "Prospective dry-run install plan",
-      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan)",
-      "selectors": ["src/apm_cli/install/dry_run_plan.py"],
+      "decision": "Prospective dry-run install plan and interpreted package selection",
+      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan) delegates selector identity and subtree filtering to install/package_selection.py and offline dependency closure to deps/apm_resolver.py",
+      "selectors": ["src/apm_cli/install/dry_run_plan.py", "src/apm_cli/install/package_selection.py"],
       "guards": ["install-deployment-prospective-dry-run-plan"]
     },
     {
       "id": "authorized-deployable-source-paths",
       "decision": "Authorized deployable source paths",
-      "owner": "install/deployable_source_plan.py (DeployableSourcePlan)",
+      "owner": "install/deployable_source_plan.py (DeployableSourcePlan, including explicit skill-source discovery completeness)",
       "selectors": ["src/apm_cli/install/deployable_source_plan.py"],
       "guards": ["install-deployment-source-plan"]
+    },
+    {
+      "id": "unmanaged-skill-preflight",
+      "decision": "Whole-plan unmanaged skill refusal and unmatched skills: selection refusal before native deployment",
+      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes",
+      "selectors": [
+        "src/apm_cli/install/deployment_plan.py",
+        "src/apm_cli/integration/skill_preflight.py"
+      ],
+      "guards": ["install-deployment-skill-preflight"]
     },
     {
       "id": "primitive-kind-classification",
@@ -123,8 +159,11 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (see integrators.instructions.md)",
-      "selectors": ["src/apm_cli/integration/base_integrator.py"],
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; see integrators.instructions.md)",
+      "selectors": [
+        "src/apm_cli/integration/base_integrator.py",
+        "src/apm_cli/install/services.py"
+      ],
       "guards": ["install-deployment-base-integrator"]
     },
     {
@@ -156,10 +195,21 @@
       "guards": ["install-deployment-uninstall-reachability"]
     },
     {
+      "id": "legacy-lockfile-parent-placement",
+      "decision": "Legacy lockfile transitive parent placement for deps tree and deps why",
+      "owner": "deps/lock_parent_placement.py (place_legacy_lock_parents, installed_manifest_children)",
+      "selectors": ["src/apm_cli/deps/lock_parent_placement.py"],
+      "guards": ["install-deployment-lock-parent-placement"]
+    },
+    {
       "id": "ci-audit-scratch-materialization",
       "decision": "CI audit scratch materialization",
-      "owner": "install/audit_replay.py (prepare_ci_audit_replay)",
-      "selectors": ["src/apm_cli/install/audit_replay.py"],
+      "owner": "install/audit_replay.py (prepare_ci_audit_replay) + install/audit_target_roots.py (scratch deployment projections)",
+      "selectors": [
+        "src/apm_cli/install/audit_replay.py",
+        "src/apm_cli/install/audit_target_roots.py",
+        "src/apm_cli/install/project_package.py"
+      ],
       "guards": ["install-deployment-audit-replay"]
     },
     {
@@ -175,6 +225,16 @@
       "owner": "models/dependency/selection.py (via DependencyReference)",
       "selectors": ["src/apm_cli/models/dependency/selection.py"],
       "guards": ["install-deployment-uninstall-selection"]
+    },
+    {
+      "id": "skills-root-derivation",
+      "decision": "Target skills-root derivation",
+      "owner": "integration/targets.py (TargetProfile.skills_rel_root, TargetProfile.skills_deploy_path)",
+      "selectors": [
+        "src/apm_cli/install/deployed_paths.py",
+        "src/apm_cli/commands/uninstall/engine.py"
+      ],
+      "guards": ["install-deployment-skills-root-derivation"]
     }
   ]
 }

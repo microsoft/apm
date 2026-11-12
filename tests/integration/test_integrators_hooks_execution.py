@@ -330,6 +330,7 @@ class TestDirectoryExistsAtRef:
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.json.return_value = []
         with patch.object(downloader, "_resilient_get", return_value=mock_resp):
             result = _directory_exists_at_ref(downloader, dep, "skills/foo", "main", lambda m: None)
 
@@ -372,6 +373,7 @@ class TestDirectoryExistsAtRef:
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.json.return_value = []
         with patch.object(downloader, "_resilient_get", return_value=mock_resp) as mock_get:
             result = _directory_exists_at_ref(downloader, dep, "path", "ref", lambda m: None)
 

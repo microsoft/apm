@@ -739,7 +739,8 @@ class TestClaudeClientAdapter:
     def test_get_config_path_user_scope(self) -> None:
         """User-scope returns ~/.claude.json path."""
         adapter = ClaudeClientAdapter(user_scope=True)
-        assert adapter.get_config_path() == str(Path.home() / ".claude.json")
+        # The adapter resolves symlinks (macOS /var -> /private/var).
+        assert Path(adapter.get_config_path()) == (Path.home() / ".claude.json").resolve()
 
     def test_get_current_config_missing_file(self, tmp_path: Path) -> None:
         """Returns empty mcpServers when config file does not exist."""

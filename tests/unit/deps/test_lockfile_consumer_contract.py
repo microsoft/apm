@@ -56,6 +56,8 @@ _LOCKED_DEPENDENCY_VALUES = {
     "declared_license": "MIT",
     "exec_status": "deployed",
     "name": "consume-contract",
+    "extensions": {"x-vendor": {"k": "v"}},
+    "replacement": None,
     "_unknown_fields": {"future_consumer_field": {"enabled": True}},
 }
 
@@ -79,6 +81,7 @@ _RECONSTRUCTED_LOCK_FIELDS = {
     "allow_insecure",
     "skill_subset",
     "target_subset",
+    "replacement",
 }
 
 _REFERENCE_TO_LOCK_FIELD = {

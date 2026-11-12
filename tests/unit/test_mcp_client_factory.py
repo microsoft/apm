@@ -285,8 +285,8 @@ class TestCodexClientAdapter(unittest.TestCase):
             ],
         }
 
-    def test_format_server_config_streamable_http_writes_url_and_id(self):
-        """Streamable-HTTP remote produces url + id (no http_headers when none)."""
+    def test_format_server_config_streamable_http_writes_url_without_native_id(self):
+        """Streamable-HTTP formatting excludes unsupported native identity fields."""
         server_info = {
             "name": "figma",
             "id": "ab12cd34-0000-0000-0000-000000000000",
@@ -299,7 +299,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         }
         config = self.adapter._format_server_config(server_info)
         self.assertEqual(config["url"], "https://mcp.figma.com/mcp")
-        self.assertEqual(config["id"], "ab12cd34-0000-0000-0000-000000000000")
+        self.assertNotIn("id", config)
         self.assertNotIn("http_headers", config)
 
     def test_format_server_config_streamable_http_writes_headers(self):
@@ -579,7 +579,10 @@ class TestCodexClientAdapter(unittest.TestCase):
         config = self.adapter.get_current_config()
         figma = config["mcp_servers"]["figma"]
         self.assertEqual(figma["url"], "https://mcp.figma.com/mcp")
-        self.assertEqual(figma["id"], "ab12cd34-0000-0000-0000-000000000000")
+        self.assertNotIn("id", figma)
+        self.assertEqual(
+            self.adapter.get_registry_id(figma), "ab12cd34-0000-0000-0000-000000000000"
+        )
         self.assertEqual(figma["http_headers"], {"Authorization": "Bearer ghp_xxx"})
 
     @patch("apm_cli.adapters.client.codex._rich_warning")

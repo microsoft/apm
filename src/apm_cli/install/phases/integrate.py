@@ -16,24 +16,28 @@ remains a sibling helper here rather than a fourth ``DependencySource``.
 from __future__ import annotations
 
 import builtins
+import copy
 import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.phases._redownload import _should_skip_redownload
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
-from apm_cli.install.services import integrate_local_content
+from apm_cli.install.services import _targets_explicitly_requested, integrate_local_content
 from apm_cli.install.sources import make_dependency_source
 from apm_cli.install.template import (
     preflight_agent_plugin_materializations,
+    preflight_skill_materializations,
     prepare_integration_materialization,
     run_integration_template,
 )
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.install.deployment_plan import PackageDeploymentPlan
 
 
 # ======================================================================
@@ -61,6 +65,20 @@ def _resolve_download_strategy(
     diagnostics = ctx.diagnostics
     logger = ctx.logger
     dep_key = dep_ref.get_unique_key()
+
+    # A semver range already in apm_modules skips the resolve callback, so
+    # replay its locked tag here; never resolve the raw range as a ref (#3382).
+    # Drift is still judged against the declared constraint: a bare ``1.1.0``
+    # tag is itself a semver string and would not equal the locked range.
+    drift_ref = dep_ref
+    if not update_refs and dep_key not in ctx.git_semver_resolutions:
+        from apm_cli.install.helpers.ref_reuse import replay_locked_git_semver
+
+        _locked_semver = replay_locked_git_semver(dep_ref, existing_lockfile)
+        if _locked_semver is not None:
+            ctx.git_semver_resolutions[dep_key] = _locked_semver
+            drift_ref = copy.copy(dep_ref)
+            dep_ref.reference = _locked_semver.resolved_tag
 
     # npm-like behavior: Branches always fetch latest, only tags/commits use cache
     # Resolve git reference to determine type
@@ -99,7 +117,7 @@ def _resolve_download_strategy(
     # Detect if manifest ref changed vs what the lockfile recorded.
     # detect_ref_change() handles all transitions including None->ref.
     _dep_locked_chk = existing_lockfile.get_dependency(dep_key) if existing_lockfile else None
-    ref_changed = detect_ref_change(dep_ref, _dep_locked_chk, update_refs=update_refs)
+    ref_changed = detect_ref_change(drift_ref, _dep_locked_chk, update_refs=update_refs)
     # When the manifest ref drifted from the lockfile, the content hash
     # will legitimately change after re-download.  Mark the dep so the
     # supply-chain check in sources.py doesn't treat it as an attack.
@@ -222,14 +240,14 @@ def _resolve_download_strategy(
 
     # Issue #551: skip re-download when the BFS callback already fetched this
     # dep during resolution AND the remote SHA still matches what was captured.
-    # This eliminates redundant network I/O in --update mode when apm_modules/
+    # This eliminates redundant network I/O in update/refresh when apm_modules/
     # is empty but the lockfile SHA is stale: the callback downloads the latest
     # content (recording its SHA), and the sequential loop would otherwise
     # re-download identical bytes because lockfile_match=False (stale SHA).
     _callback_sha = ctx.callback_downloaded.get(dep_key)
     _already_resolved_sha_match = (
         already_resolved
-        and update_refs
+        and (update_refs or ctx.refresh)
         and bool(resolved_ref)
         and bool(_callback_sha)
         and getattr(resolved_ref, "resolved_commit", None) not in (None, "cached")
@@ -248,16 +266,17 @@ def _resolve_download_strategy(
         ref_changed=ref_changed,
     )
 
-    # Verify content integrity when lockfile has a hash.
-    # NOTE: when _already_resolved_sha_match is True, the callback has already
-    # written the correct content for the current remote SHA -- but the lockfile
-    # content_hash still refers to the *previous* content. If the remote content
-    # changed (which is the typical stale-lockfile scenario), verify_package_hash
-    # will mismatch, safe_rmtree fires, and skip_download resets to False, causing
-    # a re-download. This is the correct safety behaviour but means the
-    # optimisation is a no-op for update scenarios where content_hash is present
-    # and stale. A follow-up can target this by propagating the callback-downloaded
-    # content_hash into the verified set before this guard runs.
+    # A same-SHA callback receipt binds validated bytes to their published path.
+    # Recheck those bytes rather than comparing them with the previous revision.
+    receipt = ctx.callback_content_hashes.get(dep_key)
+    if _already_resolved_sha_match and receipt and receipt[0] == install_path.resolve():
+        from apm_cli.utils.content_hash import verify_package_hash
+
+        if verify_package_hash(install_path, receipt[1]):
+            content_hash_already_verified = True
+            ctx.content_hash_verified_deps.add(dep_key)
+
+    # Missing, stale or tampered callback evidence retains the lock hash check.
     if (
         skip_download
         and _dep_locked_chk
@@ -293,6 +312,8 @@ def _resolve_download_strategy(
 
 def _integrate_root_project(
     ctx: InstallContext,
+    *,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict[str, int] | None:
     """Integrate root project's own .apm/ primitives (#714).
 
@@ -355,6 +376,7 @@ def _integrate_root_project(
             scope=ctx.scope,
             source_root=ctx.source_root,
             ctx=ctx,
+            deployment_plan=deployment_plan,
         )
 
         # Track deployed files for the post-deps-local phase (stale
@@ -566,6 +588,32 @@ def _decl_fully_trusted(allow: dict, decl) -> bool:
 # ======================================================================
 
 
+def _fail_explicit_target_without_deploy(ctx: InstallContext) -> None:
+    """Abort before any write when an explicit ``--target`` would deploy nothing."""
+    tree = getattr(ctx.dependency_graph, "dependency_tree", None)
+    if not _targets_explicitly_requested(ctx) or tree is None:
+        return
+    if ctx.root_has_local_primitives and not ctx.only_packages:
+        return
+    from apm_cli.install.target_filter import explicit_target_failure
+    from apm_cli.models.apm_package import DependencyReference
+
+    skipped = ctx.callback_failures
+    nodes = [n for n in tree.nodes.values() if n.dependency_ref.get_unique_key() not in skipped]
+    roots: list = []
+    if ctx.only_packages:
+        identities = builtins.set()
+        for spec in ctx.only_packages:
+            try:
+                identities.add(DependencyReference.parse(spec).get_identity())
+            except Exception:
+                identities.add(spec)
+        roots = [n for n in nodes if n.dependency_ref.get_identity() in identities]
+    message = explicit_target_failure(list(ctx.targets), nodes, roots)
+    if message:
+        raise DirectDependencyError(message)
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
@@ -666,12 +714,30 @@ def run(ctx: InstallContext) -> None:
         if materialization is not None
     ]
     preflight_agent_plugin_materializations(materialized)
+    _fail_explicit_target_without_deploy(ctx)
+    deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)
+
+    if ctx.frozen and ctx.existing_lockfile is not None:
+        from apm_cli.install.service import InstallService
+
+        InstallService.enforce_hydrated_mcp(
+            ctx.apm_package,
+            ctx.existing_lockfile,
+            apm_modules_dir,
+            trust_transitive_mcp=ctx.trust_transitive_mcp,
+            logger=ctx.logger,
+            active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
+        )
 
     for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
         if terminal_deltas is not None:
             deltas = terminal_deltas
         else:
-            deltas = run_integration_template(source, materialization=materialization)
+            deltas = run_integration_template(
+                source,
+                materialization=materialization,
+                deployment_plan=deployment_plans.get(dep_key),
+            )
 
         if deltas is None:
             # Direct dependency failure: surface a single concise
@@ -707,7 +773,7 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # Integrate root project's own .apm/ primitives (#714).
     # ------------------------------------------------------------------
-    root_deltas = _integrate_root_project(ctx)
+    root_deltas = _integrate_root_project(ctx, deployment_plan=local_plan)
     if root_deltas:
         installed_count += root_deltas.get("installed", 0)
         total_prompts_integrated += root_deltas.get("prompts", 0)

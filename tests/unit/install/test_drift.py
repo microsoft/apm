@@ -387,6 +387,84 @@ def test_diff_engine_hook_merge_target_tampering_is_modified(tmp_path):
     assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
 
 
+@pytest.mark.parametrize(
+    ("project_bytes", "modified"),
+    [
+        (b'{"B":[], "A":[{"command":"one","timeout":1},{"command":"two"}]}', False),
+        (b'{"A":[{"timeout":1,"command":"one"},{"command":"two"}],"B":[]}', False),
+        (b'{"A":[{"command":"changed","timeout":1},{"command":"two"}],"B":[]}', True),
+        (b'{"A":[{"command":"one","timeout":true},{"command":"two"}],"B":[]}', True),
+        (b'{"A":[{"command":"two"},{"command":"one","timeout":1}],"B":[]}', True),
+        (b'{"A":[{"command":"one","timeout":1}],"B":[]}', True),
+        (b'{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[],"C":[]}', True),
+        (b'{"A":[],"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}', True),
+        (
+            b'{"A":[{"command":"discarded","command":"one","timeout":1},{"command":"two"}],"B":[]}',
+            True,
+        ),
+        (b"{invalid json", True),
+        (b"[]", True),
+        ('{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}'.encode("utf-16"), True),
+        ('{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}'.encode("utf-32"), True),
+    ],
+    ids=[
+        "event-key-order",
+        "entry-key-order",
+        "command",
+        "value-type",
+        "execution-order",
+        "removed-entry",
+        "added-event",
+        "duplicate-event",
+        "duplicate-field",
+        "invalid-json",
+        "non-object",
+        "utf-16",
+        "utf-32",
+    ],
+)
+def test_diff_engine_hook_sidecar_compares_json_content(tmp_path, project_bytes, modified):
+    """Only object ordering/formatting is irrelevant; all content is owned."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/apm-hooks.json"
+    _write(scratch / rel, b'{"A":[{"command":"one","timeout":1},{"command":"two"}],"B":[]}')
+    _write(project / rel, project_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == (
+        [("modified", rel)] if modified else []
+    )
+    assert (project / rel).read_bytes() == project_bytes
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_diff_engine_hook_sidecar_rejects_matching_non_json_constants(tmp_path, constant):
+    """Equal invalid JSON must not become clean drift through canonicalization."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/apm-hooks.json"
+    invalid_bytes = ('{"PreToolUse":[{"timeout":' + constant + "}]}").encode()
+    _write(scratch / rel, invalid_bytes)
+    _write(project / rel, invalid_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
+    assert constant in findings[0].inline_diff
+    assert (scratch / rel).read_bytes() == invalid_bytes
+    assert (project / rel).read_bytes() == invalid_bytes
+
+
 def test_diff_engine_reports_malformed_shared_hook_event_as_modified(tmp_path):
     """A malformed native event remains drift rather than aborting audit."""
     from apm_cli.integration.targets import KNOWN_TARGETS
@@ -455,12 +533,16 @@ def test_diff_engine_100kb_inline_cap(tmp_path):
 
 
 def _target_with_skill_deploy_root(root_dir: str = ".github", deploy_root: str = ".agents"):
-    """Build a minimal TargetProfile-like stub for governed-root tests."""
-    from types import SimpleNamespace
+    """Use a real target profile for governed-root and collision routing."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
-    return SimpleNamespace(
+    target = KNOWN_TARGETS["copilot"]
+    return dataclasses.replace(
+        target,
         root_dir=root_dir,
-        primitives={"skills": SimpleNamespace(deploy_root=deploy_root)},
+        primitives={
+            "skills": dataclasses.replace(target.primitives["skills"], deploy_root=deploy_root)
+        },
     )
 
 
@@ -493,7 +575,7 @@ def test_diff_engine_walks_skill_deploy_root_detects_drift(tmp_path):
 
     findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
     assert len(findings) == 1
-    assert findings[0].kind == "modified"
+    assert findings[0].kind == "unmanaged-conflict"
     assert findings[0].path == rel
 
 
@@ -677,6 +759,7 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     def _bad_integrator(*args, **kwargs):
         # Simulate a leaky integrator that writes to project tree, not scratch.
         (project_root / ".apm" / "leaked.md").write_text("oops\n", encoding="utf-8")
+        return {"deployed_files": []}
 
     monkeypatch.setattr(
         "apm_cli.install.services.integrate_package_primitives",
@@ -775,33 +858,36 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
 def test_run_replay_threads_locked_skill_subset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    user_scope: bool,
 ) -> None:
-    """Replay must preserve the locked skill subset through dependency reconstruction."""
+    """Replay preserves the skill subset and scope-specific deployment source root."""
     from apm_cli.install.drift import run_replay
 
     project_root = tmp_path / "proj"
     project_root.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: project_root)
+    scratch_root = tmp_path / "scratch"
     (project_root / "apm.yml").write_text(
         "name: test-project\ntarget: copilot\n",
         encoding="utf-8",
     )
 
     lock = LockFile()
-    lock.add_dependency(
-        LockedDependency(
-            repo_url="./skill-bundle",
-            source="local",
-            local_path="./skill-bundle",
-            resolved_commit=None,
-            skill_subset=[
-                "productivity/grill-me",
-                "productivity/grilling",
-            ],
-        )
+    dep = LockedDependency(
+        repo_url="./skill-bundle",
+        source="local",
+        local_path="./skill-bundle",
+        resolved_commit=None,
+        skill_subset=[
+            "productivity/grill-me",
+            "productivity/grilling",
+        ],
     )
+    lock.add_dependency(dep)
     (project_root / "skill-bundle").mkdir()
     lockfile_path = project_root / "apm.lock.yaml"
     lock.write(lockfile_path)
@@ -814,6 +900,7 @@ def test_run_replay_threads_locked_skill_subset(
             {
                 "dependency_ref_skill_subset": package_info.dependency_ref.skill_subset,
                 "skill_subset": kwargs.get("skill_subset"),
+                "deployment_package_root": package_info.deployment_package_root,
             }
         )
         return {"deployed_files": []}
@@ -829,6 +916,8 @@ def test_run_replay_threads_locked_skill_subset(
             lockfile_path=lockfile_path,
             targets=None,
             cache_only=True,
+            scratch_root=scratch_root,
+            user_scope=user_scope,
         ),
         CheckLogger(verbose=False),
     )
@@ -842,6 +931,11 @@ def test_run_replay_threads_locked_skill_subset(
             "skill_subset": (
                 "productivity/grill-me",
                 "productivity/grilling",
+            ),
+            "deployment_package_root": dep.to_dependency_ref().get_install_path(
+                scratch_root / ".apm" / "apm_modules"
+                if user_scope
+                else scratch_root / "apm_modules"
             ),
         }
     ]

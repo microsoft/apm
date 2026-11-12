@@ -77,9 +77,11 @@ opt-out (`--no-drift`).
 
 For repos that commit their deployed files, use the audit-only pattern to
 catch tampering or stale committed outputs without letting `apm install`
-rewrite the checkout first. `apm install` overwrites managed files before
-audit runs, which erases any tampered bytes before `content-integrity` or
-drift can see them. Pass `setup-only: true` to the action so it only
+rewrite the checkout first. `apm install` can restore managed output, such
+as deployed instructions, before `content-integrity` or drift can inspect
+the changed bytes. Edited managed skill members are instead preserved,
+along with their original deployment hashes, unless you explicitly use
+`--force`. Pass `setup-only: true` to the action so it only
 provides the CLI, then run the full CI gate:
 
 ```yaml
@@ -92,11 +94,20 @@ provides the CLI, then run the full CI gate:
 
 In setup-only CI, `apm audit --ci` now self-hydrates a lock-pinned scratch
 install when `apm_modules/` is absent, so drift and `config-consistency`
-still run without mutating the checkout. Repos that gitignore deployed
+still run without mutating the checkout. `skill-subset-consistency` also
+checks selected skills against this lock-pinned tree, not the absent checkout
+dependencies. Invalid selections and manifest/lock mismatches still fail;
+deployed-file integrity and drift checks still inspect the checkout when
+outputs are committed.
+
+Repos that gitignore deployed
 outputs can still use the audit-only pattern: `deployed-files-present`
 skips gitignored paths automatically, so a fresh checkout of a repo that
 gitignores a deploy directory (e.g. `.agents/`) passes the check without
-an `apm install` step. See
+an `apm install` step. Note that `content-integrity` and drift have no
+committed deployed bytes to compare in that case, so coverage is limited
+to lockfile/subset consistency for gitignored deploy roots -- commit
+deployed outputs if you need full integrity and drift coverage. See
 [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
 for the full recipe and when to use each approach.
 
@@ -242,6 +253,7 @@ See the [Pack a bundle guide](../../producer/pack-a-bundle/) for the full workfl
 
 - **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.22.0`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
+- **Install with `apm install --frozen` in CI** to verify the committed lockfile is actually current. It never writes `apm.lock.yaml` and exits `1`, naming the paths, if the install deploys files the lockfile does not record. A file the lockfile omits carries no recorded hash, which puts it outside the `content-integrity` check below -- so this is the gate that keeps that check's scope honest, and it replaces a hand-rolled `git diff --exit-code apm.lock.yaml` step. If CI fails on it, run `apm install` locally and commit the updated `apm.lock.yaml`.
 - **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
 - **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed
 - **Use `GITHUB_APM_PAT`** for private dependencies; never use the default `GITHUB_TOKEN` for cross-repo access

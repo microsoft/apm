@@ -10,6 +10,7 @@ in-process without a private server or PAT.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 pytestmark = [pytest.mark.component, pytest.mark.integration, pytest.mark.requires_e2e_mode]
 
 _COMMIT = "a" * 40
+_DEPLOYED_INSTRUCTION = ".github/instructions/frozen-host.instructions.md"
 _TOKEN_VARS = ("GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN", "ADO_APM_PAT")
 
 
@@ -102,7 +104,10 @@ def _write_project(project: Path, case: _FrozenGitCase) -> None:
         encoding="utf-8",
     )
     lockfile = LockFile()
-    lockfile.add_dependency(case.locked_dep)
+    # A frozen install never writes the lockfile, so the committed lock must
+    # already record everything the install deploys.
+    locked_dep = dataclasses.replace(case.locked_dep, deployed_files=[_DEPLOYED_INSTRUCTION])
+    lockfile.add_dependency(locked_dep)
     lockfile.write(project / "apm.lock.yaml")
 
 

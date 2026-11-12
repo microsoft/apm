@@ -205,7 +205,8 @@ class TestAgentsCompilerIntegration:
         # Default should be distributed
         assert config.strategy == "distributed"
         assert not config.single_agents
-        assert config.source_attribution
+        assert config.source_attribution is False
+        assert CompilationConfig(source_attribution=True).source_attribution is True
 
         # Single agents flag should override strategy
         config = CompilationConfig(single_agents=True)

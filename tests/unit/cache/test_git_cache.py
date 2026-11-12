@@ -79,7 +79,11 @@ def test_receipt_precedence_with_actual_stale_bare_reference(
     dependency = DependencyReference.parse("owner/repo#main")
     url = dependency.to_github_url()
     bare = cache._db_root / cache_shard_key(url)
-    shutil.copytree(repository.origin, bare)
+    # Pushes can start background auto-maintenance in the origin; skip its
+    # transient lock and temp files so the snapshot copy cannot race them.
+    shutil.copytree(
+        repository.origin, bare, ignore=shutil.ignore_patterns("*.lock", "tmp_*", "gc.pid")
+    )
     payload.write_text("current\n", encoding="ascii")
     current_commit = repositories.commit(repository, message="Current observation")
     assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
@@ -176,7 +180,7 @@ class TestGitCacheGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
         )
 
         # Mock git rev-parse HEAD to return the expected SHA
@@ -408,7 +412,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+        )
 
         with (
             patch("subprocess.run") as mock_run,
@@ -473,7 +479,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+        )
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 
         def _populate(*args, **kwargs):

@@ -196,10 +196,10 @@ def test_frontmatter_authority_guard_rejects_split_owners(
     elif mutation == "reconcile-before-preflight":
         services = sandbox / "src/apm_cli/install/services.py"
         source = services.read_text(encoding="utf-8")
-        post_call = "\n    _reconcile_excluded_targets()\n\n    # Aggregate per-primitive"
-        assert post_call in source
+        post_call = "\n    _reconcile_excluded_targets()\n"
+        assert source.count(post_call) == 1
         services.write_text(
-            source.replace(post_call, "\n\n    # Aggregate per-primitive", 1).replace(
+            source.replace(post_call, "\n", 1).replace(
                 "    if integrators.instruction is not None:\n",
                 "    _reconcile_excluded_targets()\n    if integrators.instruction is not None:\n",
                 1,

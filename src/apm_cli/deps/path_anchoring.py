@@ -82,7 +82,9 @@ def resolve_local_dep_dir(
         ``resolved_by`` chain references a parent that is missing,
         ambiguous, non-local, or cyclic.
     """
-    if lock_dep.source != "local" or not lock_dep.local_path:
+    if lock_dep.replacement is not None and lock_dep.is_local_source:
+        return lock_dep.replacement.local_source_path(project_root)
+    if not lock_dep.is_local_source or not lock_dep.local_path:
         raise LocalResolutionError(
             f"not a resolvable local dependency: repo_url={lock_dep.repo_url!r} "
             f"source={lock_dep.source!r} local_path={lock_dep.local_path!r}"
@@ -108,7 +110,7 @@ def build_local_parent_index(
     grouped: dict[str, list[LockedDependency]] = {}
     if lockfile is not None:
         for dependency in lockfile.dependencies.values():
-            if dependency.source == "local" and dependency.local_path:
+            if dependency.is_local_source:
                 grouped.setdefault(dependency.repo_url, []).append(dependency)
     return {repo_url: tuple(dependencies) for repo_url, dependencies in grouped.items()}
 
@@ -126,7 +128,7 @@ def resolve_local_dep_dirs(lockfile: LockFile, project_root: Path) -> dict[str, 
             resolved_cache=resolved_cache,
         )
         for dependency in lockfile.get_package_dependencies()
-        if dependency.source == "local"
+        if dependency.is_local_source
     }
 
 
@@ -150,6 +152,10 @@ def _resolve_dep_dir(
     cached = resolved_cache.get(key)
     if cached is not None:
         return cached
+    if dep.replacement is not None and dep.is_local_source:
+        resolved = dep.replacement.local_source_path(project_root)
+        resolved_cache[key] = resolved
+        return resolved
     if not dep.resolved_by:
         resolved = _join(project_root, dep.local_path)
         resolved_cache[key] = resolved
@@ -197,6 +203,13 @@ def _find_parent(
             f"{dep.repo_url!r} declares resolved_by={dep.resolved_by!r} but no "
             "lockfile was supplied to resolve the parent"
         )
+    if lockfile.replacements is not None:
+        parent = lockfile.get_dependency(dep.resolved_by)
+        if parent is None or not parent.is_local_source:
+            raise LocalResolutionError(
+                f"resolved_by parent {dep.resolved_by!r} of {dep.repo_url!r} is not a locked local source"
+            )
+        return parent
     matches = parent_index.get(dep.resolved_by, ())
     if not matches:
         raise LocalResolutionError(

@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> **Normative reference:** This page describes the CLI's v0.3 working draft. [OpenAPM v0.1, Section 4](../../specs/openapm-v01/#4-manifest-format-apmyml) defines the normative contract; its unratified 0.1.41 amendment selects [`manifest-v0.1.41.schema.json`](/apm/specs/schemas/manifest-v0.1.41.schema.json). See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
+> **Normative reference:** This page describes the CLI's v0.3 working draft. [OpenAPM v0.1, Section 4](../../specs/openapm-v01/#4-manifest-format-apmyml) defines the normative contract; proposed amendment 0.1.48 selects a [corrected dependency/MCP schema](/apm/specs/schemas/manifest-v0.1.48.schema.json). Review, publication and supporting CLI release remain separate steps. See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 <dl>
 <dt>Version</dt><dd>0.3 (Working Draft)</dd>
@@ -65,17 +65,35 @@ devDependencies:
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
+replace:       <list<ReplacementRule>>    # candidate; explicit selector required
+x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
 ```
 
-Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. Unknown top-level keys MUST be preserved by writers but MAY be ignored by resolvers.
+Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. Unknown top-level keys MUST be preserved by writers. The CLI keeps keys matching `x-[a-z][a-z0-9-]*` and warns, without failing, on any other unknown top-level key. See [Extension keys](#312-extension-keys).
 
 The standard `$schema` key selects the manifest contract; omission selects
-APM's current working draft. Amendment 0.1.41 selects
-`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json`
-for the alias-aware OpenAPM v0.1 shape. Unknown identities fail closed, not
+APM's current working draft. The corrected OpenAPM v0.1 candidate uses
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.48.schema.json`.
+Adopt that explicit URL only after the resource is published and with a CLI
+version that recognizes it; its presence in this reference does not announce
+either event. Unknown identities fail closed, not
 back to the working draft. Explicit OpenAPM v0.1 uses the normative
 string-or-object `registries` map, not the working draft's named map plus
 `default` selector.
+
+Both older URLs, `manifest-v0.1.schema.json` and
+`manifest-v0.1.41.schema.json`, keep their original IDs and bytes. Validators
+pinned to them still reject Git objects with `path`, registry objects with
+both `id` and `registry`, and self-defined MCP objects with `registry: false`.
+The corrected candidate accepts those existing forms in both `dependencies`
+and `devDependencies`, while checking source identity conflicts, required
+fields, field types and MCP transport/command/URL rules. It retains the
+alias-aware shape; it does not add dependency features or bypass runtime,
+local-path, target, experimental-feature or policy checks.
+
+Schema-less manifests remain working drafts, not implicit opt-ins to this
+published-contract subset. There is no published working-draft schema to
+assign automatically to all `apm.yml` files.
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
@@ -307,7 +325,7 @@ policy:
 
 | Sub-key | Type | Default | Allowed values | Semantic |
 |---|---|---|---|---|
-| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no enforceable policy is available (fetch failures or no-policy outcomes). `warn` keeps installs unblocked; `block` opts into fail-closed semantics for both `apm install` and `apm audit --ci`. |
+| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no enforceable policy is available (fetch failures or no-policy outcomes). `warn` keeps installs unblocked; `block` opts into fail-closed semantics for both `apm install` and `apm audit --ci`. With `apm audit --ci --policy org`, it applies only to fetch failures; `absent`, `no_git_remote`, and `empty` pass through. An explicit `apm audit --ci --policy <path\|url\|owner/repo>` always fails closed and ignores this field. |
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
@@ -343,6 +361,57 @@ Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
 **Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
 
 For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
+
+### 3.12. Extension keys
+
+Any top-level key matching `x-[a-z][a-z0-9-]*` is a vendor extension. The CLI keeps these keys, in declaration order, on the parsed package. It does not validate or interpret the values. Normative contract: [req-ext-001](../../specs/openapm-v01/#req-ext-001) and [req-ext-003](../../specs/openapm-v01/#req-ext-003).
+
+When a dependency's `apm.yml` declares keys matching `x-[a-z][a-z0-9-]*`, `apm lock` records them on that dependency's entry in `apm.lock.yaml` under `extensions`. The field is omitted when the dependency declares none, so existing lockfiles stay unchanged.
+
+Any other unknown top-level key is ignored. The CLI prints one warning that names each ignored key and does not fail because of that key. An install dry-run reports the source manifest's warning once, not again for its prospective dependency edit. Warning paths use forward slashes on Windows too. Rename the key to match `x-[a-z][a-z0-9-]*` to keep it, or remove it.
+
+```yaml
+name: my-package
+version: 1.0.0
+x-team: platform
+x-internal:
+  ticket: ABC-1
+```
+
+---
+
+### 3.13. `replace` (candidate)
+
+This is an **unratified implementation candidate**, not an extension to the
+released OpenAPM schemas. A feature-capable development build requires the exact
+`$schema` identity
+`https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json`
+whenever `replace` is present, including an empty list. This URI is a candidate
+contract selector. Its [proposed schema](/apm/specs/schemas/manifest-source-replacements-v1.schema.json)
+is staged with [proposal 0.1.54](../../specs/openapm-v01/#481-root-source-replacements-proposed-capability);
+neither ratification nor a first supported release is claimed.
+Existing manifests without `replace` keep their current contract.
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `replace` | List of rules | Consumer-root rules; not inherited from dependencies. |
+| `for` | `{git: <explicit-host Git locator>, path?: <package subdirectory>}` | Exact normalized host, endpoint, repository and subpath. No ref, alias, wildcard, single-file primitive, registry or marketplace selector. |
+| `with` (local) | `{path: <local path>}` | Complete source substitution, anchored to the consumer manifest. |
+| `with` (Git) | `{git: <explicit HTTPS/SSH URL or SCP-style locator>, path?: <subdirectory>, ref: <ref>}` | Complete source/ref substitution. `ref` is required; omitted `path` means repository root. HTTP, `owner/repo` shorthand and scheme-free `host/repo` shorthand are rejected. |
+
+Unknown rule fields and duplicate normalized selectors fail. Original alias,
+skill/target subset and dev-selection semantics are preserved. Rules bind
+original requirements before graph selection; selected sources are not chained
+through other rules. Their own dependency declarations are new requirements.
+Cycles and ambiguous materialization slots fail rather than selecting a winner.
+An unused rule warns without reading its source, but remains part of frozen
+comparison.
+
+The explicit selector is essential: older readers can silently ignore an
+additive `replace` key. Verified v0.25.0, v0.32.0 and v0.33.0 readers reject this
+selector and lock version `"3"`; v0.24.1 does not. Rejection is not feature support,
+and untested clients are not qualified. See the
+[usage and compatibility warning](../../consumer/manage-dependencies/#replace-a-source-candidate).
 
 ---
 
@@ -438,7 +507,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`, `grok-bot`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list; `agent-skills` is also accepted by the `grok-bot` target. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs
@@ -473,7 +542,14 @@ Local path dependency (development only):
 
 ```yaml
 - path: ./packages/my-shared-skills
+- path: ./ai/agents/xyz.agent.md
 ```
+
+Local `path:` and string entries accept directory packages or one file ending
+in `.agent.md`, `.instructions.md`, or `.prompt.md`. Single-file packages contain
+only that file; companion assets require a directory package. Relative paths
+resolve against the declaring local package. User-scope installs require
+absolute or expanded `~/...` paths, and single-file symlinks are rejected.
 
 When the declaring package came from a remote repo, `path:` remains scoped to
 that same repo only. The resolved path must stay inside the parent's cloned repo
@@ -489,6 +565,9 @@ Monorepo sibling reference (`git: parent`):
 ```
 
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. Only `git`, `path`, `ref`, and `alias` are accepted on this form. When `ref` is omitted the parent's resolved ref is inherited.
+
+For before/after manifests and a feature-branch review workflow, see
+[Make sibling dependencies follow the review branch](../../producer/repo-shapes/#make-sibling-dependencies-follow-the-review-branch).
 
 Marketplace dependency (resolved at install time):
 
@@ -680,8 +759,10 @@ configurations.
 - **JetBrains Copilot** has native `${env:VAR}` interpolation in `mcp.json`; APM normalizes `${VAR}` and legacy `<VAR>` to `${env:VAR}`.
 - **Copilot CLI and Kiro** have native `${VAR}` interpolation in their MCP config files; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
 - **Codex and Gemini** have no runtime interpolation for `env`, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` there at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
+- **Claude Code** expands `${VAR}` and `${VAR:-default}` in `command`, `args`, `env`, `url` and `headers` of the project-scoped `.mcp.json` when it starts a server. An unset variable without a default stays as literal text, and `claude mcp list` warns about it. At project scope APM keeps these references, normalizing `${env:VAR}` and legacy `<VAR>` to `${VAR}`, keeps static values as authored, and never writes referenced values into `.mcp.json` or `apm.lock.yaml`. Reinstall replaces values an earlier APM release expanded into `.mcp.json` when APM can confirm it wrote them; otherwise the entry is kept and install names the affected fields. User-scope installs (`-g`, `~/.claude.json`) keep resolving references at install time. See [MCP variable compatibility](../mcp-variable-compatibility/) for every harness.
 - **Cursor** resolves `${env:VAR}` references at runtime. APM translates `${VAR}` and legacy `<VAR>` into that native form in `env`, `args`, and `headers`, so referenced values are not written into the project-local Cursor config. This normalization does not cover `command` or `url`; their existing behavior is unchanged.
 - **Codex `headers` are the exception.** Codex does read a remote server's headers from the environment, through dedicated fields rather than from inside `http_headers`, which it documents as static values. APM writes `Authorization: "Bearer ${VAR}"` as `bearer_token_env_var` and a value that is exactly `${VAR}` as `env_http_headers`; Codex resolves both at server start, so no token is written to `config.toml`. A value Codex cannot express that way -- literal text around the reference, or a shell-style default such as `${VAR:-}` -- is skipped with a warning instead of being written as static text.
+- **OpenCode** translates `${VAR}`, `${env:VAR}`, and legacy `<VAR>` to native `{env:VAR}` in remote `headers`, local `environment` (manifest `env`), and command arguments. Already-native references, authored static values, command executables, and URLs stay unchanged. Registry `env` overlays preserve authored values only for declared, emitted keys. Export referenced variables when launching OpenCode: APM writes references, not their resolved values. Keep secrets out of authored static values. See [OpenCode config substitution](https://opencode.ai/docs/config/#env-vars).
 - **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
 - **Registry-backed servers** - APM auto-generates input prompts from registry metadata only for required variables. Optional variables do not generate prompts or runtime config entries when no value is available. If a user has already edited an optional value in runtime config, reinstall preserves that value rather than overwriting it.
 - **Self-defined servers** - APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.

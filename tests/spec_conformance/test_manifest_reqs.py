@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
-req-tg-001..008, req-cf-001..002.
+req-tg-001..009, req-tg-014..015, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -18,21 +18,27 @@ from unittest.mock import MagicMock
 
 import jsonschema
 import pytest
+import tomllib
 
 from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.plugin_parser import normalize_plugin_directory
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_ERROR,
     CATEGORY_WARNING,
     DiagnosticCollector,
 )
+from apm_cli.utils.yaml_io import yaml_to_str
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_json_fixture,
@@ -133,18 +139,6 @@ def test_consumer_supports_apm_source_short_form_string():
     assert string_form.get("minLength", 0) >= 1
 
 
-@pytest.mark.req("req-mf-011")
-def test_consumer_supports_apm_source_table_form():
-    schema = load_schema("manifest-v0.1.41.schema.json")
-    entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
-    options = entry_obj["oneOf"]
-    required_sets = sorted(tuple(sorted(o["required"])) for o in options)
-    assert required_sets == [("git",), ("id",), ("path",), ("registry",)], (
-        "table-form depEntry MUST require exactly one of git/id/path/registry"
-    )
-
-
-@pytest.mark.req("req-mf-012")
 def test_consumer_rejects_unknown_source_kind():
     doc = load_yaml_fixture("manifest", "invalid-source-kind.yml")
     with pytest.raises(jsonschema.ValidationError):
@@ -156,6 +150,26 @@ def test_consumer_supports_local_path_source():
     schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "path" in entry_obj["properties"]
+
+
+@pytest.mark.req("req-mf-013")
+@pytest.mark.parametrize("reference", ["${EXAMPLE_KEY}", "${env:EXAMPLE_KEY}"])
+def test_consumer_renders_opencode_native_environment_references(tmp_path: Path, reference: str):
+    """The dispatch matrix uses the active target's native environment syntax."""
+    adapter = OpenCodeClientAdapter(project_root=tmp_path)
+    rendered = adapter.render_server_config(
+        {
+            "name": "native-reference",
+            "_raw_stdio": {
+                "command": "echo",
+                "args": [reference],
+                "env": {"TOKEN": reference, "STATIC": "literal"},
+            },
+        }
+    )
+    assert rendered["command"] == ["echo", "{env:EXAMPLE_KEY}"]
+    assert rendered["environment"] == {"TOKEN": "{env:EXAMPLE_KEY}", "STATIC": "literal"}
+    assert_spec_contains("`{env:VAR}` for OpenCode")
 
 
 @pytest.mark.req("req-mf-014")
@@ -268,30 +282,30 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
     (available_dir / "SKILL.md").write_text("# Available", encoding="utf-8")
     diagnostics = DiagnosticCollector()
 
-    SkillIntegrator._warn_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         SkillIntegrator._skill_names_in_directory(skills_dir),
         ("missing",),
         "owner/bundle",
         diagnostics=diagnostics,
     )
 
-    warnings = diagnostics.by_category()[CATEGORY_WARNING]
-    assert len(warnings) == 1
-    assert warnings[0].package == "owner/bundle"
-    assert "Requested: missing" in warnings[0].message
-    assert "Available: available" in warnings[0].message
+    errors = diagnostics.by_category()["error"]
+    assert len(errors) == 1
+    assert errors[0].package == "owner/bundle"
+    assert "Requested: missing" in errors[0].message
+    assert "Available: available" in errors[0].message
 
     empty_diagnostics = DiagnosticCollector()
-    SkillIntegrator._warn_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         frozenset(),
         ("missing",),
         "owner/empty-bundle",
         diagnostics=empty_diagnostics,
     )
-    empty_warnings = empty_diagnostics.by_category()[CATEGORY_WARNING]
-    assert len(empty_warnings) == 1
-    assert empty_warnings[0].package == "owner/empty-bundle"
-    assert "Available: (none)" in empty_warnings[0].message
+    empty_errors = empty_diagnostics.by_category()["error"]
+    assert len(empty_errors) == 1
+    assert empty_errors[0].package == "owner/empty-bundle"
+    assert "Available: (none)" in empty_errors[0].message
 
     assert_spec_contains(
         "a non-empty `skills:` subset",
@@ -301,6 +315,11 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
         "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
         "requested skill names, and the available skill names",
+        "MUST fail the install operation",
+        "nonzero status",
+        "MUST preserve previously deployed skill files",
+        "their ownership records",
+        "MUST NOT interpret an",
     )
 
 
@@ -342,15 +361,15 @@ def test_consumer_names_skills_a_plugin_collection_exposes(tmp_path: Path) -> No
     assert available == frozenset({"csharp-scripts", "dotnet-pinvoke"})
 
     diagnostics = DiagnosticCollector()
-    SkillIntegrator._warn_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         available,
         ("missing",),
         "acme/dotnet-advanced",
         diagnostics=diagnostics,
     )
-    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
-    assert "Available: csharp-scripts, dotnet-pinvoke" in warning.message
-    assert "Available: (none)" not in warning.message
+    error = diagnostics.by_category()["error"][0]
+    assert "Available: csharp-scripts, dotnet-pinvoke" in error.message
+    assert "Available: (none)" not in error.message
 
     assert_spec_contains("with a named-skills container")
 
@@ -389,15 +408,15 @@ def test_plugin_skills_declaration_is_authoritative(tmp_path: Path) -> None:
     assert available == frozenset({"declared"})
 
     diagnostics = DiagnosticCollector()
-    SkillIntegrator._warn_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         available,
         ("undeclared",),
         "acme/selective",
         diagnostics=diagnostics,
     )
-    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
-    assert "Available: declared" in warning.message
-    assert "undeclared" not in warning.message.split("Available:")[1]
+    error = diagnostics.by_category()[CATEGORY_ERROR][0]
+    assert "Available: declared" in error.message
+    assert "undeclared" not in error.message.split("Available:")[1]
 
     assert_spec_contains(
         "Only an omitted",
@@ -697,6 +716,39 @@ def test_consumer_deploys_skills_to_agents_skills():
     )
 
 
+@pytest.mark.req("req-tg-002")
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_kiro_prompt_uses_registered_root_and_filename(tmp_path: Path, scope: InstallScope) -> None:
+    """The Kiro registry partition applies to both project and user delivery."""
+    package_root = tmp_path / "package"
+    source = package_root / ".apm/prompts/review.prompt.md"
+    source.parent.mkdir(parents=True)
+    source_bytes = b"---\nname: not-the-command\ndescription: Review\n---\nReview ${1}\n"
+    source.write_bytes(source_bytes)
+    package = PackageInfo(
+        package=APMPackage(name="prompt-kit", version="1.0.0", package_path=package_root),
+        install_path=package_root,
+    )
+    selected = tmp_path / scope.value
+    (selected / ".kiro").mkdir(parents=True)
+    unselected = tmp_path / "other/.kiro/prompts/personal.md"
+    unselected.parent.mkdir(parents=True)
+    unselected.write_bytes(b"Personal prompt\n")
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"].for_scope(scope), package, selected
+    )
+
+    deployed = selected / ".kiro/prompts/review.md"
+    assert result.files_integrated == 1
+    assert result.target_paths == [deployed]
+    assert deployed.read_bytes() == b"Review ${1}\n"
+    assert sorted(path.name for path in deployed.parent.iterdir()) == ["review.md"]
+    assert list(unselected.parent.iterdir()) == [unselected]
+    assert unselected.read_bytes() == b"Personal prompt\n"
+    assert source.read_bytes() == source_bytes
+
+
 @pytest.mark.req("req-tg-004")
 def test_consumer_routes_vendor_target_identifiers_to_handlers():
     assert_spec_contains(
@@ -708,22 +760,97 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
 
 @pytest.mark.req("req-tg-005")
 def test_consumer_deploys_antigravity_rules_with_expected_dedup():
-    # Needles updated for the v0.1.11 spec-guardian fold on req-tg-005:
-    # the anchor was reworded to (a) lowercase the `antigravity`
-    # identifier, (b) pin a canonical `globs` scalar-vs-sequence
-    # representation for hash reproducibility, and (c) redefine the
-    # deduplication scope to filenames derived from the resolved
-    # instruction primitives (fail-closed non-suppression). See
-    # Appendix D revision 0.1.11.
+    # Needles updated for the 0.1.56 amendment (issue #3472): `globs` is one
+    # comma-separated double-quoted string and unscoped rules carry
+    # `trigger: always_on`. The deduplication-scope needles are unchanged.
     assert_spec_contains(
         "For the `antigravity` target, instruction rules MUST be written under",
         "`.agents/rules/<name>.md`",
         "`trigger: glob` plus a `globs` field",
-        "emitted as a YAML scalar when `applyTo` resolves to exactly one glob",
-        "as a YAML block sequence when it resolves to two or more",
+        "emitted as a single YAML double-quoted string scalar",
+        "`globs` MUST NOT be emitted as a YAML",
+        "carry a frontmatter block declaring `trigger: always_on`",
         "names derive from the currently-resolved",
         "MUST NOT be treated as a deployed rule and MUST NOT",
     )
+
+
+@pytest.mark.req("req-tg-005")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "---\napplyTo: '*.py'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "*.py"},
+        ),
+        (
+            "---\napplyTo:\n  - '**/app/services/**'\n  - '**/app/jobs/**'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "**/app/services/**, **/app/jobs/**"},
+        ),
+        (
+            "---\napplyTo: '**/app/services/**, **/app/jobs/**'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "**/app/services/**, **/app/jobs/**"},
+        ),
+        (
+            "---\ndescription: General development principles\n---\n\nBody\n",
+            {"trigger": "always_on"},
+        ),
+        # Zero-pattern boundary: separators-only and empty sequence.
+        ("---\napplyTo: ','\n---\n\nBody\n", {"trigger": "always_on"}),
+        ("---\napplyTo: []\n---\n\nBody\n", {"trigger": "always_on"}),
+        # Brace alternation commas are not separators and stay bare.
+        (
+            "---\napplyTo: 'src/**/*.{ts,tsx}'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "src/**/*.{ts,tsx}"},
+        ),
+        # An author-escaped top-level comma keeps its `\,` escape.
+        (
+            '---\napplyTo: "a\\\\,b, c"\n---\n\nBody\n',
+            {"trigger": "glob", "globs": "a\\,b, c"},
+        ),
+        # An author-escaped literal backslash is re-encoded as two backslashes.
+        (
+            "---\napplyTo: 'a\\\\b'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "a\\\\b"},
+        ),
+        # Duplicates are retained in declaration order.
+        ("---\napplyTo: 'a, a'\n---\n\nBody\n", {"trigger": "glob", "globs": "a, a"}),
+    ],
+)
+def test_consumer_emits_antigravity_rule_frontmatter_per_native_schema(source, expected):
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+    from apm_cli.utils.yaml_io import loads_frontmatter
+
+    rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
+
+    assert loads_frontmatter(rendered).metadata == expected
+    assert rendered.endswith("\n\nBody\n")
+
+
+@pytest.mark.req("req-tg-005")
+@pytest.mark.parametrize(
+    ("source", "expected_bytes"),
+    [
+        (
+            "---\napplyTo:\n  - '*.py'\n  - 'src/**'\n---\n\n\nBody\n",
+            '---\ntrigger: glob\nglobs: "*.py, src/**"\n---\n\nBody\n',
+        ),
+        (
+            "---\ndescription: General\n---\n\nBody\n",
+            "---\ntrigger: always_on\n---\n\nBody\n",
+        ),
+        (
+            "---\napplyTo: ['caf\u00e9/**']\n---\n\nBody\n",
+            '---\ntrigger: glob\nglobs: "caf\\u00e9/**"\n---\n\nBody\n',
+        ),
+    ],
+)
+def test_consumer_emits_antigravity_rule_exact_bytes(source, expected_bytes):
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+
+    rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
+
+    assert rendered == expected_bytes
 
 
 @pytest.mark.req("req-tg-006")
@@ -974,6 +1101,24 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
     )
 
 
+@pytest.mark.req("req-tg-014")
+def test_declared_user_mcp_targets_install_without_project_signals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bind declared user capabilities to real global CLI configuration writes."""
+    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from tests.integration.test_global_cursor_opencode_mcp import (
+        test_global_package_install_and_uninstall_preserve_foreign_servers as _run_user_scope_contract,
+    )
+
+    assert partition_user_scope_runtimes(["cursor", "opencode", "vscode"]) == (
+        ["cursor", "opencode"],
+        ["vscode"],
+    )
+    _run_user_scope_contract(tmp_path, monkeypatch)
+
+
 @pytest.mark.req("req-tg-009")
 def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None:
     """Fail-closed evaluation precedes any content-identity adoption fast-path.
@@ -1052,6 +1197,226 @@ def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None
         "MUST NOT\nwrite the agent's target artifact (zero bytes, no partial file)",
         "MUST\nemit an actionable diagnostic identifying the unsupported tool value(s)",
         "MUST be performed prior to any\ncontent-identity adoption fast-path",
+    )
+
+
+@pytest.mark.req("req-tg-015")
+def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
+    tmp_path: Path,
+) -> None:
+    """req-tg-015: Codex model/effort preservation plus a bounded diagnostic.
+
+    Exercises the actual generated Codex agent output (parsed TOML, not
+    string matching) for: both fields present, only one present, neither
+    present, a non-string value, and an unsupported non-capability field
+    that must be named in a diagnostic bounded on BOTH the number of named
+    keys and each key's displayed length -- never the value. Also confirms
+    req-tg-006's own tools-capability diagnostic and non-Codex target
+    deployment are unaffected by this clause.
+    """
+    # Both fields present -> both reach the generated TOML verbatim.
+    both_source = tmp_path / "both.agent.md"
+    both_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', 'model_reasoning_effort': 'high'})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    both_target = tmp_path / "both.toml"
+    both_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        both_source, both_target, diagnostics=both_diagnostics, package_name="spec-fixture"
+    )
+    both_doc = tomllib.loads(both_target.read_text(encoding="utf-8"))
+    assert both_doc["model"] == "gpt-5.6-sol"
+    assert both_doc["model_reasoning_effort"] == "high"
+    assert both_diagnostics.by_category() == {}
+
+    # Only one present -> the other key is absent (not null/empty) from the
+    # parsed TOML.
+    one_source = tmp_path / "one.agent.md"
+    one_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol'})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    one_target = tmp_path / "one.toml"
+    AgentIntegrator._write_codex_agent(
+        one_source, one_target, diagnostics=DiagnosticCollector(), package_name="spec-fixture"
+    )
+    one_doc = tomllib.loads(one_target.read_text(encoding="utf-8"))
+    assert one_doc["model"] == "gpt-5.6-sol"
+    assert "model_reasoning_effort" not in one_doc
+
+    # Neither present -> neither key appears.
+    neither_source = tmp_path / "neither.agent.md"
+    neither_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer'})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    neither_target = tmp_path / "neither.toml"
+    AgentIntegrator._write_codex_agent(
+        neither_source,
+        neither_target,
+        diagnostics=DiagnosticCollector(),
+        package_name="spec-fixture",
+    )
+    neither_doc = tomllib.loads(neither_target.read_text(encoding="utf-8"))
+    assert "model" not in neither_doc
+    assert "model_reasoning_effort" not in neither_doc
+
+    # A non-string value -> dropped, with a bounded diagnostic naming the
+    # field (not its value).
+    bad_source = tmp_path / "bad.agent.md"
+    bad_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model_reasoning_effort': 7})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    bad_target = tmp_path / "bad.toml"
+    bad_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        bad_source, bad_target, diagnostics=bad_diagnostics, package_name="spec-fixture"
+    )
+    bad_doc = tomllib.loads(bad_target.read_text(encoding="utf-8"))
+    assert "model_reasoning_effort" not in bad_doc
+    bad_warnings = bad_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert len(bad_warnings) == 1
+    assert "model_reasoning_effort" in bad_warnings[0].message
+    assert "must be a string" in bad_warnings[0].message
+    assert "7" not in bad_warnings[0].message
+
+    # Unsupported non-capability metadata, both over the count bound (8
+    # keys, one more than _MAX_DROPPED_FIELDS_SHOWN = 5) and with one
+    # individually oversized key name (20000 chars) -- the diagnostic must
+    # be bounded on BOTH axes and must never include a value.
+    oversized_key = "k" * 20_000
+    unsupported = {
+        oversized_key: "do-not-leak-this-value",
+        "bad\x1b[31mkey": "do-not-leak-this-value-either",
+        "field_c": "value_c",
+        "field_d": "value_d",
+        "field_e": "value_e",
+        "field_f": "value_f",
+        "field_g": "value_g",
+        "field_h": "value_h",
+    }
+    meta_source = tmp_path / "meta.agent.md"
+    meta_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', **unsupported})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    meta_target = tmp_path / "meta.toml"
+    meta_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        meta_source, meta_target, diagnostics=meta_diagnostics, package_name="spec-fixture"
+    )
+    meta_doc = tomllib.loads(meta_target.read_text(encoding="utf-8"))
+    assert meta_doc["model"] == "gpt-5.6-sol"
+    assert all(field not in meta_doc for field in unsupported)
+    meta_warnings = meta_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    metadata_warning = next(w for w in meta_warnings if "not translated by APM" in w.message)
+    # Count bound: 8 unsupported keys supplied, only 5 named explicitly.
+    assert "(and 3 more)" in metadata_warning.message
+    # Per-key length bound: the raw 20000-char key never appears whole.
+    assert oversized_key not in metadata_warning.message
+    assert "...(truncated)" in metadata_warning.message
+    # No value ever leaks into the diagnostic.
+    for value in unsupported.values():
+        assert value not in metadata_warning.message
+    # ASCII-safe even with a control-character key.
+    assert all(32 <= ord(c) <= 126 or c in "\n\r\t" for c in metadata_warning.message)
+    # Overall message length stays bounded despite the 20000-char input key.
+    assert len(metadata_warning.message) < 600
+
+    # req-tg-006's own capability-restriction diagnostic is unaffected: a
+    # dropped `tools` field still fires its own, separate warning.
+    tools_source = tmp_path / "tools.agent.md"
+    tools_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', 'tools': ['read']})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    tools_target = tmp_path / "tools.toml"
+    tools_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        tools_source, tools_target, diagnostics=tools_diagnostics, package_name="spec-fixture"
+    )
+    tools_doc = tomllib.loads(tools_target.read_text(encoding="utf-8"))
+    assert tools_doc["model"] == "gpt-5.6-sol"
+    tools_warnings = tools_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert any("field 'tools' was dropped" in w.message for w in tools_warnings)
+
+    # A different (non-Codex) target is unaffected by this clause: deploy
+    # through the real integration dispatch (not a write+reread of the
+    # source alone) and confirm the target file carries the frontmatter
+    # verbatim, including `model`/`model_reasoning_effort`/the unsupported
+    # `model_verbosity` key, because non-Codex/non-Kiro targets copy the
+    # agent through `copy_agent` with no field-level filtering.
+    from datetime import datetime
+
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import (
+        APMPackage,
+        GitReferenceType,
+        PackageInfo,
+        ResolvedReference,
+    )
+
+    nc_project_root = tmp_path / "nc_project"
+    (nc_project_root / ".claude").mkdir(parents=True)
+    nc_package_dir = tmp_path / "nc_pkg"
+    nc_apm_agents = nc_package_dir / ".apm" / "agents"
+    nc_apm_agents.mkdir(parents=True)
+    verbatim_content = (
+        "---\nname: reviewer\nmodel: native-model\nmodel_reasoning_effort: high\n"
+        "model_verbosity: low\n---\nReview changes.\n"
+    )
+    verbatim_source = nc_apm_agents / "verbatim.agent.md"
+    verbatim_source.write_text(verbatim_content, encoding="utf-8")
+
+    nc_package = APMPackage(
+        name="nc-pkg",
+        version="1.0.0",
+        package_path=nc_package_dir,
+        source="github.com/test/nc-pkg",
+    )
+    nc_resolved_ref = ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit="abc123",
+        ref_name="main",
+    )
+    nc_pi = PackageInfo(
+        package=nc_package,
+        install_path=nc_package_dir,
+        resolved_reference=nc_resolved_ref,
+        installed_at=datetime.now().isoformat(),
+    )
+
+    nc_diagnostics = DiagnosticCollector()
+    nc_result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["claude"],
+        nc_pi,
+        nc_project_root,
+        diagnostics=nc_diagnostics,
+    )
+    assert nc_result.files_integrated == 1
+    nc_target_path = nc_project_root / ".claude" / "agents" / "verbatim.md"
+    assert nc_target_path.read_text(encoding="utf-8") == verbatim_content
+    # No req-tg-015 diagnostic fires for this target: the dropped-field
+    # bounding/preservation clause is Codex-specific and copy_agent never
+    # inspects frontmatter keys.
+    assert nc_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
+
+    # The editorial fold removes the undefined "accepted" qualifier and
+    # explicitly binds the already-tested non-string value exclusion.
+    assert_spec_contains(
+        "A conforming **consumer** implementation providing the\nCodex-native agent conversion capability MUST preserve a\nsource-declared",
+        "MUST leave either field absent from the generated file when it is\nabsent from the source",
+        "This clause does not require or imply\npreservation of any other",
+        "define behavior for any other conversion target. A source-declared\n`model` or `model_reasoning_effort` value that is not a YAML string\nscalar is not subject to preservation under this clause, and the\nconsumer MUST still emit a diagnostic for it.",
+        "That diagnostic MUST\nidentify the field name but MUST NOT include the rejected value.",
+        "it MUST emit a diagnostic naming the source agent,\nand MUST bound both",
+        "limit (the named-field-name\nlimit MUST be at least one when at least one field was dropped)",
+        "each\nnamed field name MUST be sanitized to printable ASCII (U+0020 through\nU+007E), replacing or escaping any byte outside that range before\ndisplay",
+        "the diagnostic MUST NOT include the dropped field's value",
+        "existing capability-restriction diagnostic\nis unaffected and continues to apply on its own terms",
     )
 
 

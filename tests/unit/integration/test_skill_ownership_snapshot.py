@@ -282,8 +282,9 @@ def test_replace_delete_create_and_reinstall_start_fresh_epochs(
         assert [entry.package for entry in collisions] == (["incoming/shared"] if owner else [])
         if owner:
             assert collisions[0].detail == (
-                f"Skill 'shared' from 'incoming/shared' replaced "
-                f"'{owner}' -- remove one package to avoid this"
+                f"Skill 'shared' from 'incoming/shared' replaced overlapping files from "
+                f"'{owner}'; separately owned assets were preserved "
+                "-- remove one package to avoid this"
             )
         assert integrator._ownership_snapshots is None
 
@@ -408,8 +409,9 @@ def test_exception_drops_maps_before_retry(tmp_path: Path, ownership_work: Owner
         _deploy(integrator, package, tmp_path, diagnostics)
     assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
     assert diagnostics.by_category()[CATEGORY_OVERWRITE][0].detail == (
-        "Skill 'shared' from 'incoming/shared' replaced "
-        "'second/shared' -- remove one package to avoid this"
+        "Skill 'shared' from 'incoming/shared' replaced overlapping files from "
+        "'second/shared'; separately owned assets were preserved "
+        "-- remove one package to avoid this"
     )
     assert ownership_work.builds[tmp_path.resolve()] == 2
 
@@ -434,8 +436,9 @@ def test_session_overlay_stays_live_with_durable_owner_precedence(
         assert native == ({".agents/skills/shared": durable_owner} if durable_owner else {})
     previous = durable_owner or "first/shared"
     assert diagnostics.by_category()[CATEGORY_OVERWRITE][0].detail == (
-        f"Skill 'shared' from 'second/shared' replaced "
-        f"'{previous}' -- remove one package to avoid this"
+        f"Skill 'shared' from 'second/shared' replaced overlapping files from "
+        f"'{previous}'; separately owned assets were preserved "
+        "-- remove one package to avoid this"
     )
     assert (tmp_path / ".agents" / "skills" / "shared" / "SKILL.md").read_bytes() == (
         source / "SKILL.md"
@@ -487,10 +490,10 @@ def test_snapshot_preserves_destination_ownership_and_explicit_managed_set(
     assert ownership_work.builds == {tmp_path.resolve(): 1}
 
 
-def test_standalone_drift_replay_uses_fresh_uncached_integrators(
+def test_standalone_drift_replay_uses_fresh_bounded_integrators(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ownership_work: OwnershipWork
 ) -> None:
-    """Consecutive real scratch replays see replaced lock owners, not install epochs."""
+    """Each scratch replay gets a fresh owner epoch that is cleared on return."""
     from apm_cli.install import drift
 
     project = tmp_path / "project"
@@ -516,7 +519,8 @@ def test_standalone_drift_replay_uses_fresh_uncached_integrators(
         return integrators
 
     def observe_maps(self: SkillIntegrator, root: Path) -> object:
-        assert self._ownership_snapshots is None
+        assert self._ownership_snapshots is not None
+        assert self._replay_owners is not None
         accesses.append((self, root.resolve()))
         return maps(self, root)
 
@@ -558,6 +562,9 @@ def test_standalone_drift_replay_uses_fresh_uncached_integrators(
         assert observed_integrators[-1]._native_skill_session_owners == {
             replayed.parent.resolve(): dep.get_unique_key()
         }
+        assert observed_integrators[-1]._ownership_snapshots is None
+        assert observed_integrators[-1]._hash_snapshots is None
+        assert observed_integrators[-1]._replay_owners is None
         assert ownership_work.builds[scratch.resolve()] == 1
         assert ownership_work.reads[get_lockfile_path(scratch).resolve()] == 1
 

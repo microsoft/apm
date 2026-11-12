@@ -55,12 +55,13 @@ inherited `PATH`.
 
 APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.
 
-- `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` replace the OS store with an explicitly selected PEM bundle for APM's HTTP layer.
-- `APM_DISABLE_TRUSTSTORE=1` restores the previous bundled-`certifi` behavior.
-- If `truststore` is unavailable or injection fails, APM falls back to `certifi`; it does not disable verification.
-- The Python-based `llm` runtime receives a shipped, self-contained `.pth` bootstrap in its managed virtual environment. The bootstrap imports only `truststore`; it does not execute dependency-provided package content.
+- `REQUESTS_CA_BUNDLE` takes precedence over `CURL_CA_BUNDLE`; either explicitly replaces normal Requests trust and suppresses OS/additive injection.
+- `APM_DISABLE_TRUSTSTORE=1` disables OS/additive trust without unsetting a separately configured replacement bundle.
+- `APM_EXTRA_CA_BUNDLE` adds certificate-only PEM certificates to APM's package-management HTTPS. Truststore-backed contexts retain native OS roots; the Requests fallback retains bundled `certifi` roots plus the extra certificates. Certificate and hostname verification remain enabled.
+- A selected bundle that is missing, unreadable, empty, non-regular, over 8 MiB, non-ASCII, malformed, or contains a private key fails closed with a configuration error.
+- The existing Python `llm` runtime still receives a self-contained `.pth` OS-trust bootstrap at venv setup. `APM_EXTRA_CA_BUNDLE` does not extend that bootstrap or derive Python/Node child settings.
 
-Node-based (Copilot) and Rust-based (Codex) child runtimes retain their own trust configuration for now. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
+Git, Node-based Copilot, and Rust-based Codex retain their own trust configuration. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
 
 ## Dependency provenance
 
@@ -367,6 +368,7 @@ during contained package materialization:
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
 - **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
+- **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; replace the link with a regular file to continue.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
@@ -411,8 +413,9 @@ APM prevents this with a per-symlink containment check (see also
 When APM deploys a file, it checks whether a file already exists at the target path:
 
 - If the file is **tracked in the managed files set** (deployed by a previous APM install), it is overwritten.
-- If the file is **not tracked** (user-authored or created by another tool), APM skips it and prints a warning.
-- The `--force` flag overrides collision detection, allowing APM to overwrite untracked files.
+- If a selected **skill file is untracked and differs**, APM refuses the complete selected deployment plan before native writes or manifest/lock success state. Rename the local skill or use a valid existing skill/target selection. Matching names or shared directories alone are not conflicts.
+- Other untracked primitive files retain their existing warning-and-skip behavior.
+- The `--force` flag overrides collision detection, allowing APM to overwrite untracked files. It also bypasses the critical security-scan block; it is not the routine remedy for a skill conflict.
 
 ### Development dependency isolation
 
@@ -549,7 +552,7 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 | Purpose | Environment variables (checked in order) |
 |---|---|
 | GitHub packages | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `GH_TOKEN` |
-| Azure DevOps packages | `ADO_APM_PAT` |
+| Azure DevOps packages | `ADO_APM_PAT`, then Azure CLI bearer, then path-scoped `git credential fill` |
 
 - **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
 - **Never logged.** Token values are not included in console output, error messages, or debug logs.
@@ -564,7 +567,8 @@ When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps Services
 (`dev.azure.com` and `*.visualstudio.com`) with a Microsoft Entra ID bearer
 token issued on demand by the Azure CLI (`az account get-access-token`).
 Azure DevOps Server hosts configured with `ADO_HOST` or `APM_ADO_HOSTS`
-are PAT-only. The Services bearer posture:
+are PAT then path-scoped `git credential fill` (no Azure CLI bearer).
+The Services bearer posture:
 
 - **Short-lived.** Tokens expire in roughly 60 minutes, are acquired per resolution, and are never persisted by APM.
 - **No new secrets in manifests.** Nothing is written to `apm.yml` or `apm.lock.yaml`. The token never crosses the `apm.yml`/lockfile boundary.
@@ -648,4 +652,22 @@ APM is distributed as a PyPI package (`apm-cli`) and as pre-built binaries attac
 
 ### Where is the source code?
 
-APM is open source under the MIT license, hosted on GitHub under the `microsoft` organization. The full source code, build pipeline, and release process are publicly auditable.
+APM-owned software, bundled agent primitives, code examples and the
+software-facing OpenAPM specification are licensed under
+[Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE).
+General documentation is licensed under
+[CC-BY-4.0](https://github.com/microsoft/apm/blob/main/LICENSE-DOCS).
+[LICENSING.md](https://github.com/microsoft/apm/blob/main/LICENSING.md)
+defines the scope and exclusions; Markdown agent primitives are software,
+not general documentation.
+Third-party material retains its applicable license; attribution and the
+historical MIT notice are preserved in
+[NOTICE](https://github.com/microsoft/apm/blob/main/NOTICE). Previously published
+MIT releases are unchanged. Downstream redistributors should review the applicable
+terms and retain licenses and notices when updating. The generated NOTICE covers
+direct Python runtime dependencies, not the complete transitive, vendored, native,
+website or build-tool inventory. A successful NOTICE drift check does not establish
+complete dependency-license compliance.
+
+APM is hosted on GitHub under the `microsoft` organization. The full source code,
+build pipeline, and release process are publicly auditable.

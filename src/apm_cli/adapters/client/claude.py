@@ -22,14 +22,94 @@ See https://code.claude.com/docs/en/mcp
 import json
 import logging
 import os
+import re
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import ClassVar
 
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
-from ...utils.path_security import PathTraversalError
+from ...utils.path_security import PathTraversalError, validate_path_segments
+from .base import _ENV_VAR_RE, _translate_env_placeholder
 from .copilot import CopilotClientAdapter
 
 _log = logging.getLogger(__name__)
+
+# Claude Code's reference syntax: ${VAR} or ${VAR:-default}.
+_CLAUDE_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}")
+
+
+def _string_leaves(value: object) -> Iterator[str]:
+    """Yield every string inside a rendered server entry."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _string_leaves(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _string_leaves(item)
+
+
+def _paired_leaves(old: object, new: object, path: str = "") -> Iterator[tuple[str, str, str]]:
+    """Yield ``(path, old, new)`` for string leaves present in both entries."""
+    if isinstance(old, str) and isinstance(new, str):
+        yield path, old, new
+    elif isinstance(old, Mapping) and isinstance(new, Mapping):
+        for key in new.keys() & old.keys():
+            yield from _paired_leaves(old[key], new[key], f"{path}.{key}" if path else str(key))
+    elif isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
+        for index, (old_item, new_item) in enumerate(zip(old, new, strict=True)):
+            yield from _paired_leaves(old_item, new_item, f"{path}[{index}]")
+
+
+def _expanded_leaves(old: object, new: object) -> Iterator[tuple[str, str]]:
+    """Yield ``(path, new)`` where *new* holds a reference and *old* a value."""
+    for path, old_text, new_text in _paired_leaves(old, new):
+        if old_text != new_text and "${" not in old_text and _CLAUDE_REFERENCE_RE.search(new_text):
+            yield path, new_text
+
+
+def _expand_like_install_time(text: str, environ: Mapping[str, str]) -> str:
+    """Expand bare ``${VAR}`` references the way pre-#3252 installs did."""
+    # An empty value counts as unset on purpose: a compound string such as
+    # ``--token=${FOO}`` with FOO="" then fails to match and the entry is kept
+    # as a conflict, which is the safe outcome. _legacy_equivalent handles a
+    # whole-string reference that an older release wrote as "".
+    return _ENV_VAR_RE.sub(lambda m: environ.get(m.group(1)) or m.group(0), text)
+
+
+def _legacy_equivalent(native: object, expected: object, environ: Mapping[str, str]) -> bool:
+    """Whether *native* is *expected* with its references expanded from *environ*.
+
+    Pre-#3252 releases expanded each recognized reference at install time and
+    left unresolved ones in their authored spelling (``${env:VAR}``, ``<VAR>``)
+    or, for registry variables, as an empty string.
+    """
+    if isinstance(expected, Mapping):
+        return (
+            isinstance(native, Mapping)
+            and native.keys() == expected.keys()
+            and all(_legacy_equivalent(native[key], expected[key], environ) for key in expected)
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(native, list)
+            and len(native) == len(expected)
+            and all(
+                _legacy_equivalent(item, ref, environ)
+                for item, ref in zip(native, expected, strict=True)
+            )
+        )
+    if isinstance(expected, str) and isinstance(native, str):
+        if native == expected:
+            return True
+        expanded = _expand_like_install_time(expected, environ)
+        if _translate_env_placeholder(native) == expanded:
+            return True
+        unset_reference = _ENV_VAR_RE.fullmatch(expected)
+        return native == "" and bool(unset_reference) and not environ.get(unset_reference.group(1))
+    return native == expected
 
 
 class ClaudeClientAdapter(CopilotClientAdapter):
@@ -44,14 +124,45 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = True
+    _client_label: str = "Claude Code"
     target_name: str = "claude"
     mcp_servers_key: str = "mcpServers"
 
-    # Claude Desktop / Code's mcp config does NOT support runtime env-var
-    # substitution -- the value in ``env`` must be a literal string. This
-    # adapter MUST keep the legacy install-time resolution behaviour.
-    # See #1152 supply-chain analysis.
-    _supports_runtime_env_substitution: bool = False
+    _runtime_config_label: ClassVar[str] = "the project .mcp.json"
+    _runtime_launch_command: ClassVar[str] = "claude"
+
+    # Own post-install aggregation buckets: the parent's mutable ClassVars
+    # are shared by reference, so without these Claude's diagnostics would
+    # be reported (and worded) as Copilot CLI's.
+    _legacy_angle_offenders_by_server: ClassVar[dict] = {}
+    _security_upgraded_keys: ClassVar[set] = set()
+    _unset_env_keys_by_server: ClassVar[dict] = {}
+    _install_run_summary_emitted: ClassVar[bool] = False
+
+    # Extra guidance appended to the security-upgrade notice: replacing a
+    # committed value does not revoke it or remove it from Git history.
+    _runtime_upgrade_guidance: ClassVar[str] = (
+        "If .mcp.json was committed, rotate these credentials: replacing the "
+        "values does not remove them from Git history."
+    )
+
+    @property
+    def _supports_runtime_env_substitution(self) -> bool:
+        """Keep ``${VAR}`` references in the project-scoped ``.mcp.json``.
+
+        Claude Code expands ``${VAR}`` and ``${VAR:-default}`` in a project
+        ``.mcp.json`` in ``command``, ``args``, ``env``, ``url`` and
+        ``headers`` when it starts a server (checked with Claude Code
+        2.1.310), so secrets stay in each developer's environment instead of
+        being copied into a file teams commit. User scope (``~/.claude.json``,
+        outside the repo, written ``0o600``) keeps install-time resolution.
+        See #1152 and #3252.
+        """
+        return not self._is_user_scope()
+
+    def _format_runtime_env_placeholder(self, name: str) -> str:
+        """Return Claude Code's native reference syntax, ``${NAME}``."""
+        return "${" + name + "}"
 
     # Skill packages declare self-defined MCP launchers using the cross-tool
     # converged path ``.agents/skills/<name>/...`` (see
@@ -81,7 +192,169 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         config = super()._format_server_config(server_info, env_overrides, runtime_vars)
         if isinstance(config, dict) and "command" in config:
             config["command"] = self._rewrite_self_defined_skill_command(config["command"])
+        if isinstance(config, dict) and self._supports_runtime_env_substitution:
+            # The shared pipeline copies command and url verbatim. Claude Code
+            # only reads ${VAR}, so normalize ${env:VAR} and <VAR> there too.
+            for field in ("command", "url"):
+                if isinstance(config.get(field), str):
+                    config[field] = self._resolve_env_variable(field, config[field])
         return config
+
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
+        """Compare against the normalized shape actually written to Claude."""
+        return self._normalize_mcp_entry_for_claude_code(
+            super().render_server_config(
+                server_info, env_overrides=env_overrides, runtime_vars=runtime_vars
+            )
+        )
+
+    def matches_managed_server_config(self, native: object, expected: dict) -> bool:
+        """OAuth metadata is runtime-owned, not part of an APM connection declaration."""
+        if not isinstance(native, dict):
+            return False
+        return self.managed_server_config(native) == expected
+
+    def managed_server_config(self, native: dict) -> dict:
+        """Exclude only the runtime-owned OAuth account from write fingerprints."""
+        return {key: value for key, value in native.items() if key != "oauthAccount"}
+
+    def project_managed_server_config(
+        self, native: object, *, baseline: dict, requested: dict
+    ) -> object:
+        """Exclude a valid native-only cwd from managed reconciliation, never cleanup."""
+        if (
+            not isinstance(native, dict)
+            or native.get("type") != "stdio"
+            or baseline.get("type") != "stdio"
+            or "cwd" in baseline
+            or "cwd" in requested
+        ):
+            return native
+        cwd = native.get("cwd")
+        if not isinstance(cwd, str) or not cwd.strip() or "\x00" in cwd:
+            return native
+        try:
+            validate_path_segments(cwd, context="MCP cwd", allow_current_dir=True)
+        except PathTraversalError:
+            return native
+        return {key: value for key, value in native.items() if key != "cwd"}
+
+    def _resolve_environment_variables(self, env_vars, env_overrides=None):
+        """Keep static ``env`` values authored in apm.yml as written.
+
+        Copilot's translate mode also rewrites static values to ``${NAME}``.
+        Claude Code passes an unset variable without a default through as
+        the literal ``${NAME}`` text, so a server configured with a plain
+        setting such as ``LOG_LEVEL: debug`` would silently lose it.
+        """
+        if isinstance(env_vars, dict) and self._supports_runtime_env_substitution:
+            return self._resolve_explicit_environment_values(env_vars, env_overrides)
+        return super()._resolve_environment_variables(env_vars, env_overrides)
+
+    # ------------------------------------------------------------------ #
+    # Post-install diagnostics (names only, never values)
+    # ------------------------------------------------------------------ #
+
+    def _begin_env_tracking(self, server_url, server_name, server_info=None) -> object:
+        """Snapshot the current native entry (``dict | None``) for the upgrade notice.
+
+        Claude's snapshot shape differs from Copilot's, so this pairs with the
+        :meth:`_record_env_diagnostics` override below.
+        """
+        self._last_env_placeholder_keys = set()
+        self._last_legacy_angle_vars = set()
+        if not self._supports_runtime_env_substitution:
+            return None
+        key = self._determine_config_key(server_url, server_name, server_info)
+        previous = (self.get_current_config().get(self.mcp_servers_key) or {}).get(key)
+        return previous if isinstance(previous, dict) else None
+
+    def _record_env_diagnostics(self, config_key, server_config, previously_baked):
+        """Record replaced values and missing variables for the run summary."""
+        if self._supports_runtime_env_substitution:
+            if self._last_legacy_angle_vars:
+                self._legacy_angle_offenders_by_server[config_key] = set(
+                    self._last_legacy_angle_vars
+                )
+            if isinstance(previously_baked, dict):
+                for _path, text in _expanded_leaves(previously_baked, server_config):
+                    self._security_upgraded_keys.update(
+                        m.group(1) for m in _CLAUDE_REFERENCE_RE.finditer(text)
+                    )
+        self._emit_install_summary(config_key, server_config)
+
+    def _emit_install_summary(self, config_key, server_config):
+        """Track unset references without a default in every expanded field."""
+        if not self._supports_runtime_env_substitution:
+            return
+        names = {
+            m.group(1) for text in _string_leaves(server_config) for m in _ENV_VAR_RE.finditer(text)
+        }
+        unset = sorted(name for name in names if not os.environ.get(name))
+        if unset:
+            bucket = self.__class__._unset_env_keys_by_server.setdefault(config_key, [])
+            bucket.extend(name for name in unset if name not in bucket)
+
+    # ------------------------------------------------------------------ #
+    # Entries written before references were kept (#3252)
+    # ------------------------------------------------------------------ #
+
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
+    ) -> bool:
+        """Whether *native* is the expanded form APM wrote for *expected*.
+
+        Earlier releases expanded references at install time. Such an entry is
+        treated as APM-generated only when it is unchanged since APM recorded
+        its write fingerprint, or when expanding the references in *expected*
+        (the current rendering of the same declaration) from this environment
+        reproduces it exactly. Anything else may hold user edits.
+        """
+        if self._is_user_scope() or not isinstance(native, dict):
+            return False
+        if not any(_CLAUDE_REFERENCE_RE.search(text) for text in _string_leaves(expected)):
+            return False
+        if recorded_write:
+            return True
+        return _legacy_equivalent(self.managed_server_config(native), expected, os.environ)
+
+    def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
+        """Explain a preserved entry that holds values where apm.yml has references."""
+        if self._is_user_scope():
+            return None
+        servers = self.get_current_config().get(self.mcp_servers_key) or {}
+        # Self-defined servers keep their declared name as the key (#3493);
+        # registry servers use the historical short key.
+        native = servers.get(name, servers.get(self._determine_config_key(name, None)))
+        expanded = sorted(_expanded_leaves(native, expected))
+        if not expanded:
+            return None
+        fields = [path for path, _text in expanded]
+        where = (
+            f"Field {fields[0]} holds a value"
+            if len(fields) == 1
+            else f"Fields {', '.join(fields)} hold values"
+        )
+        # Names only: show which reference belongs where, never a value or default.
+        mapping = "; ".join(
+            f"{path}: "
+            + ", ".join(
+                dict.fromkeys("${" + m.group(1) + "}" for m in _CLAUDE_REFERENCE_RE.finditer(text))
+            )
+            for path, text in expanded
+        )
+        return (
+            f"{where} where apm.yml declares environment references, and APM cannot "
+            "confirm it wrote them. Put the references declared in apm.yml back "
+            f"yourself ({mapping}), then retry. If .mcp.json was committed, rotate "
+            "those credentials: editing the file does not erase them in Git history."
+        )
 
     @classmethod
     def _is_remote_mcp_entry(cls, entry: dict) -> bool:
@@ -148,7 +421,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         }
 
     @classmethod
-    def _merge_mcp_server_dicts(cls, existing_servers: dict, config_updates: dict) -> None:
+    def _merge_mcp_server_dicts(
+        cls, existing_servers: dict, config_updates: dict, managed_fields: set[str] | None = None
+    ) -> None:
         """Merge *config_updates* into *existing_servers* in place.
 
         Per-server entries are shallow-merged: ``{**old, **new}`` so keys present
@@ -164,15 +439,23 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 continue
             prev = existing_servers.get(name)
             if isinstance(prev, dict):
+                if managed_fields:
+                    prev = {
+                        key: value
+                        for key, value in prev.items()
+                        if key not in managed_fields or key in new_cfg
+                    }
                 merged = {**cls._retained_previous_entry(prev, new_cfg), **new_cfg}
                 existing_servers[name] = merged
             else:
                 existing_servers[name] = dict(new_cfg)
 
-    def _merge_and_normalize_updates(self, data: dict, config_updates: dict) -> None:
+    def _merge_and_normalize_updates(
+        self, data: dict, config_updates: dict, managed_fields: set[str] | None = None
+    ) -> None:
         if "mcpServers" not in data:
             data["mcpServers"] = {}
-        self._merge_mcp_server_dicts(data["mcpServers"], config_updates)
+        self._merge_mcp_server_dicts(data["mcpServers"], config_updates, managed_fields)
         for name in config_updates:
             ent = data["mcpServers"].get(name)
             if isinstance(ent, dict):
@@ -184,7 +467,12 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _project_mcp_path(self) -> Path:
         return self.project_root / ".mcp.json"
 
-    def _user_claude_json_path(self) -> Path:
+    @classmethod
+    def resolve_user_claude_unresolved_path(cls) -> Path:
+        """Return the un-normalized path for user-scope Claude Code config.
+
+        Used for symlink pre-checks before canonical resolution.
+        """
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
         if config_dir:
             config_path = Path(config_dir).expanduser()
@@ -193,8 +481,21 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
                     "config; set an absolute path or unset it to use ~/.claude.json."
                 )
-            return config_path.resolve(strict=False) / ".claude.json"
+            return config_path / ".claude.json"
         return Path.home() / ".claude.json"
+
+    @classmethod
+    def resolve_user_claude_json_path(cls, unresolved_path: Path | None = None) -> Path:
+        """Resolve the selected destination, optionally reusing a checked path."""
+        path = (
+            unresolved_path
+            if unresolved_path is not None
+            else cls.resolve_user_claude_unresolved_path()
+        )
+        return path.parent.resolve(strict=False) / path.name
+
+    def _user_claude_json_path(self) -> Path:
+        return self.resolve_user_claude_json_path()
 
     def _should_write_project(self) -> bool:
         return (self.project_root / ".claude").is_dir()
@@ -216,9 +517,11 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         except (json.JSONDecodeError, OSError):
             return {"mcpServers": {}}
 
-    def update_config(self, config_updates, enabled=True):
+    def update_config(
+        self, config_updates, enabled=True, *, managed_fields: set[str] | None = None
+    ):
         if self._is_user_scope():
-            return self._merge_user_mcp(config_updates)
+            return self._merge_user_mcp(config_updates, managed_fields=managed_fields)
         if not self._should_write_project():
             _rich_warning(
                 f"Skipped Claude Code project MCP -- .claude/ not found in {self.project_root}"
@@ -236,13 +539,13 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     data = {}
             else:
                 data = {}
-            self._merge_and_normalize_updates(data, config_updates)
+            self._merge_and_normalize_updates(data, config_updates, managed_fields)
             path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
             return True
         except OSError:
             return False
 
-    def _merge_user_mcp(self, config_updates) -> bool:
+    def _merge_user_mcp(self, config_updates, *, managed_fields: set[str] | None = None) -> bool:
         path = self._user_claude_json_path()
         try:
             if path.is_file():
@@ -255,7 +558,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                     data = {}
             else:
                 data = {}
-            self._merge_and_normalize_updates(data, config_updates)
+            self._merge_and_normalize_updates(data, config_updates, managed_fields)
             payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(path, payload, new_file_mode=0o600)
@@ -272,6 +575,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         env_overrides=None,
         server_info_cache=None,
         runtime_vars=None,
+        managed_fields: set[str] | None = None,
     ):
         if not server_url:
             _rich_error("server_url cannot be empty")
@@ -295,11 +599,19 @@ class ClaudeClientAdapter(CopilotClientAdapter):
 
             config_key = self._determine_config_key(server_url, server_name, server_info)
 
+            previously_baked = self._begin_env_tracking(server_url, server_name, server_info)
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            ok = self.update_config({config_key: server_config})
+            from apm_cli.install.mcp.ownership import mcp_native_hash
+
+            fingerprint = mcp_native_hash(
+                self.managed_server_config(self._normalize_mcp_entry_for_claude_code(server_config))
+            )
+            ok = self.update_config({config_key: server_config}, managed_fields=managed_fields)
             if not ok:
                 _rich_error(f"Failed to write MCP config for '{config_key}' to Claude Code")
                 return False
+            self.written_mcp_hashes[server_url] = fingerprint
+            self._record_env_diagnostics(config_key, server_config, previously_baked)
 
             _rich_success(f"Successfully configured MCP server '{config_key}' for Claude Code")
             return True

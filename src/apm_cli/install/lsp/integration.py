@@ -4,14 +4,17 @@ Mirrors the MCP integration pattern with runtime-neutral target selection.
 """
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.lsp import LSPDependency
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 _PROJECT_LSP_OWNER = "project:."
 _PACKAGE_LSP_OWNER_PREFIX = "package:"
@@ -242,6 +245,94 @@ def reconcile_lsp_after_uninstall(
     return before != after
 
 
+@dataclass(frozen=True)
+class PreparedLspIntegration:
+    """Trusted declarations and canonical targets prepared before native writes."""
+
+    dependencies: list["LSPDependency"]
+    target_runtimes: list[str] | None
+
+
+def prepare_lsp_integration(
+    *,
+    apm_package: "APMPackage",
+    apm_modules_path: Path,
+    lock_path: Path,
+    project_root: Path,
+    should_install: bool,
+    logger: "InstallLogger",
+    existing_lock: "LockFile | None",
+    user_scope: bool,
+    runtime: str | None = None,
+    exclude: str | None = None,
+    target_context: tuple[dict | None, str | list[str] | None, object] = (None, None, None),
+    target_decision: "EffectiveTargetDecision | None" = None,
+    diagnostics: "DiagnosticCollector | None" = None,
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
+    no_policy: bool = False,
+) -> PreparedLspIntegration:
+    """Collect trusted declarations once before native-service reconciliation."""
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.security.executables import filter_lsp_by_allow_executables
+
+    apm_config, explicit_target, scope = target_context
+    effective_allow_executables, effective_allow_resolved = executable_context
+    lsp_deps = apm_package.get_lsp_dependencies()
+    if not isinstance(lsp_deps, list):
+        logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
+        lsp_deps = []
+    if should_install and apm_modules_path.exists():
+        transitive_lsp = LSPIntegrator.collect_transitive(
+            apm_modules_path,
+            lock_path,
+            diagnostics=diagnostics,
+        )
+        if transitive_lsp:
+            logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
+            if not effective_allow_resolved:
+                from apm_cli.security.executables import effective_exec_map_for_project
+
+                policy = None
+                if not no_policy:
+                    from apm_cli.policy.discovery import discover_policy_with_chain
+
+                    policy = getattr(
+                        discover_policy_with_chain(project_root),
+                        "policy",
+                        None,
+                    )
+                effective_allow_executables = effective_exec_map_for_project(
+                    project_root,
+                    policy=policy,
+                    fallback_allow_executables=getattr(
+                        apm_package,
+                        "allow_executables",
+                        None,
+                    ),
+                    logger=logger,
+                )
+            transitive_lsp = filter_lsp_by_allow_executables(
+                transitive_lsp,
+                effective_allow_executables,
+                logger,
+            )
+            lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)
+    target_runtimes = None
+    if should_install and (lsp_deps or (existing_lock and existing_lock.lsp_servers)):
+        target_runtimes = LSPIntegrator.resolve_target_runtimes(
+            project_root=project_root,
+            user_scope=user_scope,
+            runtime=runtime,
+            exclude=exclude,
+            apm_config=apm_config,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            scope=scope,
+            logger=logger,
+        )
+    return PreparedLspIntegration(lsp_deps, target_runtimes)
+
+
 def run_lsp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
@@ -266,6 +357,7 @@ def run_lsp_integration(  # noqa: PLR0913
     force: bool = False,
     no_policy: bool = False,
     persist: bool = True,
+    prepared: PreparedLspIntegration | None = None,
 ) -> int:
     """Run LSP server integration after APM package installation.
 
@@ -300,10 +392,26 @@ def run_lsp_integration(  # noqa: PLR0913
     """
     from apm_cli.integration.lsp_integrator import LSPIntegrator
 
-    lsp_deps = apm_package.get_lsp_dependencies()
-    if not isinstance(lsp_deps, list):
-        logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
-        lsp_deps = []
+    if target_context is not None:
+        apm_config, explicit_target, scope = target_context
+    prepared = prepared or prepare_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        project_root=project_root,
+        should_install=should_install,
+        logger=logger,
+        existing_lock=existing_lock,
+        user_scope=user_scope,
+        runtime=runtime,
+        exclude=exclude,
+        target_context=(apm_config, explicit_target, scope),
+        target_decision=target_decision,
+        diagnostics=diagnostics,
+        executable_context=(effective_allow_executables, effective_allow_resolved),
+        no_policy=no_policy,
+    )
+    lsp_deps, target_runtimes = prepared.dependencies, prepared.target_runtimes
 
     # Capture old LSP servers from lockfile
     old_lsp_servers: builtins.set = builtins.set()
@@ -321,48 +429,6 @@ def run_lsp_integration(  # noqa: PLR0913
             getattr(existing_lock, "_lsp_target_servers_present", False) is True
         )
 
-    from apm_cli.security.executables import filter_lsp_by_allow_executables
-
-    # Filter transitive declarations before first-wins deduplication so an
-    # untrusted package cannot shadow an approved package's same-name server.
-    if should_install and apm_modules_path.exists():
-        transitive_lsp = LSPIntegrator.collect_transitive(
-            apm_modules_path,
-            lock_path,
-            diagnostics=diagnostics,
-        )
-        if transitive_lsp:
-            logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
-            if not effective_allow_resolved:
-                from apm_cli.security.executables import effective_exec_map_for_project
-
-                policy = None
-                if not no_policy:
-                    from apm_cli.policy.discovery import discover_policy_with_chain
-
-                    policy = getattr(
-                        discover_policy_with_chain(project_root),
-                        "policy",
-                        None,
-                    )
-                effective_allow_executables = effective_exec_map_for_project(
-                    project_root,
-                    policy=policy,
-                    fallback_allow_executables=getattr(
-                        apm_package,
-                        "allow_executables",
-                        None,
-                    ),
-                    logger=logger,
-                )
-                effective_allow_resolved = True
-            transitive_lsp = filter_lsp_by_allow_executables(
-                transitive_lsp,
-                effective_allow_executables,
-                logger,
-            )
-            lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)
-
     if should_install and not (
         lsp_deps or old_lsp_servers or old_lsp_provenance or old_lsp_targets
     ):
@@ -370,23 +436,6 @@ def run_lsp_integration(  # noqa: PLR0913
         return 0
 
     lsp_count = 0
-
-    if target_context is not None:
-        apm_config, explicit_target, scope = target_context
-
-    target_runtimes = None
-    if should_install and (lsp_deps or old_lsp_servers):
-        target_runtimes = LSPIntegrator.resolve_target_runtimes(
-            project_root=project_root,
-            user_scope=user_scope,
-            runtime=runtime,
-            exclude=exclude,
-            apm_config=apm_config,
-            explicit_target=explicit_target,
-            target_decision=target_decision,
-            scope=scope,
-            logger=logger,
-        )
 
     if should_install:
         bundle_names = {

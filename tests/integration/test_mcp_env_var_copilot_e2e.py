@@ -596,9 +596,9 @@ class TestMcpEnvVarHeadersCursor:
             cwd=project,
             env=env,
         )
-        assert result.returncode == 1, result.stdout + result.stderr
+        assert result.returncode == 0, result.stdout + result.stderr
         assert cursor_config.read_bytes() == before
-        assert not (isolated.home / ".cursor" / "mcp.json").exists()
+        user_config = isolated.home / ".cursor" / "mcp.json"
+        servers = json.loads(user_config.read_text(encoding="utf-8"))["mcpServers"]
+        assert servers["global-probe"]["command"] == "printf"
         assert not (isolated.config_root / ".cursor" / "mcp.json").exists()
-        assert "workspace-only" in result.stdout + result.stderr
-        assert "no effective target can accept" in result.stdout + result.stderr

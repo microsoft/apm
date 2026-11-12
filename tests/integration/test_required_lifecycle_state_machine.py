@@ -10,14 +10,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
+from uuid import UUID
 
 import pytest
 import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
 from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
@@ -117,6 +119,58 @@ def _skill(name: str) -> str:
     return (
         f"---\nname: {name}\ndescription: Required lifecycle fixture skill {name}\n---\n# {name}\n"
     )
+
+
+def _assert_skill_receipt(
+    scenario: _Scenario,
+    root: Path,
+    *,
+    scope: str,
+    owner: str,
+    expected: Mapping[str, Path],
+    bound: bool,
+) -> Path:
+    """Check successful-write evidence and its expected committed-claim binding."""
+    receipts = list((scenario.isolated.config_root / "deployment-receipts").glob("*.json"))
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.is_file() and not receipt.is_symlink()
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    identity = root / ".apm-local/installation"
+    assert identity.is_file() and not identity.is_symlink()
+    assert UUID(hex=data["installation"]).hex == data["installation"]
+    assert identity.read_bytes() == (data["installation"] + "\n").encode("ascii")
+    assert (identity.parent / ".gitignore").read_bytes() == b"*\n"
+    assert data["version"] == 1
+    assert data["root"] == root.resolve().as_posix()
+    assert data["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
+    assert data["scope"] == scope
+    ledger = DeploymentLedgerCodec.from_rows(data["records"])
+    assert len(ledger.records) == len(expected)
+    assert set(data["destinations"]) == set(data["bindings"]) == set(ledger.records)
+    assert {
+        row.locator.target: Path(data["destinations"][key]) for key, row in ledger.records.items()
+    } == {target: path.resolve() for target, path in expected.items()}
+    lock_root = scenario.isolated.config_root if scope == "user" else root
+    lock = LockFile.read(lock_root / "apm.lock.yaml")
+    assert lock is not None
+    claims = DeploymentLedgerCodec.from_lockfile(lock).records
+    for key, row in ledger.records.items():
+        path = expected[row.locator.target]
+        assert row.locator.scope == scope
+        assert row.content_hash == compute_file_hash(path)
+        assert (row.owners, row.active_owner) == ((owner,), owner)
+        value = path.as_posix() if scope == "user" else path.relative_to(root).as_posix()
+        expected_claims = sorted(
+            [claim.locator.key, list(claim.owners), claim.active_owner]
+            for claim in claims.values()
+            if claim.locator.value == value
+        )
+        if bound:
+            assert expected_claims
+        assert data["bindings"][key][0] == owner
+        assert json.loads(data["bindings"][key][1]) == (expected_claims if bound else [])
+    return receipt
 
 
 def _revision_instruction(revision: str) -> str:
@@ -457,7 +511,7 @@ def test_required_codex_runtime_headers_follow_declaration_changes(
             "mcp.example.invalid",
             "/mcp",
         )
-        rendered.pop("id")
+        assert "id" not in rendered
         assert rendered == expected_fields
         assert document["model"] == "user-selected-model"
         assert document["mcp_servers"]["user-authored"] == {"command": "user-command"}
@@ -504,7 +558,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     apm_binary_path: Path,
     scope: str,
 ) -> None:
-    """An unchanged legacy render is not migrated; a source rewrite repairs it."""
+    """Legacy headers and native edits survive until the operator reconciles them."""
     scenario = _new_scenario(tmp_path / "codex-headers", apm_binary_path)
     consumer, manifest_path, config_path, opposite_path, args = _codex_header_lifecycle(
         scenario, scope
@@ -522,7 +576,8 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
         environment=scenario.environment,
         scenario_id="codex-legacy-header-install",
     )
-    # Seed the bytes emitted by the old formatter, retaining real install ownership.
+    baseline = config_path.read_bytes()
+    # Old header spelling plus a manual addition is not a verifiable managed baseline.
     legacy = tomlkit.parse(config_path.read_text(encoding="utf-8"))
     server = legacy["mcp_servers"]["runtime-headers"]
     del server["env_http_headers"]
@@ -530,13 +585,16 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     server["startup_timeout_sec"] = 91
     config_path.write_text(tomlkit.dumps(legacy), encoding="utf-8")
     before = _codex_header_snapshot(manifest_path, config_path)
-    _run_success(
-        scenario,
-        consumer,
-        args,
-        environment=scenario.environment,
-        scenario_id="codex-legacy-header-unchanged-noop",
-    )
+    for flags in ((), ("--force",), ("--frozen",)):
+        result = scenario.runner.run(
+            (*args, *flags),
+            cwd=consumer.root,
+            env=scenario.environment,
+            scenario_id="codex-legacy-header-unchanged-conflict",
+        )
+        assert result.returncode != 0, _result_evidence(result)
+        assert "conflicts with the existing codex" in result.stdout
+        assert _codex_header_snapshot(manifest_path, config_path) == before
     unchanged = _codex_header_snapshot(manifest_path, config_path)
     assert unchanged.files == before.files
     assert unchanged.lockfile_bytes == before.lockfile_bytes
@@ -545,6 +603,21 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     assert opposite_path.read_bytes() == opposite_bytes
 
     _rewrite_codex_headers(manifest_path, {"X-Runtime": "${env:APM_TEST_HEADER}"})
+    changed = _codex_header_snapshot(manifest_path, config_path)
+    for flags in ((), ("--force",)):
+        result = scenario.runner.run(
+            (*args, *flags),
+            cwd=consumer.root,
+            env=scenario.environment,
+            scenario_id="codex-legacy-header-declaration-conflict",
+        )
+        assert result.returncode != 0, _result_evidence(result)
+        assert "conflicts with the existing codex" in result.stdout
+        assert _codex_header_snapshot(manifest_path, config_path) == changed
+        assert opposite_path.read_bytes() == opposite_bytes
+        assert unrelated_file.read_bytes() == unrelated_bytes
+
+    config_path.write_bytes(baseline)
     _run_success(
         scenario,
         consumer,
@@ -558,7 +631,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
     assert "http_headers" not in server
     assert "bearer_token_env_var" not in server
     assert "env" not in server
-    # A changed declaration replaces its selected entry, including manual additions.
+    # Only the operator removed the manual addition before this managed update.
     assert "startup_timeout_sec" not in server
     assert scenario.environment["APM_TEST_HEADER"] not in config_path.read_text(encoding="utf-8")
     assert repaired["model"] == "user-selected-model"
@@ -1059,6 +1132,51 @@ def test_required_lsp_only_dry_run_reports_plan_without_writing_state(
     _assert_same_state(before, after)
 
 
+def test_required_conflicted_lockfile_preserves_durable_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Required readers fail and preview warns without repairing conflicted state."""
+    scenario = _new_scenario(tmp_path / "conflicted-lockfile", apm_binary_path)
+    source = _publish(scenario, "conflict-kit", skill="preserved")
+    consumer = scenario.consumers.create(
+        "conflict-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="conflict-seed",
+    )
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (PurePosixPath("apm_modules"),),
+    }
+    before = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    lockfile = consumer.root / "apm.lock.yaml"
+    good_bytes = lockfile.read_bytes()
+    conflicted = good_bytes + b"\n<<<<<<< HEAD\n=======\n>>>>>>> feature\n"
+    for suffix, exit_code in (((), 1), (("--frozen",), 1), (("--dry-run",), 0)):
+        lockfile.write_bytes(conflicted)
+        result = scenario.runner.run(
+            (*_INSTALL_ARGS, *suffix),
+            cwd=consumer.root,
+            env=source.environment,
+            scenario_id=f"conflict-{suffix[0] if suffix else 'install'}",
+        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == exit_code, _result_evidence(result)
+        assert "unresolved git merge conflict markers" in output
+        assert "".join(str(lockfile).split()) in "".join(output.split())
+        assert "retry your original command" in output
+        assert lockfile.read_bytes() == conflicted
+        # The semantic snapshot requires parseable YAML. Assert conflicted bytes
+        # first, then restore only the test fixture to compare all other state.
+        lockfile.write_bytes(good_bytes)
+        _assert_same_state(before, LifecycleStateSnapshot.capture(consumer.root, **capture_args))
+
+
 def test_required_unknown_host_qualified_virtual_install_fails_before_state_write(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -1390,7 +1508,7 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     state_a = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
 
-    scenario.consumers.set_targets(consumer, ("claude", "cursor"))
+    scenario.consumers.set_targets(consumer, ("claude", "windsurf"))
     _run_success(
         scenario,
         consumer,
@@ -1400,7 +1518,7 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     state_ab = LifecycleStateSnapshot.capture(
         consumer.root,
-        targets=("claude", "cursor"),
+        targets=("claude", "windsurf"),
     )
 
     scenario.consumers.set_targets(consumer, ("claude",))
@@ -1420,10 +1538,10 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     )
     state_final = LifecycleStateSnapshot.capture(
         consumer.root,
-        targets=("claude", "cursor"),
+        targets=("claude", "windsurf"),
         config_paths=(
             PurePosixPath(".agents/skills/scope/SKILL.md"),
-            PurePosixPath(".cursor/rules/scope.mdc"),
+            PurePosixPath(".windsurf/rules/scope.md"),
         ),
     )
     _, audit = _audit(
@@ -1438,18 +1556,18 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
         == state_ab.file(".claude/skills/scope/SKILL.md").content
     )
     assert state_ab.file(".agents/skills/scope/SKILL.md").content == _skill("scope").encode()
-    assert state_ab.file(".cursor/rules/scope.mdc").kind == "file"
-    assert state_ab.file(".cursor/hooks.json").kind == "file"
-    assert state_ab.file(".cursor/apm-hooks.json").kind == "file"
+    assert state_ab.file(".windsurf/rules/scope.md").kind == "file"
+    assert state_ab.file(".windsurf/hooks.json").kind == "file"
+    assert state_ab.file(".windsurf/apm-hooks.json").kind == "file"
     assert state_final.file(".agents/skills/scope/SKILL.md").kind == "missing"
-    assert state_final.file(".cursor/rules/scope.mdc").kind == "missing"
-    assert _hook_commands(consumer.root / ".cursor" / "hooks.json") == []
-    assert state_final.file(".cursor/apm-hooks.json").kind == "missing"
+    assert state_final.file(".windsurf/rules/scope.md").kind == "missing"
+    assert _hook_commands(consumer.root / ".windsurf" / "hooks.json") == []
+    assert state_final.file(".windsurf/apm-hooks.json").kind == "missing"
     assert (
         state_final.file(".claude/skills/scope/SKILL.md").content
         == state_a.file(".claude/skills/scope/SKILL.md").content
     )
-    assert not any(record.locator.target == "cursor" for record in state_final.deployment_records)
+    assert not any(record.locator.target == "windsurf" for record in state_final.deployment_records)
     assert audit["passed"] is True
 
 
@@ -1693,7 +1811,7 @@ def test_required_cursor_metadata_survives_install_compile_update(
         (".claude/rules/stable.md", 'paths:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
         (".windsurf/rules/stable.md", 'globs:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
         (".kiro/steering/stable.md", 'fileMatchPattern:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
-        (".agents/rules/stable.md", 'globs:\n  - "**/*.py"\n  - "src/**/*.{ts,tsx}"'),
+        (".agents/rules/stable.md", 'trigger: glob\nglobs: "**/*.py, src/**/*.{ts,tsx}"\n'),
     ):
         assert marker in (consumer.root / relative).read_text(encoding="utf-8")
     assert (consumer.root / ".github/instructions/stable.instructions.md").read_text(
@@ -1724,6 +1842,100 @@ def test_required_cursor_metadata_survives_install_compile_update(
         )
         for relative, data in sentinels.items():
             assert (consumer.root / relative).read_bytes() == data
+
+
+@pytest.mark.parametrize("with_native_group", [False, True], ids=["standalone", "merged"])
+def test_required_claude_untyped_hook_upgrade_preserves_ownership_and_converges(
+    tmp_path: Path, apm_binary_path: Path, with_native_group: bool
+) -> None:
+    """Real installs heal pre-fix handlers without executing or claiming user hooks."""
+    scenario = _new_scenario(tmp_path / "claude-untyped", apm_binary_path)
+    source = _publish(scenario, "flat-kit", hook_command="echo native")
+    hook_root = source.repository.worktree / ".apm" / "hooks"
+    if not with_native_group:
+        (hook_root / "pretool.json").unlink()
+    command = "echo must-not-run > hook-executed"
+    flat = {"command": command, "matcher": "Write", "timeout": 10}
+    (hook_root / "flat.json").write_text(
+        json.dumps({"hooks": {"preToolUse": [flat]}}), encoding="ascii"
+    )
+    commit = scenario.repositories.commit(source.repository, message="publish untyped flat hook")
+    consumer = scenario.consumers.create(
+        "claude-consumer",
+        dependencies=({**source.dependency, "ref": commit.sha},),
+        targets=("claude",),
+    )
+    scenario.consumers.add_hook(
+        consumer, "root", {"hooks": {"PreToolUse": [{"command": "echo root"}]}}
+    )
+    settings_path = consumer.root / ".claude/settings.json"
+    sidecar_path = consumer.root / ".claude/apm-hooks.json"
+    settings_path.parent.mkdir()
+    user_group = {"matcher": "Read", "hooks": [{"type": "prompt", "prompt": "Keep user hook"}]}
+    settings_path.write_text(
+        json.dumps(
+            {"permissions": {"deny": ["Bash(rm:*)"]}, "hooks": {"PreToolUse": [user_group]}}
+        ),
+        encoding="ascii",
+    )
+    sentinel = consumer.root / ".codex/hooks.json"
+    sentinel.parent.mkdir()
+    sentinel.write_bytes(b'{"hooks": {}, "user": "unchanged"}\n')
+    authored = ArtifactSnapshot.capture(consumer.root / ".apm")
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "claude"),
+        environment=source.environment,
+        scenario_id="claude-untyped-install",
+    )
+    expected_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    expected_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    groups = expected_settings["hooks"]["PreToolUse"]
+    handlers = [handler for group in groups for handler in group["hooks"]]
+    assert {"type": "command", "command": command, "timeout": 10} in handlers
+    assert {"type": "command", "command": "echo root"} in handlers
+    assert all(handler["type"] in {"command", "prompt"} for handler in handlers)
+    assert user_group in groups
+    assert len(groups) == 3 + int(with_native_group)
+    assert {entry["_apm_source"] for entry in expected_sidecar["PreToolUse"]} == {
+        f"{_OWNER}/flat-kit",
+        "_local/claude-consumer",
+    }
+    assert all(entry["hooks"] != user_group["hooks"] for entry in expected_sidecar["PreToolUse"])
+
+    # Recreate the previous renderer's untyped output and a renamed root source.
+    legacy_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    legacy_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    for entries in (legacy_settings["hooks"]["PreToolUse"], legacy_sidecar["PreToolUse"]):
+        for entry in entries:
+            for handler in entry["hooks"]:
+                if handler.get("command") in {command, "echo root"}:
+                    handler.pop("type")
+            if entry.get("_apm_source") == "_local/claude-consumer":
+                entry["_apm_source"] = "old-checkout-name"
+    settings_path.write_text(json.dumps(legacy_settings), encoding="ascii")
+    sidecar_path.write_text(json.dumps(legacy_sidecar), encoding="ascii")
+
+    baseline = None
+    for cycle in range(2):
+        _run_success(
+            scenario,
+            consumer,
+            (*_INSTALL_ARGS, "--target", "claude"),
+            environment=source.environment,
+            scenario_id=f"claude-untyped-reinstall-{cycle}",
+        )
+        assert json.loads(settings_path.read_text(encoding="utf-8")) == expected_settings
+        assert json.loads(sidecar_path.read_text(encoding="utf-8")) == expected_sidecar
+        assert sentinel.read_bytes() == b'{"hooks": {}, "user": "unchanged"}\n'
+        assert not (consumer.root / "hook-executed").exists()
+        assert_unchanged(authored, ArtifactSnapshot.capture(consumer.root / ".apm"))
+        snapshot = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
+        if baseline is not None:
+            _assert_same_state(baseline, snapshot)
+        baseline = snapshot
 
 
 @pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
@@ -2949,9 +3161,11 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         "caller": cwd,
         **external_roots,
     }
-    home_sentinel = scenario.isolated.home / "user-owned.txt"
+    home_sentinel, caller_sentinel = (
+        scenario.isolated.home / "user-owned.txt",
+        cwd / "user-owned.txt",
+    )
     home_sentinel.write_bytes(b"home-user-owned\n")
-    caller_sentinel = cwd / "user-owned.txt"
     caller_sentinel.write_bytes(b"caller-user-owned\n")
 
     def capture() -> LifecycleStateSnapshot:
@@ -2963,6 +3177,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         *,
         expected_returncode: int = 0,
         command_cwd: Path | None = None,
+        create_identity: bool = False,
     ) -> CommandResult:
         before = ArtifactSnapshotSet.capture(artifact_roots)
         result = scenario.runner.run(
@@ -2973,7 +3188,17 @@ def test_required_global_audit_rule_matrix_for_external_roots(
             before,
             ArtifactSnapshotSet.capture(artifact_roots),
             exact_paths={
-                "home": {".local", ".local/state", ".local/state/gh", ".local/state/gh/device-id"},
+                "home": {
+                    ".local",
+                    ".local/state",
+                    ".local/state/gh",
+                    ".local/state/gh/device-id",
+                    *(
+                        {".apm-local", ".apm-local/.gitignore", ".apm-local/installation"}
+                        if create_identity
+                        else set()
+                    ),
+                },
                 **{
                     target: {
                         "skills",
@@ -3014,7 +3239,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     )
 
     install_args = ("install", "--global", "--no-policy", "--parallel-downloads", "0")
-    run(install_args, "global-audit-install")
+    run(install_args, "global-audit-install", create_identity=True)
     installed = capture()
     installed_home = LifecycleStateSnapshot.capture(
         cwd,
@@ -3056,6 +3281,14 @@ def test_required_global_audit_rule_matrix_for_external_roots(
                 _skill("global-audit") + f"\nrevision-{revision}\n"
             ).encode()
         assert capture().deployment_records
+        _assert_skill_receipt(
+            scenario,
+            scenario.isolated.home,
+            scope="user",
+            owner=f"{_OWNER}/{source.package.name}",
+            expected={target: external_roots[target] / skill_paths[target] for target in targets},
+            bound=True,
+        )
 
     manifest_path = physical_apm_home / "apm.yml"
 
@@ -3162,7 +3395,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     )
     package_removed_audit = audit_row(
         "global-audit-package-dir-removed",
-        failed={"config-consistency", "drift"},
+        failed={"config-consistency", "drift", "skill-subset-consistency"},
     )
     package_removed_after_audit = LifecycleStateSnapshot.capture(
         cwd,
@@ -3171,7 +3404,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     assert _check(package_removed_audit, "no-orphaned-packages")["passed"] is True
     assert _check(package_removed_audit, "deployed-files-present")["passed"] is True
     assert _check(package_removed_audit, "content-integrity")["passed"] is True
-    for check_name in ("config-consistency", "drift"):
+    for check_name in ("config-consistency", "drift", "skill-subset-consistency"):
         message = str(_check(package_removed_audit, check_name)["message"])
         assert "installed package materialization is missing" in message
         assert "apm install --global" in message
@@ -3254,7 +3487,10 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     run(("deps", "clean", "--yes"), "global-deps-clean", command_cwd=physical_apm_home)
     assert not modules_dir.exists()
     assert capture().deployment_records == before_clean.deployment_records
-    audit_row("global-audit-after-deps-clean", failed={"config-consistency", "drift"})
+    audit_row(
+        "global-audit-after-deps-clean",
+        failed={"config-consistency", "drift", "skill-subset-consistency"},
+    )
     run(install_args, "global-rehydrate-after-deps-clean")
     assert_revision(commit_b, "b")
     assert_clean("global-audit-after-rehydrate")
@@ -3323,6 +3559,14 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         environment=source.environment,
         scenario_id="lock-release-install-baseline",
     )
+    receipt = _assert_skill_receipt(
+        scenario,
+        consumer.root,
+        scope="project",
+        owner=f"{_OWNER}/{source.package.name}",
+        expected={"copilot": consumer.root / ".agents/skills/lock-release/SKILL.md"},
+        bound=True,
+    )
     scenario.consumers.set_targets(consumer, ("claude",))
     capture_args = {
         "targets": ("claude", "copilot"),
@@ -3364,6 +3608,17 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         after_failure.file(".claude/skills/lock-release/SKILL.md").content
         == _skill("lock-release").encode()
     )
+    assert (
+        _assert_skill_receipt(
+            scenario,
+            consumer.root,
+            scope="project",
+            owner=f"{_OWNER}/{source.package.name}",
+            expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
+            bound=False,
+        )
+        == receipt
+    )
     assert_only_snapshot_paths_changed(
         before_artifacts,
         after_artifacts,
@@ -3377,10 +3632,12 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
                 ".claude/skills",
                 ".claude/skills/lock-release",
                 ".claude/skills/lock-release/SKILL.md",
-            }
+            },
+            "user": {receipt.relative_to(scenario.isolated.home).as_posix()},
         },
     )
     assert list(consumer.root.glob("apm-atomic-*")) == []
+    failed_receipt_bytes = receipt.read_bytes()
 
     _run_success(
         scenario,
@@ -3389,11 +3646,27 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         environment=source.environment,
         scenario_id="lock-release-followup-install",
     )
+    _assert_skill_receipt(
+        scenario,
+        consumer.root,
+        scope="project",
+        owner=f"{_OWNER}/{source.package.name}",
+        expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
+        bound=False,
+    )
+    assert receipt.read_bytes() == failed_receipt_bytes
+    before_audit = ArtifactSnapshotSet.capture(
+        {"project": consumer.root, "user": scenario.isolated.home}
+    )
     _, audit = _audit(
         scenario,
         consumer,
         environment=source.environment,
         scenario_id="lock-release-followup-audit",
+    )
+    assert_snapshot_set_unchanged(
+        before_audit,
+        ArtifactSnapshotSet.capture({"project": consumer.root, "user": scenario.isolated.home}),
     )
     released = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
     assert (
@@ -3402,6 +3675,27 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
     )
     assert released.file(".agents/skills/lock-release/SKILL.md").kind == "missing"
     assert audit["passed"] is True
+    preserved = consumer.root / "preserved-skill.md"
+    (consumer.root / ".claude/skills/lock-release/SKILL.md").rename(preserved)
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="lock-release-restore-written-baseline",
+    )
+    _assert_skill_receipt(
+        scenario,
+        consumer.root,
+        scope="project",
+        owner=f"{_OWNER}/{source.package.name}",
+        expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
+        bound=True,
+    )
+    assert preserved.read_bytes() == _skill("lock-release").encode()
+    assert (
+        consumer.root / ".claude/skills/lock-release/SKILL.md"
+    ).read_bytes() == preserved.read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -3504,3 +3798,384 @@ def test_required_mixed_primitives_survive_reinstall_without_state_loss(
     assert before.mcp_state_bytes == after.mcp_state_bytes
     assert before.semantic_bytes == after.semantic_bytes
     assert audit["passed"] is True
+
+
+def _author_local_skill(consumer: LocalPackage, name: str, content: str | None = None) -> None:
+    """Author one of the consumer project's own ``.apm/skills``."""
+    path = consumer.root / ".apm" / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content or _skill(name), encoding="ascii")
+
+
+def _remove_local_skill(consumer: LocalPackage, name: str) -> None:
+    shutil.rmtree(consumer.root / ".apm" / "skills" / name)
+
+
+def _local_skill_rows(project_root: Path, skill_name: str) -> dict[str, str]:
+    """Return ``value -> target`` for the project's own rows naming *skill_name*."""
+    lockfile = LockFile.read(project_root / "apm.lock.yaml")
+    assert lockfile is not None
+    return {
+        record.locator.value: record.locator.target
+        for record in lockfile.deployment_ledger.records.values()
+        if "." in record.owners and PurePosixPath(record.locator.value).parts[2:3] == (skill_name,)
+    }
+
+
+def _skill_on_disk(project_root: Path, root: str, skill_name: str) -> bool:
+    return (project_root / root / "skills" / skill_name / "SKILL.md").is_file()
+
+
+def _install_and_audit(
+    scenario: _Scenario,
+    consumer: LocalPackage,
+    *,
+    environment: dict[str, str],
+    scenario_id: str,
+    targets: tuple[str, ...],
+) -> LifecycleStateSnapshot:
+    """Install, prove a repeat install settles, then prove audit passes without mutating."""
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=environment,
+        scenario_id=f"{scenario_id}-install",
+    )
+    settled = LifecycleStateSnapshot.capture(consumer.root, targets=targets)
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=environment,
+        scenario_id=f"{scenario_id}-reinstall",
+    )
+    _assert_same_state(settled, LifecycleStateSnapshot.capture(consumer.root, targets=targets))
+    before_audit = ArtifactSnapshot.capture(consumer.root)
+    _, audit = _audit(
+        scenario,
+        consumer,
+        environment=environment,
+        scenario_id=f"{scenario_id}-audit",
+    )
+    assert audit["passed"] is True
+    assert_unchanged(before_audit, ArtifactSnapshot.capture(consumer.root))
+    return settled
+
+
+def test_required_local_skill_rename_delete_and_target_drop_reconcile_shared_root(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Issue #3179: the project's own skills leave no ``.agents`` copy or lock row behind."""
+    scenario = _new_scenario(tmp_path / "local-shared-root", apm_binary_path)
+    source = _publish(scenario, "local-root-kit", skill="dep-skill")
+    consumer = scenario.consumers.create(
+        "local-root-consumer",
+        dependencies=(source.dependency,),
+        targets=("claude", "copilot"),
+    )
+    targets = ("claude", "copilot")
+    root = consumer.root
+
+    _author_local_skill(consumer, "demo-v1")
+    _install_and_audit(
+        scenario, consumer, environment=source.environment, scenario_id="local-v1", targets=targets
+    )
+    assert _local_skill_rows(root, "demo-v1") == {
+        ".claude/skills/demo-v1": "claude",
+        ".claude/skills/demo-v1/SKILL.md": "claude",
+        ".agents/skills/demo-v1": "copilot",
+        ".agents/skills/demo-v1/SKILL.md": "copilot",
+    }
+
+    _remove_local_skill(consumer, "demo-v1")
+    _author_local_skill(consumer, "demo-v2")
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=source.environment,
+        scenario_id="local-rename",
+        targets=targets,
+    )
+    assert _local_skill_rows(root, "demo-v1") == {}
+    assert not _skill_on_disk(root, ".claude", "demo-v1")
+    assert not _skill_on_disk(root, ".agents", "demo-v1")
+    assert _skill_on_disk(root, ".agents", "demo-v2")
+    assert _skill_on_disk(root, ".agents", "dep-skill")
+
+    _remove_local_skill(consumer, "demo-v2")
+    _author_local_skill(consumer, "demo-v3")
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=source.environment,
+        scenario_id="local-delete",
+        targets=targets,
+    )
+    assert _local_skill_rows(root, "demo-v2") == {}
+    assert not _skill_on_disk(root, ".agents", "demo-v2")
+
+    scenario.consumers.set_targets(consumer, ("claude",))
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=source.environment,
+        scenario_id="local-drop-copilot",
+        targets=("claude",),
+    )
+    assert _local_skill_rows(root, "demo-v3") == {
+        ".claude/skills/demo-v3": "claude",
+        ".claude/skills/demo-v3/SKILL.md": "claude",
+    }
+    assert not _skill_on_disk(root, ".agents", "demo-v3")
+    assert not _skill_on_disk(root, ".agents", "dep-skill")
+
+    tampered = root / ".claude" / "skills" / "demo-v3" / "SKILL.md"
+    tampered.write_text(_skill("demo-v3") + "\ntampered\n", encoding="ascii")
+    before_audit = ArtifactSnapshot.capture(root)
+    _, audit = _audit(
+        scenario,
+        consumer,
+        environment=source.environment,
+        expected_returncode=1,
+        scenario_id="local-tamper-audit",
+    )
+    assert audit["passed"] is False
+    assert_unchanged(before_audit, ArtifactSnapshot.capture(root))
+
+
+def test_required_shared_root_file_survives_until_its_last_target_claim_leaves(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Dropping one of two ``.agents/skills`` targets keeps the file; dropping both removes it."""
+    scenario = _new_scenario(tmp_path / "shared-root-claims", apm_binary_path)
+    consumer = scenario.consumers.create(
+        "shared-root-consumer",
+        targets=("claude", "codex", "copilot"),
+    )
+    root = consumer.root
+    _author_local_skill(consumer, "shared")
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="shared-all",
+        targets=("claude", "codex", "copilot"),
+    )
+
+    scenario.consumers.set_targets(consumer, ("claude", "codex"))
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="shared-drop-copilot",
+        targets=("claude", "codex"),
+    )
+    assert _skill_on_disk(root, ".agents", "shared")
+    assert _local_skill_rows(root, "shared")[".agents/skills/shared/SKILL.md"] == "codex"
+
+    scenario.consumers.set_targets(consumer, ("claude",))
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="shared-drop-codex",
+        targets=("claude",),
+    )
+    assert not _skill_on_disk(root, ".agents", "shared")
+    assert set(_local_skill_rows(root, "shared")) == {
+        ".claude/skills/shared",
+        ".claude/skills/shared/SKILL.md",
+    }
+
+
+def test_required_target_only_install_keeps_unprocessed_sibling_claims(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """``--target claude`` must not discard the declared copilot target's local claims."""
+    scenario = _new_scenario(tmp_path / "target-only-sibling", apm_binary_path)
+    consumer = scenario.consumers.create("target-only-consumer", targets=("claude", "copilot"))
+    root = consumer.root
+    _author_local_skill(consumer, "demo")
+    full = _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="target-only-full",
+        targets=("claude", "copilot"),
+    )
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "claude"),
+        environment=scenario.environment,
+        scenario_id="target-only-claude",
+    )
+    assert _skill_on_disk(root, ".agents", "demo")
+    assert _local_skill_rows(root, "demo")[".agents/skills/demo/SKILL.md"] == "copilot"
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=scenario.environment,
+        scenario_id="target-only-full-again",
+    )
+    after = LifecycleStateSnapshot.capture(root, targets=("claude", "copilot"))
+    assert after.deployment_records == full.deployment_records
+    assert after.files == full.files
+
+
+def test_required_unattributed_local_rows_contract_and_preserve_user_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Ambiguous historical rows, edits and untracked files survive without ownership guesses."""
+    scenario = _new_scenario(tmp_path / "legacy-local-rows", apm_binary_path)
+    consumer = scenario.consumers.create("legacy-rows-consumer", targets=("claude", "copilot"))
+    root = consumer.root
+    _author_local_skill(consumer, "renamed")
+    _author_local_skill(consumer, "edited")
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=scenario.environment,
+        scenario_id="legacy-rows-seed",
+    )
+    lock_path = root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    for row in lock_document["deployments"]:
+        if row["value"].startswith(".agents/"):
+            row["target"] = "legacy"
+    dump_yaml(lock_document, lock_path)
+    untracked = root / ".agents" / "skills" / "handmade" / "SKILL.md"
+    untracked.parent.mkdir(parents=True)
+    untracked.write_text(_skill("handmade"), encoding="ascii")
+    edited = root / ".agents" / "skills" / "edited" / "SKILL.md"
+    edited.write_text(_skill("edited") + "\nlocal note\n", encoding="ascii")
+
+    _remove_local_skill(consumer, "renamed")
+    _remove_local_skill(consumer, "edited")
+    _author_local_skill(consumer, "renamed-v2")
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=scenario.environment,
+        scenario_id="legacy-rows-contract",
+    )
+    settled = LifecycleStateSnapshot.capture(root, targets=("claude", "copilot"))
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=scenario.environment,
+        scenario_id="legacy-rows-settle",
+    )
+
+    _assert_same_state(settled, LifecycleStateSnapshot.capture(root, targets=("claude", "copilot")))
+    assert _local_skill_rows(root, "renamed") == {
+        ".agents/skills/renamed": "legacy",
+        ".agents/skills/renamed/SKILL.md": "legacy",
+    }
+    assert _skill_on_disk(root, ".agents", "renamed")
+    assert not _skill_on_disk(root, ".claude", "renamed")
+    assert _local_skill_rows(root, "renamed-v2")[".agents/skills/renamed-v2/SKILL.md"] == "copilot"
+    assert untracked.read_text(encoding="ascii") == _skill("handmade")
+    assert edited.read_text(encoding="ascii") == _skill("edited") + "\nlocal note\n"
+    assert ".agents/skills/edited/SKILL.md" in _local_skill_rows(root, "edited")
+    before_audit = ArtifactSnapshot.capture(root)
+    _, audit = _audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        expected_returncode=1,
+        scenario_id="legacy-rows-read-only-audit",
+    )
+    assert audit["passed"] is False
+    assert_unchanged(before_audit, ArtifactSnapshot.capture(root))
+
+
+def test_required_target_only_install_keeps_claims_whose_recorded_target_left(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A shared file stays when its recorded target left but an unprocessed sibling governs it."""
+    scenario = _new_scenario(tmp_path / "target-only-departed", apm_binary_path)
+    consumer = scenario.consumers.create(
+        "departed-target-consumer", targets=("claude", "codex", "copilot")
+    )
+    root = consumer.root
+    _author_local_skill(consumer, "shared")
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="departed-full",
+        targets=("claude", "codex", "copilot"),
+    )
+    assert _local_skill_rows(root, "shared")[".agents/skills/shared/SKILL.md"] == "codex"
+
+    scenario.consumers.set_targets(consumer, ("claude", "copilot"))
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "claude"),
+        environment=scenario.environment,
+        scenario_id="departed-target-only",
+    )
+    assert _skill_on_disk(root, ".agents", "shared")
+    assert ".agents/skills/shared/SKILL.md" in _local_skill_rows(root, "shared")
+
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="departed-full-again",
+        targets=("claude", "copilot"),
+    )
+    assert _local_skill_rows(root, "shared")[".agents/skills/shared/SKILL.md"] == "copilot"
+
+
+def test_required_deleting_all_local_content_cleans_its_deployments(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Removing the whole ``.apm/`` tree of a dependency-free project still cleans up."""
+    scenario = _new_scenario(tmp_path / "local-tree-deleted", apm_binary_path)
+    consumer = scenario.consumers.create("tree-deleted-consumer", targets=("claude", "copilot"))
+    root = consumer.root
+    _author_local_skill(consumer, "only")
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="tree-deleted-seed",
+        targets=("claude", "copilot"),
+    )
+
+    shutil.rmtree(root / ".apm")
+    result = _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=scenario.environment,
+        scenario_id="tree-deleted-install",
+    )
+
+    assert "Cleaned 4 stale files" in result.stdout
+    assert _local_skill_rows(root, "only") == {}
+    assert not _skill_on_disk(root, ".agents", "only")
+    assert not _skill_on_disk(root, ".claude", "only")
+    _install_and_audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="tree-deleted-settle",
+        targets=("claude", "copilot"),
+    )

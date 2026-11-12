@@ -159,6 +159,10 @@ apm install                    # no --target needed: deploys to claude
 apm config unset target        # clear it (back to auto-detection)
 ```
 
+Changing this default does not retarget an existing installation during audit.
+Audit uses current manifest targets or recorded deployment identities; see
+[`apm audit`](../audit/).
+
 On Unix, leaving `self-update.install-dir` unset already preserves the detected launcher. Optionally persist a matching directory for an existing installation:
 
 ```bash

@@ -253,7 +253,7 @@ Every current non-deprecated top-level key. Field names come straight from the s
 ```yaml
 name: ""                  # display name
 version: ""               # your policy version
-extends: null             # "org" | "<owner>/<repo>" | "https://..."
+# extends: org            # optional: omit when unset; or "<owner>/<repo>", "https://..."
 enforcement: warn         # warn | block | off
 fetch_failure: warn       # warn | block (when policy can't be fetched)
 cache:

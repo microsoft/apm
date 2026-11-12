@@ -46,12 +46,42 @@ if TYPE_CHECKING:
 
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.models.dependency.replacement import ReplacementRule
 
 
 _ACTION_UPDATE = "update"
 _ACTION_ADD = "add"
 _ACTION_REMOVE = "remove"
 _ACTION_UNCHANGED = "unchanged"
+
+
+def lockfile_satisfies_replacements(
+    lockfile: LockFile | None,
+    rules: list[ReplacementRule] | None,
+) -> tuple[bool, list[str]]:
+    """Compare the complete root replacement intent without accessing sources."""
+    from apm_cli.models.dependency.replacement import (
+        ReplacementConfigError,
+        build_replacement_index,
+        replacement_rules_from_dicts,
+    )
+
+    if lockfile is None:
+        return (
+            (True, []) if rules is None else (False, ["  - replacement declaration is not locked"])
+        )
+    if rules is None and lockfile.replacements is None:
+        return True, []
+    if rules is None or lockfile.replacements is None:
+        return False, ["  - replacement declaration differs from apm.lock.yaml"]
+    try:
+        locked_rules = replacement_rules_from_dicts(lockfile.replacements)
+        build_replacement_index(locked_rules)
+    except ReplacementConfigError as exc:
+        return False, [f"  - locked replacement table is invalid: {exc}"]
+    if frozenset(rules) != frozenset(locked_rules):
+        return False, ["  - replacement rules differ from apm.lock.yaml"]
+    return True, []
 
 
 def _dep_ref_key(dep: DependencyReference) -> str:
@@ -116,6 +146,7 @@ class PlanEntry:
 
     new_resolved_ref: str | None = None
     new_resolved_commit: str | None = None
+    new_content_hash: str | None = None
 
     deployed_files: tuple[str, ...] = ()
 
@@ -179,6 +210,7 @@ def build_update_plan(
     resolved_deps: Iterable[DependencyReference],
     *,
     complete_resolved_dep_keys: Iterable[str] | None = None,
+    resolved_content_hashes: dict[str, str] | None = None,
 ) -> UpdatePlan:
     """Compare an existing lockfile against freshly-resolved deps.
 
@@ -216,6 +248,8 @@ def build_update_plan(
         key = _dep_ref_key(dep)
         seen_keys.add(key)
         old = old_entries.get(key)
+        new_hash = (resolved_content_hashes or {}).get(key)
+        same_source = old is not None and old.matches_replacement(dep)
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
         # Unannotated registry dep (cached, not re-downloaded): no concrete
         # version was resolved this run, so treat the locked value as current.
@@ -239,6 +273,7 @@ def build_update_plan(
         if (
             new_commit is None
             and old is not None
+            and same_source
             and getattr(old, "resolved_tag", None)
             and new_ref == old.resolved_ref
         ):
@@ -252,6 +287,7 @@ def build_update_plan(
                     display_name=_display_name(key, None) or dep.repo_url,
                     new_resolved_ref=new_ref,
                     new_resolved_commit=new_commit,
+                    new_content_hash=new_hash,
                 )
             )
             continue
@@ -260,7 +296,12 @@ def build_update_plan(
         old_commit = old.resolved_commit
         deployed = tuple(old.deployed_files)
 
-        if (old_commit or None) == (new_commit or None) and (old_ref or None) == (new_ref or None):
+        if (
+            same_source
+            and (old_commit or None) == (new_commit or None)
+            and (old_ref or None) == (new_ref or None)
+            and (new_hash is None or new_hash == old.content_hash)
+        ):
             plan_entries.append(
                 PlanEntry(
                     dep_key=key,
@@ -271,6 +312,7 @@ def build_update_plan(
                     old_content_hash=old.content_hash,
                     new_resolved_ref=new_ref,
                     new_resolved_commit=new_commit,
+                    new_content_hash=new_hash,
                     deployed_files=deployed,
                 )
             )
@@ -286,6 +328,7 @@ def build_update_plan(
                 old_content_hash=old.content_hash,
                 new_resolved_ref=new_ref,
                 new_resolved_commit=new_commit,
+                new_content_hash=new_hash,
                 deployed_files=deployed,
             )
         )
@@ -365,6 +408,10 @@ def _format_ref_change(entry: PlanEntry) -> str:
         ``v1.0.0 (new)``
         ``main (abc1234 removed)``
     """
+    if entry.new_content_hash is not None:
+        return (
+            f"local content ({(entry.old_content_hash or '-')[:8]} -> {entry.new_content_hash[:8]})"
+        )
     if entry.action == _ACTION_ADD:
         ref = entry.new_resolved_ref or "-"
         commit = entry.short_new_commit
@@ -465,29 +512,33 @@ def lockfile_satisfies_manifest(
     Args:
         lockfile: The on-disk lockfile.
         manifest_deps: Direct deps from the apm.yml manifest (regular +
-            dev).  Local deps are skipped as they have no remote ref to
-            satisfy.
+            dev). Local deps require an entry but have no remote ref.
 
     Returns:
         ``(satisfied, reasons)`` -- ``reasons`` is a list of
         human-readable strings explaining each mismatch, empty when
         ``satisfied`` is True.
     """
-    from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.deps.revision_pins import is_full_revision_pin
     from apm_cli.drift import detect_ref_change
 
-    locked_keys = {key for key in lockfile.dependencies if key != _SELF_KEY}
-
+    marketplace_index = lockfile.marketplace_index()
     reasons: list[str] = []
     for dep in manifest_deps:
-        if getattr(dep, "is_local", False):
-            continue
         key = _dep_ref_key(dep)
-        if key not in locked_keys:
-            reasons.append(f"  - {key} is declared in apm.yml but missing from apm.lock.yaml")
+        display = dep.get_display_name() if dep.is_marketplace else key
+        locked_dep = lockfile.get_dependency(key, marketplace_index=marketplace_index)
+        if locked_dep is None or key == ".":
+            reasons.append(f"  - {display} is declared in apm.yml but missing from apm.lock.yaml")
             continue
-        locked_dep = lockfile.dependencies[key]
+        if getattr(dep, "is_local", False):
+            if (
+                not locked_dep.is_local_source
+                or not locked_dep.matches_replacement(dep)
+                or not locked_dep.content_hash
+            ):
+                reasons.append(f"  - local dependency {key!r} has no locked content hash")
+            continue
         reference = dep.reference
         if (
             reference
@@ -495,13 +546,13 @@ def lockfile_satisfies_manifest(
             and (locked_dep.resolved_commit or "").lower() != reference.lower()
         ):
             reasons.append(
-                f"  - {key}: manifest commit '{dep.reference}' != "
+                f"  - {display}: manifest commit '{dep.reference}' != "
                 f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
             )
             continue
         if detect_ref_change(dep, locked_dep):
             reasons.append(
-                f"  - {key}: declared source, ref, host provider, or transport "
+                f"  - {display}: declared source, ref, host provider, or transport "
                 "differs from apm.lock.yaml"
             )
 
