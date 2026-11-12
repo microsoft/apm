@@ -17,12 +17,13 @@ Safety gates, in order:
    individual files are removed first; if the directory is then empty (or
    only contains APM-tracked files with matching hashes) it is safely
    removed. Non-skill directory entries are still rejected as untrusted.
-3. **Provenance check** -- when the previous lockfile recorded a content
-   hash for the file, the on-disk content must still match. If the user
-   edited the file after APM deployed it the hash will differ and the
-   deletion is skipped with a warning. Files without a recorded hash
-   (legacy lockfiles) fall through and are deleted, preserving prior
-   behaviour.
+3. **Provenance check** -- a file is deleted only when the previous
+   lockfile recorded a content hash for it and the on-disk content still
+   matches. If the user edited the file after APM deployed it the hash
+   differs and the deletion is skipped with a warning. A claim without a
+   recorded hash (legacy or hand-edited lockfile) is kept with a warning,
+   so a lockfile row alone never authorizes deleting a file (#3663).
+   ``cowork://`` rows are exempt until install records their hashes.
 
 The helper records cleanup diagnostics via *diagnostics* (collect-then-
 render) and returns a :class:`CleanupResult` summarizing deleted, failed,
@@ -295,9 +296,8 @@ def remove_stale_deployed_files(
             (user-edit skip, unlink failure, refused directory entry)
             are pushed here.
         recorded_hashes: Mapping from rel-path to ``"sha256:<hex>"`` as
-            stored on the previous ``LockedDependency``. ``None`` (or
-            empty) disables the per-file provenance check entirely --
-            preserved for backward compat with pre-hash lockfiles.
+            stored on the previous ``LockedDependency``. A project file
+            without an entry is kept and reported in ``skipped_unmanaged``.
         failed_path_retained: When ``True`` (default, intra-package
             stale cleanup) the failure diagnostic tells the user APM
             will retry on the next install -- the caller is expected
@@ -386,6 +386,8 @@ def remove_stale_deployed_files(
                 from .copilot_cowork_paths import from_lockfile_path
 
                 stale_target = from_lockfile_path(stale_path, _cowork_root_cached)
+                # The lockfile records no hash for cowork:// rows yet.
+                hash_required = False
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -405,6 +407,7 @@ def remove_stale_deployed_files(
                 result.skipped_unmanaged.append(stale_path)
                 continue
             stale_target = project_root / stale_path
+            hash_required = True
 
         if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).
@@ -434,13 +437,24 @@ def remove_stale_deployed_files(
                 )
             continue
 
-        # Gate 3: provenance check. If APM recorded a content hash for
-        # this file at deploy time and it no longer matches, the user
-        # has edited the file -- skip deletion and warn so they can
-        # decide what to do. Fails CLOSED on hash-read errors: if APM
-        # cannot prove the file is unmodified (PermissionError, race,
+        # Gate 3: provenance check. Deletion requires a recorded content
+        # hash that still matches: a claim without a recorded hash proves
+        # nothing (#3663) and a mismatch means the user edited the file;
+        # both are kept with a warning. Fails CLOSED on hash-read errors: if
+        # APM cannot prove the file is unmodified (PermissionError, race,
         # etc.) we keep it rather than risk destroying user work.
         expected_hash = recorded_hashes.get(stale_path)
+        if hash_required and not expected_hash:
+            result.skipped_unmanaged.append(stale_path)
+            diagnostics.warn(
+                (
+                    f"Kept {stale_path}: the lockfile records no content hash "
+                    "proving APM deployed it. Delete it manually if you no "
+                    "longer need it."
+                ),
+                package=dep_key,
+            )
+            continue
         if expected_hash:
             if allow_final_symlink and stale_target.is_symlink():
                 result.skipped_user_edit.append(stale_path)

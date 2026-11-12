@@ -287,13 +287,14 @@ def test_real_cleanup_preserves_survivors_and_refusals_in_ledger(
     expected_bytes = deployed.read_bytes()
     cleanup.run(ctx)
 
-    retained = case not in {"last-claim", "no-hash"}
+    retained = case != "last-claim"
     assert deployed.exists() is retained
     if retained:
         assert deployed.read_bytes() == expected_bytes
-    refused = case in {"edited", "unlink-failed"}
+    # A claim without a recorded hash is kept, never deleted (#3663).
+    refused = case in {"edited", "unlink-failed", "no-hash"}
     assert ctx.package_deployed_files[owner] == ([path] if refused else [])
-    assert ctx.package_cleanup_retained == ({owner: hashes} if refused else {})
+    assert ctx.package_cleanup_retained == ({owner: {path: hashes.get(path)}} if refused else {})
     files, final_hashes, final_ledger = union_preserving(
         ctx.package_deployed_files[owner],
         {},

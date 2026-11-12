@@ -318,6 +318,8 @@ Lock files generated before this feature omit `content_hash`. APM handles this g
 
 On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not via `git rev-parse`, so a poisoned `.git/config` cannot subvert the check) and compares it to the lockfile's `resolved_commit`; on mismatch the cache entry is evicted and a fresh fetch runs. Local bundles get a fourth check: every file listed in `pack.bundle_files` is SHA-256 verified, symlinks under the bundle root are rejected, and unlisted files are flagged as a tampering signal.
 
+**Lockfile cleanup authority.** A committed `apm.lock.yaml` is reviewed input: `apm install`, `apm update`, `apm prune` and `apm uninstall` delete a deployed file it lists only when the file's recorded `deployed_file_hashes` entry still matches the bytes on disk. Files without a recorded hash, or with a mismatch, are kept with a warning. A lockfile row whose recorded hash matches the bytes on disk still authorizes deletion, even for a file APM never deployed, so review lockfile changes in pull requests like code.
+
 See the [Lock File Specification](../../reference/lockfile-spec/#44-content-integrity) for field details.
 
 ## Inventory export (SBOM)

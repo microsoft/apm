@@ -660,8 +660,9 @@ dependencies:
                 pass  # deleted - also acceptable
 
     def test_prune_cleans_deployed_files_from_lockfile(self):
-        """prune removes deployed integration files listed in the lockfile."""
-        lockfile_content = """\
+        """prune removes deployed integration files whose recorded hash matches."""
+        digest = hashlib.sha256(b"# Orphan prompt\n").hexdigest()
+        lockfile_content = f"""\
 version: 1
 dependencies:
   - repo_url: orphan-org/orphan-repo
@@ -670,6 +671,8 @@ dependencies:
     depth: 1
     deployed_files:
       - .github/prompts/orphan-prompt.md
+    deployed_file_hashes:
+      .github/prompts/orphan-prompt.md: sha256:{digest}
 """
         with self._chdir_tmp() as tmp:
             (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
@@ -682,6 +685,29 @@ dependencies:
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             assert not deployed.exists(), "Deployed file must be removed by prune"
+
+    def test_prune_keeps_deployed_file_without_recorded_hash(self):
+        """A lockfile claim without a recorded hash never deletes a file (#3663)."""
+        lockfile_content = """\
+version: 1
+dependencies:
+  - repo_url: orphan-org/orphan-repo
+    host: github.com
+    resolved_commit: abc123
+    depth: 1
+    deployed_files:
+      - .github/prompts/user-prompt.md
+"""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            _write_lockfile(tmp, lockfile_content)
+            user_file = tmp / ".github" / "prompts" / "user-prompt.md"
+            user_file.parent.mkdir(parents=True, exist_ok=True)
+            user_file.write_text("# Mine\n")
+            result = self.runner.invoke(cli, ["prune"])
+            assert result.exit_code == 0
+            assert user_file.read_text() == "# Mine\n"
 
     def test_prune_deletes_lockfile_when_empty(self):
         """prune deletes apm.lock.yaml entirely when all dependencies are pruned."""
