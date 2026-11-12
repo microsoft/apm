@@ -149,7 +149,9 @@ def test_silent_promisor_checkout_raises_auth_signal_and_lands_nothing(
     assert silent.triggered == 1
     assert AuthResolver.is_public_github_auth_failure(excinfo.value) is True
     assert "not materialized" in str(excinfo.value)
-    assert sorted(p.name for p in _shard_dir(cache_root, sha).iterdir()) == [
+    # Only variant directories count; filelock may leave sibling ``.lock``
+    # files behind depending on the platform.
+    assert sorted(p.name for p in _shard_dir(cache_root, sha).iterdir() if p.is_dir()) == [
         _variant_key(["packages/pkg-a"])
     ]
     retried = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse)
