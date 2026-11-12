@@ -346,18 +346,21 @@ Functions that already exceeded them are listed in
 keyed by file and function qualname. The list can only shrink.
 
 ```bash
-uv run --frozen --extra dev python scripts/check_complexity_ratchet.py
+git fetch origin main
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --base-ref origin/main
 ```
 
 The check fails when:
 
 - a function outside the baseline exceeds a limit (`# noqa` does not exempt it);
-- the baseline gains an entry compared with the base branch;
+- the baseline gains an entry compared with the base branch (needs `--base-ref`,
+  which CI always passes);
 - a listed function is now within limits but still in the baseline.
 
 Fix a new violation by splitting the function, not by editing the baseline.
-Moving or renaming a grandfathered function counts as new code. After you bring
-a grandfathered function within limits, prune its entry:
+Renaming a grandfathered function, or moving it to another file or class,
+counts as new code. After you bring a grandfathered function within limits,
+prune its entry:
 
 ```bash
 uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --update-baseline
