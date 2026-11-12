@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -673,6 +674,20 @@ def test_changed_mcp_dependencies_update_lockfile(tmp_path: Path) -> None:
         }
     }
     assert second_bytes != first_bytes
+
+
+def test_json_type_change_updates_mcp_config_baseline(tmp_path: Path) -> None:
+    """``1`` and ``true`` compare equal in Python but are different baselines."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    config = {"name": "local", "registry": False, "transport": "stdio", "command": "echo"}
+    for enabled in (True, 1):
+        MCPIntegrator.update_lockfile(
+            {"local"}, lock_path, mcp_configs={"local": {**config, "enabled": enabled}}
+        )
+
+    lock = LockFile.read(lock_path)
+    assert lock is not None
+    assert json.dumps(lock.mcp_configs["local"]["enabled"]) == "1"
 
 
 def test_changed_mcp_dependencies_refresh_legacy_generated_at(tmp_path: Path) -> None:

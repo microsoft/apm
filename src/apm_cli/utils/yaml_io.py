@@ -480,23 +480,26 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     """
     import frontmatter
 
+    text = text.removeprefix("\ufeff")
     if not _BOUNDED_FRONTMATTER_HANDLER.detect(text):
         return frontmatter.Post(text)
 
     try:
-        split = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+        _BOUNDED_FRONTMATTER_HANDLER.split(text)
         post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
     except yaml.YAMLError:
         raise
     except (IndexError, ValueError) as exc:
         raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:
-        _, body = split
-        if body.startswith("\r\n"):
-            body = body[2:]
-        elif body.startswith("\n"):
-            body = body[1:]
-        post.content = body
+        # The handler's delimiter regex consumes following whitespace too.
+        # Keep that authored whitespace, starting after the closing fence line.
+        normalized = text.removeprefix("\ufeff")
+        boundaries = _BOUNDED_FRONTMATTER_HANDLER.FM_BOUNDARY.finditer(normalized)
+        next(boundaries)
+        closing = next(boundaries)
+        line_break = normalized.find("\n", closing.start())
+        post.content = normalized[line_break + 1 :] if line_break != -1 else ""
     return post
 
 

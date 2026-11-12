@@ -275,6 +275,18 @@ class TestFilterFilesByTarget:
         assert ".grok/skills/x/SKILL.md" in filtered
         assert mappings[".grok/skills/x/SKILL.md"] == ".github/skills/x/SKILL.md"
 
+    def test_cross_map_github_to_grok_bot(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md", ".github/agents/a.md"]
+        filtered, mappings = _filter_files_by_target(files, "grok-bot")
+        # grok-bot is skills-only: skills remap to agent-data/workflows/,
+        # agents have no cross-map entry and are dropped (not direct, not mapped).
+        assert filtered == ["agent-data/workflows/x/SKILL.md"]
+        assert mappings == {
+            "agent-data/workflows/x/SKILL.md": ".github/skills/x/SKILL.md",
+        }
+
     def test_cross_map_github_to_grok_build(self):
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 

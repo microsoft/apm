@@ -20,7 +20,10 @@ def test_compile_claude_project_standards_is_not_duplicate_h1(
     """CLAUDE.md keeps Project Standards below the file title."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "apm.yml").write_text(
-        "name: single-h1-repro\nversion: 1.0.0\ntargets:\n  - claude\n  - codex\n",
+        (
+            "name: single-h1-repro\nversion: 1.0.0\ntargets:\n  - claude\n  - codex\n"
+            "dependencies:\n  apm:\n    - owner/package\n"
+        ),
         encoding="utf-8",
     )
 

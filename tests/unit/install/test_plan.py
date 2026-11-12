@@ -9,6 +9,8 @@ Issue: https://github.com/microsoft/apm/issues/1203
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.plan import (
     PlanEntry,
@@ -59,6 +61,51 @@ def _resolved_dep(repo_url: str, ref: str, commit: str | None) -> DependencyRefe
 
 
 class TestBuildUpdatePlan:
+    @pytest.mark.parametrize(
+        ("existing", "old_hash", "new_hash", "expected_action"),
+        [
+            (False, None, "sha256:new", "add"),
+            (True, "sha256:old", "sha256:new", "update"),
+            (True, None, "sha256:new", "update"),
+            (True, "sha256:same", "sha256:same", "unchanged"),
+            (True, "sha256:old", None, "unchanged"),
+        ],
+    )
+    def test_resolved_content_hash_controls_action_and_is_preserved(
+        self,
+        existing: bool,
+        old_hash: str | None,
+        new_hash: str | None,
+        expected_action: str,
+    ) -> None:
+        """Content can change independently of an unchanged ref and commit."""
+        dep = _resolved_dep("owner/package", "main", "a" * 40)
+        lock = _new_lockfile()
+        if existing:
+            locked = _locked(dep.repo_url, "main", "a" * 40)
+            locked.content_hash = old_hash
+            lock.add_dependency(locked)
+        hashes = {"unrelated/package": "sha256:unrelated"}
+        if new_hash is not None:
+            hashes[dep.get_unique_key()] = new_hash
+
+        plan = build_update_plan(lock, [dep], resolved_content_hashes=hashes)
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key=dep.get_unique_key(),
+                action=expected_action,
+                display_name=dep.repo_url,
+                old_resolved_ref="main" if existing else None,
+                old_resolved_commit="a" * 40 if existing else None,
+                old_content_hash=old_hash,
+                new_resolved_ref="main",
+                new_resolved_commit="a" * 40,
+                new_content_hash=new_hash,
+            ),
+        )
+        assert plan.has_changes is (expected_action != "unchanged")
+
     def test_entries_preserve_full_state_and_canonical_action_order(self):
         lock = _new_lockfile()
         update = _locked("https://github.com/u/r", "main", "a" * 40, ["update.md"])
@@ -241,6 +288,63 @@ class TestBuildUpdatePlan:
             "https://github.com/acme/old-selected-transitive": "remove",
         }
         assert plan.summary_counts["remove"] == 1
+
+    def test_selective_update_retained_entry_preserves_full_locked_state(self):
+        host = "ghe.example.com"
+        lock = _new_lockfile()
+        retained = LockedDependency(
+            repo_url="owner/retained",
+            host=host,
+            resolved_ref="v1",
+            resolved_commit="r" * 40,
+            depth=1,
+            deployed_files=[".github/skills/retained/SKILL.md"],
+        )
+        retained.content_hash = "sha256:retained"
+        lock.add_dependency(retained)
+        retained_key = retained.get_unique_key()
+        assert retained_key != retained.repo_url
+
+        plan = build_update_plan(lock, [], complete_resolved_dep_keys={retained_key})
+
+        assert plan.entries == (
+            PlanEntry(
+                dep_key=retained_key,
+                action="unchanged",
+                display_name="owner/retained",
+                old_resolved_ref="v1",
+                old_resolved_commit="r" * 40,
+                old_content_hash="sha256:retained",
+                new_resolved_ref="v1",
+                new_resolved_commit="r" * 40,
+                deployed_files=(".github/skills/retained/SKILL.md",),
+            ),
+        )
+
+    def test_entries_within_action_sort_by_display_name_not_key(self):
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="a/z",
+                host="ghe.example.com",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        lock.add_dependency(_locked("b/a", "main", "b" * 40))
+        hosted = DependencyReference(repo_url="a/z", host="ghe.example.com", reference="main")
+        hosted.resolved_reference = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            ref_name="main",
+            resolved_commit="a" * 40,
+        )
+
+        plan = build_update_plan(lock, [_resolved_dep("b/a", "main", "b" * 40), hosted])
+
+        assert sorted(entry.dep_key for entry in plan.entries)[0] == "b/a"
+        assert [entry.display_name for entry in plan.entries] == ["a/z", "b/a"]
 
     def test_selective_update_complete_keys_use_canonical_identity_for_all_sources(self):
         lock = _new_lockfile()
@@ -684,7 +788,7 @@ class TestLockfileSatisfiesManifest:
                 depth=1,
             )
         )
-        manifest = [DependencyReference.parse("git@git.example.com:org/private-skills.git")]
+        manifest = [DependencyReference.parse("git@git.example.com:org/private-skills.git#main")]
 
         ok, reasons = lockfile_satisfies_manifest(lock, manifest)
 
@@ -720,7 +824,7 @@ class TestLockfileSatisfiesManifest:
                 depth=1,
             )
         )
-        manifest = [DependencyReference.parse("git@github.com:org/public-skills.git")]
+        manifest = [DependencyReference.parse("git@github.com:org/public-skills.git#main")]
 
         ok, reasons = lockfile_satisfies_manifest(lock, manifest)
 
@@ -737,16 +841,130 @@ class TestLockfileSatisfiesManifest:
         assert len(reasons) == 1
         assert "missing" in reasons[0]
 
-    def test_local_deps_skipped(self):
-        """Local file deps have no remote ref, so they're skipped."""
+    @pytest.mark.parametrize(
+        ("manifest_ref", "locked_ref", "commit", "satisfied"),
+        [
+            (None, None, "a" * 40, True),
+            ("main", "main", "a" * 40, True),
+            ("release", "main", "a" * 40, False),
+            (None, "main", "a" * 40, False),
+            ("main", None, "a" * 40, False),
+            ("a" * 40, "a" * 40, "a" * 40, True),
+            ("A" * 40, "A" * 40, "a" * 40, True),
+            ("a" * 40, "a" * 40, "b" * 40, False),
+        ],
+    )
+    def test_frozen_compares_declared_identity_without_resolving_upstream(
+        self, manifest_ref: str | None, locked_ref: str | None, commit: str, satisfied: bool
+    ) -> None:
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package", resolved_ref=locked_ref, resolved_commit=commit
+            )
+        )
+        manifest = [DependencyReference(repo_url="owner/package", reference=manifest_ref)]
+        before = lock.to_yaml()
+        ok, reasons = lockfile_satisfies_manifest(lock, manifest)
+        assert ok is satisfied
+        assert bool(reasons) is not satisfied
+        assert lock.to_yaml() == before
+
+    def test_frozen_rejects_custom_host_backend_change(self):
+        """The same host/ref cannot reuse a lock from a different backend."""
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package",
+                host="code.example.com",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+            )
+        )
+        manifest = [
+            DependencyReference(
+                repo_url="owner/package",
+                host="code.example.com",
+                host_type="gitlab",
+                reference="main",
+            )
+        ]
+        before = lock.to_yaml()
+        assert lockfile_satisfies_manifest(lock, manifest) == (
+            False,
+            [
+                "  - code.example.com/owner/package: declared source, ref, host provider, "
+                "or transport differs from apm.lock.yaml"
+            ],
+        )
+        assert lock.to_yaml() == before
+
+    @pytest.mark.parametrize("locked_insecure", [False, True])
+    def test_frozen_git_semver_refuses_transport_change_and_recovers(
+        self, locked_insecure: bool
+    ) -> None:
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package",
+                resolved_ref="v1.2.3",
+                constraint="^1.2.0",
+                resolved_commit="a" * 40,
+                is_insecure=locked_insecure,
+            )
+        )
+        manifest = DependencyReference(
+            repo_url="owner/package", reference="^1.2.0", is_insecure=not locked_insecure
+        )
+        before = lock.to_yaml()
+        assert lockfile_satisfies_manifest(lock, [manifest]) == (
+            False,
+            [
+                "  - owner/package: declared source, ref, host provider, "
+                "or transport differs from apm.lock.yaml"
+            ],
+        )
+        assert lock.to_yaml() == before
+        manifest.is_insecure = locked_insecure
+        assert lockfile_satisfies_manifest(lock, [manifest]) == (True, [])
+        assert lock.to_yaml() == before
+
+    @pytest.mark.parametrize(
+        ("manifest_host_type", "locked_host_type"), [(None, "gitlab"), ("gitlab", None)]
+    )
+    def test_frozen_accepts_explicit_and_inferred_equivalent_provider_forms(
+        self, manifest_host_type: str | None, locked_host_type: str | None
+    ) -> None:
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/package",
+                host="gitlab.com",
+                host_type=locked_host_type,
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+            )
+        )
+        manifest = [
+            DependencyReference(
+                repo_url="owner/package",
+                host="gitlab.com",
+                host_type=manifest_host_type,
+                reference="main",
+            )
+        ]
+        assert lockfile_satisfies_manifest(lock, manifest) == (True, [])
+
+    def test_local_deps_require_locked_evidence(self):
+        """Local dependencies require a recorded baseline even without a ref."""
         lock = _new_lockfile()
         local = DependencyReference(repo_url="local", local_path="./vendor/pkg")
         local.is_local = True
 
         ok, reasons = lockfile_satisfies_manifest(lock, [local])
 
-        assert ok is True
-        assert reasons == []
+        assert ok is False
+        assert reasons == ["  - ./vendor/pkg is declared in apm.yml but missing from apm.lock.yaml"]
 
     def test_orphan_lockfile_entries_do_not_fail_check(self):
         """Lock has extra entries not in manifest -- structural check passes."""

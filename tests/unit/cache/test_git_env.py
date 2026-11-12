@@ -1,14 +1,17 @@
 """Tests for git subprocess environment sanitization."""
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
 import pytest
 
+from apm_cli.utils import git_env
 from apm_cli.utils.git_env import (
     _STRIP_GIT_VARS,
     GitConfigEntry,
@@ -16,9 +19,11 @@ from apm_cli.utils.git_env import (
     GitUrlRewriteProbeError,
     _GitConfigSnapshot,
     _resolve_trusted_executable,
+    checkout_git_worktree,
     clone_git_worktree,
     get_gh_executable,
     get_git_executable,
+    git_autocrlf_pin_args,
     git_network_env,
     git_remote_refs,
     git_subprocess_env,
@@ -44,6 +49,41 @@ def _run_real_git_config_and_fake_clone(args, **kwargs):
     return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Modern qualified PATHEXT lookup")
+@pytest.mark.parametrize("name", ["git", "gh"])
+def test_modern_windows_missing_lookup_scales_linearly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Count real stdlib candidate probes without repeating modern PATHEXT scans."""
+    project = tmp_path / "project"
+    trusted_bin = tmp_path / "tools"
+    project.mkdir()
+    trusted_bin.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(shutil, "sys", SimpleNamespace(platform="win32"))
+    counts = []
+    for size in (20, 200):
+        extensions = [f".EXT{index}" for index in range(size)]
+        monkeypatch.setenv("PATHEXT", os.pathsep.join(extensions))
+        monkeypatch.setattr(
+            git_env,
+            "os",
+            SimpleNamespace(
+                name="nt",
+                pathsep=";",
+                environ={"PATHEXT": ";".join(extensions)},
+                get_exec_path=lambda: [str(trusted_bin)],
+            ),
+        )
+        with patch("shutil._access_check", return_value=False) as access:
+            with pytest.raises(FileNotFoundError, match="trusted PATH"):
+                _resolve_trusted_executable(name)
+            counts.append(access.call_count)
+
+    assert counts == [20, 200]
+
+
+@pytest.mark.trusted_executable
 class TestGetGitExecutable:
     """Test cached git binary lookup."""
 
@@ -94,6 +134,7 @@ class TestGetGitExecutable:
         assert mock_resolve.call_count == 2
 
 
+@pytest.mark.trusted_executable
 class TestGetGhExecutable:
     """Test cached GitHub CLI binary lookup."""
 
@@ -112,6 +153,7 @@ class TestGetGhExecutable:
             get_gh_executable()
 
 
+@pytest.mark.trusted_executable
 class TestResolveTrustedExecutable:
     """Test exclusion of executable candidates controlled by the project."""
 
@@ -136,6 +178,92 @@ class TestResolveTrustedExecutable:
 
         assert result == str((trusted_bin / "git").resolve())
         mock_which.assert_called_once_with(str(trusted_bin / "git"))
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    @pytest.mark.parametrize("extension", [".EXE", ".CMD"])
+    def test_real_lookup_expands_extensions_without_searching_project_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, extension: str
+    ) -> None:
+        """Real filesystem lookup honors PATH even with a project-local shadow."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "trusted tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        filename = f"{name}{extension}" if sys.platform == "win32" else name
+        trusted_executable = trusted_bin / filename
+        trusted_executable.touch()
+        trusted_executable.chmod(0o700)
+        shadow = project / filename
+        shadow.touch()
+        shadow.chmod(0o700)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(project), str(trusted_bin)]))
+        monkeypatch.setenv("PATHEXT", ".EXE;.CMD")
+        monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
+
+        assert _resolve_trusted_executable(name) == str(trusted_executable.resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    @pytest.mark.parametrize("marker", [".git", "apm.yml"])
+    def test_real_lookup_excludes_nested_project_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, marker: str
+    ) -> None:
+        """Both repository and manifest roots exclude executable descendants."""
+        project = tmp_path / "project"
+        nested = project / "nested"
+        nested.mkdir(parents=True)
+        (project / marker).touch()
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        executable = project / filename
+        executable.touch()
+        executable.chmod(0o700)
+        monkeypatch.chdir(nested)
+        monkeypatch.setenv("PATH", str(project))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            _resolve_trusted_executable(name)
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_real_lookup_preserves_path_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """An earlier trusted PATH directory wins without recursive discovery."""
+        project = tmp_path / "project"
+        project.mkdir()
+        directories = [tmp_path / "first", tmp_path / "second"]
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        for directory in directories:
+            directory.mkdir()
+            executable = directory / filename
+            executable.touch()
+            executable.chmod(0o700)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", os.pathsep.join(map(str, directories)))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        assert _resolve_trusted_executable(name) == str((directories[0] / filename).resolve())
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_real_lookup_rejects_symlink_into_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """A trusted directory cannot redirect execution into the excluded project."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        filename = f"{name}.exe" if sys.platform == "win32" else name
+        target = project / filename
+        target.touch()
+        target.chmod(0o700)
+        (trusted_bin / filename).symlink_to(target)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("PATH", str(trusted_bin))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+
+        with pytest.raises(FileNotFoundError, match="trusted PATH"):
+            _resolve_trusted_executable(name)
 
     def test_rejects_candidate_resolving_inside_worktree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1480,3 +1608,113 @@ class TestGitSubprocessEnv:
             )
 
         assert token not in str(raised.value)
+
+
+class TestUncachedFallbackLineEndings:
+    """The uncached fallback clone and its checkout must agree on line endings.
+
+    A host ``core.autocrlf=true`` is frozen into the clone's environment
+    (apm#2971), which rewrote LF-committed blobs as CRLF; the follow-up
+    ``git checkout <locked sha>`` then saw every file as modified and refused
+    (apm#3368).
+    """
+
+    def test_clone_and_checkout_pin_autocrlf_false(self, tmp_path) -> None:
+        assert git_autocrlf_pin_args() == ("-c", "core.autocrlf=false")
+
+        with patch(
+            "apm_cli.utils.git_env.subprocess.run",
+            side_effect=_run_real_git_config_and_fake_clone,
+        ) as run:
+            clone_git_worktree(
+                "https://git.example.com/acme/repo",
+                tmp_path / "clone",
+                env={"PATH": os.environ.get("PATH", "")},
+            )
+
+        clone_argv = run.call_args_list[-1].args[0]
+        clone_pin = clone_argv.index("core.autocrlf=false")
+        assert clone_argv[clone_pin - 1] == "-c"
+        assert clone_pin < clone_argv.index("clone")
+
+        with patch("apm_cli.utils.git_env.subprocess.run") as checkout_run:
+            checkout_git_worktree(
+                tmp_path / "clone",
+                "0123456789abcdef0123456789abcdef01234567",
+                env={"PATH": os.environ.get("PATH", "")},
+            )
+
+        checkout_argv = checkout_run.call_args.args[0]
+        checkout_pin = checkout_argv.index("core.autocrlf=false")
+        assert checkout_argv[checkout_pin - 1] == "-c"
+        assert checkout_pin < checkout_argv.index("checkout")
+
+    def test_locked_sha_checks_out_from_a_crlf_host(self, tmp_path, monkeypatch) -> None:
+        """End-to-end reproduction: clone under a CRLF host, then check out an older SHA."""
+        git = get_git_executable()
+        host_config = tmp_path / "host.gitconfig"
+        host_config.write_text("[core]\n\tautocrlf = true\n", encoding="utf-8")
+        empty_config = tmp_path / "empty.gitconfig"
+        empty_config.write_text("", encoding="utf-8")
+
+        src = tmp_path / "src"
+        src.mkdir()
+        subprocess.run([git, "init", "-q", "-b", "main", str(src)], check=True)
+        tracked = src / "f.txt"
+        tracked.write_bytes(b"a\nb\n")
+
+        def _commit(message: str) -> None:
+            subprocess.run(
+                [git, "-C", str(src), "-c", "user.name=t", "-c", "user.email=t@t", "add", "f.txt"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    git,
+                    "-C",
+                    str(src),
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "commit",
+                    "-qm",
+                    message,
+                ],
+                check=True,
+            )
+
+        _commit("one")
+        old_sha = subprocess.run(
+            [git, "-C", str(src), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        tracked.write_bytes(b"a\nb\nc\n")
+        _commit("two")
+
+        # Host-level config that the clone snapshot freezes into the child env.
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(host_config))
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        reset_git_cache()
+        isolated = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(empty_config)}
+
+        target = tmp_path / "wt"
+        clone_git_worktree(src.resolve().as_uri(), target, env=isolated)
+
+        assert tracked.read_bytes().replace(b"\r\n", b"\n") == b"a\nb\nc\n"
+        assert (target / "f.txt").read_bytes() == b"a\nb\nc\n", (
+            "clone must write the committed LF bytes"
+        )
+
+        checkout_git_worktree(target, old_sha, env=isolated)
+
+        head = subprocess.run(
+            [git, "-C", str(target), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert head == old_sha
+        assert (target / "f.txt").read_bytes() == b"a\nb\n"

@@ -1,6 +1,7 @@
 """Tests for MCP overlay functionality: MCPDependency model, self-defined server
 info building, overlay application, and install flow integration."""
 
+from copy import deepcopy
 from unittest.mock import ANY, MagicMock, patch  # noqa: F401
 
 import pytest
@@ -33,6 +34,18 @@ class TestMCPDependencyModel:
         assert dep.name == "my-server"
         assert dep.transport is None
         assert dep.env is None
+        assert dep.has_enabled is False
+        assert "enabled" not in dep.to_dict()
+        assert deepcopy(dep).has_enabled is False
+
+    @pytest.mark.parametrize("enabled", [False, "false", None])
+    def test_opencode_enabled_is_preserved_without_coercion(self, enabled):
+        dep = MCPDependency.from_dict({"name": "my-server", "enabled": enabled})
+
+        assert dep.has_enabled is True
+        assert dep.enabled == enabled
+        assert type(dep.enabled) is type(enabled)
+        assert dep.to_dict()["enabled"] == enabled
 
     def test_from_dict_full_overlay(self):
         dep = MCPDependency.from_dict(
@@ -674,6 +687,15 @@ class TestBuildSelfDefinedServerInfo:
         result = MCPIntegrator._build_self_defined_info(dep)
         assert "_apm_tools_override" not in result
 
+    @pytest.mark.parametrize("enabled", [False, "false", None])
+    def test_opencode_enabled_embedded_without_coercion(self, enabled):
+        dep = MCPDependency.from_dict({"name": "enabled-srv", "enabled": enabled})
+
+        result = MCPIntegrator._build_self_defined_info(dep)
+
+        assert result["_apm_opencode_enabled"].value == enabled
+        assert type(result["_apm_opencode_enabled"].value) is type(enabled)
+
 
 # ---------------------------------------------------------------------------
 # _apply_mcp_overlay
@@ -741,6 +763,25 @@ class TestApplyMCPOverlay:
         dep = MCPDependency(name="srv")
         MCPIntegrator._apply_overlay(cache, dep)
         assert cache["srv"]["packages"] == original["packages"]
+        assert "_apm_opencode_enabled" not in cache["srv"]
+
+    def test_registry_cannot_supply_opencode_enabled_marker(self):
+        cache = {"srv": {"packages": [], "_apm_opencode_enabled": False}}
+        dep = MCPDependency(name="srv")
+
+        MCPIntegrator._apply_overlay(cache, dep)
+
+        assert "_apm_opencode_enabled" not in cache["srv"]
+
+    @pytest.mark.parametrize("enabled", [False, "false", None])
+    def test_opencode_enabled_overlay_is_preserved_without_coercion(self, enabled):
+        cache = {"srv": {"packages": [{"registry_name": "npm"}]}}
+        dep = MCPDependency.from_dict({"name": "srv", "enabled": enabled})
+
+        MCPIntegrator._apply_overlay(cache, dep)
+
+        assert cache["srv"]["_apm_opencode_enabled"].value == enabled
+        assert type(cache["srv"]["_apm_opencode_enabled"].value) is type(enabled)
 
     def test_missing_server_info_noop(self):
         cache = {}
@@ -883,3 +924,24 @@ class TestInstallMCPDepsWithOverlays:
         # Both deps result in _install_for_runtime calls (1 registry + 1 self-defined)
         assert mock_install_runtime.call_count == 2
         assert count == 2
+
+
+@pytest.mark.parametrize(
+    ("stored", "current"),
+    [(False, 0), (0, False), (True, 1), (1, True), ([False], [0]), ({"x": 1}, {"x": True})],
+)
+def test_opencode_enabled_drift_preserves_json_type(stored: object, current: object) -> None:
+    dep = MCPDependency.from_dict({"name": "typed", "enabled": current})
+    assert MCPIntegrator._detect_mcp_config_drift(
+        [dep], {"typed": {"name": "typed", "enabled": stored}}
+    ) == {"typed"}
+
+
+def test_opencode_enabled_object_order_does_not_create_drift() -> None:
+    dep = MCPDependency.from_dict({"name": "typed", "enabled": {"first": 1, "second": False}})
+    assert (
+        MCPIntegrator._detect_mcp_config_drift(
+            [dep], {"typed": {"name": "typed", "enabled": {"second": False, "first": 1}}}
+        )
+        == set()
+    )

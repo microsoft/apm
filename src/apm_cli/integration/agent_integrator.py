@@ -20,6 +20,7 @@ from apm_cli.install.primitive_classification import (
 )
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.primitives.models import resolve_user_invocable
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -412,6 +413,52 @@ class AgentIntegrator(BaseIntegrator):
         re.DOTALL,
     )
 
+    # Bound the dropped-fields diagnostic to a fixed number of named keys so
+    # hostile/oversized frontmatter (many keys) cannot blow up a single CLI
+    # diagnostic line; the remainder is summarized by count instead of
+    # enumerated.
+    _MAX_DROPPED_FIELDS_SHOWN = 5
+    # Bound each individually-named key to a fixed display length so a
+    # single hostile/oversized key name cannot blow up a single CLI
+    # diagnostic line either; combined with _MAX_DROPPED_FIELDS_SHOWN this
+    # bounds the whole diagnostic's total length.
+    _MAX_DROPPED_FIELD_KEY_LEN = 60
+
+    # Native string fields Codex itself recognizes and whose declared value
+    # takes precedence over any APM default. Single source of truth for both
+    # the model-settings extraction loop and the dropped-fields exclusion set
+    # below, so adding a third recognized field only requires one edit here.
+    _CODEX_MODEL_FIELDS = ("model", "model_reasoning_effort")
+    # 'user-invocable' and its 'visibility' alias are recognized-but-lossy:
+    # they get their own dedicated diagnostic via _warn_user_invocable_dropped
+    # (with the actionable 'cannot be guaranteed' hint), so they must be
+    # excluded here to avoid a second, generic dropped-fields warning for the
+    # same key.
+    _CODEX_KNOWN_FIELDS = frozenset(
+        {"name", "description", "tools", "user-invocable", "visibility", *_CODEX_MODEL_FIELDS}
+    )
+
+    @staticmethod
+    def _display_dropped_field_key(field: object) -> str:
+        """Render one dropped frontmatter key name, bounded and ASCII-safe.
+
+        ``field`` stays ``object`` (not a narrower union) because the YAML
+        frontmatter loader (``load_yaml_str``) accepts the full YAML 1.1 key
+        domain, including ``datetime.date`` (bare ``2026-10-05:`` keys) and
+        ``bytes`` (``!!binary`` keys) -- neither representable by a small
+        str/int/float/bool/None union. ``str(field)`` below covers all of
+        them uniformly.
+
+        Sanitizes control/non-ASCII characters first, then truncates the
+        *displayed* key (never the full value) so a single oversized key
+        name cannot blow up the diagnostic line.
+        """
+        text = printable_ascii_text(str(field))
+        max_len = AgentIntegrator._MAX_DROPPED_FIELD_KEY_LEN
+        if len(text) > max_len:
+            text = text[:max_len] + "...(truncated)"
+        return text
+
     @staticmethod
     def _warn_codex_unverified_scope(
         diagnostics: DiagnosticCollector | None,
@@ -454,6 +501,52 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     @staticmethod
+    def _warn_user_invocable_dropped(
+        fm,
+        source: Path,
+        target_name: str,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Warn that a target renderer cannot carry programmatic-only status.
+
+        No-ops when diagnostics are unavailable, the frontmatter is not a
+        mapping, or the agent resolves as user-invocable (the default). The
+        single interpretation authority is resolve_user_invocable(), shared
+        with the parser, so the model and the integrator agree on meaning:
+        the source may have set 'user-invocable: false' directly or only the
+        'visibility: internal' alias.
+
+        The emitted diagnostic is a warning (lossy compilation), not an error:
+        the agent is still deployed, but this renderer cannot encode the
+        source's programmatic-only intent, so that semantic cannot be
+        guaranteed after the render. The APM source frontmatter remains the
+        authority; operators who must keep the agent out of a user-facing
+        picker should not generate/deploy it for this target, or should
+        prefer a target that preserves 'user-invocable'.
+        """
+        if diagnostics is None:
+            return
+        if not isinstance(fm, dict):
+            return
+        if resolve_user_invocable(fm):
+            return
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"{target_name} agent {printable_ascii_text(source.name)}: user-invocability "
+                "(resolved from 'user-invocable' or the 'visibility: internal' alias) cannot be "
+                "represented in this target format; programmatic-only semantics cannot be "
+                "guaranteed after this lossy render."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "The APM source agent remains the authority for user-invocability. Mitigation: "
+                "do not generate/deploy this agent for this target if it must stay out of a "
+                "user-facing agent picker, or prefer a target that preserves 'user-invocable'."
+            ),
+        )
+
+    @staticmethod
     def _write_codex_agent(
         source: Path,
         target: Path,
@@ -463,8 +556,8 @@ class AgentIntegrator(BaseIntegrator):
     ) -> None:
         """Transform an ``.agent.md`` file to Codex ``.toml`` format.
 
-        Parses YAML frontmatter for ``name`` and ``description``, uses
-        the markdown body as ``developer_instructions``.
+        Preserves ``name``, ``description``, and native model settings;
+        uses the markdown body as ``developer_instructions``.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -477,6 +570,7 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        model_settings: dict[str, str] = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
@@ -486,6 +580,58 @@ class AgentIntegrator(BaseIntegrator):
                 if isinstance(fm, dict):
                     name = fm.get("name", name)
                     description = fm.get("description", description)
+                    for field in AgentIntegrator._CODEX_MODEL_FIELDS:
+                        if field not in fm:
+                            continue
+                        if isinstance(fm[field], str):
+                            model_settings[field] = fm[field]
+                        elif diagnostics is not None:
+                            diagnostics.lossy_agent_compilation(
+                                message=(
+                                    f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                    f"field '{field}' must be a string and was dropped."
+                                ),
+                                package=printable_ascii_text(package_name),
+                                detail=(
+                                    f"Fix: set '{field}' to a string in the source agent, "
+                                    "then rerun 'apm install'."
+                                ),
+                            )
+                    # Collect only the raw dropped keys here (no formatting)
+                    # so hostile frontmatter with many keys does not force
+                    # rendering every key just to discard most of them below.
+                    dropped_field_names = [
+                        field for field in fm if field not in AgentIntegrator._CODEX_KNOWN_FIELDS
+                    ]
+                    if dropped_field_names and diagnostics is not None:
+                        shown_names = dropped_field_names[
+                            : AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN
+                        ]
+                        remaining = len(dropped_field_names) - len(shown_names)
+                        shown_fields = [
+                            f"'{AgentIntegrator._display_dropped_field_key(field)}'"
+                            for field in shown_names
+                        ]
+                        fields_text = ", ".join(shown_fields)
+                        if remaining > 0:
+                            fields_text += f" (and {remaining} more)"
+                        singular = len(dropped_field_names) == 1
+                        field_label = "field" if singular else "fields"
+                        dropped_verb = "was" if singular else "were"
+                        field_reference = "this field" if singular else "these fields"
+                        setting_reference = "its setting" if singular else "their settings"
+                        diagnostics.lossy_agent_compilation(
+                            message=(
+                                f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
+                                f"{field_label} {fields_text} {dropped_verb} dropped; "
+                                "this metadata is not translated by APM for Codex."
+                            ),
+                            package=printable_ascii_text(package_name),
+                            detail=(
+                                f"Fix: remove {field_reference} if unnecessary; otherwise do not "
+                                f"rely on {setting_reference} in the generated Codex agent."
+                            ),
+                        )
                 else:
                     AgentIntegrator._warn_codex_unverified_scope(
                         diagnostics,
@@ -501,6 +647,9 @@ class AgentIntegrator(BaseIntegrator):
                         source,
                         package_name,
                     )
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Codex", diagnostics, package_name
+                )
             except yaml.YAMLError:
                 AgentIntegrator._warn_codex_unverified_scope(
                     diagnostics,
@@ -513,6 +662,7 @@ class AgentIntegrator(BaseIntegrator):
         doc = {
             "name": name,
             "description": description,
+            **model_settings,
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))
@@ -654,6 +804,10 @@ class AgentIntegrator(BaseIntegrator):
                 if "tools" in out_fm:
                     out_fm_ordered["tools"] = out_fm["tools"]
                 out_fm = out_fm_ordered
+
+                AgentIntegrator._warn_user_invocable_dropped(
+                    fm, source, "Kiro", diagnostics, package_name
+                )
 
         if out_fm:
             fm_text = yaml_to_str(out_fm)

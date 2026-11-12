@@ -10,7 +10,11 @@ for issue-first scope approval, PR eligibility, small corrections, private
 security reporting, and the transition for existing contributions.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
-Its [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
+The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)
+lists names, GitHub IDs, and affiliations. See
+[contributor credit](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#contributors)
+in the contribution guide.
+The [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
 separates priorities from scope approval and release targets. Follow the public
 [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) for current
 Now / Next / Later priorities.
@@ -30,6 +34,11 @@ cd apm
 uv sync --extra dev
 ```
 
+For binary builds, install the locked build tools with
+`uv sync --frozen --extra dev --extra build`. PyInstaller 6.17 or newer is
+required for compatibility with setuptools 83, which no longer provides
+`pkg_resources`.
+
 ## Optional agent tools
 
 No AI tool, harness, or repository skill is required to contribute. APM
@@ -44,13 +53,38 @@ for human review.
 Issue triage produces a recommendation and a **proposed** scope, done-when,
 exclusions, and review-needs brief. Maintainers still decide acceptance,
 priority, contributor invitations, and milestones. The
-[triage label contract](https://github.com/microsoft/apm/blob/main/packages/apm-triage-panel/assets/label-contract.json)
+[triage label contract](https://github.com/microsoft/apm/blob/main/packages/autopilot/autopilot-issue-triage-worker/assets/label-contract.json)
 separates those decisions from advisory processing. During compatibility
 rollout, both `status/triaged` and `triage/recommended` mean completed
-automated advice, not human review. The new writer uses `triage/recommended`
-after the canonical label is provisioned and this code is deployed.
+automated advice, not human review. Sweep fetch excludes those labels
+so already-advised open issues and PRs are not re-listed. The new writer
+uses `triage/recommended` after the canonical label is provisioned and
+this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
+
+The scheduled Triage Panel (also used by a blank manual dispatch) fetches
+labels and complete comments before selecting at most five issues. It
+excludes accepted/declined issues and any issue with an `apm-scope:v1`
+marker, uses the repository default Copilot model
+(`GH_AW_MODEL_AGENT_COPILOT`, else `auto`), and must account for every selected issue
+within the 30-minute job timeout. Read failures stop selection rather than
+turning incomplete evidence into an empty queue. Explicit `triage/requested`
+and numbered dispatches retain their existing behavior. Deterministic
+selection tests do not establish model reliability: acceptance of this
+repair still requires a week of real scheduled outcomes after deployment.
+Run logs include scanned and selected counts: the five-item cap limits
+selection, not the evidence reads needed to find eligible issues.
+
+PR review is the same shape: `panel-review` requests a fresh
+advisory pass (`autopilot-pr-review-worker`). `status/accepted`
+(on the PR or a linked issue) is the human action flag -- no
+accepted, no review. If acceptance is missing, scheduler and
+review-worker stop with no comment. The worker may clear
+`panel-review`; the scheduler does not comment or change labels.
+The review is advisory and does not gate merge. Drive-to-merge
+(`autopilot-pr-merge-worker`) is summoned by name and is never
+composed by the review scheduler.
 
 ### Eligibility evidence and automation
 
@@ -172,6 +206,15 @@ uv run pytest tests/unit -x -v
 to force serial execution. The default selection in `pyproject.toml` excludes
 `benchmark` and `live` tests.
 
+For performance changes, prefer deterministic operation-count regressions over
+wall-clock thresholds. Run the consolidated scan regressions with
+`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py`.
+They check deferred error-only imports, at most two indexed ZIP member lookups,
+and uninstall deduplication without comparing previously selected entries.
+Archive parsing and canonical dependency matching retain their existing costs.
+Deferring a direct import does not prove a cold-start speedup: other modules may
+still load the same dependency transitively.
+
 Without `uv`, use a standard Python venv and pip:
 
 ```bash
@@ -259,6 +302,10 @@ The reviewed survivor allowlist lives in
 [`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
 Do not update it to make a run green. Review every surviving diff with
 `mutmut show` and add behavioral tests for real contract gaps.
+Mutant numbers can shift when a function changes. Compare the old and new
+diffs before replacing an accepted ID; a renamed survivor is not a newly
+killed behavior. Add missing coverage to the owner's configured test seam,
+not only to tests outside the pilot.
 Use `--update-baseline` only when the baseline change itself has been reviewed:
 
 ```bash
@@ -352,15 +399,16 @@ WIP push.
 ### Workflow dependency updates
 
 When updating actions in generated `.github/workflows/*.lock.yml` files,
-keep their `gh-aw-manifest` headers, human-readable action lists, and
-`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
-Dependabot does not update those metadata records. Preserve the compiler
-version and source hashes for dependency-only edits; recompile with
-`gh aw compile` when changing workflow source.
+align `gh-aw-manifest` headers, action lists, and `.github/aw/actions-lock.json`
+entries with runtime `uses:` pins. Dependabot does not update this metadata.
+Preserve compiler versions and source hashes for dependency-only edits.
+For source changes, including comments, run `gh aw compile` with the repository's
+pinned compiler version from `.github/workflows/copilot-setup-steps.yml`.
+Commit source and regenerated lock together; do not edit compiler metadata by hand.
 
-Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
-to check setup and app-token action pin consistency across the manifest-bearing
-workflows.
+Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py tests/unit/test_shared_apm_workflow_contract.py`
+to check triage/review source freshness across line endings, compiler-header
+consistency with the repository pin, and action-pin consistency.
 
 ### Code scanning on pull requests and merge queues
 
@@ -482,3 +530,13 @@ The workflow distinguishes three modes:
 
 These checks cannot detect every semantic drift. Choosing the appropriate
 mode remains a human decision; the harness exposes the choice, not the answer.
+
+The same limit applies to the `apm-spec-guardian` skill's review panel. Its
+synthesizer-return schema validates that a `defer_v0_2` entry's
+`reserved_slot_anchor` field is **present and of type string** -- a
+structural, type-only check. It does not verify that the cited anchor is one of
+the spec's actual reserved-for-v0.2 sections (for example Section 4.8
+workspaces, Section 7.9 version withdrawal, Section 10.12 publisher
+attestations, or Appendix B). Confirming that a cited anchor genuinely
+reserves the space it claims remains a human/panel judgment, not something
+schema validation can substitute for.

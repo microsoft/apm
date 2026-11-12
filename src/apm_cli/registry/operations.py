@@ -153,11 +153,13 @@ class MCPServerOperations:
                                     installed_ids.add(server_id)
 
                     elif runtime == "codex":
+                        from ..adapters.client.codex import CodexClientAdapter
+
                         # Codex stores servers as mcp_servers.{name} sections in config.toml
                         mcp_servers = config.get("mcp_servers", {})
                         for server_name, server_config in mcp_servers.items():  # noqa: B007
                             if isinstance(server_config, dict):
-                                server_id = server_config.get("id")
+                                server_id = CodexClientAdapter.get_registry_id(server_config)
                                 if server_id:
                                     installed_ids.add(server_id)
 
@@ -289,23 +291,43 @@ class MCPServerOperations:
 
         return valid_servers, invalid_servers
 
-    def batch_fetch_server_info(self, server_references: list[str]) -> dict[str, dict | None]:
+    def batch_fetch_server_info(
+        self,
+        server_references: list[str],
+        max_workers: int = 4,
+    ) -> dict[str, dict | None]:
         """Batch fetch server info for all servers to avoid duplicate registry calls.
+
+        Each registry lookup is independent. Lookups run in a bounded
+        ThreadPoolExecutor (same pattern as ``check_servers_needing_installation``)
+        and results are collected in submission order via ``executor.map``.
+        The shared registry client's ``find_server_by_reference`` must support
+        concurrent calls. Callers must not change the client's configuration
+        until the batch completes.
 
         Args:
             server_references: List of MCP server references
+            max_workers: Requested parallel lookups; clamped to 4.
 
         Returns:
             Dictionary mapping server reference to server info (or None if not found)
         """
-        server_info_cache = {}
+        from concurrent.futures import ThreadPoolExecutor
 
-        for server_ref in server_references:
+        def _fetch_one(server_ref: str) -> tuple[str, dict | None]:
             try:
-                server_info = self.registry_client.find_server_by_reference(server_ref)
-                server_info_cache[server_ref] = server_info
+                return (server_ref, self.registry_client.find_server_by_reference(server_ref))
             except Exception:
-                server_info_cache[server_ref] = None
+                return (server_ref, None)
+
+        server_info_cache: dict[str, dict | None] = {}
+        if not server_references:
+            return server_info_cache
+
+        workers = min(max(1, max_workers), 4, len(server_references))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-fetch") as executor:
+            for server_ref, server_info in executor.map(_fetch_one, server_references):
+                server_info_cache[server_ref] = server_info
 
         return server_info_cache
 

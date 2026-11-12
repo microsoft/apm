@@ -73,6 +73,29 @@ def _resolve_relative_hook_script(
     return last_candidate
 
 
+def resolve_plugin_root_hook_script(
+    package_path: Path,
+    rel_path: str,
+    *,
+    hook_file_dir: Path | None = None,
+) -> Path:
+    """Resolve a plugin-root resource, optionally accepting a producer hooks root.
+
+    Installation keeps package-root semantics. Producers may supply the source
+    descriptor directory for resources authored relative to that hooks root.
+    Return the lexical path so callers can reject symlinked source components.
+    """
+    candidate = package_path / rel_path
+    resolved = ensure_path_within(candidate, package_path)
+    if hook_file_dir is None:
+        return resolved
+    if candidate.exists() or candidate.is_symlink():
+        return candidate
+    fallback = hook_file_dir / rel_path
+    ensure_path_within(fallback, package_path)
+    return fallback if fallback.exists() or fallback.is_symlink() else candidate
+
+
 def _referenced_hook_source_files(
     data: dict,
     package_path: Path,
@@ -84,9 +107,9 @@ def _referenced_hook_source_files(
         command = normalize_quoted_plugin_root(declaration.command)
         for match in iter_plugin_root_paths(command):
             try:
-                source_file = ensure_path_within(
-                    package_path / plugin_root_relative_path(match.group(1)),
+                source_file = resolve_plugin_root_hook_script(
                     package_path,
+                    plugin_root_relative_path(match.group(1)),
                 )
             except PathTraversalError:
                 continue

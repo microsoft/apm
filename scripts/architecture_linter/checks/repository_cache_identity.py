@@ -19,9 +19,10 @@ every load-bearing shape the helper asserts:
 * ``_repository_cache_identity`` *directly returns* the composition
   ``normalize_repo_url(dep_ref.to_github_url())`` -- one return, no keywords,
   and no intermediate binding that could truncate the value first.
-* ``L0PerRunCache.try_resolve``, ``TieredRefResolver.resolve``, and
-  ``TieredRefResolver.seed`` consume that helper directly, with the exact
-  call/assignment counts and argument positions the helper requires.
+* ``L0PerRunCache.try_resolve`` and fresh ``TieredRefResolver.resolve`` results
+  consume that helper directly. Lockfile seeds remain isolated in a
+  dependency-scoped key that composes package identity, repository/transport
+  identity, effective host-provider identity, and ref.
 * Every fail-closed case: a missing owner path, an unparseable owner source,
   and each individually missing method or function.
 
@@ -81,6 +82,7 @@ L0_METHOD = "try_resolve"
 RESOLVER_CLASS = "TieredRefResolver"
 RESOLVE_METHOD = "resolve"
 SEED_METHOD = "seed"
+LOCK_SEED_KEY_METHOD = "_lock_seed_key"
 
 _NORMALIZER = "normalize_repo_url"
 _REPOSITORY_URL = "repository_url"
@@ -91,7 +93,9 @@ _DEP_REF = "dep_ref"
 _GITHUB_URL = "dep_ref.to_github_url"
 _BARE_LOOKUP = "self._find_repo_bare"
 _L0_GET = "self.cache.get"
-_SEED_PUT = "self._cache.put"
+_LOCK_SEED_STORE = "self._lock_seeds"
+_LOCK_SEED_GET = "self._lock_seeds.get"
+_EFFECTIVE_HOST_PROVIDER_IDENTITY = "effective_host_provider_identity"
 
 # --------------------------------------------------------------------------
 # Diagnostic messages (verbatim from the helper).
@@ -128,9 +132,16 @@ RESOLVE_KEY_MESSAGE = (
 )
 SEED_MISSING_MESSAGE = f"{RESOLVER_CLASS}.{SEED_METHOD} is missing"
 SEED_DUPLICATE_MESSAGE = f"{RESOLVER_CLASS}.{SEED_METHOD} has duplicate definitions"
-SEED_PUT_MESSAGE = (
-    f"lockfile seed must call _cache.put({IDENTITY_FUNCTION}({_DEP_REF}), {_REF}, sha)"
+LOCK_SEED_KEY_MISSING_MESSAGE = f"{RESOLVER_CLASS}.{LOCK_SEED_KEY_METHOD} is missing"
+LOCK_SEED_KEY_DUPLICATE_MESSAGE = (
+    f"{RESOLVER_CLASS}.{LOCK_SEED_KEY_METHOD} has duplicate definitions"
 )
+LOCK_SEED_KEY_MESSAGE = (
+    "lockfile seed key must combine dependency identity, full repository cache identity, "
+    "effective host-provider identity, and ref"
+)
+SEED_STORE_MESSAGE = "lockfile seed must store by the canonical dependency-scoped seed key"
+SEED_LOOKUP_MESSAGE = "lockfile replay must retrieve by the canonical dependency-scoped seed key"
 
 # The complete vocabulary this analyzer can emit. Callers (and the mutation
 # suite) use it to tell a structural finding apart from the rule's retained
@@ -157,7 +168,11 @@ STRUCTURAL_MESSAGES: tuple[str, ...] = (
     RESOLVE_KEY_MESSAGE,
     SEED_MISSING_MESSAGE,
     SEED_DUPLICATE_MESSAGE,
-    SEED_PUT_MESSAGE,
+    LOCK_SEED_KEY_MISSING_MESSAGE,
+    LOCK_SEED_KEY_DUPLICATE_MESSAGE,
+    LOCK_SEED_KEY_MESSAGE,
+    SEED_STORE_MESSAGE,
+    SEED_LOOKUP_MESSAGE,
 )
 
 # ``str(SyntaxError)`` renders as ``invalid syntax (module.py, line 12)``; the
@@ -255,6 +270,50 @@ def _identity_ref_tuple(node: ast.AST) -> bool:
     )
 
 
+def _dep_attribute(node: ast.AST, attribute: str) -> bool:
+    """Return whether ``node`` is exactly ``dep_ref.<attribute>``."""
+    return isinstance(node, ast.Attribute) and _call_name(node) == f"dep_ref.{attribute}"
+
+
+def _effective_provider_identity_call(node: ast.AST) -> bool:
+    """Return whether the canonical provider identity receives host and host_type."""
+    if (
+        not isinstance(node, ast.Call)
+        or _call_name(node.func) != _EFFECTIVE_HOST_PROVIDER_IDENTITY
+        or len(node.args) != 1
+        or len(node.keywords) != 1
+    ):
+        return False
+    host = node.args[0]
+    keyword = node.keywords[0]
+    return (
+        isinstance(host, ast.BoolOp)
+        and isinstance(host.op, ast.Or)
+        and len(host.values) == 2
+        and _dep_attribute(host.values[0], "host")
+        and _is_call(host.values[1], "default_host", ())
+        and keyword.arg == "host_type"
+        and _dep_attribute(keyword.value, "host_type")
+    )
+
+
+def _lock_seed_identity_tuple(node: ast.AST) -> bool:
+    """Return whether ``node`` is the complete dependency-scoped seed identity."""
+    return (
+        isinstance(node, ast.Tuple)
+        and len(node.elts) == 4
+        and _is_call(node.elts[0], "dep_ref.get_unique_key", ())
+        and _repository_identity_call(node.elts[1])
+        and _effective_provider_identity_call(node.elts[2])
+        and _is_name(node.elts[3], _REF)
+    )
+
+
+def _lock_seed_key_call(node: ast.AST) -> bool:
+    """Return whether ``node`` calls ``self._lock_seed_key(dep_ref, ref)``."""
+    return _is_call(node, "self._lock_seed_key", (_DEP_REF, _REF))
+
+
 def _direct_identity_composition(node: ast.AST) -> bool:
     """Return whether `node` is ``normalize_repo_url(dep_ref.to_github_url())``."""
     if not isinstance(node, ast.Call) or _call_name(node.func) != _NORMALIZER:
@@ -331,6 +390,7 @@ def _duplicate_definition_findings(
         (L0_CLASS, L0_METHOD): L0_DUPLICATE_MESSAGE,
         (RESOLVER_CLASS, RESOLVE_METHOD): RESOLVE_DUPLICATE_MESSAGE,
         (RESOLVER_CLASS, SEED_METHOD): SEED_DUPLICATE_MESSAGE,
+        (RESOLVER_CLASS, LOCK_SEED_KEY_METHOD): LOCK_SEED_KEY_DUPLICATE_MESSAGE,
     }
     for class_name, method_names in class_methods:
         owners = direct_definitions(index, class_name, kinds=(ast.ClassDef,))
@@ -517,7 +577,7 @@ def _l0_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
 
 
 def _resolve_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
-    """Return the resolver coalescing-key violations."""
+    """Return fresh-result coalescing and lock-seed lookup violations."""
     path = TIERED_RESOLVER_PATH
     resolve = _find_function(index, RESOLVE_METHOD, class_name=RESOLVER_CLASS)
     if resolve is None:
@@ -525,22 +585,59 @@ def _resolve_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
     key_value = _sole_assignment_value(index, resolve, _KEY)
     if key_value is None or not _identity_ref_tuple(key_value):
         return (IdentityFinding(path, _line_of(resolve), RESOLVE_KEY_MESSAGE),)
+    lock_key = _sole_assignment_value(index, resolve, "lock_key")
+    lookups = _calls_to(index, resolve, _LOCK_SEED_GET)
+    if (
+        lock_key is None
+        or not _lock_seed_key_call(lock_key)
+        or len(lookups) != 1
+        or len(lookups[0].args) != 1
+        or not _is_name(lookups[0].args[0], "lock_key")
+    ):
+        return (IdentityFinding(path, _line_of(resolve), SEED_LOOKUP_MESSAGE),)
+    return ()
+
+
+def _lock_seed_key_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
+    """Return dependency-scoped lock-seed key violations."""
+    path = TIERED_RESOLVER_PATH
+    method = _find_function(index, LOCK_SEED_KEY_METHOD, class_name=RESOLVER_CLASS)
+    if method is None:
+        return (IdentityFinding(path, 1, LOCK_SEED_KEY_MISSING_MESSAGE),)
+    returns = _returns_in(index, method)
+    if (
+        len(returns) != 1
+        or returns[0].value is None
+        or not _lock_seed_identity_tuple(returns[0].value)
+        or assignment_nodes(index, method)
+    ):
+        return (IdentityFinding(path, _line_of(method), LOCK_SEED_KEY_MESSAGE),)
     return ()
 
 
 def _seed_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
-    """Return the lockfile-seed violations."""
+    """Return lockfile-seed storage violations."""
     path = TIERED_RESOLVER_PATH
     seed = _find_function(index, SEED_METHOD, class_name=RESOLVER_CLASS)
     if seed is None:
         return (IdentityFinding(path, 1, SEED_MISSING_MESSAGE),)
-    puts = _calls_to(index, seed, _SEED_PUT)
-    if len(puts) != 1 or not (
-        len(puts[0].args) >= 2
-        and _repository_identity_call(puts[0].args[0])
-        and _is_name(puts[0].args[1], _REF)
+    key_value = _sole_assignment_value(index, seed, _KEY)
+    stores = [
+        node
+        for node in index.walk(seed)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Subscript)
+        and _call_name(node.targets[0].value) == _LOCK_SEED_STORE
+    ]
+    if (
+        key_value is None
+        or not _lock_seed_key_call(key_value)
+        or len(stores) != 1
+        or not _is_name(stores[0].targets[0].slice, _KEY)
+        or not _is_call(stores[0].value, "sha.lower", ())
     ):
-        return (IdentityFinding(path, _line_of(seed), SEED_PUT_MESSAGE),)
+        return (IdentityFinding(path, _line_of(seed), SEED_STORE_MESSAGE),)
     return ()
 
 
@@ -552,7 +649,7 @@ def tiered_resolver_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
         module_functions=(IDENTITY_FUNCTION,),
         class_methods=(
             (L0_CLASS, (L0_METHOD,)),
-            (RESOLVER_CLASS, (RESOLVE_METHOD, SEED_METHOD)),
+            (RESOLVER_CLASS, (RESOLVE_METHOD, SEED_METHOD, LOCK_SEED_KEY_METHOD)),
         ),
     )
     identity = _identity_findings(index)
@@ -563,6 +660,7 @@ def tiered_resolver_findings(index: TreeIndex) -> tuple[IdentityFinding, ...]:
         *identity,
         *_l0_findings(index),
         *_resolve_findings(index),
+        *_lock_seed_key_findings(index),
         *_seed_findings(index),
     )
 

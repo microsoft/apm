@@ -35,6 +35,7 @@ resolves it, validates it, and appends it to `dependencies.apm:` in
 apm install microsoft/apm-sample-package#v1.0.0
 apm install github/awesome-copilot/skills/review-and-refactor
 apm install ./packages/my-shared-skills        # local path
+apm install ./ai/agents/xyz.agent.md            # one local primitive
 apm install --dev acme/internal-debug-agents   # devDependencies
 ```
 
@@ -65,6 +66,17 @@ virtual subdirectory paths into a monorepo, single-file references,
 and local paths starting with `./`, `../`, or `/`. For private hosts
 and tokens, see [Authentication](../authentication/).
 
+Local files must end in `.agent.md`, `.instructions.md`, or `.prompt.md`.
+APM copies only the selected file into an ordinary package, then applies the
+same policy, rendering, ownership, update, and removal flow as other packages.
+It does not link to the source or collect neighboring assets. Use a directory
+package with `apm.yml` when the primitive needs companion files.
+
+Relative paths are anchored to the manifest that declares them, including
+nested local packages. `--root` redirects output, not source lookup. With
+`--global`, use an absolute path or `~/...`; project-relative paths remain
+unsupported. Select a real file, not a file symlink.
+
 ## What `apm install` does
 
 The pipeline is deterministic. Each phase must pass before the next runs.
@@ -84,6 +96,19 @@ The pipeline is deterministic. Each phase must pass before the next runs.
    `.agents/skills/`.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
+
+On a fresh clone or CI runner without local deployment receipts, a committed
+skill is kept and its receipts are recorded when every file in its directory
+matches what the install would write and is recorded in `apm.lock.yaml`. The
+lockfile hashes are not used as proof. If any file differs, or another existing
+skill cannot be overwritten because its local deployment receipt is missing,
+install exits nonzero before stale-file cleanup and lockfile replacement. The
+refused files and prior lock contents are preserved, including during cold
+`--frozen` replay and when dependencies deliver the same skill. This is not a
+full rollback: files admitted earlier in the run may remain. Move the
+conflicting file aside and retry, or use `--force` only when you intend to
+overwrite it. Files edited since a valid recorded deployment remain protected
+with a warning.
 
 For the deeper view of how compile fits in, see
 [Lifecycle](../../concepts/lifecycle/).
@@ -127,16 +152,16 @@ Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf
 
 ## What to commit
 
-Commit `apm.yml`, `apm.lock.yaml`, and every target-owned directory APM writes
-to. These can include `.github/`, `.claude/`, `.grok/`, and `.agents/`.
-Committed deployed files give teammates agent context on clone, before they
-run `apm install`.
+Commit `apm.yml`, `apm.lock.yaml`, and target-owned outputs; keep `apm_modules/`
+gitignored. Committed agent files are reviewable and discoverable after clone,
+not necessarily self-contained: run `apm install` to restore linked package
+context. Keep those installed resources available while native agents or tools
+follow the deployed links; do not remove `apm_modules/` just because install
+has finished.
 
-Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from
-the lockfile on every `apm install`. APM adds the entry automatically on first install.
-
-See the [Quickstart](../../quickstart/#what-to-commit) for the full table and
-rationale.
+See the [Quickstart](../../quickstart/#what-to-commit) for details, and
+[`apm_modules/` is derived](../../reference/lockfile-spec/#apm_modules-is-derived)
+for reinstall and safe cleanup guidance.
 
 ## Transitive dependencies and the lockfile
 
@@ -181,7 +206,7 @@ runnable scripts your manifest exposes (see
 ## Useful flags
 
 ```bash
-apm install --dry-run                  # resolve and print the plan; no writes
+apm install --dry-run                  # preview locally known dependencies
 apm install --target claude,cursor     # only deploy to these harnesses
 apm install --exclude gemini           # deploy to all targets except gemini
 apm install --only apm                 # skip MCP server integration this run
@@ -205,14 +230,30 @@ For project-scope installs, targets that require
 print a hint when dependency instructions require `apm compile`. The hint names
 the root context files that compile will update.
 
-For the full flag reference, run `apm install --help` or see
-[CLI commands](../../reference/cli/install/).
+`--dry-run` includes required indirect APM dependencies when metadata is
+available locally. Offline gaps make the preview incomplete and suppress
+orphan-removal predictions; stale-file integration cleanup is not previewed.
+See [preview limits](../../reference/cli/install/#preview-without-writing)
+and the full flag reference, or run `apm install --help`.
 
 ## When things go wrong
 
+- **Package contains symbolic links.** APM always checks out in-repo links
+  in a dependency as real symlinks, so a package records the same
+  `content_hash` on Windows, macOS and Linux and a lockfile from one platform
+  verifies on another. If the host cannot create symlinks, install fails
+  before hashing with `Package <name> contains symbolic links, but this host
+  cannot create them`. On Windows, enable Developer Mode or grant the
+  "Create symbolic links" privilege, then retry. APM sets `core.symlinks=true`
+  only on its own Git commands and does not change your Git configuration.
+  Cached checkouts made by older APM versions are re-created automatically.
 - **Critical security finding.** Install aborts with the offending
   characters and file path. Patch upstream when you can; use
   `--force` only when you can document the exception.
+- **Unmanaged skill conflict.** A differing local skill file refuses the
+  complete selected plan before native deployment or manifest/lock success
+  state. Rename the local skill or narrow a valid existing skill/target
+  selection; see [install behavior](../../reference/cli/install/#behavior).
 - **Policy violation.** Install aborts before any file is written.
   Adjust the dependency or update org policy. See
   [Governance on the consumer ramp](../governance-on-the-consumer-ramp/).
@@ -222,6 +263,13 @@ For the full flag reference, run `apm install --help` or see
 - **Drift between `apm_modules/` and the lockfile.** Run
   `apm audit --ci` locally to reproduce the CI gate; see
   [Update and refresh](../update-and-refresh/) to recover.
+- **Skipped symlinked agent source.** `apm install` warns and skips agent
+  files or directories that are symlinks (for example
+  `.apm/agents -> ../agents`). Fix by shipping real files and directories in
+  the source package, then rerun `apm install`. Do not edit `apm_modules/` --
+  cached edits are not a durable fix. For a third-party package,
+  ask the author to publish real sources. See
+  [Instructions and agents](../../producer/author-primitives/instructions-and-agents/#agents).
 
 Once your dependencies are installed, scripts run them.
 [Run scripts](../run-scripts/) shows how to wire `apm.yml`'s

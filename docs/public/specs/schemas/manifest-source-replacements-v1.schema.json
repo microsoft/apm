@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json",
+  "title": "Proposed OpenAPM root source replacement manifest",
+  "description": "Unratified opt-in capability proposal 0.1.54. Structural validation supplements req-rpl-001; canonical identity, duplicate selectors and provider/path semantics require consumer validation. No first supporting release is implied.",
+  "allOf": [
+    { "$ref": "manifest-v0.1.48.schema.json" }
+  ],
+  "type": "object",
+  "required": ["$schema"],
+  "properties": {
+    "$schema": { "const": "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json" },
+    "replace": { "type": "array", "items": { "$ref": "#/$defs/rule" } }
+  },
+  "$defs": {
+    "gitSelector": {
+      "type": "string",
+      "pattern": "^(https?://[^/?#@\\s]+/[^?#\\s]+|ssh://[^/?#\\s]+/[^?#\\s]+|[^@/:\\s]+@[^/:\\s]+:[^?#\\s]+)$"
+    },
+    "gitSource": {
+      "allOf": [
+        { "$ref": "#/$defs/gitSelector" },
+        { "not": { "pattern": "^http://" } }
+      ]
+    },
+    "nonempty": { "type": "string", "pattern": "\\S" },
+    "selector": {
+      "type": "object",
+      "required": ["git"],
+      "properties": {
+        "git": { "$ref": "#/$defs/gitSelector" },
+        "path": { "$ref": "#/$defs/nonempty" }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string", "pattern": "^(\\./|\\.\\./|/|~/)\\S*" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["git", "ref"],
+          "properties": {
+            "git": { "$ref": "#/$defs/gitSource" },
+            "ref": { "$ref": "#/$defs/nonempty" },
+            "path": { "$ref": "#/$defs/nonempty" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "required": ["for", "with"],
+      "properties": {
+        "for": { "$ref": "#/$defs/selector" },
+        "with": { "$ref": "#/$defs/source" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

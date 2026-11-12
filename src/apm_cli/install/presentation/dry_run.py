@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from apm_cli.commands.install import InstallLogger
+    from apm_cli.deps.lockfile import LockFile
 
 
 def render_and_exit(
@@ -22,13 +24,14 @@ def render_and_exit(
     plan: ProspectiveInstallPlan,
     update: bool,
     apm_dir: Path,
+    local_cleanup_pending: Callable[[LockFile], bool] | None = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
     The caller is responsible for ``return``-ing after this function
     completes -- this function does NOT exit or return early on its own.
     """
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.deps.lockfile import LockFile, LockfileConflictError, get_lockfile_path
     from apm_cli.drift import detect_orphans
 
     logger.progress("Dry run mode - showing what would change:")
@@ -77,13 +80,23 @@ def render_and_exit(
         else:
             logger.progress("No dependencies found in apm.yml")
 
-    # Orphan preview: lockfile + manifest difference -- no integration
-    # required, accurate to compute.
+    if plan.dependency_preview_errors:
+        logger.dry_run_notice(
+            "Dependency preview incomplete; showing only locally known dependencies. "
+            "Orphan removals are not previewed. Run 'apm install' without --dry-run "
+            "to resolve dependencies."
+        )
+        for error in plan.dependency_preview_errors:
+            logger.verbose_detail(error)
+
     try:
         _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))
+    except LockfileConflictError as exc:
+        logger.warning(str(exc))
+        _dryrun_lock = None
     except Exception:
         _dryrun_lock = None
-    if _dryrun_lock:
+    if _dryrun_lock and plan.should_install_apm and not plan.dependency_preview_errors:
         _orphan_preview = detect_orphans(
             _dryrun_lock,
             plan.intended_dependency_keys,
@@ -99,9 +112,15 @@ def render_and_exit(
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
-    if selected_apm_dependencies:
+    cleanup_pending = False
+    if not selected_apm_dependencies and local_cleanup_pending and _dryrun_lock:
+        try:
+            cleanup_pending = local_cleanup_pending(_dryrun_lock)
+        except (KeyError, TypeError, ValueError) as exc:  # malformed ledger state
+            logger.verbose_detail(f"Local cleanup preview skipped: {exc}")
+    if selected_apm_dependencies or cleanup_pending:
         logger.dry_run_notice(
-            "Per-package stale-file cleanup (renames within a package) is "
-            "not previewed -- it requires running integration. Run without "
-            "--dry-run to apply."
+            "Stale-file cleanup (renames within a package or in the project's "
+            ".apm/ content) is not previewed -- it requires running "
+            "integration. Run without --dry-run to apply."
         )

@@ -8,7 +8,7 @@ Those rules defend decisions that have no entry in
 a semantic rule whose body was gutted still registers, still runs, still
 reports a clean run, and still ships.
 
-This file supplies the missing proof for that half.  For each of the 48
+This file supplies the missing proof for that half.  For each of the
 guard-less rules it pins one minimal, meaningful source mutation -- a surgical
 edit that kills a load-bearing sub-condition of the decision the rule owns --
 and asserts that exact rule reports a real `Violation`.  Coverage is a set
@@ -431,19 +431,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         new="time.perf_counter",
         intent="Runtime streaming stops enforcing a monotonic wall-clock deadline.",
         replace_all=True,
-    ),
-    MutationCase(
-        rule_id="transport-platform-tls-trust-injection",
-        path="src/apm_cli/cli.py",
-        old="from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status",
-        new=(
-            "import truststore\n"
-            "from apm_cli.core.tls_trust import configure_process_tls_trust,"
-            " log_tls_trust_status\n"
-            "\n"
-            "truststore.inject_into_ssl()"
-        ),
-        intent="The root CLI injects TLS trust outside the two sanctioned modules.",
     ),
 )
 

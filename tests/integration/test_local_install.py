@@ -215,7 +215,7 @@ print("ordinary Markdown")
         ("target", "deployed_path", "scope_marker"),
         [
             ("claude", ".claude/rules/test-skill.md", '  - "src/**"'),
-            ("cursor", ".cursor/rules/test-skill.mdc", 'globs: "src/**"'),
+            ("cursor", ".cursor/rules/test-skill.mdc", "globs: src/**"),
             ("windsurf", ".windsurf/rules/test-skill.md", 'globs: "src/**"'),
             ("kiro", ".kiro/steering/test-skill.md", 'fileMatchPattern: "src/**"'),
             ("antigravity", ".agents/rules/test-skill.md", 'globs: "src/**"'),
@@ -525,10 +525,23 @@ print("ordinary Markdown")
         assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
         assert "Fix or remove the invalid frontmatter, then rerun apm install." in output
 
+    @pytest.mark.parametrize(
+        ("escaped", "decoded"),
+        [
+            (r"safe\n---\n\0suffix", "safe\n---\n\0suffix"),
+            (r"safe\u0080suffix", "safe\u0080suffix"),
+            (r"safe\u009fsuffix", "safe\u009fsuffix"),
+            (r"safe\ufffesuffix", "safe\ufffesuffix"),
+            (r"safe\uffffsuffix", "safe\uffffsuffix"),
+        ],
+        ids=["multiline-nul", "c1-start", "c1-end", "noncharacter-fffe", "noncharacter-ffff"],
+    )
     def test_install_cursor_quotes_multiline_control_characters(
         self,
         temp_workspace,
         apm_binary_path,
+        escaped,
+        decoded,
     ):
         """Cursor output remains valid YAML for decoded control characters."""
         consumer = temp_workspace / "consumer"
@@ -541,7 +554,7 @@ print("ordinary Markdown")
             / "test-skill.instructions.md"
         )
         source.write_text(
-            '---\napplyTo: src/**\ndescription: "safe\\n---\\n\\0suffix"\n---\n# Scoped rule\n',
+            f'---\napplyTo: src/**\ndescription: "{escaped}"\n---\n# Scoped rule\n',
             encoding="utf-8",
         )
 
@@ -564,7 +577,7 @@ print("ordinary Markdown")
         rendered = deployed.read_text(encoding="utf-8")
         assert "\0" not in rendered
         post = loads_frontmatter(rendered)
-        assert post.metadata["description"] == "safe\n---\n\0suffix"
+        assert post.metadata["description"] == decoded
         assert post.metadata["globs"] == "src/**"
 
     def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_binary_path):

@@ -49,6 +49,13 @@ Downloads the runtime binary from its official source and writes a default APM c
 
 For Codex, APM verifies the GitHub Releases SHA-256 asset digest before extracting the archive and fails if the digest is missing or mismatched.
 
+On Linux and macOS, Codex archive downloads through curl reject HTTP errors and
+retry transient failures up to three times within a 30-second retry window.
+Each attempt has a 10-second connection timeout and a 120-second transfer timeout;
+an attempt already in progress can finish after the retry window closes.
+Failed downloads are removed without replacing an existing runtime.
+A checksum mismatch is not retried or bypassed.
+
 | Flag | Default | Description |
 |---|---|---|
 | `--version VERSION` | latest | Pin a specific upstream version. |

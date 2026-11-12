@@ -638,22 +638,22 @@ class TestValidateApmPackage:
 class TestValidateHookPackage:
     """Test _validate_hook_package internals."""
 
-    def test_returns_valid_result_with_package(self, tmp_path: Path) -> None:
+    def test_returns_valid_result_with_package(self, valid_hook_package: Path) -> None:
         """_validate_hook_package creates an APMPackage and returns valid result."""
         from apm_cli.models.validation import _validate_hook_package
 
         result: ValidationResult = ValidationResult()
-        returned: ValidationResult = _validate_hook_package(tmp_path, result)
+        returned: ValidationResult = _validate_hook_package(valid_hook_package, result)
         assert returned.is_valid is True
         assert returned.package is not None
-        assert returned.package.name == tmp_path.name
+        assert returned.package.name == valid_hook_package.name
 
-    def test_package_version_is_1_0_0(self, tmp_path: Path) -> None:
+    def test_package_version_is_1_0_0(self, valid_hook_package: Path) -> None:
         """_validate_hook_package sets package version to '1.0.0'."""
         from apm_cli.models.validation import _validate_hook_package
 
         result: ValidationResult = ValidationResult()
-        returned: ValidationResult = _validate_hook_package(tmp_path, result)
+        returned: ValidationResult = _validate_hook_package(valid_hook_package, result)
         assert returned.package is not None
         assert returned.package.version == "1.0.0"
 

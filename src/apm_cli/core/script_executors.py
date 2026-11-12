@@ -961,6 +961,11 @@ def _build_guarded_session():
     # _dispatch_http_request (which honors the operator's env proxy explicitly);
     # this session is used only when no env proxy applies to the destination.
     session.trust_env = False
+    from .tls_trust import explicit_ca_bundle_path
+
+    explicit_ca = explicit_ca_bundle_path()
+    if explicit_ca:
+        session.verify = explicit_ca
     session.mount("https://", _SSRFGuardAdapter())
     return session
 
@@ -1057,6 +1062,11 @@ def _build_capturing_session():
     # Never auto-honor env proxies: the proxy is passed EXPLICITLY per-dispatch
     # in _run, so a stray env var cannot silently re-route a dispatch here.
     session.trust_env = False
+    from .tls_trust import explicit_ca_bundle_path
+
+    explicit_ca = explicit_ca_bundle_path()
+    if explicit_ca:
+        session.verify = explicit_ca
     adapter = _CapturingAdapter()
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -1382,6 +1392,12 @@ def _dispatch_http_request(
         # daemon, reaped at process exit) and reclaim the permit when it dies.
         if _abort_dispatch_sock(holder):
             worker.join(_HTTP_ABANDON_GRACE)
+        # The worker may publish its response during the grace join; close it
+        # like the completion path does so the late response does not leak.
+        late_resp = holder.get("resp")
+        if late_resp is not None:
+            with contextlib.suppress(Exception):
+                late_resp.close()
         _append_to_script_log(
             event_name,
             "http",

@@ -337,7 +337,7 @@ _APM_YML_CLAUDE_ONLY = textwrap.dedent("""\
           version: "^1.0.0"
 """)
 
-_APM_YML_BOTH_FORMATS = textwrap.dedent("""\
+_APM_YML_ALL_FORMATS = textwrap.dedent("""\
     name: demo
     description: d
     version: 0.1.0
@@ -346,6 +346,7 @@ _APM_YML_BOTH_FORMATS = textwrap.dedent("""\
       outputs:
         claude: {}
         codex: {}
+        copilot: {}
       packages:
         - name: pkg
           source: acme/pkg
@@ -377,7 +378,7 @@ class TestDoctorFormatCoverage:
     @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_full_coverage_passes_silently(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "apm.yml").write_text(_APM_YML_BOTH_FORMATS, encoding="utf-8")
+        (tmp_path / "apm.yml").write_text(_APM_YML_ALL_FORMATS, encoding="utf-8")
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),

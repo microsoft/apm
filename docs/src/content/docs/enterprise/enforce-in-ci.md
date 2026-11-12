@@ -32,6 +32,8 @@ Useful flags:
 - `--policy <source>` -- explicit policy ref
   (`org`, a path, a URL, or `<owner>/<repo>`). Without it, APM
   auto-discovers from your project's git remote, mirroring `apm install`.
+  A path, URL, or `<owner>/<repo>` that cannot be loaded fails the gate
+  (exit `1`) instead of skipping policy checks.
 - `--no-policy` -- skip policy discovery (baseline + drift only).
 - `--no-cache` -- force a fresh policy fetch. Recommended in CI so a
   cached file does not mask a same-day policy update.
@@ -74,8 +76,10 @@ jobs:
 
 `microsoft/apm-action@v1` runs `apm install` by default, so by the time
 `apm audit --ci` runs, the lockfile and deployed files are present.
-That remains the right default for repos that gitignore their deployed
-outputs, because `deployed-files-present` still expects those files on disk.
+Use that default when CI needs to materialize deployed outputs.
+Missing gitignored outputs do not fail `deployed-files-present`, so those
+repos can also use audit-only CI. Without committed deployed bytes, that
+pattern has reduced integrity and drift coverage.
 Make this job a required status check via
 [GitHub Rulesets](../github-rulesets/) and a violating PR cannot merge.
 
@@ -86,15 +90,16 @@ subsequent steps. That is still the right default for most workflows:
 it ensures the lockfile and deployed files are present before the audit
 reads them.
 
-However, `apm install` overwrites every managed file with a fresh copy
-before `apm audit --ci` runs. If a managed file was modified on disk after
-the last install -- its bytes changed without updating the lockfile hash --
-the install step silently restores the clean copy. The `content-integrity`
-check then compares the freshly restored file against a hash that matches,
-and the tampering goes undetected.
+However, `apm install` can restore managed output, such as deployed
+instructions, before `apm audit --ci` inspects it. The `content-integrity`
+check then sees the restored bytes rather than the pre-install changes.
+This does not apply to every managed file: ordinary reinstall preserves
+edited managed skill members and their original deployment hashes.
+Restoring those members requires explicit `--force` consent.
 
 For repos that **commit** their deployed files, the CI gate can now run in
-setup-only mode and still execute drift plus `config-consistency` from a cold
+setup-only mode and still execute drift plus `config-consistency` and
+`skill-subset-consistency` from a cold
 cache. `apm audit --ci` self-hydrates a lock-pinned scratch install, compares
 the tracked checkout against that replay, and never rewrites the working tree
 or live `apm_modules/`.
@@ -120,7 +125,7 @@ jobs:
 
 `setup-only: true` leaves every deployed file exactly as checked out.
 `apm audit --ci` now self-hydrates its scratch replay from `apm.lock.yaml`,
-so drift and `config-consistency` still run even when the checkout has no
+so drift, `config-consistency`, and `skill-subset-consistency` still run even when the checkout has no
 live `apm_modules/` tree. If the scratch replay itself cannot be materialized,
 the audit fails closed instead of reporting a green skip. The
 `content-integrity` check still verifies that every deployed file's SHA-256

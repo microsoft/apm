@@ -3,9 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import tomlkit
 
+from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.integration.mcp_integrator import MCPIntegrator
+from tests.utils.managed_mcp import install_managed_mcp
 
 
 def test_codex_install_preserves_windows_literal_paths(tmp_path: Path) -> None:
@@ -65,14 +68,22 @@ def test_codex_stale_cleanup_preserves_windows_literal_paths(tmp_path: Path) -> 
         "'C:\\Users\\me\\Documents\\Playground' = \"fileManager\"\n"
     )
     config_path.write_text(
-        unrelated
-        + "\n[mcp_servers.stale-server]\n"
-        + 'command = "old"\n'
-        + "\n[mcp_servers.keep-server]\n"
-        + 'command = "keep"\n',
+        unrelated + "\n[mcp_servers.keep-server]\n" + 'command = "keep"\n',
         encoding="utf-8",
         newline="\n",
     )
+    stored, hashes = install_managed_mcp(tmp_path, "codex", "stale-server")
+    before = config_path.read_bytes()
+    for names, baseline in (({"stale-server"}, {}), ({"keep-server"}, stored)):
+        with pytest.raises(RequiredIntegrationError, match="managed baseline"):
+            MCPIntegrator.remove_stale(
+                names,
+                runtime="codex",
+                project_root=tmp_path,
+                stored_configs=baseline,
+                native_hashes=hashes,
+            )
+        assert config_path.read_bytes() == before
 
     with patch("apm_cli.integration.mcp_integrator._rich_success"):
         MCPIntegrator.remove_stale(
@@ -80,6 +91,8 @@ def test_codex_stale_cleanup_preserves_windows_literal_paths(tmp_path: Path) -> 
             runtime="codex",
             project_root=tmp_path,
             logger=MagicMock(),
+            stored_configs=stored,
+            native_hashes=hashes,
         )
 
     updated = config_path.read_text(encoding="utf-8")

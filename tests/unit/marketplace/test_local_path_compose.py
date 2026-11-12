@@ -303,6 +303,46 @@ def test_write_codex_output_profile(tmp_path: Path) -> None:
     assert '"path": "./plugins/local-tool"' in text
 
 
+def test_write_copilot_output_profile(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: copilot-marketplace
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          outputs: [copilot]
+          copilot:
+            output: .github/plugin/marketplace.json
+          packages:
+            - name: local-tool
+              source: ./plugins/local-tool
+              description: A locally vendored tool.
+        """,
+    )
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = config.packages[0]
+    resolved = (builder._resolve_entry(local_entry),)
+
+    report = builder.write_output(
+        MARKETPLACE_OUTPUTS["copilot"],
+        resolved,
+        tmp_path / ".github" / "plugin" / "marketplace.json",
+    )
+
+    assert report.warnings == ()
+    assert report.output_path == tmp_path / ".github" / "plugin" / "marketplace.json"
+    assert report.resolved == resolved
+    text = report.output_path.read_text(encoding="utf-8")
+    # Copilot's source is a relative-path string, never the Claude/Codex
+    # object shape (no nested "source"/"url"/"ref"/"sha" keys).
+    assert '"source": "./plugins/local-tool"' in text
+    assert '"ref"' not in text
+    assert '"sha"' not in text
+
+
 def test_compose_inherited_top_level_omits_description_and_version(
     project_with_local: Path,
 ) -> None:

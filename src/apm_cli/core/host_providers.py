@@ -258,6 +258,16 @@ def classify_host_provider(
     raise RuntimeError(f"No host provider registered for {host!r}")
 
 
+def effective_host_provider_identity(
+    host: str,
+    *,
+    host_type: str | None = None,
+) -> tuple[str, str]:
+    """Return the backend and credential-route identity for one remote host."""
+    provider = classify_host_provider(host, host_type=host_type)
+    return provider.kind, provider.credential_purpose
+
+
 def register_host_backend(kind: str, backend_factory: type[Any]) -> None:
     """Register a native backend for one canonical host provider."""
     if kind not in HOST_PROVIDERS:

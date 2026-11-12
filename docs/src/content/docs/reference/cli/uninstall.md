@@ -121,6 +121,25 @@ What gets removed, in order:
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
 
+When uninstall rebuilds a surviving package's loose skills, APM records those
+actual writes locally and binds them after the final lockfile update succeeds.
+Later installs can update the survivor without treating its unchanged files as
+user edits. Removed-output receipts are retired before survivor copies; failed
+removals do not retire evidence. Receipt failures are reported, not ignored.
+
+### Claude Code profiles
+
+Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
+removes a package's files and lockfile rows only under the selected
+`CLAUDE_CONFIG_DIR` (or `~/.claude`). Files deployed to another profile stay.
+If another profile still uses the package, it stays in `~/.apm/apm.yml` and
+`apm_modules/`; uninstall it with that profile selected to remove it everywhere.
+The selected profile is matched by path; symlinks are not resolved.
+
+`Cleaned N stale deployed files for DEPENDENCY` identifies the affected
+dependency, not the deletion location. An absolute local path in that message
+names the source package; cleanup removes its deployed files, not source files.
+
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
 matched package in the same invocation is removed. Fix the identifier and retry.

@@ -344,10 +344,18 @@ class TestValidateApmPackage:
 
 class TestDirectValidators:
     def test_validate_hook_package_creates_package(self, tmp_path: Path) -> None:
+        _write(tmp_path / "hooks" / "pre.json", "{}")
         result = _validate_hook_package(tmp_path, ValidationResult())
+        assert result.is_valid
         assert result.package is not None
         assert result.package.name == tmp_path.name
         assert result.package.type == PackageContentType.HYBRID
+
+    def test_validate_hook_package_rejects_missing_descriptors(self, tmp_path: Path) -> None:
+        result = _validate_hook_package(tmp_path, ValidationResult())
+        assert not result.is_valid
+        assert result.package is None
+        assert result.errors == ["Hook package has no deployable hook descriptors."]
 
     def test_validate_claude_skill_reads_frontmatter(self, tmp_path: Path) -> None:
         skill_md = _write_skill_md(

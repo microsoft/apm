@@ -1064,7 +1064,7 @@ class TestSearchCmd:
 
 
 class TestAddCmdVerboseTraceback:
-    @patch("apm_cli.marketplace.client._auto_detect_path")
+    @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_verbose_flag_shows_traceback_on_error(
         self, mock_detect: MagicMock, runner: CliRunner
     ) -> None:

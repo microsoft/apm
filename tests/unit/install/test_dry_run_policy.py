@@ -13,10 +13,9 @@ Covers:
   apm.yml is NOT mutated (dry-run never persists).
 - ``apm install --mcp <denied> --dry-run`` -> same UX (preview block message).
 
-Design choice: dry-run checks run against **direct manifest deps** only, not
-resolved/transitive deps.  The resolver does not run in ``--dry-run`` mode;
-evaluating transitives would require a full resolve which defeats the purpose
-of a lightweight preview.  This is a documented limitation.
+Dry-run checks include dependencies discoverable through the read-only
+resolver. Unavailable metadata leaves the preview explicitly incomplete;
+previewing never fetches dependencies just to expand that graph.
 """
 
 from __future__ import annotations

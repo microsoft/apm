@@ -6,15 +6,16 @@ directories.  This causes ``[WinError 32] The process cannot access the
 file because it is being used by another process`` during ``apm install``.
 
 This module provides drop-in replacements for :func:`shutil.rmtree`,
-:func:`shutil.copytree`, and :func:`shutil.copy2` that transparently
-retry on transient lock errors with exponential backoff.
+:func:`shutil.copytree`, :func:`shutil.copy2`, and :meth:`Path.replace`
+that transparently retry on transient lock errors with exponential backoff.
 
 Design
 ------
 * ``_is_transient_lock_error`` -- single predicate for classifying OSError.
 * ``_retry_on_lock`` -- generic retry loop (not a decorator, because
   cleanup-between-retries varies per operation).
-* ``robust_rmtree`` / ``robust_copytree`` / ``robust_copy2`` -- public API.
+* ``robust_rmtree`` / ``robust_copytree`` / ``robust_copy2`` /
+  ``robust_replace`` -- public API.
 """
 
 from __future__ import annotations
@@ -162,7 +163,7 @@ def _on_readonly_retry(func: Callable, path: str, _exc_info: Any) -> None:
     try:
         os.chmod(path, stat.S_IWRITE)
         func(path)
-    except OSError:
+    except FileNotFoundError:
         pass
 
 
@@ -195,7 +196,18 @@ def robust_rmtree(
     path_s = str(path)
 
     def _do_rmtree() -> None:
-        shutil.rmtree(path_s, onerror=_on_readonly_retry)
+        failures: list[OSError] = []
+
+        def recover_or_record(func: Callable, failed_path: str, exc_info: Any) -> None:
+            try:
+                _on_readonly_retry(func, failed_path, exc_info)
+            except OSError as exc:
+                failures.append(exc)
+
+        shutil.rmtree(path_s, onerror=recover_or_record)
+        if failures:
+            # Finish independent removals, but never report a partial tree as removed.
+            raise failures[0]
 
     try:
         _retry_on_lock(_do_rmtree, f"rmtree {path_s}", max_retries=max_retries)
@@ -325,3 +337,33 @@ def robust_copy2(
         max_retries=max_retries,
     )
     return Path(result)
+
+
+def robust_replace(
+    src: Path | str,
+    dst: Path | str,
+    *,
+    max_retries: int = _DEFAULT_MAX_RETRIES,
+) -> Path:
+    """Atomically rename *src* to *dst*, retrying on transient lock errors.
+
+    A failed rename moves nothing, so each retry repeats the same atomic
+    operation. Persistent errors re-raise the original exception unchanged.
+
+    Parameters
+    ----------
+    src, dst:
+        Source and destination paths (same semantics as :meth:`Path.replace`).
+    max_retries:
+        Maximum retry attempts for transient lock errors.
+
+    Returns
+    -------
+    Path to the destination.
+    """
+    src_p, dst_p = Path(src), Path(dst)
+    return _retry_on_lock(
+        lambda: src_p.replace(dst_p),
+        f"replace {src_p} -> {dst_p}",
+        max_retries=max_retries,
+    )
