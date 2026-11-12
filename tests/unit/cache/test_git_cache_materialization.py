@@ -17,7 +17,14 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, IncompleteCheckoutError, _variant_key
+from apm_cli.cache import git_cache as git_cache_module
+from apm_cli.cache.git_cache import (
+    _SPARSE_COMPLETENESS_PIN,
+    GitCache,
+    IncompleteCheckoutError,
+    _sparse_checkout_is_complete,
+    _variant_key,
+)
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
@@ -158,12 +165,18 @@ def test_silent_promisor_checkout_raises_auth_signal_and_lands_nothing(
     assert validate_apm_package(retried / "packages" / "pkg-shared").is_valid
 
 
+def _unset_sparse_pin(checkout: Path) -> None:
+    """Make a shard look like one written by 0.29.1+ before the #3071 pin."""
+    _git("-C", str(checkout), "config", "--unset", _SPARSE_COMPLETENESS_PIN[0])
+
+
 def test_cached_incomplete_sparse_shard_is_rematerialized(tmp_path: Path) -> None:
     bare, sha = _build_monorepo(tmp_path)
     cache = GitCache(tmp_path / "cache")
     url = bare.as_uri()
     sparse = ["packages/pkg-shared"]
     first = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse)
+    _unset_sparse_pin(first)
     manifest = first / "packages" / "pkg-shared" / "apm.yml"
     manifest.unlink()
 
@@ -172,6 +185,62 @@ def test_cached_incomplete_sparse_shard_is_rematerialized(tmp_path: Path) -> Non
     assert again == first
     assert manifest.is_file()
     assert validate_apm_package(again / "packages" / "pkg-shared").is_valid
+    assert (
+        _git("-C", str(again), "config", _SPARSE_COMPLETENESS_PIN[0])
+        == (_SPARSE_COMPLETENESS_PIN[1])
+    )
+
+
+def test_verified_sparse_shard_skips_probe_on_hit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy shard is probed once, pinned, then trusted without a git spawn."""
+    bare, sha = _build_monorepo(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    url = bare.as_uri()
+    sparse = ["packages/pkg-shared"]
+    first = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse)
+    _unset_sparse_pin(first)
+    probes: list[Path] = []
+    real_probe = git_cache_module._unmaterialized_paths
+
+    def counting_probe(git_exe: str, checkout_dir: Path, **kwargs: object) -> list[str]:
+        probes.append(checkout_dir)
+        return real_probe(git_exe, checkout_dir, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(git_cache_module, "_unmaterialized_paths", counting_probe)
+
+    assert cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse) == first
+    assert cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse) == first
+
+    assert probes == [first]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        subprocess.CalledProcessError(128, ["git", "ls-files"]),
+        subprocess.TimeoutExpired(["git", "ls-files"], 10),
+        OSError("git missing"),
+    ],
+    ids=["called-process-error", "timeout", "os-error"],
+)
+def test_probe_failure_treats_shard_as_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """A crashing probe rebuilds the shard instead of trusting or failing the hit."""
+    checkout = tmp_path / "shard"
+    _git("init", "-q", str(checkout))
+
+    def failing_probe(*args: object, **kwargs: object) -> list[str]:
+        raise error
+
+    monkeypatch.setattr(git_cache_module, "_unmaterialized_paths", failing_probe)
+
+    assert _sparse_checkout_is_complete(checkout, ["pkg"], env=None) is False
+    assert _sparse_checkout_is_complete(checkout, None, env=None) is True
+    config = (checkout / ".git" / "config").read_text(encoding="utf-8")
+    assert "sparseMaterialization" not in config
 
 
 def test_transitive_monorepo_subdirectory_retries_with_credentials(

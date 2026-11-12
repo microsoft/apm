@@ -117,6 +117,10 @@ def _safe_git_args() -> list[str]:
 # key. Older shards hold OS symlinks or Git link text instead (#3457).
 _LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects")
 
+# Sparse (promisor) shards verified to hold every tracked file carry this
+# local key, so cache hits skip the ``ls-files`` probe (#3071).
+_SPARSE_COMPLETENESS_PIN = ("apm.sparseMaterialization", "complete")
+
 
 def _checkout_config_values(checkout_dir: Path) -> dict[str, str] | None:
     """Return the first ``section.key`` values in a checkout's local gitconfig."""
@@ -171,18 +175,34 @@ def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     )
 
 
-def _unmaterialized_paths(git_exe: str, checkout_dir: Path, *, env: dict[str, str]) -> list[str]:
+def _unmaterialized_paths(
+    git_exe: str, checkout_dir: Path, *, env: dict[str, str], timeout: int = 60
+) -> list[str]:
     """Return tracked paths the working tree is missing (skip-worktree excluded)."""
     result = subprocess.run(
         [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "ls-files", "--deleted", "-z"],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=timeout,
         env=env,
         stdin=subprocess.DEVNULL,
         check=True,
     )
     return [path for path in result.stdout.split("\0") if path]
+
+
+def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str, str]) -> None:
+    """Record that a sparse shard was verified complete (#3071)."""
+    key, value = _SPARSE_COMPLETENESS_PIN
+    subprocess.run(
+        [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
 
 
 def _sparse_checkout_is_complete(
@@ -194,20 +214,32 @@ def _sparse_checkout_is_complete(
     """Return whether a cached sparse shard materialized every tracked file.
 
     Only promisor-backed sparse shards can lose blobs silently, so full
-    shards skip the probe. Probe failures count as incomplete so the shard
-    is rebuilt rather than trusted.
+    shards skip the probe, and so do shards already pinned as verified.
+    Unpinned shards (possibly poisoned by 0.29.1+) are probed once and
+    pinned when complete. Probe failures count as incomplete so the shard
+    is rebuilt rather than trusted. Callers hold the shard lock.
     """
     if not sparse_paths:
         return True
+    key, value = _SPARSE_COMPLETENESS_PIN
+    if (_checkout_config_values(checkout_dir) or {}).get(key.lower()) == value:
+        return True
     from ..utils.git_env import get_git_executable, git_subprocess_env
 
+    git_exe = get_git_executable()
+    subprocess_env = git_subprocess_env(env)
     try:
-        missing = _unmaterialized_paths(
-            get_git_executable(), checkout_dir, env=git_subprocess_env(env)
-        )
+        # Local index scan only; a short bound limits shard-lock hold time.
+        missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
-    return not missing
+    if missing:
+        return False
+    try:
+        _pin_sparse_completeness(git_exe, checkout_dir, env=subprocess_env)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        _log.debug("Could not pin sparse completeness for %s", checkout_dir)
+    return True
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -897,6 +929,8 @@ class GitCache:
                         "the repository may require credentials.",
                         stderr=checkout.stderr or "",
                     )
+                if promisor_url:
+                    _pin_sparse_completeness(git_exe, staged, env=subprocess_env)
                 # Replace link text with Git-object content before landing
                 # (#3457). Lenient: this shard may serve any package path or
                 # a marketplace read, so an unresolvable link stays link
