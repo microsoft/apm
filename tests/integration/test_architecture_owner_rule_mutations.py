@@ -328,6 +328,35 @@ def test_preview_cannot_bypass_offline_graph_authority(path: str, old: str, new:
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/policy/_constraint_pinning.py",
+            "name = git_semver_package_name(dep)",
+            'name = (dep.virtual_path or dep.repo_url).rstrip("/").rsplit("/", 1)[-1]',
+        ),
+        (
+            "src/apm_cli/install/helpers/ref_reuse.py",
+            "def git_semver_package_name(",
+            "def git_semver_package_label(",
+        ),
+    ],
+)
+def test_pinned_constraint_tag_name_must_use_resolver_owner(path: str, old: str, new: str) -> None:
+    """The policy recognises release tags with the resolver's package-name owner (#3224)."""
+    rule_id = "transport-platform-git-semver-preflight"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
             "src/apm_cli/integration/hook_ownership.py",
             "def canonicalize_hook_sidecar(",
             "def canonicalize_hook_sidecar_disabled(",

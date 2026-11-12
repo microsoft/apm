@@ -108,7 +108,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
-| `require_pinned_constraint` | boolean        | `false`          | When `true`, every APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Transitive deps are also classified and pass when their parent manifests pinned them. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
+| `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
 
 ### `require_pinned_constraint` reference
 
@@ -128,6 +128,8 @@ dependencies:
     - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
     - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
     - seventh/lib#v1.5.3       # OK: literal tag
+    - acme/mono/packages/pkg-a#pkg-a-v1.5.3  # OK: this package's own release tag
+    - acme/mono/packages/pkg-a#pkg-b-v1.5.3  # FAIL: another package's tag (BARE_BRANCH)
     - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
     - ./packages/local         # OK: local-path dep (no version surface)
 ```
@@ -143,6 +145,8 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
     - third/lib: wildcard '*' matches any version
     - acme/lib: bare branch 'main' tracks a moving tip
 ```
+
+A range is classified as the author wrote it: `fourth/lib#^1.2.0` stays `OK` after the install selects `v1.4.0` for it, and `acme/lib#main` stays `FAIL` whatever commit it resolves to. The package name used for `{name}-v{version}` and `{name}--v{version}` tags is the final path segment of a subdirectory dependency, otherwise the repository name.
 
 Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
 

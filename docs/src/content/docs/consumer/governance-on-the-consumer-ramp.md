@@ -36,9 +36,11 @@ your platform team can set, and what each one does to your install:
 - **`dependencies.require`** -- packages your `apm.yml` must include.
 - **`dependencies.max_depth`** -- maximum transitive dependency depth.
 - **`dependencies.require_pinned_constraint`** -- when `true`, every
-  APM dep declared in your `apm.yml` must use a bounded constraint
-  (semver range, literal tag, or 40-char SHA); bare branch names,
-  wildcards, and open-upper ranges (`>=1.0.0`) are rejected.
+  direct APM dep declared in your `apm.yml` must use a bounded constraint
+  (semver range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3`, or
+  40-char SHA); bare branch names, wildcards, and open-upper ranges
+  (`>=1.0.0`) are rejected. The constraint is judged as you declared it,
+  not as the tag it resolved to.
 - **`mcp.allow`** / **`mcp.deny`** -- glob patterns over MCP server
   references. Same semantics as the dependency lists.
 - **`mcp.transport.allow`** -- restricts MCP transports
