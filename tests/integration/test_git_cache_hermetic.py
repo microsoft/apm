@@ -87,7 +87,7 @@ class TestGetCheckout:
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
-            "[apm]\n\tlinkMaterialization = git-objects\n",
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
             encoding="ascii",
         )
 
@@ -510,7 +510,7 @@ class TestCreateCheckout:
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
-            "[apm]\n\tlinkMaterialization = git-objects\n",
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
             encoding="ascii",
         )
 
@@ -604,7 +604,7 @@ class TestCreateCheckout:
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
-            "[apm]\n\tlinkMaterialization = git-objects\n",
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
             encoding="ascii",
         )
         (cache._db_root / shard_key).mkdir(parents=True)

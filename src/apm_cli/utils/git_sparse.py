@@ -411,7 +411,9 @@ class _CheckoutBytes:
         index. ``cat-file --filters`` reads no index, so in a sparse checkout
         it silently skipped attributes such as ``eol=crlf`` (#3457).
         """
-        scratch = Path(tempfile.mkdtemp(prefix="apm-link-"))
+        from ..config import get_apm_temp_dir
+
+        scratch = Path(tempfile.mkdtemp(prefix="apm-link-", dir=get_apm_temp_dir()))
         try:
             env = dict(self._env if self._env is not None else os.environ)
             env["GIT_INDEX_FILE"] = str(scratch / "index")

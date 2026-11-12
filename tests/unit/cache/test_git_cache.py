@@ -188,7 +188,7 @@ class TestGitCacheGetCheckout:
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
-            "[apm]\n\tlinkMaterialization = git-objects\n",
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
             encoding="ascii",
         )
 
@@ -423,7 +423,7 @@ class TestCheckoutWriteDedup:
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
-            "[apm]\n\tlinkMaterialization = git-objects\n",
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
             encoding="ascii",
         )
 
@@ -492,7 +492,7 @@ class TestCheckoutWriteDedup:
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
-            "[apm]\n\tlinkMaterialization = git-objects\n",
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
             encoding="ascii",
         )
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
