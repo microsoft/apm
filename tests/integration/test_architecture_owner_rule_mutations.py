@@ -40,19 +40,15 @@ from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
+from tests.utils.xdist_shared import shared_session_value, sources_digest
 
 pytestmark = [
     pytest.mark.component,
-    # The module-scoped baseline fixture below pays for one linter run across
-    # every owner rule. `--dist loadgroup` (the xdist scheduler this repo's
-    # sharded integration runs use) is the only scheduler that honors
-    # `xdist_group`; without it these cases could be split across workers and
-    # each worker would recompute that baseline.
-    pytest.mark.xdist_group(name="architecture_owner_rule_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
 OWNERS_DIR = ROOT / ".apm/architecture/owners"
+ARCHITECTURE_SOURCE_ROOTS = ("src/apm_cli", "scripts/architecture_linter", ".apm/architecture")
 
 
 @pytest.mark.parametrize(
@@ -1753,10 +1749,20 @@ def _mutate(case: MutationCase) -> str:
 
 
 @pytest.fixture(scope="module")
-def baseline_violated_rule_ids() -> frozenset[str]:
-    """Run every owner rule once, unmutated, so each case can prove attribution."""
-    report = run_selected_rules(ROOT, tuple(sorted({case.rule_id for case in MUTATIONS})))
-    return frozenset(violation.rule_id for violation in report.violations)
+def baseline_violated_rule_ids(tmp_path_factory: pytest.TempPathFactory) -> frozenset[str]:
+    """Run every owner rule once per session, unmutated, so each case can prove attribution.
+
+    The cases spread across xdist workers; the first worker computes the
+    baseline and the others reuse it, keyed by the rule set and source hash.
+    """
+    rule_ids = tuple(sorted({case.rule_id for case in MUTATIONS}))
+
+    def compute() -> list[str]:
+        report = run_selected_rules(ROOT, rule_ids)
+        return sorted({violation.rule_id for violation in report.violations})
+
+    key = sources_digest(ROOT, ARCHITECTURE_SOURCE_ROOTS, rule_ids)
+    return frozenset(shared_session_value(tmp_path_factory, "owner-baseline", key, compute))
 
 
 def test_matrix_covers_every_registry_guard_exactly_once() -> None:

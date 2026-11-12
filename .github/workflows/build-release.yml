@@ -2,10 +2,21 @@ name: CI/CD Pipeline
 
 env:
   PYTHON_VERSION: '3.12'  # Standardize on 3.12 for Ubuntu 24.04 LTS compatibility
+  # Hermetic integration selection. Network-dependent tests run once in the
+  # retriable network lane; the two selections partition the non-live corpus.
+  HERMETIC_MARK_EXPR: "not live and not requires_github_token and not requires_network_integration"
+  NETWORK_MARK_EXPR: "(requires_github_token or requires_network_integration) and not live"
+  # Architecture-linter contracts are platform-agnostic: Linux x86_64 runs
+  # them once, every other lane deselects them.
+  ARM_MARK_EXPR: "not live and not requires_github_token and not requires_network_integration and not architecture_contract"
+  # macOS runners are scarce: they run the platform-sensitive subset only.
+  MACOS_MARK_EXPR: "(lifecycle_smoke or windows_compat or platform_sensitive) and not live and not requires_github_token and not requires_network_integration and not architecture_contract"
 
 on:
   push:
-    branches: [ main ]
+    # TEMP-REHEARSAL (#3582): the two rehearsal branches exercise the full and
+    # promoted release paths without a tag. Remove before merge.
+    branches: [ main, danielmeppiel-ci-release-rehearsal, danielmeppiel-ci-promote-rehearsal ]
     tags: [ "v*" ]
     paths-ignore:
       - 'docs/**'
@@ -22,33 +33,139 @@ permissions:
   contents: read
 
 jobs:
-  # Unit tests + binary build combined (Linux + Windows).
+  # Decides what this run validates (scripts/release_plan.py):
+  #   push to main      -> push: unit tests + binaries (Linux, Windows)
+  #   schedule/dispatch -> full: every suite; a green full run is promotion
+  #                        evidence for its SHA
+  #   tag               -> promoted when the SHA already has evidence (build,
+  #                        smoke, release validation); otherwise fail closed,
+  #                        unless vars.APM_RELEASE_FULL_VALIDATION_TAG names
+  #                        this tag (then: full validation, then publish)
+  release-plan:
+    name: Release Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      publish: ${{ steps.plan.outputs.publish }}
+      run_unit: ${{ steps.plan.outputs.run_unit }}
+      full: ${{ steps.plan.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Decide validation mode
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          # Manual override for one tag whose SHA has no evidence: set the
+          # repository variable to that exact tag and re-run; the run then
+          # validates everything itself before publishing.
+          FULL_VALIDATION_TAG: ${{ vars.APM_RELEASE_FULL_VALIDATION_TAG }}
+          # TEMP-REHEARSAL (#3582): remove before merge.
+          FULL_VALIDATION_BRANCHES: danielmeppiel-ci-release-rehearsal
+          PROMOTION_BRANCHES: danielmeppiel-ci-promote-rehearsal
+          EVIDENCE_BRANCH: ${{ github.ref_name == 'danielmeppiel-ci-promote-rehearsal' && 'danielmeppiel-ci-release-rehearsal' || 'main' }}
+          EVIDENCE_EVENTS: ${{ github.ref_name == 'danielmeppiel-ci-promote-rehearsal' && 'push' || '' }}
+        run: python3 scripts/release_plan.py
+
+  # Plans duration-balanced integration shards while the binaries build.
+  integration-plan:
+    name: Integration Shard Plan
+    needs: [release-plan]
+    if: needs.release-plan.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      x86_shards: ${{ steps.plan.outputs.x86_shards }}
+      x86_count: ${{ steps.plan.outputs.x86_count }}
+      arm_shards: ${{ steps.plan.outputs.arm_shards }}
+      arm_count: ${{ steps.plan.outputs.arm_count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Select shard durations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-shard-durations.sh .shard-plan
+
+      - name: Plan shards
+        id: plan
+        env:
+          APM_E2E_TESTS: "1"
+        run: |
+          plan() {
+            uv run --frozen python -m pytest tests/integration --collect-only -q \
+              -p no:cacheprovider -p scripts.ci_sharding -m "$2" \
+              --shard-durations ".shard-plan/$1.json" --shard-plan-out ".shard-plan/plan-$1.json" \
+              --shard-target-seconds 480 --shard-workers 4 --shard-max "$3" > ".shard-plan/collect-$1.log"
+          }
+          plan linux-x86_64 "$HERMETIC_MARK_EXPR" 8 & x86=$!
+          plan linux-arm64 "$ARM_MARK_EXPR" 6 & arm=$!
+          wait "$x86" && wait "$arm"
+          for lane in linux-x86_64 linux-arm64; do tail -n 1 ".shard-plan/collect-$lane.log"; cat ".shard-plan/plan-$lane.json"; done
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          for key, lane in (("x86", "linux-x86_64"), ("arm", "linux-arm64")):
+              plan = json.load(open(f".shard-plan/plan-{lane}.json"))
+              print(f"{key}_shards={json.dumps(plan['shards'])}")
+              print(f"{key}_count={plan['shard_count']}")
+          PY
+
+      - name: Share the plan with every shard
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-shard-plan
+          path: .shard-plan/*.json
+          retention-days: 7
+          if-no-files-found: error
+
+  # Unit tests + binary build combined, one job per platform so each
+  # platform's integration starts as soon as its own binary exists.
   # Merging test+build eliminates ~1.5m runner re-provisioning overhead per platform.
   # macOS runners are scarce and have their own consolidated jobs below.
-  build-and-test:
+  build-linux-x86:
     name: Build & Test
+    needs: [release-plan]
     strategy:
-      fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
             arch: x86_64
             platform: linux
             binary_name: apm-linux-x86_64
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            platform: linux
-            binary_name: apm-linux-arm64
-          - os: windows-latest
-            arch: x86_64
-            platform: windows
-            binary_name: apm-windows-x86_64
-
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
 
-    steps:
+    steps: &build-and-test-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
@@ -67,7 +184,7 @@ jobs:
       # Keep the installer gate ahead of the broad unit suite so an unrelated
       # platform test failure cannot hide installer-specific Windows evidence.
       - name: Test install.ps1 end-to-end (Windows)
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && needs.release-plan.outputs.run_unit == 'true'
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
@@ -77,12 +194,9 @@ jobs:
           -vv -ra --tb=short
 
       # Unit tests run on every push for fast platform-regression signal.
-      # Smoke is intentionally NOT included here: it duplicates ci-integration.yml's
-      # merge-time smoke gate and burns a real codex binary download per platform
-      # per push (~15 redundant runs/day). Smoke is gated to promotion boundaries
-      # below (tag/schedule/dispatch) where it actually serves as a pre-ship gate.
+      # A promoted tag skips them: its SHA already passed them.
       - name: Run unit tests
-        if: matrix.platform != 'windows'
+        if: matrix.platform != 'windows' && needs.release-plan.outputs.run_unit == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
@@ -91,7 +205,7 @@ jobs:
       # Named starts/outcomes identify unfinished tests without dumping captures.
       # This bounds an opaque hang; it does not turn a timeout into success.
       - name: Run unit tests (Windows diagnostics)
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && needs.release-plan.outputs.run_unit == 'true'
         timeout-minutes: 60
         env:
           PYTHONUNBUFFERED: "1"
@@ -101,12 +215,10 @@ jobs:
           uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
           -vv --tb=short --show-capture=no --no-showlocals
 
-      # Smoke runs only at promotion boundaries:
-      #   - tags (pre-ship release gate; only place tag-cut releases get smoke validation)
-      #   - schedule (nightly regression catch for upstream codex URL drift)
-      #   - repository_dispatch (default-branch manual safety net)
+      # Runtime smoke runs only on full validation (schedule/dispatch): the
+      # nightly regression catch for upstream codex URL drift.
       - name: Run smoke tests
-        if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
+        if: needs.release-plan.outputs.full == 'true'
         env:
           GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
@@ -115,9 +227,8 @@ jobs:
 
       - name: Install UPX (Linux)
         if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y upx-ucl
+        timeout-minutes: 5
+        run: bash scripts/ci-apt-install.sh upx-ucl
 
       - name: Build binary (Unix)
         if: matrix.platform != 'windows'
@@ -140,6 +251,16 @@ jobs:
           BINARY_DIR: dist\apm-windows-x86_64
         run: |
           uv run pwsh scripts/windows/sign-binary.ps1
+
+      # Hermetic, network-free smoke of the README promises against the
+      # exact binary, on every release-bound run (full and promoted).
+      - name: Smoke-test built binary (Linux)
+        if: matrix.platform == 'linux' && needs.release-plan.outputs.mode != 'push'
+        timeout-minutes: 5
+        env:
+          APM_E2E_TESTS: "1"
+          APM_BINARY_PATH: ${{ github.workspace }}/dist/${{ matrix.binary_name }}/apm
+        run: uv run --frozen pytest tests/integration/test_core_smoke.py -v
 
       # A stalled upload once hung a release job for 11.5 min. Time-box it
       # and retry once instead of failing the whole platform leg.
@@ -183,18 +304,52 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  # Consolidated macOS Intel build + validation.
-  # Intel runners are plentiful (<1 min queue) so this runs on every push for
-  # early macOS build-regression feedback. Integration and release-validation
-  # phases are conditional on tag/schedule/dispatch.
-  # Root node - runs its own unit tests instead of waiting for build-and-test.
+  build-linux-arm:
+    name: Build & Test
+    needs: [release-plan]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux
+            binary_name: apm-linux-arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps: *build-and-test-steps
+
+  build-windows:
+    name: Build & Test
+    needs: [release-plan]
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x86_64
+            platform: windows
+            binary_name: apm-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps: *build-and-test-steps
+
+  # Consolidated macOS Intel build + validation. macOS capacity is scarce, so
+  # this stays one job per run and runs only on release-bound runs (full and
+  # promoted), not on every push. Full runs add the platform-sensitive
+  # integration subset; promoted tags build, smoke-test and release-validate.
+  # Root node - runs its own unit tests instead of waiting for Linux/Windows.
   build-and-validate-macos-intel:
     name: Build & Validate (macOS x86_64)
+    needs: [release-plan]
+    if: needs.release-plan.outputs.mode != 'push'
     runs-on: macos-15-intel
+    env:
+      MACOS_BINARY: apm-darwin-x86_64
     permissions:
       contents: read
 
-    steps:
+    steps: &macos-steps
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -230,6 +385,7 @@ jobs:
         run: uv sync --frozen --extra dev --extra build
 
       - name: Run unit tests
+        if: needs.release-plan.outputs.run_unit == 'true'
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
       # PHASE 1: BUILD BINARY
@@ -241,7 +397,7 @@ jobs:
       - name: Test macOS non-shell binary startup
         env:
           APM_E2E_TESTS: "1"
-          APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-x86_64/apm
+          APM_BINARY_PATH: ${{ github.workspace }}/dist/${{ env.MACOS_BINARY }}/apm
         run: |
           test -x "$APM_BINARY_PATH"
           uv run --frozen pytest \
@@ -257,10 +413,10 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: apm-darwin-x86_64
+          name: ${{ env.MACOS_BINARY }}
           path: |
-            ./dist/apm-darwin-x86_64
-            ./dist/apm-darwin-x86_64.sha256
+            ./dist/${{ env.MACOS_BINARY }}
+            ./dist/${{ env.MACOS_BINARY }}.sha256
             ./scripts/test-release-validation.sh
             ./scripts/test-dependency-integration.sh
             ./scripts/github-token-helper.sh
@@ -273,10 +429,10 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: apm-darwin-x86_64
+          name: ${{ env.MACOS_BINARY }}
           path: |
-            ./dist/apm-darwin-x86_64
-            ./dist/apm-darwin-x86_64.sha256
+            ./dist/${{ env.MACOS_BINARY }}
+            ./dist/${{ env.MACOS_BINARY }}.sha256
             ./scripts/test-release-validation.sh
             ./scripts/test-dependency-integration.sh
             ./scripts/github-token-helper.sh
@@ -285,186 +441,37 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-      # PHASE 2: FOCUSED INTEGRATION TESTS (tag/schedule/dispatch only)
-      - name: Run focused Intel integration tests
-        if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
+      # PHASE 2: PLATFORM-SENSITIVE INTEGRATION SUBSET (full validation only)
+      # Lifecycle, cross-platform, filesystem/shell-sensitive and binary
+      # contracts against the native binary. The platform-agnostic remainder
+      # (architecture contracts, network lane) runs once on Linux.
+      - name: Run platform-sensitive integration tests
+        if: needs.release-plan.outputs.full == 'true'
         env:
           APM_E2E_TESTS: "1"
           GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          # Intel validates the promoted lifecycle subset against its native
-          # binary. Live credential acceptance belongs to auth-acceptance.yml.
           # loadgroup preserves HOME-mutating test serialization.
-          PYTEST_MARK_EXPR: "lifecycle_smoke and not live"
+          PYTEST_MARK_EXPR: ${{ env.MACOS_MARK_EXPR }}
           PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        # Run 39834866538 timed out at 30m with workers still passing at 91%.
-        # 30 / 0.91 projects roughly 33m; 60m adds setup/tail headroom,
-        # not a completion guarantee. Keep selection and failure gates intact.
         timeout-minutes: 60
-
-      # PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only)
-      - name: Prepare isolated release-validation environment
-        if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
-        run: |
-          mkdir -p /tmp/apm-isolated-test/dist
-          cp -R ./dist/apm-darwin-x86_64 /tmp/apm-isolated-test/dist/
-          cp ./dist/apm-darwin-x86_64.sha256 /tmp/apm-isolated-test/dist/ 2>/dev/null || true
-          cp ./scripts/test-release-validation.sh /tmp/apm-isolated-test/
-          cp ./scripts/test-dependency-integration.sh /tmp/apm-isolated-test/ 2>/dev/null || true
-          cp ./scripts/github-token-helper.sh /tmp/apm-isolated-test/ 2>/dev/null || true
-
-          cd /tmp/apm-isolated-test
-          chmod +x ./dist/apm-darwin-x86_64/apm
-          ln -s "$(pwd)/dist/apm-darwin-x86_64/apm" "$(pwd)/apm"
-          echo "/tmp/apm-isolated-test" >> "$GITHUB_PATH"
-
-      - name: Run release validation tests
-        if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
-        env:
-          APM_E2E_TESTS: "1"
-          GITHUB_API_TOKEN: ${{ github.token }}
-          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-        run: |
-          cd /tmp/apm-isolated-test
-          chmod +x test-release-validation.sh
-          ./test-release-validation.sh
-        timeout-minutes: 20
-
-  # Consolidated macOS ARM build + validation.
-  # ARM runners (macos-latest) are extremely scarce - 2-4+ hour queue waits are
-  # common. This job is gated to tag/schedule/dispatch only so push-to-main never
-  # blocks on ARM availability. All phases run unconditionally since the job itself
-  # is already release-gated.
-  # Root node - runs its own unit tests instead of waiting for build-and-test.
-  build-and-validate-macos-arm:
-    name: Build & Validate (macOS arm64)
-    if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
-    runs-on: macos-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install UPX
-        run: brew install upx
-
-      - name: Install Unix shell startup test runtimes
-        run: |
-          brew list bash >/dev/null 2>&1 || brew install bash
-          brew list fish >/dev/null 2>&1 || brew install fish
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
-        with:
-          enable-cache: true
-
-      - name: Install dependencies
-        run: uv sync --frozen --extra dev --extra build
-
-      - name: Run unit tests
-        run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
-
-      # PHASE 1: BUILD BINARY
-      - name: Build binary
-        run: |
-          chmod +x scripts/build-binary.sh
-          uv run ./scripts/build-binary.sh
-
-      - name: Test macOS non-shell binary startup
-        env:
-          APM_E2E_TESTS: "1"
-          APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-darwin-arm64/apm
-        run: |
-          test -x "$APM_BINARY_PATH"
-          uv run --frozen pytest \
-            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
-            tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
-            -vv -ra --tb=short
-
-      # A stalled upload once hung a release job for 11.5 min. Time-box it
-      # and retry once instead of failing the whole platform leg.
-      - name: Upload binary as workflow artifact
-        id: upload-binary
-        timeout-minutes: 5
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: apm-darwin-arm64
-          path: |
-            ./dist/apm-darwin-arm64
-            ./dist/apm-darwin-arm64.sha256
-            ./scripts/test-release-validation.sh
-            ./scripts/test-dependency-integration.sh
-            ./scripts/github-token-helper.sh
-          include-hidden-files: true
-          retention-days: 30
-          if-no-files-found: error
-
-      - name: Retry binary upload
-        if: steps.upload-binary.outcome == 'failure'
-        timeout-minutes: 5
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: apm-darwin-arm64
-          path: |
-            ./dist/apm-darwin-arm64
-            ./dist/apm-darwin-arm64.sha256
-            ./scripts/test-release-validation.sh
-            ./scripts/test-dependency-integration.sh
-            ./scripts/github-token-helper.sh
-          include-hidden-files: true
-          retention-days: 30
-          if-no-files-found: error
-          overwrite: true
-
-      # PHASE 2: INTEGRATION TESTS
-      - name: Run integration tests
-        env:
-          APM_E2E_TESTS: "1"
-          GITHUB_API_TOKEN: ${{ github.token }}
-          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-          # Scarce ARM runners force the full suite onto one runner, so
-          # parallelise the non-live corpus in-process with xdist.
-          # --dist loadgroup honors the
-          # home_env xdist_group markers that keep HOME-mutating tests
-          # serialized on a single worker.
-          PYTEST_MARK_EXPR: "not live"
-          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
-        run: |
-          chmod +x scripts/test-integration.sh
-          uv run ./scripts/test-integration.sh
-        # Run 39784442659 reached 77% at 60 minutes with all workers progressing.
-        # Allow setup/tail headroom beyond the roughly 78-minute linear estimate.
-        timeout-minutes: 120
 
       # PHASE 3: RELEASE VALIDATION
       - name: Prepare isolated release-validation environment
         run: |
           mkdir -p /tmp/apm-isolated-test/dist
-          cp -R ./dist/apm-darwin-arm64 /tmp/apm-isolated-test/dist/
-          cp ./dist/apm-darwin-arm64.sha256 /tmp/apm-isolated-test/dist/ 2>/dev/null || true
+          cp -R "./dist/$MACOS_BINARY" /tmp/apm-isolated-test/dist/
+          cp "./dist/$MACOS_BINARY.sha256" /tmp/apm-isolated-test/dist/ 2>/dev/null || true
           cp ./scripts/test-release-validation.sh /tmp/apm-isolated-test/
           cp ./scripts/test-dependency-integration.sh /tmp/apm-isolated-test/ 2>/dev/null || true
           cp ./scripts/github-token-helper.sh /tmp/apm-isolated-test/ 2>/dev/null || true
 
           cd /tmp/apm-isolated-test
-          chmod +x ./dist/apm-darwin-arm64/apm
-          ln -s "$(pwd)/dist/apm-darwin-arm64/apm" "$(pwd)/apm"
+          chmod +x "./dist/$MACOS_BINARY/apm"
+          ln -s "$(pwd)/dist/$MACOS_BINARY/apm" "$(pwd)/apm"
           echo "/tmp/apm-isolated-test" >> "$GITHUB_PATH"
 
       - name: Run release validation tests
@@ -478,107 +485,222 @@ jobs:
           ./test-release-validation.sh
         timeout-minutes: 20
 
-  # Integration tests with full source code access (Linux + Windows).
-  # macOS integration tests run inside the consolidated macOS jobs to avoid re-queuing scarce runners.
-  # Skip on push-to-main: already validated by ci-integration.yml during the PR.
-  # Run on tags (release gate), schedule (regression), and dispatch (manual).
-  integration-tests:
-    name: Integration Tests
-    if: >
-      always() &&
-      (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch') &&
-      (github.event_name == 'schedule' || needs.build-and-test.result == 'success')
-    needs: [build-and-test]
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            arch: x86_64
-            platform: linux
-            binary_name: apm-linux-x86_64
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            platform: linux
-            binary_name: apm-linux-arm64
-          - os: windows-latest
-            arch: x86_64
-            platform: windows
-            binary_name: apm-windows-x86_64
-
-    runs-on: ${{ matrix.os }}
+  # Consolidated macOS ARM build + validation. Same single-job shape and
+  # reduced platform-sensitive scope as Intel; never runs on push.
+  build-and-validate-macos-arm:
+    name: Build & Validate (macOS arm64)
+    needs: [release-plan]
+    if: needs.release-plan.outputs.mode != 'push'
+    runs-on: macos-latest
+    env:
+      MACOS_BINARY: apm-darwin-arm64
     permissions:
       contents: read
+    steps: *macos-steps
 
-    steps:
+  # Hermetic Linux integration, duration-balanced across runners. Each
+  # architecture starts as soon as its own binary is built.
+  integration-linux-x86:
+    name: Integration Tests (linux x86_64, shard ${{ matrix.shard }})
+    needs: [release-plan, integration-plan, build-linux-x86]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      BINARY_NAME: apm-linux-x86_64
+      LANE: linux-x86_64
+      SHARD_COUNT: ${{ needs.integration-plan.outputs.x86_count }}
+      LANE_MARK_EXPR: "not live and not requires_github_token and not requires_network_integration"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.integration-plan.outputs.x86_shards) }}
+
+    steps: &linux-integration-steps
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download APM binary from build artifacts
-        continue-on-error: ${{ github.event_name == 'schedule' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ matrix.binary_name }}
+          name: ${{ env.BINARY_NAME }}
           path: ./
 
-      - name: Check downloaded binary artifact
-        id: artifact
-        if: always()
-        shell: bash
-        run: |
-          if [ -d "./dist/${{ matrix.binary_name }}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No ${{ matrix.binary_name }} artifact; skipping scheduled integration validation for this platform."
-          fi
+      - name: Download shard plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: integration-shard-plan
+          path: ./.shard-plan/
 
       - name: Set up Node.js
-        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
       - name: Set up Python
-        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
         uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: true
 
       - name: Install Unix shell startup test runtimes
-        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
         timeout-minutes: 5
         run: bash scripts/ci-apt-install.sh fish zsh
 
       - name: Install test dependencies
-        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
         run: uv sync --frozen --extra dev
 
       - name: Run integration tests (Unix)
-        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
         env:
           APM_E2E_TESTS: "1"
           GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}    # Primary: APM module access
-          # The tag gate runs the non-live corpus on one runner. Four workers stay
-          # below the merge gate's aggregate width while loadgroup preserves
-          # xdist_group serialization for HOME-mutating tests.
-          PYTEST_MARK_EXPR: "not live"
-          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
+          PYTEST_MARK_EXPR: ${{ env.LANE_MARK_EXPR }}
+          # Every shard computes the planner's partition from the same
+          # durations; loadgroup keeps each xdist_group on one worker.
+          PYTEST_EXTRA_ARGS: >-
+            -p scripts.ci_sharding
+            --shard-count ${{ env.SHARD_COUNT }} --shard-index ${{ matrix.shard }}
+            --shard-durations .shard-plan/${{ env.LANE }}.json
+            --shard-store-durations durations-${{ env.LANE }}-${{ matrix.shard }}.json
+            -n 4 --dist loadgroup --durations=15
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        # Linux x64 reached only 78% in 60 minutes in run 39819494530.
-        # Keep the proven ARM bound; allow x64 setup and full-corpus tail headroom.
-        timeout-minutes: ${{ matrix.arch == 'x86_64' && 120 || 60 }}
+        timeout-minutes: 25
+
+      - name: Upload measured durations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: durations-${{ env.LANE }}-${{ matrix.shard }}
+          path: durations-${{ env.LANE }}-${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  integration-linux-arm:
+    name: Integration Tests (linux arm64, shard ${{ matrix.shard }})
+    needs: [release-plan, integration-plan, build-linux-arm]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      BINARY_NAME: apm-linux-arm64
+      LANE: linux-arm64
+      SHARD_COUNT: ${{ needs.integration-plan.outputs.arm_count }}
+      LANE_MARK_EXPR: "not live and not requires_github_token and not requires_network_integration and not architecture_contract"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.integration-plan.outputs.arm_shards) }}
+    steps: *linux-integration-steps
+
+  # Network-dependent tests in their own small lane, with bounded retries of
+  # only the failed tests, so one DNS blip cannot fail a long hermetic job.
+  integration-network:
+    name: Integration Tests (network, linux x86_64)
+    needs: [release-plan, build-linux-x86]
+    if: needs.release-plan.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download APM binary from build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: apm-linux-x86_64
+          path: ./
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+
+      - name: Install Unix shell startup test runtimes
+        timeout-minutes: 5
+        run: bash scripts/ci-apt-install.sh fish zsh
+
+      - name: Install test dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run network-dependent integration tests
+        env:
+          APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+          PYTEST_MARK_EXPR: ${{ env.NETWORK_MARK_EXPR }}
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup"
+          PYTEST_RETRY_FAILED: "2"
+        run: |
+          chmod +x scripts/test-integration.sh
+          uv run ./scripts/test-integration.sh
+        timeout-minutes: 25
+
+  # Windows integration keeps its scenario script (no architecture or
+  # network-lane tests).
+  integration-windows:
+    name: Integration Tests
+    needs: [release-plan, build-windows]
+    if: needs.release-plan.outputs.full == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x86_64
+            platform: windows
+            binary_name: apm-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download APM binary from build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ matrix.binary_name }}
+          path: ./
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+
+      - name: Install test dependencies
+        run: uv sync --frozen --extra dev
 
       - name: Run integration tests (Windows)
-        if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
@@ -588,17 +710,85 @@ jobs:
           uv run pwsh scripts/windows/test-integration.ps1 -SkipBuild
         timeout-minutes: 20
 
-  # Release validation tests - Final pre-release validation of shipped binary (Linux + Windows).
-  # macOS release validation runs inside the consolidated macOS jobs.
+  # Single result for every integration lane, plus the measured durations
+  # the next planner run balances with (published by the nightly run).
+  integration-tests:
+    name: Integration Tests Summary
+    needs:
+      - release-plan
+      - integration-plan
+      - integration-linux-x86
+      - integration-linux-arm
+      - integration-network
+      - integration-windows
+    if: always() && needs.release-plan.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Download measured durations
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          pattern: durations-linux-*
+          path: measured/
+          merge-multiple: true
+
+      - name: Merge measured durations per lane
+        run: |
+          mkdir -p merged
+          for lane in linux-x86_64 linux-arm64; do
+            if compgen -G "measured/durations-$lane-*.json" > /dev/null; then
+              python3 - "merged/$lane.json" measured/durations-"$lane"-*.json <<'PY'
+          import json
+          import sys
+
+          merged = {}
+          for path in sys.argv[2:]:
+              merged.update(json.load(open(path, encoding="utf-8")))
+          with open(sys.argv[1], "w", encoding="utf-8") as handle:
+              json.dump(dict(sorted(merged.items())), handle, indent=0)
+          print(f"[i] {sys.argv[1]}: {len(merged)} durations from {len(sys.argv) - 2} shard(s)")
+          PY
+            fi
+          done
+
+      - name: Publish durations for the next shard plan
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-durations
+          path: merged/*.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Require every integration lane
+        env:
+          PLAN: ${{ needs.integration-plan.result }}
+          LINUX_X86: ${{ needs.integration-linux-x86.result }}
+          LINUX_ARM: ${{ needs.integration-linux-arm.result }}
+          NETWORK: ${{ needs.integration-network.result }}
+          WINDOWS: ${{ needs.integration-windows.result }}
+        run: |
+          failed=0
+          for lane in PLAN LINUX_X86 LINUX_ARM NETWORK WINDOWS; do
+            result="${!lane}"
+            echo "$lane: $result"
+            [ "$result" = success ] || failed=1
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Every integration lane must succeed."
+            exit 1
+          fi
+
+  # Release validation of the shipped binary (Linux + Windows), started as
+  # soon as the platform's binary exists. macOS validates in its own job.
   release-validation:
     name: Release Validation
-    if: >
-      always() &&
-      (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch') &&
-      (github.event_name == 'schedule' ||
-        (needs.build-and-test.result == 'success' && needs.integration-tests.result == 'success'))
-    needs: [build-and-test, integration-tests]
+    needs: [release-plan, build-linux-x86, build-linux-arm]
+    if: needs.release-plan.outputs.mode != 'push'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
@@ -609,16 +799,12 @@ jobs:
             arch: arm64
             platform: linux
             binary_name: apm-linux-arm64
-          - os: windows-latest
-            arch: x86_64
-            platform: windows
-            binary_name: apm-windows-x86_64
 
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
 
-    steps:
+    steps: &release-validation-steps
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -630,37 +816,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Download APM binary from build artifacts
-        continue-on-error: ${{ github.event_name == 'schedule' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ matrix.binary_name }}
           path: ${{ matrix.platform == 'windows' && 'D:\apm-isolated-test' || '/tmp/apm-isolated-test/' }}
 
-      - name: Check downloaded binary artifact (Unix)
-        id: artifact_unix
-        if: always() && matrix.platform != 'windows'
-        run: |
-          if [ -d "/tmp/apm-isolated-test/dist/${{ matrix.binary_name }}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No ${{ matrix.binary_name }} artifact; skipping scheduled release validation for this platform."
-          fi
-
-      - name: Check downloaded binary artifact (Windows)
-        id: artifact_windows
-        if: always() && matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          if (Test-Path "D:\apm-isolated-test\dist\${{ matrix.binary_name }}") {
-            "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            "available=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            Write-Warning "No ${{ matrix.binary_name }} artifact; skipping scheduled release validation for this platform."
-          }
-
       - name: Make binary executable and verify isolation (Unix)
-        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact_unix.outputs.available == 'true')
+        if: matrix.platform != 'windows'
         run: |
           cd /tmp/apm-isolated-test
 
@@ -673,14 +835,14 @@ jobs:
           chmod +x ./dist/${{ matrix.binary_name }}/apm
 
       - name: Create APM symlink for testing (Unix)
-        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact_unix.outputs.available == 'true')
+        if: matrix.platform != 'windows'
         run: |
           cd /tmp/apm-isolated-test
           ln -s "$(pwd)/dist/${{ matrix.binary_name }}/apm" "$(pwd)/apm"
           echo "/tmp/apm-isolated-test" >> "$GITHUB_PATH"
 
       - name: Verify binary and add to PATH (Windows)
-        if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact_windows.outputs.available == 'true')
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           cd D:\apm-isolated-test
@@ -695,7 +857,7 @@ jobs:
           echo $binDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Run release validation tests (Unix)
-        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact_unix.outputs.available == 'true')
+        if: matrix.platform != 'windows'
         env:
           APM_E2E_TESTS: "1"
           GITHUB_API_TOKEN: ${{ github.token }}
@@ -707,7 +869,7 @@ jobs:
         timeout-minutes: 20
 
       - name: Run release validation tests (Windows)
-        if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact_windows.outputs.available == 'true')
+        if: matrix.platform == 'windows'
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
@@ -718,14 +880,34 @@ jobs:
           .\scripts\windows\test-release-validation.ps1
         timeout-minutes: 20
 
+  release-validation-windows:
+    name: Release Validation
+    needs: [release-plan, build-windows]
+    if: needs.release-plan.outputs.mode != 'push'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x86_64
+            platform: windows
+            binary_name: apm-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps: *release-validation-steps
+
   daily-release-smoke-signal:
     name: Daily Release Smoke Signal
     needs:
-      - build-and-test
+      - release-plan
+      - build-linux-x86
+      - build-linux-arm
+      - build-windows
       - build-and-validate-macos-intel
       - build-and-validate-macos-arm
       - integration-tests
       - release-validation
+      - release-validation-windows
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
@@ -747,10 +929,34 @@ jobs:
             await main({ github, context, core });
 
 
+  # Publication: pushed tags only. Every release-bound lane must have succeeded;
+  # integration is skipped only on a promoted tag, whose SHA was already
+  # fully validated (see release-plan).
   create-release:
     name: Create GitHub Release
-    needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation]
-    if: github.event_name == 'push' && github.ref_type == 'tag'  # Only pushed tags create GitHub releases
+    needs:
+      - release-plan
+      - build-linux-x86
+      - build-linux-arm
+      - build-windows
+      - build-and-validate-macos-intel
+      - build-and-validate-macos-arm
+      - integration-tests
+      - release-validation
+      - release-validation-windows
+    if: >-
+      always() && github.ref_type == 'tag' &&
+      needs.release-plan.result == 'success' &&
+      needs.release-plan.outputs.publish == 'true' &&
+      needs.build-linux-x86.result == 'success' &&
+      needs.build-linux-arm.result == 'success' &&
+      needs.build-windows.result == 'success' &&
+      needs.build-and-validate-macos-intel.result == 'success' &&
+      needs.build-and-validate-macos-arm.result == 'success' &&
+      needs.release-validation.result == 'success' &&
+      needs.release-validation-windows.result == 'success' &&
+      (needs.integration-tests.result == 'success' ||
+        (needs.release-plan.outputs.mode == 'promoted' && needs.integration-tests.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Required for release creation

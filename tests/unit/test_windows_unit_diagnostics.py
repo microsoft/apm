@@ -19,16 +19,18 @@ WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/build-releas
 TEST_COMMAND = ["uv", "run", "pytest", "tests/unit", "tests/test_console.py"]
 PARALLEL_ARGS = ["-n", "auto", "--dist", "worksteal"]
 DIAGNOSTIC_ARGS = ["-vv", "--tb=short", "--show-capture=no", "--no-showlocals"]
+RUN_UNIT = "needs.release-plan.outputs.run_unit == 'true'"
 
 
 def _assert_windows_diagnostics(workflow: dict) -> None:
     """Windows stays exhaustive, parallel, bounded, and fail-closed."""
-    job = workflow_job(workflow, "build-and-test")
+    job = workflow_job(workflow, "build-windows")
+    assert [entry["platform"] for entry in job["strategy"]["matrix"]["include"]] == ["windows"]
     linux = workflow_step(job, "Run unit tests")
     windows = workflow_step(job, "Run unit tests (Windows diagnostics)")
-    assert linux["if"] == "matrix.platform != 'windows'"
+    assert linux["if"] == f"matrix.platform != 'windows' && {RUN_UNIT}"
     assert shell_commands(linux) == [TEST_COMMAND + PARALLEL_ARGS]
-    assert windows["if"] == "matrix.platform == 'windows'"
+    assert windows["if"] == f"matrix.platform == 'windows' && {RUN_UNIT}"
     assert windows["timeout-minutes"] == 60
     assert shell_commands(windows) == [[*TEST_COMMAND, *PARALLEL_ARGS, *DIAGNOSTIC_ARGS]]
     assert windows["env"] == {**linux["env"], "PYTHONUNBUFFERED": "1"}
@@ -54,7 +56,7 @@ def test_windows_diagnostics_contract_rejects_mutations(key: str, value: object)
     """A success-shaped replacement or changed safety bound is rejected."""
     workflow = deepcopy(load_workflow(WORKFLOW))
     step = workflow_step(
-        workflow_job(workflow, "build-and-test"), "Run unit tests (Windows diagnostics)"
+        workflow_job(workflow, "build-windows"), "Run unit tests (Windows diagnostics)"
     )
     step[key] = value
     with pytest.raises(AssertionError):

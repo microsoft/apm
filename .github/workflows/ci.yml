@@ -399,11 +399,69 @@ jobs:
           exit 1
         fi
 
+  # Architecture-linter contracts (tests/integration/test_architecture_*,
+  # marker architecture_contract) on PRs that touch what they lint. They are
+  # platform-agnostic, so this is their only PR-time run; the merge queue
+  # and the nightly release run cover every other change. Not required.
+  architecture-contracts:
+    name: Architecture Contracts Shard ${{ matrix.shard }} (Linux)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Detect architecture-relevant changes
+      id: changes
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        relevant='^(src/|scripts/architecture_linter/|scripts/lint_architecture_boundaries\.py|scripts/ci_sharding\.py|\.apm/architecture/|tests/integration/(test_architecture_|conftest\.py)|tests/utils/|pyproject\.toml|uv\.lock)'
+        if git diff --name-only "$BASE_SHA" HEAD | grep -qE "$relevant"; then
+          echo "run=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          echo "[i] No architecture-relevant change; the merge queue and nightly run these contracts."
+        fi
+
+    - name: Set up Python
+      if: steps.changes.outputs.run == 'true'
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      if: steps.changes.outputs.run == 'true'
+      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      if: steps.changes.outputs.run == 'true'
+      run: uv sync --frozen --extra dev
+
+    - name: Run architecture contracts
+      if: steps.changes.outputs.run == 'true'
+      run: >-
+        uv run --frozen python -m pytest -p no:cacheprovider -q
+        -m architecture_contract tests/integration
+        -p scripts.ci_sharding --shard-count 3 --shard-index ${{ matrix.shard }}
+        --shard-durations .github/ci-durations/linux-x86_64.json
+        -n 4 --dist loadgroup --durations=10
+
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
-  # Two-way sharded with pytest-split, mirroring the pattern proven in
-  # ci-integration.yml. Each shard is an independent runner; xdist inside
-  # each shard parallelises within.
+  # Two-way sharded by measured duration with scripts/ci_sharding.py, the
+  # plugin ci-integration.yml and build-release.yml also use. Each shard is
+  # an independent runner; xdist inside each shard parallelises within.
   #
   # The shard jobs themselves are the required checks at PR time (see
   # merge-gate.yml EXPECTED_CHECKS). An earlier iteration of this
@@ -415,12 +473,15 @@ jobs:
   # enforces the global 80% floor, just off the PR-time critical path,
   # and is escalated to required on `merge_group`.
   #
-  # First runs use pytest-split's naive file-based split (no .test_durations
-  # committed yet); commit a durations file in a follow-up PR after one
-  # green run to balance shards better.
+  # Durations come from .github/ci-durations/unit.json (refresh it from the
+  # durations-unit-* artifacts each shard uploads); unknown tests weigh the
+  # mean known duration.
   build-and-test-shard:
     name: Build & Test Shard ${{ matrix.shard }} (Linux)
-    runs-on: ubuntu-24.04
+    # Linux arm64 runners finish the same suite about 1.5x faster than
+    # x86_64 at the same core count. x86_64 stays covered by the merge
+    # queue, main pushes and release runs.
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
     strategy:
@@ -462,10 +523,11 @@ jobs:
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
-    # --splits 2 --group N matches the layout used by ci-integration.yml.
-    # -n 2 --dist worksteal parallelises within the shard. -n 4 was measured
-    # on #3582: per-worker collection of ~13k tests added 40-60 s while
-    # execution gained 0-25 s, so both shards got slower.
+    # scripts/ci_sharding.py splits the suite by measured duration
+    # (.github/ci-durations/unit.json) instead of by file count, keeping
+    # xdist groups whole. -n 2 --dist worksteal parallelises within the
+    # shard; -n 4 was measured on #3582: per-worker collection of ~13k
+    # tests added 40-60 s while execution gained 0-25 s.
     #
     # Per-shard floor of 60% catches regressions at PR time on roughly
     # half the codebase (observed per-shard coverage today is ~65%).
@@ -475,8 +537,10 @@ jobs:
     # gate is preserved on the path that actually merges to main.
     - name: Run tests with coverage
       run: |
-        uv run pytest tests/unit tests/test_console.py tests/red_team \
-          --splits 2 --group ${{ matrix.shard }} \
+        uv run python -m pytest tests/unit tests/test_console.py tests/red_team \
+          -p scripts.ci_sharding --shard-count 2 --shard-index ${{ matrix.shard }} \
+          --shard-durations .github/ci-durations/unit.json \
+          --shard-store-durations durations-unit-${{ matrix.shard }}.json \
           -n 2 --dist worksteal \
           --cov --cov-report= --cov-fail-under=60
 
@@ -486,6 +550,15 @@ jobs:
         if [ -f .coverage ]; then
           mv .coverage .coverage.unit-shard-${{ matrix.shard }}
         fi
+
+    - name: Upload measured durations
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: durations-unit-${{ matrix.shard }}
+        path: durations-unit-${{ matrix.shard }}.json
+        retention-days: 7
+        if-no-files-found: ignore
 
     - name: Upload coverage data
       if: always()
@@ -703,15 +776,17 @@ jobs:
   #
   # Why timeout-minutes: 10
   # ------------------------
-  # Four xdist workers use the public Ubuntu runner's four CPUs without
-  # changing the required selection.
+  # Four xdist workers use the public Ubuntu arm64 runner's four CPUs
+  # without changing the required selection (arm64 runs the same corpus
+  # about 1.4x faster than x86_64; x86_64 is covered in the merge queue).
   # loadgroup preserves xdist_group serialization for HOME-mutating tests,
   # matching the merge-group integration scheduler. The cap includes
   # checkout/setup/sync/cleanup; hosted job duration is the release authority.
   # The growing corpus exhausted this cap on run 39737354179. Two shards
   # retain the full selection and xdist affinity without increasing the cap.
-  # pytest-split balances whole affinity units by their member counts;
-  # these weights are not claimed as measured test durations.
+  # scripts/ci_sharding.py (via scripts/lifecycle_smoke_sharding.py)
+  # balances whole affinity units by measured durations from
+  # .github/ci-durations/linux-arm64.json.
   # The required aggregate checks both explicit job results independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
@@ -721,7 +796,7 @@ jobs:
   # credential/network prohibitions.
   lifecycle-smoke-shard-1:
     name: Lifecycle Smoke Shard 1 (Linux)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -763,12 +838,13 @@ jobs:
         nproc
         uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
           -p scripts.lifecycle_smoke_sharding --lifecycle-shard "$LIFECYCLE_SHARD" \
+          --lifecycle-durations .github/ci-durations/linux-arm64.json \
           -n 4 --dist loadgroup --durations=20 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
 
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read

@@ -28,16 +28,31 @@
 #
 # Binary is built inline rather than downloaded from ci.yml so this workflow
 # tests exactly the merge-queue tentative merge SHA without cross-workflow
-# artifact plumbing.
+# artifact plumbing. It is built once and shared by every lane.
+#
+# Lanes (all on the tentative merge commit):
+#   - hermetic integration, duration-balanced shards (scripts/ci_sharding.py)
+#     planned while the binary builds;
+#   - network-dependent integration in one small lane that retries only
+#     failed tests, so a DNS blip cannot fail a long hermetic shard;
+#   - full Windows unit suite in three duration-balanced shards, the only
+#     pre-merge run of it (build-release.yml runs it after merge);
+#   - release validation, in parallel with integration.
 name: Integration Tests
-
-env:
-  PYTHON_VERSION: '3.12'
 
 on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  # TEMP-REHEARSAL (#3582): exercise the merge-queue lanes from a rehearsal
+  # branch push (write access only, same trust boundary). Remove before merge.
+  push:
+    branches: [ danielmeppiel-ci-release-rehearsal ]
+
+env:
+  PYTHON_VERSION: '3.12'
+  HERMETIC_MARK_EXPR: "not live and not requires_github_token and not requires_network_integration"
+  NETWORK_MARK_EXPR: "(requires_github_token or requires_network_integration) and not live"
 
 permissions:
   contents: read
@@ -63,9 +78,8 @@ jobs:
         run: uv sync --frozen --extra dev --extra build
 
       - name: Install UPX
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y upx-ucl
+        timeout-minutes: 5
+        run: bash scripts/ci-apt-install.sh upx-ucl
 
       - name: Build binary
         run: |
@@ -80,6 +94,63 @@ jobs:
             ./dist/apm-linux-x86_64
             ./dist/apm-linux-x86_64.sha256
           include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+
+  integration-plan:
+    name: Integration Shard Plan (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Select shard durations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-shard-durations.sh .shard-plan
+
+      - name: Plan shards
+        id: plan
+        env:
+          APM_E2E_TESTS: "1"
+          APM_RUN_INTEGRATION_TESTS: "1"
+        run: |
+          uv run --frozen python -m pytest tests/integration --collect-only -q \
+            -p no:cacheprovider -p scripts.ci_sharding -m "$HERMETIC_MARK_EXPR" \
+            --shard-durations .shard-plan/linux-x86_64.json --shard-plan-out .shard-plan/plan.json \
+            --shard-target-seconds 420 --shard-workers 4 --shard-max 8 | tail -n 1
+          cat .shard-plan/plan.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          plan = json.load(open(".shard-plan/plan.json"))
+          print(f"shards={json.dumps(plan['shards'])}")
+          print(f"count={plan['shard_count']}")
+          PY
+
+      - name: Share the plan with every shard
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-shard-plan
+          path: .shard-plan/*.json
           retention-days: 7
           if-no-files-found: error
 
@@ -156,17 +227,16 @@ jobs:
 
   integration-tests-shard:
     name: Integration Tests Shard ${{ matrix.shard }} (Linux)
-    needs: [build, smoke-test]
+    needs: [build, smoke-test, integration-plan]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # 4-way sharding via pytest-split keeps wall-clock low. Each shard
-        # is an independent runner so HOME-mutating tests never race
-        # across shards. xdist within a shard gives an additional 2x; the
-        # 4 HOME-mutating files carry an xdist_group("home_env") marker
-        # so xdist serializes them on a single worker (race-safe).
-        shard: [1, 2, 3, 4]
+        # Shard count comes from the duration-based plan. Each shard is an
+        # independent runner, so HOME-mutating tests never race across
+        # shards; within a shard, loadgroup keeps each xdist_group on one
+        # worker and the plan never splits a group across shards.
+        shard: ${{ fromJSON(needs.integration-plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -177,6 +247,12 @@ jobs:
         with:
           name: apm-mq-linux-x86_64
           path: ./dist/
+
+      - name: Download shard plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: integration-shard-plan
+          path: ./.shard-plan/
 
       - name: Make binary executable
         run: chmod +x ./dist/apm-linux-x86_64/apm
@@ -226,13 +302,19 @@ jobs:
           APM_RUN_INTEGRATION_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
+          PYTEST_MARK_EXPR: ${{ env.HERMETIC_MARK_EXPR }}
           # Sharded + parallel pytest invocation passed through to
           # scripts/test-integration.sh, which still owns runtime setup
           # (apm runtime setup copilot/codex/llm) and token resolution.
           # --dist loadgroup is required: it is the only xdist scheduler
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
+          PYTEST_EXTRA_ARGS: >-
+            -p scripts.ci_sharding
+            --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
+            --shard-durations .shard-plan/linux-x86_64.json
+            --shard-store-durations durations-linux-x86_64-${{ matrix.shard }}.json
+            -n 4 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0 --durations=15
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -257,12 +339,147 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Upload measured durations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: durations-linux-x86_64-${{ matrix.shard }}
+          path: durations-linux-x86_64-${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Network-dependent tests (GitHub tokens, live registries) in one small
+  # lane. A failure re-runs only the failed tests, at most twice.
+  integration-network:
+    name: Integration Tests Network (Linux)
+    needs: [build, smoke-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download binary
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: apm-mq-linux-x86_64
+          path: ./dist/
+
+      - name: Make binary executable
+        run: chmod +x ./dist/apm-linux-x86_64/apm
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+
+      - name: Install Unix shell startup test runtimes
+        timeout-minutes: 5
+        run: bash scripts/ci-apt-install.sh fish zsh
+
+      - name: Install test dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run network-dependent integration tests
+        env:
+          APM_E2E_TESTS: "1"
+          APM_RUN_INTEGRATION_TESTS: "1"
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+          ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
+          PYTEST_MARK_EXPR: ${{ env.NETWORK_MARK_EXPR }}
+          PYTEST_EXTRA_ARGS: "-n 4 --dist loadgroup --cov --cov-fail-under=0"
+          PYTEST_RETRY_FAILED: "2"
+        run: |
+          chmod +x scripts/test-integration.sh
+          uv run ./scripts/test-integration.sh
+        timeout-minutes: 20
+
+      - name: Rename coverage data for the network lane
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            mv .coverage .coverage.network
+          fi
+
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-coverage-network
+          path: .coverage.network
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The full Windows unit suite, duration-balanced across three runners.
+  # It previously ran only after merge (build-release.yml), so Windows-only
+  # regressions reached main before anyone saw them.
+  windows-unit-shard:
+    name: Windows Unit Tests Shard ${{ matrix.shard }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run unit tests (Windows shard)
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: >-
+          uv run --frozen python -m pytest tests/unit tests/test_console.py
+          -p scripts.ci_sharding --shard-count 3 --shard-index ${{ matrix.shard }}
+          --shard-durations .github/ci-durations/unit.json
+          -n 4 --dist worksteal
+          -vv --tb=short --show-capture=no --no-showlocals
+
+  windows-unit:
+    name: Windows Unit Tests
+    needs: [windows-unit-shard]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require every Windows unit shard
+        env:
+          SHARDS_RESULT: ${{ needs.windows-unit-shard.result }}
+        run: |
+          if [ "$SHARDS_RESULT" != success ]; then
+            echo "::error::Windows unit shards must all succeed; got '$SHARDS_RESULT'."
+            exit 1
+          fi
+
   # Fan-in job that preserves the gate-required check name
   # "Integration Tests (Linux)". Branch protection / merge-gate.yml
   # require this exact name; shard jobs above are not required directly.
   integration-tests:
     name: Integration Tests (Linux)
-    needs: [integration-tests-shard, scaling-guards]
+    needs: [integration-plan, integration-tests-shard, integration-network, scaling-guards]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -283,7 +500,7 @@ jobs:
         if: always()
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: integration-coverage-shard-*
+          pattern: integration-coverage-*
           path: coverage-shards/
           merge-multiple: true
         continue-on-error: true
@@ -314,11 +531,19 @@ jobs:
 
       - name: Aggregate shard results
         run: |
+          if [[ "${{ needs.integration-plan.result }}" != "success" ]]; then
+            echo "Integration shard planning failed: ${{ needs.integration-plan.result }}"
+            exit 1
+          fi
           if [[ "${{ needs.integration-tests-shard.result }}" != "success" ]]; then
             echo "One or more integration test shards failed: ${{ needs.integration-tests-shard.result }}"
             exit 1
           fi
-          echo "All integration test shards passed."
+          if [[ "${{ needs.integration-network.result }}" != "success" ]]; then
+            echo "The network integration lane failed: ${{ needs.integration-network.result }}"
+            exit 1
+          fi
+          echo "All integration test shards and the network lane passed."
 
       - name: Aggregate scaling-guards result
         run: |
@@ -328,9 +553,10 @@ jobs:
           fi
           echo "Scaling guards passed."
 
+  # Validates the shipped binary in isolation, in parallel with integration.
   release-validation:
     name: Release Validation (Linux)
-    needs: [build, integration-tests]
+    needs: [build, smoke-test]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout test scripts

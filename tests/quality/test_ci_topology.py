@@ -991,7 +991,9 @@ def test_lifecycle_aggregate_cannot_ignore_either_shard(
 def _assert_lifecycle_smoke_shard(ci: WorkflowNode, shard: int) -> None:
     job = workflow_job(ci, LIFECYCLE_SMOKE_SHARD_JOBS[shard - 1])
     assert job["name"] == f"Lifecycle Smoke Shard {shard} (Linux)"
-    assert job["runs-on"] == "ubuntu-24.04"
+    # Hosted four-vCPU Linux runners only (x86_64 or arm64): the -n 4 worker
+    # count and the 10-minute budget are sized for that machine class.
+    assert job["runs-on"] in ("ubuntu-24.04", "ubuntu-24.04-arm")
     assert job["permissions"] == {"contents": "read"}
     assert job["env"] == {"LIFECYCLE_SHARD": str(shard)}
     assert "if" not in job

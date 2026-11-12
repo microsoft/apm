@@ -1,4 +1,4 @@
-"""Affinity-preserving delegation to pytest-split for required lifecycle shards."""
+"""Affinity-preserving delegation to the shared CI sharding plugin for lifecycle shards."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pytest_split.algorithms import TestGroup as SplitGroup
 
+from scripts import ci_sharding
 from scripts import lifecycle_smoke_sharding as sharding
 
 pytestmark = pytest.mark.unit
@@ -60,7 +61,7 @@ def test_partition_delegates_balancing_to_pytest_split(monkeypatch: pytest.Monke
             SplitGroup([single], [grouped[0]], 1.0),
         ]
     )
-    monkeypatch.setattr(sharding, "LeastDurationAlgorithm", lambda: algorithm)
+    monkeypatch.setattr(ci_sharding, "LeastDurationAlgorithm", lambda: algorithm)
 
     assert sharding.partition_items([*grouped, single]) == (grouped, [single])
     algorithm.assert_called_once_with(2, [grouped[0], single], {"a": 2.0, "c": 1.0})
@@ -93,7 +94,7 @@ def test_missing_or_duplicated_algorithm_output_fails_closed(
     algorithm = MagicMock(
         return_value=[SplitGroup([items[node] for node in group], [], 1.0) for group in selection]
     )
-    monkeypatch.setattr(sharding, "LeastDurationAlgorithm", lambda: algorithm)
+    monkeypatch.setattr(ci_sharding, "LeastDurationAlgorithm", lambda: algorithm)
 
     with pytest.raises(pytest.UsageError, match="partition every selected node"):
         sharding.partition_items(list(items.values()))
@@ -105,7 +106,7 @@ def test_wrong_algorithm_partition_count_fails_closed(
 ) -> None:
     items = [_item("a"), _item("b")]
     algorithm = MagicMock(return_value=[SplitGroup(items, [], 1.0)] * count)
-    monkeypatch.setattr(sharding, "LeastDurationAlgorithm", lambda: algorithm)
+    monkeypatch.setattr(ci_sharding, "LeastDurationAlgorithm", lambda: algorithm)
 
     with pytest.raises(pytest.UsageError, match="partition every selected node"):
         sharding.partition_items(items)
