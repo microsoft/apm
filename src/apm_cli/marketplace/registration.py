@@ -28,6 +28,8 @@ PROBED_MANIFEST_PATHS = (
 )
 
 
+# Lives beside PROBED_MANIFEST_PATHS, which its message lists; errors.py would
+# have to import this module back to build it.
 class MarketplaceManifestNotFoundError(MarketplaceError):
     """Raised when no ``marketplace.json`` exists at any probed location."""
 

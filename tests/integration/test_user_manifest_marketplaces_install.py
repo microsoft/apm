@@ -16,6 +16,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def user_root(tmp_path, monkeypatch):
@@ -107,7 +109,7 @@ def test_install_g_keeps_manual_and_removes_only_manifest_entries(user_root, tmp
     flat = _flat(result.output)
     assert "Removed marketplace 'tools'" in flat
     assert "Kept manual marketplace 'manual'" in flat
-    assert "Kept marketplace(s) unchanged: acme" in flat
+    assert "Kept marketplace unchanged: acme" in flat
     registry = _registry(user_root)
     assert sorted(registry) == ["acme", "manual"]
     assert "origin" not in registry["manual"]
@@ -127,3 +129,15 @@ def test_project_manifest_with_marketplaces_fails_with_user_manifest_hint(user_r
     assert "Project and package manifests cannot declare marketplaces" in flat
     assert "apm install -g" in flat
     assert not (user_root / ".apm" / "marketplaces.json").exists()
+
+
+def test_install_g_dry_run_previews_without_creating_registry_files(user_root, tmp_path):
+    acme = _marketplace_dir(tmp_path, "acme", "lint-skill")
+    _write_user_manifest(user_root, {"acme": acme})
+
+    result = _invoke("install", "-g", "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert "Would register marketplace 'acme'" in _flat(result.output)
+    assert not (user_root / ".apm" / "marketplaces.json").exists()
+    assert not (user_root / ".apm" / "config.json").exists()

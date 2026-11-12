@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .errors import ManualMarketplaceConflictError, MarketplaceError
+from .errors import MarketplaceError
 from .models import ORIGIN_MANIFEST, MarketplaceSource
 from .registration import ParsedSource, parse_registration_source, probe_registration
 from .user_manifest import DeclaredMarketplace, parse_declared_marketplaces
@@ -60,40 +60,86 @@ def _same_location(existing: MarketplaceSource, parsed: ParsedSource) -> bool:
     return parsed.is_direct_url or existing.ref == parsed.ref
 
 
-def _register(
+@dataclass
+class _Pending:
+    """A declared entry whose manifest was fetched and awaits the registry write."""
+
+    name: str
+    action: str
+    source: MarketplaceSource
+    plugin_count: int
+
+
+def _probe(
     item: DeclaredMarketplace,
     parsed: ParsedSource,
     *,
     action: str,
     report: MarketplaceReconcileReport,
     logger: CommandLogger,
-) -> None:
-    from .registry import register_manifest_marketplace
-
+) -> _Pending | None:
     try:
         source, manifest = probe_registration(
             item.name, parsed.url, parsed.ref, is_direct_url=parsed.is_direct_url
         )
-        register_manifest_marketplace(dataclasses.replace(source, origin=ORIGIN_MANIFEST))
-    except ManualMarketplaceConflictError:
-        _report_conflict(item.name, report=report, logger=logger)
-        return
     except (MarketplaceError, ValueError, OSError) as exc:
         report.failed.append((item.name, str(exc)))
         logger.error(f"Could not {_VERBS[action]} marketplace '{item.name}': {exc}")
-        return
-    getattr(report, action).append(item.name)
-    count = len(manifest.plugins)
-    noun = "plugin" if count == 1 else "plugins"
-    logger.success(
-        f"{action.capitalize()} marketplace '{item.name}' ({count} {noun})", symbol="check"
+        return None
+    return _Pending(
+        name=item.name,
+        action=action,
+        source=dataclasses.replace(source, origin=ORIGIN_MANIFEST),
+        plugin_count=len(manifest.plugins),
     )
 
 
-def _report_conflict(name: str, *, report: MarketplaceReconcileReport, logger: CommandLogger):
+def _apply(
+    pending: list[_Pending],
+    removals: list[str],
+    *,
+    report: MarketplaceReconcileReport,
+    logger: CommandLogger,
+) -> None:
+    """Write every fetched entry and removal in one registry transaction."""
+    from .registry import apply_manifest_marketplaces
+
+    applied, conflicts, removed = apply_manifest_marketplaces([p.source for p in pending], removals)
+    applied_set = set(applied)
+    for item in pending:
+        if item.name not in applied_set:
+            continue
+        getattr(report, item.action).append(item.name)
+        noun = "plugin" if item.plugin_count == 1 else "plugins"
+        logger.success(
+            f"{item.action.capitalize()} marketplace '{item.name}' ({item.plugin_count} {noun})",
+            symbol="check",
+        )
+    for name in conflicts:
+        _report_conflict(name, report=report, logger=logger)
+    for name in removed:
+        report.removed.append(name)
+        logger.success(
+            f"Removed marketplace '{name}' (no longer in the user manifest)", symbol="remove"
+        )
+
+
+def _report_conflict(
+    name: str,
+    *,
+    report: MarketplaceReconcileReport,
+    logger: CommandLogger,
+    existing: MarketplaceSource | None = None,
+):
     report.conflicts.append(name)
+    current = ""
+    if existing is not None:
+        from ._git_utils import redact_token
+
+        shown = redact_token(existing.url) if existing.url else existing.display_source
+        current = f" (currently {shown})"
     logger.warning(
-        f"Kept manual marketplace '{name}': it was added with 'apm marketplace add', "
+        f"Kept manual marketplace '{name}'{current}: it was added with 'apm marketplace add', "
         "so the user manifest entry was not applied. To let the user manifest manage it, "
         f"run 'apm marketplace remove {name}' and re-run 'apm install -g'."
     )
@@ -140,7 +186,7 @@ def reconcile_user_marketplaces(
         ValueError: The user manifest or its ``marketplaces:`` declaration
             is malformed. Raised before the registry is read or changed.
     """
-    from .registry import read_registered_marketplaces, unregister_manifest_marketplace
+    from .registry import read_registered_marketplaces
 
     declared = parse_declared_marketplaces(_load_user_manifest(manifest_path), manifest_path)
     registered = {s.name.lower(): s for s in read_registered_marketplaces()}
@@ -150,11 +196,12 @@ def reconcile_user_marketplaces(
         return report
 
     logger.start(f"Reconciling marketplaces from {manifest_path.as_posix()}", symbol="gear")
+    pending: list[_Pending] = []
     for item in declared:
         parsed = parse_registration_source(item.source, ref=item.ref)
         existing = registered.get(item.name.lower())
         if existing is not None and existing.origin != ORIGIN_MANIFEST:
-            _report_conflict(item.name, report=report, logger=logger)
+            _report_conflict(item.name, report=report, logger=logger, existing=existing)
             continue
         if existing is not None and _same_location(existing, parsed):
             report.kept.append(item.name)
@@ -164,27 +211,25 @@ def reconcile_user_marketplaces(
             getattr(report, action).append(item.name)
             logger.dry_run_notice(f"Would {_VERBS[action]} marketplace '{item.name}'")
             continue
-        _register(item, parsed, action=action, report=report, logger=logger)
+        fetched = _probe(item, parsed, action=action, report=report, logger=logger)
+        if fetched is not None:
+            pending.append(fetched)
 
     declared_names = {item.name.lower() for item in declared}
     # A failed fetch may be the replacement for a stale entry (rename or
     # source move); keep every existing registration until all succeed.
-    stale_entries = [] if report.failed else owned
-    for stale in stale_entries:
-        if stale.name.lower() in declared_names:
-            continue
-        if dry_run:
-            report.removed.append(stale.name)
-            logger.dry_run_notice(f"Would remove marketplace '{stale.name}'")
-        elif unregister_manifest_marketplace(stale.name):
-            report.removed.append(stale.name)
-            logger.success(
-                f"Removed marketplace '{stale.name}' (no longer in the user manifest)",
-                symbol="check",
-            )
+    stale = [] if report.failed else [s.name for s in owned]
+    removals = [name for name in stale if name.lower() not in declared_names]
+    if dry_run:
+        for name in removals:
+            report.removed.append(name)
+            logger.dry_run_notice(f"Would remove marketplace '{name}'")
+    elif pending or removals:
+        _apply(pending, removals, report=report, logger=logger)
 
     if report.kept:
-        logger.progress(f"Kept marketplace(s) unchanged: {', '.join(report.kept)}")
+        noun = "marketplace" if len(report.kept) == 1 else "marketplaces"
+        logger.progress(f"Kept {noun} unchanged: {', '.join(report.kept)}")
     return report
 
 
@@ -202,9 +247,10 @@ def reconcile_user_marketplaces_for_install(
         return False
     if report.ok:
         return True
-    names = ", ".join(name for name, _ in report.failed)
+    names = [name for name, _ in report.failed]
+    target = f"'{names[0]}'" if len(names) == 1 else "each failed entry"
     logger.error(
-        f"Marketplace reconcile failed for: {names}. Fix the source of each entry "
+        f"Marketplace reconcile failed for: {', '.join(names)}. Fix the source of {target} "
         f"in {manifest_path.as_posix()} or remove it, then re-run 'apm install -g'."
     )
     return False

@@ -254,7 +254,7 @@ class TestReconcile:
         assert report.kept == ["acme"]
         assert report.registered == report.updated == report.removed == []
         probe.assert_not_called()
-        logger.progress.assert_any_call("Kept marketplace(s) unchanged: acme")
+        logger.progress.assert_any_call("Kept marketplace unchanged: acme")
 
     def test_changed_entries_are_updated(self, user_manifest, probe):
         _write_manifest(user_manifest, [{"name": "acme", "source": "acme-org/m", "ref": "v1"}])
@@ -381,6 +381,27 @@ class TestReconcile:
         assert report.ok
         assert not (apm_dir / "marketplaces.json").exists()
         assert not (apm_dir / "config.json").exists()
+
+    def test_registers_and_removes_in_one_registry_write(self, user_manifest, probe, monkeypatch):
+        _write_manifest(user_manifest, [{"name": "old", "source": "o/o"}])
+        reconcile_user_marketplaces(user_manifest, logger=MagicMock())
+        saves = []
+        real_save = registry_mod._save
+        monkeypatch.setattr(registry_mod, "_save", lambda s: (saves.append(s), real_save(s)))
+        _write_manifest(
+            user_manifest, [{"name": "acme", "source": "a/a"}, {"name": "tools", "source": "t/t"}]
+        )
+        report = reconcile_user_marketplaces(user_manifest, logger=MagicMock())
+        assert (report.registered, report.removed) == (["acme", "tools"], ["old"])
+        assert len(saves) == 1
+        assert registry_mod.marketplace_names() == ["acme", "tools"]
+
+    def test_conflict_warning_names_the_current_manual_source(self, user_manifest, probe):
+        registry_mod.add_marketplace(MarketplaceSource(name="acme", owner="manual", repo="r"))
+        _write_manifest(user_manifest, [{"name": "acme", "source": "decl/m"}])
+        logger = MagicMock()
+        reconcile_user_marketplaces(user_manifest, logger=logger)
+        assert "manual/r)" in logger.warning.call_args.args[0]
 
 
 # -- shared SOURCE grammar ------------------------------------------------------

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -154,27 +155,60 @@ def remove_marketplace(name: str) -> None:
     logger.debug("Removed marketplace '%s'", name)
 
 
-def register_manifest_marketplace(source: MarketplaceSource) -> None:
-    """Add or replace a manifest-origin registration.
+def apply_manifest_marketplaces(
+    upserts: Sequence[MarketplaceSource], removals: Sequence[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """Add, replace and remove manifest-origin registrations in one transaction.
 
-    The ownership check and the write happen in one locked transaction, so a
-    manual registration of the same name is never overwritten.
+    The ownership checks and the single write happen under one lock, so a
+    manual registration is never replaced or removed: an upsert whose name a
+    manual entry owns is reported as a conflict, and a removal only drops a
+    manifest-origin entry.
+
+    Returns:
+        ``(applied, conflicts, removed)`` display names.
+    """
+    if any(source.origin != ORIGIN_MANIFEST for source in upserts):
+        raise ValueError("apply_manifest_marketplaces requires manifest-origin sources")
+    applied: list[str] = []
+    conflicts: list[str] = []
+    removed: list[str] = []
+    with _marketplace_mutation():
+        sources = _load()
+        for source in upserts:
+            lower = source.name.lower()
+            owner = next((s for s in sources if s.name.lower() == lower), None)
+            if owner is not None and owner.origin != ORIGIN_MANIFEST:
+                conflicts.append(owner.name)
+                continue
+            sources = [s for s in sources if s.name.lower() != lower]
+            sources.append(source)
+            applied.append(source.name)
+        for name in removals:
+            lower = name.lower()
+            kept = [
+                s for s in sources if not (s.name.lower() == lower and s.origin == ORIGIN_MANIFEST)
+            ]
+            if len(kept) != len(sources):
+                removed.append(name)
+                sources = kept
+        if applied or removed:
+            _save(sources)
+    logger.debug("Manifest marketplaces: applied=%s removed=%s", applied, removed)
+    return applied, conflicts, removed
+
+
+def register_manifest_marketplace(source: MarketplaceSource) -> None:
+    """Add or replace one manifest-origin registration.
 
     Raises:
         ManualMarketplaceConflictError: A manual registration owns the name.
     """
     if source.origin != ORIGIN_MANIFEST:
         raise ValueError("register_manifest_marketplace requires a manifest-origin source")
-    lower = source.name.lower()
-    with _marketplace_mutation():
-        current = _load()
-        for existing in current:
-            if existing.name.lower() == lower and existing.origin != ORIGIN_MANIFEST:
-                raise ManualMarketplaceConflictError(existing.name)
-        sources = [s for s in current if s.name.lower() != lower]
-        sources.append(source)
-        _save(sources)
-    logger.debug("Registered manifest marketplace '%s'", source.name)
+    _applied, conflicts, _removed = apply_manifest_marketplaces([source], [])
+    if conflicts:
+        raise ManualMarketplaceConflictError(conflicts[0])
 
 
 def unregister_manifest_marketplace(name: str) -> bool:
@@ -182,15 +216,7 @@ def unregister_manifest_marketplace(name: str) -> bool:
 
     Returns True when an entry was removed.
     """
-    lower = name.lower()
-    with _marketplace_mutation():
-        before = _load()
-        after = [s for s in before if not (s.name.lower() == lower and s.origin == ORIGIN_MANIFEST)]
-        if len(after) == len(before):
-            return False
-        _save(after)
-    logger.debug("Removed manifest marketplace '%s'", name)
-    return True
+    return bool(apply_manifest_marketplaces([], [name])[2])
 
 
 def marketplace_names() -> list[str]:

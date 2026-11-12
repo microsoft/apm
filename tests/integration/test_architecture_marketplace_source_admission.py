@@ -61,6 +61,7 @@ def test_registration_source_grammar_has_single_owner() -> None:
     assert "parsed = parse_registration_source(item.source, ref=item.ref)" in reconcile
     assert "split_source_fragment_ref(source" not in command
     assert "url_names_remote_manifest(" not in command
+    assert "split_source_fragment_ref(" not in reconcile
 
 
 def test_source_admission_guard_rejects_add_side_fragment_parser() -> None:
@@ -81,6 +82,27 @@ def test_source_admission_guard_rejects_add_side_fragment_parser() -> None:
     assert report.failures == ()
     messages = [v.message for v in report.violations if v.rule_id == _RULE_ID]
     assert (
-        "Marketplace add must parse SOURCE through registration.parse_registration_source"
+        "Marketplace SOURCE must be parsed through registration.parse_registration_source"
+        in messages
+    )
+
+
+def test_source_admission_guard_rejects_reconcile_side_fragment_parser() -> None:
+    """The user-manifest reconcile cannot re-parse SOURCE beside the shared owner."""
+    root = Path(__file__).parents[2]
+    path = "src/apm_cli/marketplace/reconcile.py"
+    original = (root / path).read_text(encoding="utf-8")
+    needle = "        parsed = parse_registration_source(item.source, ref=item.ref)"
+    assert original.count(needle) == 1
+    mutated = original.replace(
+        needle, needle + "\n        _url, _frag = split_source_fragment_ref(item.source)"
+    )
+
+    report = run_selected_rules(root, (_RULE_ID,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    messages = [v.message for v in report.violations if v.rule_id == _RULE_ID]
+    assert (
+        "Marketplace SOURCE must be parsed through registration.parse_registration_source"
         in messages
     )

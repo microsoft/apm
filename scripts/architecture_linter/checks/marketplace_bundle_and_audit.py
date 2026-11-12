@@ -332,9 +332,9 @@ def _check_marketplace_source_admission(
             provider,
             inventory,
             _RID_SOURCE_ADMISSION,
-            (_MARKETPLACE_COMMAND,),
+            (_MARKETPLACE_COMMAND, _MARKETPLACE_RECONCILE),
             re.compile(r"\b_?split_source_fragment_ref\(|\burl_names_remote_manifest\("),
-            "Marketplace add must parse SOURCE through registration.parse_registration_source",
+            "Marketplace SOURCE must be parsed through registration.parse_registration_source",
             exempt=False,
         )
     )
