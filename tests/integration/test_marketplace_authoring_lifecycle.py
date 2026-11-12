@@ -96,6 +96,7 @@ def test_live_local_catalog_register_browse_view_install_and_edit(tmp_path, apm_
     skills = list(consumer.root.rglob("SKILL.md"))
     assert any("chosen" in file.as_posix() for file in skills)
     assert all("unused" not in file.as_posix() for file in skills)
+    assert not list(isolated.work_root.rglob("hook-executed.txt"))
     lock = yaml.safe_load((consumer.root / "apm.lock.yaml").read_text(encoding="utf-8"))
     assert len(lock["dependencies"]) == 1
     assert lock["dependencies"][0]["source"] == "local"
