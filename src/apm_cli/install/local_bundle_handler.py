@@ -60,7 +60,8 @@ def install_local_bundle(
         check_target_mismatch,
         verify_bundle_integrity,
     )
-    from ..core.scope import InstallScope, get_source_root
+    from ..core.scope import InstallScope, get_manifest_path, get_source_root
+    from ..core.target_detection import resolve_manifest_target_decision
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ..install.services import (
         enforce_agent_plugin_deployment_boundary,
@@ -96,8 +97,17 @@ def install_local_bundle(
         enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
         # Resolve targets before policy preflight so target restrictions apply
-        # to the actual deployment set, including auto-detected targets.
-        explicit = target if target else None
+        # to the actual deployment set, including auto-detected targets. The
+        # bundle never edits apm.yml, but its declared targets still restrict
+        # where files land (--target > apm.yml > apm config > auto-detect).
+        explicit = resolve_manifest_target_decision(
+            project_root,
+            manifest_path=get_manifest_path(scope),
+            explicit_target=target or None,
+            user_scope=global_,
+            auto_detect=False,
+            create_config=create_config,
+        ).value
         targets = resolve_targets(
             project_root,
             user_scope=global_,

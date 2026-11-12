@@ -99,6 +99,7 @@ _INSTALL_PIPELINE = "src/apm_cli/install/pipeline.py"
 
 
 _INSTALL_SERVICE = "src/apm_cli/install/service_integration.py"
+_LOCAL_BUNDLE_HANDLER = "src/apm_cli/install/local_bundle_handler.py"
 
 
 _UPDATE_CMD = "src/apm_cli/commands/update.py"
@@ -365,6 +366,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
         _INSTALL_PIPELINE,
         _INSTALL_SERVICE,
         _UPDATE_CMD,
+        _LOCAL_BUNDLE_HANDLER,
     )
     facts_by_path, failures = _read_required(provider, rule_id, paths)
     if failures:
@@ -376,6 +378,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
     pipeline = facts_by_path[_INSTALL_PIPELINE]
     service = facts_by_path[_INSTALL_SERVICE]
     update = facts_by_path[_UPDATE_CMD]
+    local_bundle = facts_by_path[_LOCAL_BUNDLE_HANDLER]
 
     if _count_regex_lines(owner, r"^def resolve_effective_target_decision\(") != 1:
         findings.append(
@@ -416,6 +419,14 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
                 rule_id,
                 _INSTALL_SERVICE,
                 "service integration must forward target_decision to package and MCP phases",
+            )
+        )
+    if not _has_fixed(local_bundle, "explicit = resolve_manifest_target_decision("):
+        findings.append(
+            violation(
+                rule_id,
+                _LOCAL_BUNDLE_HANDLER,
+                "local bundle install must resolve targets through the manifest target decision",
             )
         )
     if not _has_fixed(update, 'target_decision = getattr(result, "target_decision", None)'):
