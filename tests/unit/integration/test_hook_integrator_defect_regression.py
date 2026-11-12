@@ -14,7 +14,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration import hook_integrator as hook_integrator_module
 from apm_cli.integration.hook_integrator import HookIntegrator
-from apm_cli.integration.hook_ownership import dependency_hook_source_marker
+from apm_cli.integration.hook_ownership import dependency_hook_source_marker, drop_source_entries
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.reference import DependencyReference
@@ -828,3 +828,27 @@ def test_reconcile_validates_survivor_targets_before_destructive_wipe(
 
     assert config.read_bytes() == config_bytes
     assert sidecar.read_bytes() == sidecar_bytes
+
+
+def test_drop_source_entries_retires_only_undeclared_events_of_one_source() -> None:
+    """#3665: a source's entries leave events it no longer declares; others stay."""
+    mine = {"_apm_source": "pkg", "hooks": [{"command": "old"}]}
+    kept_event = {"_apm_source": "pkg", "hooks": [{"command": "new"}]}
+    sibling = {"_apm_source": "other", "hooks": [{"command": "sib"}]}
+    user = {"hooks": [{"command": "user"}]}
+    hooks = {
+        "PreToolUse": [mine],
+        "Stop": [mine, user],
+        "SessionStart": [kept_event],
+        "Notification": [sibling],
+        "Empty": [],
+    }
+
+    drop_source_entries(hooks, {"pkg"}, keep_events={"SessionStart"})
+
+    assert hooks == {
+        "Stop": [user],
+        "SessionStart": [kept_event],
+        "Notification": [sibling],
+        "Empty": [],
+    }

@@ -727,6 +727,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="HookIntegrator stops owning the neutral hook rewrite-scope resolver.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-neutral-hook-contract",
+        rule_id="mutation_writes.neutral_hook_contract",
+        path="src/apm_cli/integration/hook_integrator.py",
+        old="drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)",
+        new="json_config.setdefault(container, {})",
+        intent="Merged hooks stop retiring events a hook source no longer declares (#3665).",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-opencode-enabled-intent",
         rule_id="mutation_writes.opencode_enabled_intent",
         path="src/apm_cli/models/dependency/mcp.py",

@@ -45,6 +45,28 @@ def reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                     del pool[content_key]
 
 
+def drop_source_entries(
+    hooks: dict, markers: set[str], keep_events: frozenset[str] | set[str] = frozenset()
+) -> None:
+    """Remove entries owned by *markers* from every event outside *keep_events*.
+
+    An event this call empties is deleted; user and sibling entries are kept.
+    Merged targets keep the events a source re-declared this run, so a hook
+    file removed from a package cannot leave its event entries behind (#3665).
+    """
+    for event_name in list(hooks):
+        entries = hooks[event_name]
+        if event_name in keep_events or not isinstance(entries, list):
+            continue
+        kept = [e for e in entries if not (isinstance(e, dict) and e.get("_apm_source") in markers)]
+        if len(kept) == len(entries):
+            continue
+        if kept:
+            hooks[event_name] = kept
+        else:
+            del hooks[event_name]
+
+
 def extract_apm_source_sidecar(hooks: dict) -> dict[str, list[dict[str, Any]]]:
     """Extract ownership metadata and leave native hook entries schema-clean."""
     sidecar: dict[str, list[dict[str, Any]]] = {}

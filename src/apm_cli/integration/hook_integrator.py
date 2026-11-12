@@ -61,6 +61,7 @@ from apm_cli.integration.hook_native_formats import (
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
     dependency_hook_sources,
+    drop_source_entries,
     legacy_source_marker_is_unambiguous,
 )
 from apm_cli.integration.hook_ownership import (
@@ -1295,15 +1296,7 @@ class HookIntegrator(BaseIntegrator):
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
         if config.target_key == "cursor":
-            for event in list(json_config[container]):
-                json_config[container][event] = [
-                    entry
-                    for entry in json_config[container][event]
-                    if not isinstance(entry, dict)
-                    or entry.get("_apm_source") not in {source_marker, *legacy_source_markers}
-                ]
-                if not json_config[container][event]:
-                    del json_config[container][event]
+            drop_source_entries(json_config[container], {source_marker, *legacy_source_markers})
 
         # Defaults never overwrite existing user fields.
         injected_keys: list[str] = []
@@ -1509,6 +1502,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
 
+        drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)
         # Shared configs are cleaned by ownership, never file-level deletion.
         json_path.parent.mkdir(parents=True, exist_ok=True)
 
