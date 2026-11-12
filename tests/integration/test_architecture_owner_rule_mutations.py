@@ -2801,4 +2801,3 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
     report = run_selected_rules(ROOT, (_HOST_CRED_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(v.rule_id == _HOST_CRED_RULE for v in report.violations)
-
