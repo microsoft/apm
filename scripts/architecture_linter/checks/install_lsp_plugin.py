@@ -24,6 +24,7 @@ _LSP_PIPELINE = "src/apm_cli/install/lsp/integration.py"
 _LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
 _INSTALL_SERVICES = "src/apm_cli/install/services.py"
 _SKILL_SUPPORT = "src/apm_cli/integration/skill_support.py"
+_EXEC_GATE = "src/apm_cli/install/exec_gate.py"
 
 
 def _missing_tokens(
@@ -58,11 +59,16 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _EXECUTABLES: (
                 "def exec_trust_context_for_project(",
                 "def locked_dependency_approval_keys(",
+                "def dependency_approval_key(",
                 "def local_bundle_approval_key(",
                 'owner = getattr(dependency, "resolved_by", None)',
                 'approval_keys = getattr(dependency, "approval_keys", ())',
             ),
-            _APPROVE_COMMAND: ("approval_identity=locked.get_unique_key()",),
+            _APPROVE_COMMAND: (
+                "approval_identity=locked.get_unique_key()",
+                "resolve_exec_decision(ctx, d.package_key, t)",
+            ),
+            _EXEC_GATE: ("return dependency_approval_key(dep_ref)",),
             _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
             _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
             _LSP_PIPELINE: (

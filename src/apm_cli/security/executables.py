@@ -466,6 +466,17 @@ def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys((identity, versioned)))
 
 
+def dependency_approval_key(dependency_ref: Any) -> str:
+    """Return the trust key for a resolved dependency reference.
+
+    Uses the lockfile identity domain that ``apm approve`` writes (bare
+    ``owner/repo`` for github.com), bound to the selected source so a
+    replacement never inherits upstream approval.
+    """
+    source = dependency_ref.source_reference
+    return build_approval_key(source.get_unique_key(), source.reference or "")
+
+
 def local_bundle_approval_key(
     package_id: str,
     version: str,

@@ -20,6 +20,7 @@ from apm_cli.cli import cli
 from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETPLACES_KEY
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
+from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.executables import (
     TRUST_DENIED,
     TRUST_GATED,
@@ -205,7 +206,7 @@ def _native_package_info():
     package = SimpleNamespace(agent_plugin=SimpleNamespace(components=components))
     return SimpleNamespace(
         package=package,
-        dependency_ref=SimpleNamespace(canonical_string=lambda: "owner/plugin"),
+        dependency_ref=DependencyReference.parse("owner/plugin"),
     )
 
 
@@ -320,7 +321,7 @@ def test_on_disk_hooks_absent_from_ir_still_refuse_native_registration(
     package = SimpleNamespace(agent_plugin=SimpleNamespace(components=components), version="1.0.0")
     package_info = SimpleNamespace(
         package=package,
-        dependency_ref=SimpleNamespace(canonical_string=lambda: "owner/plugin"),
+        dependency_ref=DependencyReference.parse("owner/plugin"),
         install_path=install_path,
     )
     ctx = SimpleNamespace(exec_trust_ctx=None, package_exec_status={})
