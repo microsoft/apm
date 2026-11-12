@@ -250,9 +250,9 @@
     },
     {
       "id": "consumer-manifest-rewrite",
-      "decision": "Consumer apm.yml rewrites preserve user comments, aliases and layout",
-      "owner": "utils/yaml_io.py round-trip pair (load_yaml_roundtrip, dump_yaml_roundtrip) for install, uninstall, approve/deny and install --mcp",
-      "selectors": ["src/apm_cli/install/mcp/writer.py"],
+      "decision": "apm.yml reads reject duplicate top-level keys; rewrites preserve user comments, aliases and layout",
+      "owner": "models/manifest_io.py (load_manifest, load_manifest_roundtrip) for apm.yml reads: APMPackage.from_apm_yml, project executable trust, apm run config and every rewrite; utils/yaml_io.py dump_yaml_roundtrip for install, uninstall, approve/deny and install --mcp rewrites",
+      "selectors": ["src/apm_cli/install/mcp/writer.py", "src/apm_cli/models/manifest_io.py"],
       "guards": ["install-deployment-consumer-manifest-rewrite"]
     }
   ]

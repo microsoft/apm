@@ -500,11 +500,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 
         # Read current apm.yml
-        from ...utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
+        from ...models.manifest_io import load_manifest_roundtrip
+        from ...utils.yaml_io import dump_yaml_roundtrip
 
         apm_yml_path = manifest_path
         try:
-            data = load_yaml_roundtrip(apm_yml_path) or {}
+            data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to read {apm_yml_path}: {e}")
             sys.exit(1)
@@ -583,7 +584,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Reload both, then revalidate without repeating success diagnostics so
         # those edits are preserved rather than overwritten by a stale snapshot.
         try:
-            data = load_yaml_roundtrip(apm_yml_path) or {}
+            data = load_manifest_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to re-read {apm_yml_path} after pre-uninstall: {e}")
             sys.exit(1)

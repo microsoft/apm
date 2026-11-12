@@ -70,7 +70,7 @@ marketplaces:  <list<MarketplaceEntry>>   # user manifest only; see 3.14
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
 ```
 
-Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. Unknown top-level keys MUST be preserved by writers. The CLI keeps keys matching `x-[a-z][a-z0-9-]*` and warns, without failing, on any other unknown top-level key. See [Extension keys](#312-extension-keys).
+Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. A top-level key MUST NOT appear twice; the CLI refuses such a manifest (for example two `dependencies:` blocks left by a merge) before changing any file, naming the key and both lines. Unknown top-level keys MUST be preserved by writers. The CLI keeps keys matching `x-[a-z][a-z0-9-]*` and warns, without failing, on any other unknown top-level key. See [Extension keys](#312-extension-keys).
 
 The standard `$schema` key selects the manifest contract; omission selects
 APM's current working draft. The corrected OpenAPM v0.1 candidate uses

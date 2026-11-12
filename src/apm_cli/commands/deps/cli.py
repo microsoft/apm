@@ -19,6 +19,7 @@ from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
 from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
+from ...models.manifest_io import DuplicateManifestKeyError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
@@ -307,7 +308,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
-    except PathTraversalError:
+    except (PathTraversalError, DuplicateManifestKeyError):
         raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails

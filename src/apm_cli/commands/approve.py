@@ -248,10 +248,10 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
 
 def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
     """Build the org / project / user trust context the install gate resolves."""
+    from ..models.manifest_io import load_manifest
     from ..security.executables import build_exec_trust_context
-    from ..utils.yaml_io import load_yaml
 
-    data = load_yaml(manifest)
+    data = load_manifest(manifest)
     project_data = data if isinstance(data, dict) else {}
     policy = _load_org_policy(manifest.parent, logger=logger)
     return build_exec_trust_context(policy=policy, project_data=project_data)

@@ -606,9 +606,9 @@ def _validate_and_add_packages_to_apm_yml(
 
     # Read current apm.yml
     try:
-        from ..utils.yaml_io import load_yaml_roundtrip
+        from ..models.manifest_io import load_manifest_roundtrip
 
-        data = load_yaml_roundtrip(apm_yml_path) or {}
+        data = load_manifest_roundtrip(apm_yml_path) or {}
     except Exception as e:
         (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)

@@ -939,12 +939,12 @@ def exec_trust_context_for_project(
     migrate_user_legacy: bool = True,
 ) -> ExecTrustContext:
     """Resolve project, user, and policy executable trust through one owner."""
-    from apm_cli.utils.yaml_io import load_yaml
+    from apm_cli.models.manifest_io import load_manifest
 
     project_data: dict[str, Any] | None = None
     manifest_path = project_root / "apm.yml"
     if manifest_path.is_file():
-        data = load_yaml(manifest_path)
+        data = load_manifest(manifest_path)
         if isinstance(data, dict):
             project_data = data
             if data.get("allowExecutables") is not None:
@@ -1444,11 +1444,11 @@ def load_project_executables(
     manifest_path: Path,
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]], bool]:
     """Read the project ``executables`` block (and alias) from ``apm.yml``."""
-    from ..utils.yaml_io import load_yaml
+    from ..models.manifest_io import load_manifest
 
     if not manifest_path.is_file():
         return {}, {}, False
-    data = load_yaml(manifest_path)
+    data = load_manifest(manifest_path)
     if not isinstance(data, dict):
         return {}, {}, False
     return parse_project_executables(data)
@@ -1466,10 +1466,11 @@ def write_project_executables(
     sub-blocks are omitted; an empty ``executables: {}`` is still written when
     the gate was already opted-in so the signal is not lost.
     """
-    from ..utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
+    from ..models.manifest_io import load_manifest_roundtrip
+    from ..utils.yaml_io import dump_yaml_roundtrip
 
     # Round-trip keeps the user's comments and layout (#2000, #2012).
-    data = load_yaml_roundtrip(manifest_path)
+    data = load_manifest_roundtrip(manifest_path)
     if not isinstance(data, dict):
         return
 

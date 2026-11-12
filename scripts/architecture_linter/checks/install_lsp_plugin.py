@@ -29,6 +29,10 @@ _EXEC_GATE = "src/apm_cli/install/exec_gate.py"
 _MCP_WRITER = "src/apm_cli/install/mcp/writer.py"
 _MANIFEST_HELPERS = "src/apm_cli/install/manifest_helpers.py"
 _UNINSTALL_COMMAND = "src/apm_cli/commands/uninstall/cli.py"
+_MANIFEST_IO = "src/apm_cli/models/manifest_io.py"
+_COMMAND_HELPERS = "src/apm_cli/commands/_helpers.py"
+_APM_PACKAGE = "src/apm_cli/models/apm_package.py"
+_ADOPT_MANIFEST_EDIT = "src/apm_cli/adopt/manifest_edit.py"
 
 
 def _missing_tokens(
@@ -91,21 +95,35 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
 
 
 def check_consumer_manifest_rewrite(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Every consumer apm.yml rewrite must use the comment-preserving round-trip pair."""
+    """Every apm.yml read rejects duplicate keys; every rewrite preserves authoring."""
     return _missing_tokens(
         provider,
         GUARD_CONSUMER_MANIFEST_REWRITE,
         {
+            _MANIFEST_IO: (
+                "def reject_duplicate_manifest_keys(",
+                "def load_manifest(",
+                "def load_manifest_roundtrip(",
+            ),
+            _APM_PACKAGE: ("data = load_manifest(apm_yml_path)",),
+            _APPROVE_COMMAND: ("data = load_manifest(manifest)",),
+            _COMMAND_HELPERS: ("return load_manifest(APM_YML_FILENAME)",),
+            _INSTALL_COMMAND: ("data = load_manifest_roundtrip(apm_yml_path) or {}",),
+            _ADOPT_MANIFEST_EDIT: ("data = load_manifest_roundtrip(path)",),
             _MCP_WRITER: (
-                "data = load_yaml_roundtrip(apm_yml_path) or {}",
+                "data = load_manifest_roundtrip(apm_yml_path) or {}",
                 "dump_yaml_roundtrip(data, apm_yml_path)",
             ),
             _EXECUTABLES: (
-                "data = load_yaml_roundtrip(manifest_path)",
+                "data = load_manifest(manifest_path)",
+                "data = load_manifest_roundtrip(manifest_path)",
                 "dump_yaml_roundtrip(data, manifest_path)",
             ),
             _MANIFEST_HELPERS: ("dump_yaml_roundtrip(data, apm_yml_path)",),
-            _UNINSTALL_COMMAND: ("dump_yaml_roundtrip(data, apm_yml_path)",),
+            _UNINSTALL_COMMAND: (
+                "data = load_manifest_roundtrip(apm_yml_path) or {}",
+                "dump_yaml_roundtrip(data, apm_yml_path)",
+            ),
         },
     )
 
