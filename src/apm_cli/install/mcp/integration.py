@@ -5,10 +5,9 @@ with runtime-neutral target selection.
 """
 
 import builtins
-from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -38,7 +37,6 @@ def prepare_mcp_integration(
     trust_transitive_mcp: bool,
     logger: "InstallLogger",
     diagnostics: "DiagnosticCollector | None" = None,
-    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
     project_root: Path | None = None,
@@ -64,7 +62,6 @@ def prepare_mcp_integration(
             trust_transitive_self_defined=trust_transitive_mcp,
             diagnostics=diagnostics,
             logger=logger,
-            trusted_transitive_configs=trusted_transitive_configs,
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
             include_dependency_mcp=should_install,
@@ -230,7 +227,6 @@ def run_mcp_integration(  # noqa: PLR0913
     explicit_target: str | list[str] | None = None,
     target_decision: "EffectiveTargetDecision | None" = None,
     scope=None,
-    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     prepared: PreparedMcpIntegration | None = None,
     active_package_keys: frozenset[str] | None = None,
     executable_context: tuple[dict | None, bool] = (None, False),
@@ -268,8 +264,6 @@ def run_mcp_integration(  # noqa: PLR0913
         no_policy: Skip policy enforcement for the merged MCP set.
         verbose: Show detailed installation information.
         explicit_target: Explicit target selected by CLI or manifest.
-        trusted_transitive_configs: Exact declaring-package/config pairs for
-            previously trusted self-defined servers that a no-op update may preserve.
         scope: Optional InstallScope for user/project filtering.
 
     Returns:
@@ -302,7 +296,6 @@ def run_mcp_integration(  # noqa: PLR0913
         trust_transitive_mcp=trust_transitive_mcp,
         logger=logger,
         diagnostics=diagnostics,
-        trusted_transitive_configs=trusted_transitive_configs,
         active_package_keys=active_package_keys,
         project_root=project_root,
         executable_context=executable_context,

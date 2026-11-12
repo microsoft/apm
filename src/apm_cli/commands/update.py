@@ -84,7 +84,12 @@ from ..install.errors import (
 from ..install.locking import serialized_lifecycle
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
-from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
+from ._helpers import (
+    UnknownPackageError,
+    _find_apm_yml,
+    resolve_requested_packages,
+    trust_transitive_mcp_option,
+)
 
 if TYPE_CHECKING:
     from ..core.command_logger import CommandLogger
@@ -235,6 +240,7 @@ def _run_mcp_lsp_integration(
     effective_allow_executables: dict[str, dict[str, bool]] | None = None,
     effective_allow_resolved: bool = False,
     force: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -264,13 +270,6 @@ def _run_mcp_lsp_integration(
         old_mcp_configs = dict(existing_lock.mcp_configs)
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
         old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
-    # Unchanged configs admitted by an earlier install keep their trust; the
-    # view applies this only to declarations that require transitive trust.
-    trusted_transitive_configs = {
-        name: (old_mcp_provenance[name], config)
-        for name, config in old_mcp_configs.items()
-        if name in old_mcp_provenance
-    }
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
@@ -285,7 +284,7 @@ def _run_mcp_lsp_integration(
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
             old_mcp_target_servers=old_mcp_target_servers,
-            trusted_transitive_configs=trusted_transitive_configs,
+            trust_transitive_mcp=trust_transitive_mcp,
             project_root=project_root,
             user_scope=user_scope,
             should_install=True,
@@ -333,6 +332,7 @@ def _handle_service_only_update(
     logger: InstallLogger,
     verbose: bool,
     force: bool,
+    trust_transitive_mcp: bool = False,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -375,6 +375,7 @@ def _handle_service_only_update(
             logger=logger,
             verbose=verbose,
             force=force,
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
@@ -454,6 +455,7 @@ def _handle_service_only_update(
         "(--target > apm.yml targets: > apm config set target ... > auto-detect)."
     ),
 )
+@trust_transitive_mcp_option
 @click.pass_context
 @serialized_lifecycle
 def update(
@@ -467,6 +469,7 @@ def update(
     parallel_downloads: int,
     check_only: bool,
     target: str | list[str] | None,
+    trust_transitive_mcp: bool,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
 
@@ -556,6 +559,7 @@ def update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        trust_transitive_mcp=trust_transitive_mcp,
     )
 
 
@@ -570,6 +574,7 @@ def _run_dep_update(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Serialize update with every other mutation of the same workspace."""
     from apm_cli.core.scope import InstallScope
@@ -585,6 +590,7 @@ def _run_dep_update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        trust_transitive_mcp=trust_transitive_mcp,
     )
 
 
@@ -599,6 +605,7 @@ def _run_dep_update_locked(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
@@ -654,6 +661,7 @@ def _run_dep_update_locked(
         logger=logger,
         verbose=verbose,
         force=force,
+        trust_transitive_mcp=trust_transitive_mcp,
     ):
         return
 
@@ -890,6 +898,7 @@ def _run_dep_update_locked(
                 effective_allow_executables=getattr(result, "exec_allow_map", None),
                 effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
                 force=force,
+                trust_transitive_mcp=trust_transitive_mcp,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))

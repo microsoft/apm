@@ -78,7 +78,6 @@ class CurrentMcpConfigView:
         trust_transitive_self_defined: bool,
         diagnostics: DiagnosticCollector | None = None,
         logger: _McpViewLogger | None = None,
-        trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
         include_dependency_mcp: bool = True,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
@@ -100,7 +99,6 @@ class CurrentMcpConfigView:
                     trust_transitive_self_defined=trust_transitive_self_defined,
                     diagnostics=diagnostics,
                     logger=logger,
-                    trusted_transitive_configs=trusted_transitive_configs,
                     include_dependency_mcp=include_dependency_mcp,
                     allow_pending=allow_pending,
                     active_package_keys=active_package_keys,
@@ -316,21 +314,6 @@ def _log_skipped_dev_mcp(
         )
 
 
-def _matches_trusted_transitive_config(
-    dependency: MCPDependency,
-    declarer: str,
-    trusted_configs: Mapping[str, tuple[str, Mapping[str, Any]]] | None,
-) -> bool:
-    """Return whether this package's unchanged config was trusted before."""
-    if trusted_configs is None:
-        return False
-    trusted = trusted_configs.get(dependency.name)
-    if trusted is None:
-        return False
-    stored_declarer, stored_config = trusted
-    return stored_declarer == declarer and dependency.to_dict() == stored_config
-
-
 def _fallback_manifest_path(
     dependency: LockedDependency,
     modules_root: Path,
@@ -485,7 +468,6 @@ def _collect_locked_dependencies(
     trust_transitive_self_defined: bool,
     diagnostics: DiagnosticCollector | None,
     logger: _McpViewLogger | None = None,
-    trusted_transitive_configs: (Mapping[str, tuple[str, Mapping[str, Any]]] | None) = None,
     include_dependency_mcp: bool = True,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
@@ -681,16 +663,6 @@ def _collect_locked_dependencies(
                         logger.progress(
                             f"Trusting self-defined MCP server '{mcp_dependency.name}' "
                             f"from transitive package '{declarer}' (--trust-transitive-mcp)"
-                        )
-                elif _matches_trusted_transitive_config(
-                    mcp_dependency,
-                    declarer,
-                    trusted_transitive_configs,
-                ):
-                    if logger is not None:
-                        logger.verbose_detail(
-                            f"Preserving unchanged trusted MCP server "
-                            f"'{mcp_dependency.name}' from '{declarer}'"
                         )
                 else:
                     omissions.setdefault(

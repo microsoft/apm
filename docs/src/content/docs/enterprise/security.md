@@ -546,12 +546,12 @@ MCP servers declared by your direct dependencies (packages listed in your `apm.y
 
 ### Transitive dependencies
 
-MCP servers declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. Transitive MCP servers can request tool access, file system permissions, or network capabilities — blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency.
+Self-defined MCP servers (`registry: false`) declared by transitive dependencies (dependencies of your dependencies) are **blocked by default**. They can request tool access, file system permissions, or network capabilities -- blocking them ensures that adding a prompt package cannot silently grant MCP access to an unknown transitive dependency. Registry-resolved servers declared by transitive dependencies are resolved through the MCP registry and MCP policy; see [direct vs transitive](../../producer/author-primitives/mcp-as-primitive/#direct-vs-transitive-the-trust-boundary).
 
-To allow transitive MCP servers, you must either:
+To allow transitive self-defined MCP servers, you must either:
 
 - **Re-declare the dependency** in your own `apm.yml`, promoting it to a direct dependency.
-- **Pass `--trust-transitive-mcp`** to explicitly opt in to transitive MCP servers for that install.
+- **Pass `--trust-transitive-mcp`** to `apm install` or `apm update` to opt in for that run. The lockfile records which servers were written; it does not carry this consent to later runs.
 
 ## Token handling
 
