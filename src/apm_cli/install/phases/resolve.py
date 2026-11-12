@@ -499,7 +499,7 @@ def _resolve_dependencies(
                     update_refs=update_refs,
                     package_path=install_path,
                     update_keys=update_keys,
-                ):
+                ) or (dep_ref.is_local and staging_session.owns_path(install_path)):
                     return install_path
             replacement_path = staging_session.prepare_replacement(install_path)
             # Emit progress only after the cache fast path decides to fetch.
@@ -949,6 +949,24 @@ def _record_update_plan_complete_dep_keys(ctx: InstallContext) -> None:
     )
 
 
+def _record_partial_subtree_reconciliation(ctx: InstallContext) -> None:
+    """Classify the selected packages' previous descendants for a partial install."""
+    # An incomplete graph cannot prove that no retained package still needs a
+    # candidate, so a failed resolution keeps every previous entry.
+    if not ctx.only_packages or ctx.existing_lockfile is None or ctx.callback_failures:
+        return
+    from apm_cli.install.package_selection import previous_selected_subtree_keys
+
+    dropped, rescued = previous_selected_subtree_keys(
+        ctx.only_packages,
+        ctx.all_apm_deps,
+        ctx.existing_lockfile,
+        ctx.update_plan_complete_dep_keys,
+    )
+    ctx.partial_dropped_dep_keys = dropped
+    ctx.partial_rescued_dep_keys = rescued
+
+
 def _compute_intended_dep_keys(ctx: InstallContext) -> None:
     """Populate ``ctx.intended_dep_keys`` (manifest-intent set for orphan cleanup)."""
     # ------------------------------------------------------------------
@@ -983,6 +1001,7 @@ def run(ctx: InstallContext) -> None:
     seed_ref_resolver_from_lockfile(ctx)
     _resolve_dependencies(ctx, staging_session, materialization_reader)
     _record_update_plan_complete_dep_keys(ctx)
+    _record_partial_subtree_reconciliation(ctx)
     if ctx.only_packages:
         _apply_only_filter(ctx)
     _compute_intended_dep_keys(ctx)

@@ -31,6 +31,22 @@ def test_replacement_keeps_installed_hook_live_until_publish(tmp_path: Path) -> 
     assert hook.read_text(encoding="ascii") == "old hook"
 
 
+def test_owns_path_reports_reserved_and_published_slots(tmp_path: Path) -> None:
+    """A slot this session is replacing, or already replaced, is owned by it (#3401)."""
+    modules = tmp_path / "apm_modules"
+    package = modules / "_local" / "shared"
+    package.mkdir(parents=True)
+    staging = ResolutionStagingSession(modules)
+
+    assert staging.owns_path(package) is False
+    replacement = staging.prepare_replacement(package)
+    assert staging.owns_path(package) is True
+    replacement.mkdir(parents=True, exist_ok=True)
+    staging.publish_replacement(replacement)
+    assert staging.owns_path(package) is True
+    assert staging.owns_path(modules / "_local" / "other") is False
+
+
 @pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
 def test_publish_replacement_restores_old_package_when_activation_fails(
     tmp_path: Path,

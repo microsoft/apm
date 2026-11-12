@@ -314,7 +314,10 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 ```
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly.
+never contacts GitHub directly. The proxy has no tag listing, so semver
+ranges (`#^1.2.0`) and `apm view <pkg> versions` fail with an actionable
+error and `apm outdated` reports git deps as unknown; pin the exact upstream
+tag (`#v1.2.3`).
 
 ## Registry tokens (experimental)
 
@@ -405,7 +408,7 @@ rejects secret-looking flags) -- export them as env vars instead.
 
 `apm install <package>` validates a virtual subdirectory package (`owner/repo/path#ref`) before writing it to `apm.yml`. The chain mirrors the actual clone auth path so a credential that succeeds for `git clone` is never false-rejected by the installer:
 
-1. **Marker-file probes** via raw content -- `apm.yml`, `SKILL.md`, `plugin.json`, `README.md`. Fast positive signal; absence is not a failure.
+1. **Marker-file probes** -- `apm.yml`, `SKILL.md`, `plugin.json`, `.github/plugin/plugin.json`, `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `README.md`. On public `github.com`, APM first checks them through `raw.githubusercontent.com` only and stops at the first hit; per-marker raw + Contents API probes run only if none is found. Fast positive signal; absence is not a failure.
 2. **Contents API directory probe** -- `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`. Confirms the directory exists at the ref.
 3. **`git ls-remote`** with the install auth chain (PAT header-injected, then plain HTTPS w/ credential helper, then SSH if `--ssh` or `--allow-protocol-fallback`). Confirms the ref exists.
 4. **Shallow `git fetch --depth=1 --filter=tree:0` + `git ls-tree`** at the resolved ref -- the path probe that confirms the subdirectory exists at that ref. Required to close the fail-open hole where step 3 would otherwise pass any successful repo handshake.

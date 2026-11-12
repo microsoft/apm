@@ -4,8 +4,6 @@ description: Recommend scope and classification for selected issues. Human maint
 engine:
   id: copilot
   version: 1.0.80
-  env:
-    COPILOT_MODEL: "${{ github.job == 'detection' && 'detection' || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.issue_number == '')) && 'grok-4.7' || vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'auto' }}"
 
 on:
   # Keep activation read-only while retaining compiler revocation checks.

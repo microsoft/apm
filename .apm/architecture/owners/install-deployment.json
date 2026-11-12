@@ -110,8 +110,8 @@
     },
     {
       "id": "unmanaged-skill-preflight",
-      "decision": "Whole-plan unmanaged skill refusal before native deployment",
-      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment",
+      "decision": "Whole-plan unmanaged skill refusal and unmatched skills: selection refusal before native deployment",
+      "owner": "integration/skill_preflight.py via SkillIntegrator; install/template.py applies the batch gate using deployment_plan.prepare_package_deployment; install/services.py calls skill_preflight.preflight_skill_selection before any primitive of a package writes",
       "selectors": [
         "src/apm_cli/install/deployment_plan.py",
         "src/apm_cli/integration/skill_preflight.py"
@@ -193,6 +193,13 @@
       "owner": "deps/reachability.py (compute_forward_reachable_keys)",
       "selectors": ["src/apm_cli/deps/reachability.py"],
       "guards": ["install-deployment-uninstall-reachability"]
+    },
+    {
+      "id": "legacy-lockfile-parent-placement",
+      "decision": "Legacy lockfile transitive parent placement for deps tree and deps why",
+      "owner": "deps/lock_parent_placement.py (place_legacy_lock_parents, installed_manifest_children)",
+      "selectors": ["src/apm_cli/deps/lock_parent_placement.py"],
+      "guards": ["install-deployment-lock-parent-placement"]
     },
     {
       "id": "ci-audit-scratch-materialization",

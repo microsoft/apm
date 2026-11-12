@@ -145,9 +145,9 @@ def validate_virtual_package_exists(
         if verbose_callback:
             verbose_callback(msg)
 
-    def _probe(path: str) -> bool:
+    def _probe(path: str, raw_only: bool = False) -> bool:
         try:
-            downloader.download_raw_file(dep_ref, path, ref)
+            downloader.download_raw_file(dep_ref, path, ref, raw_only=raw_only)
             _log(f"  [+] {path}@{ref}")
             return True
         except GitHubThrottleError:
@@ -156,6 +156,28 @@ def validate_virtual_package_exists(
             # Marker-file misses on the success path are expected, not
             # errors -- reserve [x] for genuine failures.
             _log(f"  [i] {path}@{ref} ({exc})")
+            return False
+
+    def _raw_cdn_first_applies() -> bool:
+        """Whether a raw-CDN-only marker sweep is safe and useful here.
+
+        True only for public github.com repositories on the anonymous-first
+        path: the CDN is un-metered there, while every Contents API miss
+        spends the shared 60/h anonymous budget (microsoft/apm#3283).
+        """
+        host = dep_ref.host or default_host()
+        if dep_ref.is_azure_devops() or not is_github_hostname(host):
+            return False
+        try:
+            return (
+                downloader.auth_resolver.uses_public_github_anonymous_first(
+                    host,
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+                is True
+            )
+        except Exception:
             return False
 
     _log(f'  [i] Validating virtual package at ref "{ref}": {dep_ref.repo_url}/{vpath}')
@@ -176,6 +198,23 @@ def validate_virtual_package_exists(
             f"{vpath}/.cursor-plugin/plugin.json",
             f"{vpath}/README.md",
         ]
+
+        # Efficiency repair (microsoft/apm#3283, maintainer-approved bounded
+        # scope): for public github.com repositories the raw CDN answers
+        # marker probes without spending the shared anonymous REST budget,
+        # so sweep every candidate marker CDN-only first.  A Claude-plugin
+        # layout (manifest at ``.claude-plugin/plugin.json``) previously
+        # burned one anonymous Contents API call per earlier-marker miss;
+        # the sweep reduces marker validation to zero API calls when any
+        # marker is reachable through the raw-file path.  Each miss here is
+        # expected, not an error: when the sweep finds nothing, the original
+        # per-marker probes below run unchanged, so API-only, private, and
+        # enterprise-host validation keeps its exact behavior.
+        if _raw_cdn_first_applies():
+            for marker_path in marker_paths:
+                if _probe(marker_path, raw_only=True):
+                    return True
+
         for marker_path in marker_paths:
             if _probe(marker_path):
                 return True

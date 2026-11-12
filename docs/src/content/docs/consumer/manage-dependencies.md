@@ -337,6 +337,9 @@ single-file sparse fetches. Git then applies matching safe
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Other shorthand | HTTPS |
 
+`apm audit --ci` cold replay uses the same declared transport, so an SSH
+dependency does not need `APM_GIT_PROTOCOL` for audit.
+
 An explicit scheme prevents APM from choosing another protocol unless
 cross-protocol fallback is enabled, but it does not disable your Git `insteadOf`
 configuration. Safe rules may select the same host over SSH or a local mirror.

@@ -388,6 +388,31 @@ class TestPromoteSubSkillsManagedFiles:
             mock_warn.assert_called_once()
         assert n == 0
 
+    def test_empty_preexisting_tree_is_deployed_not_skipped(self, tmp_path: Path) -> None:
+        """#3441: an empty (nested) target tree holds no user content and is not a collision."""
+        skills_dir = tmp_path / ".apm" / "skills"
+        sub = skills_dir / "my-skill"
+        sub.mkdir(parents=True)
+        (sub / "SKILL.md").write_text("# skill", encoding="utf-8")
+
+        target_root = tmp_path / ".github" / "skills"
+        (target_root / "my-skill" / "nested" / "deeper").mkdir(parents=True)
+        diagnostics = MagicMock()
+
+        n, deployed = SkillIntegrator._promote_sub_skills(
+            skills_dir,
+            target_root,
+            "parent-pkg",
+            managed_files=set(),
+            force=False,
+            diagnostics=diagnostics,
+        )
+        assert n == 1
+        assert deployed == [target_root / "my-skill"]
+        assert (target_root / "my-skill" / "SKILL.md").read_text(encoding="utf-8") == "# skill"
+        diagnostics.skip.assert_not_called()
+        diagnostics.overwrite.assert_not_called()
+
     def test_overwrite_warning_with_logger(self, tmp_path: Path) -> None:
         """When warn=True and not self_overwrite, logger.warning is called."""
         skills_dir = tmp_path / ".apm" / "skills"
