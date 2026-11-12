@@ -180,6 +180,14 @@ def test_publish_payloads_start_python(workdir: Path, tool: str, args: dict) -> 
     assert marker.read_text(encoding="utf-8") == "x"
 
 
+def test_gh_pr_create_mentioning_update_tool_name_starts_python(workdir: Path) -> None:
+    """A tool name inside an argument must not mask the `gh pr create` publish."""
+    bundle, marker = _stub_bundle(workdir / "bundle")
+    command = "gh pr create --title 'Fix update_pull_request' --body x"
+    launch(bundle, _tool_payload("bash", {"command": command, "description": "d"}))
+    assert marker.read_text(encoding="utf-8") == "x"
+
+
 def test_update_pull_request_text_edits_never_start_python(workdir: Path) -> None:
     bundle, marker = _stub_bundle(workdir / "bundle")
     launch(bundle, _tool_payload("update_pull_request", {"title": "t", "body": "b"}))

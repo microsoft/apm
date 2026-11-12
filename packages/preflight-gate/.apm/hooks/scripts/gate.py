@@ -14,10 +14,13 @@ import sys
 
 sys.dont_write_bytecode = True
 
+import contextlib  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import shlex  # noqa: E402
+import signal  # noqa: E402
+import subprocess  # noqa: E402
 from collections.abc import Callable  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -91,8 +94,26 @@ GH_API_VALUE_OPTS = {
 GH_API_FIELD_OPTS = {"-f", "--raw-field", "-F", "--field", "--input"}
 PULLS_PATH = re.compile(r"(^|/)pulls(/\d+)?/?$")
 GRAPHQL_PR_MUTATION = re.compile(r"\b(createPullRequest|markPullRequestReadyForReview)\b")
+REPO_PULLS_PATH = re.compile(r"(?:^|/)repos/([^/]+)/([^/]+)/pulls/(\d+)/?$")
+PR_LOOKUP_TIMEOUT_S = 8.0
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_GIT_CONFIG_ENV = re.compile(r"^GIT_CONFIG[A-Za-z0-9_]*=")
 _PUNCT = set(";&|()<>\n")
+
+
+@dataclass
+class PRTarget:
+    """An existing PR whose actual head/base must be looked up (ready ops)."""
+
+    ref: str | None = None
+    repo: str | None = None
+    node_id: str | None = None
+
+    def label(self) -> str:
+        if self.node_id:
+            return self.node_id
+        name = self.ref or "of the current branch"
+        return f"{self.repo}#{name}" if self.repo and self.ref else name
 
 
 @dataclass
@@ -107,6 +128,9 @@ class Action:
     fix: str | None = None
     base: str | None = None
     head: str | None = None
+    pr: PRTarget | None = None
+    implicit: bool = False
+    config: list[tuple[str, str | None]] = field(default_factory=list)
 
 
 # Tailored "Fix:" lines for denials that re-running preflight cannot cure.
@@ -123,11 +147,26 @@ FIX_PARSE = (
 )
 FIX_TARGET = "Fix: run the command from the repository root, without cd/-C/--git-dir indirection."
 FIX_PR_HEAD = "Fix: push the branch first, then create the PR from it without --head."
+FIX_IMPLICIT_PUSH = (
+    "Fix: name the source explicitly (e.g. `git push origin HEAD`); configured push "
+    "refspecs / push.default=matching can publish other branches."
+)
+FIX_PR_CREATE_TARGET = (
+    "Fix: pass head and base explicitly (e.g. `-f head=<branch> -f base=main`), or use "
+    "`gh pr create` from the verified branch."
+)
+FIX_PR_READY_TARGET = (
+    "Fix: name the PR explicitly (e.g. `gh pr ready <number>`) and make sure `gh` is "
+    "authenticated and online."
+)
+FIX_PR_PUSH_FIRST = "Fix: push the verified commit to the PR branch first, then retry."
 
 # Segments that may precede a gated push/PR in the same tool call: they cannot
 # move HEAD, rewrite history or change the worktree (D1: chained pushes).
 READ_ONLY_COMMANDS = {"cd", "pushd", "popd", "true", "echo", "printf"}
-READ_ONLY_GIT = {"status", "log", "diff", "show", "fetch", "rev-parse"}
+# `fetch` is NOT read-only: `git fetch origin x:x` can move a local branch
+# after the gate checked it.
+READ_ONLY_GIT = {"status", "log", "diff", "show", "rev-parse"}
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +339,17 @@ def _shell_script(args: list[str]) -> str | None:
     return None
 
 
-def _push_action(args: list[str], cwd: str | None, text: str) -> Action | None:
-    """Parse `git push` arguments. None when not gated."""
+def _push_action(
+    args: list[str],
+    cwd: str | None,
+    text: str,
+    config: list[tuple[str, str | None]] | None = None,
+) -> Action | None:
+    """Parse `git push` arguments. None when not gated.
+
+    *config* holds the command's `-c` / `--config-env` overrides (value None
+    when it is taken from the environment and therefore unknown).
+    """
     positionals: list[str] = []
     delete = False
     unbindable = None
@@ -371,7 +419,37 @@ def _push_action(args: list[str], cwd: str | None, text: str) -> Action | None:
         sources.append(src or "HEAD")
     if refspecs and not sources:
         return None
-    return Action("git-push", cwd, text, sources=sources or ["HEAD"])
+    if refspecs:
+        return Action("git-push", cwd, text, sources=sources)
+    overrides = list(config or [])
+    if any(value is None and _is_push_config(key) for key, value in overrides):
+        return Action(
+            "git-push",
+            cwd,
+            text,
+            deny="implicit `git push` with push config taken from --config-env is not verifiable",
+            fix=FIX_IMPLICIT_PUSH,
+        )
+    return Action("git-push", cwd, text, sources=["HEAD"], implicit=True, config=overrides)
+
+
+def _config_key(key: str) -> tuple[str, str, int]:
+    """(section, variable, part count); both are case-insensitive in git."""
+    parts = key.split(".")
+    return parts[0].lower(), parts[-1].lower(), len(parts)
+
+
+def _is_push_default(key: str) -> bool:
+    return _config_key(key) == ("push", "default", 2)
+
+
+def _is_remote_push(key: str) -> bool:
+    section, var, count = _config_key(key)
+    return section == "remote" and var == "push" and count >= 3
+
+
+def _is_push_config(key: str) -> bool:
+    return _is_push_default(key) or _is_remote_push(key)
 
 
 def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
@@ -413,12 +491,23 @@ def _is_read_only(argv: list[str]) -> bool:
 def _git_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
     """Only a literal `push` subcommand is gated; aliases are not expanded."""
     target = cwd
+    config: list[tuple[str, str | None]] = []
     idx = 0
     while idx < len(args):
         cur = args[idx]
         if cur == "-C" and idx + 1 < len(args):
             target = _resolve_dir(target, args[idx + 1])
             idx += 2
+        elif cur == "-c" and idx + 1 < len(args):
+            key, sep, value = args[idx + 1].partition("=")
+            config.append((key, value if sep else "true"))
+            idx += 2
+        elif cur == "--config-env" and idx + 1 < len(args):
+            config.append((args[idx + 1].partition("=")[0], None))
+            idx += 2
+        elif cur.startswith("--config-env="):
+            config.append((cur[len("--config-env=") :].partition("=")[0], None))
+            idx += 1
         elif cur in GIT_VALUE_OPTS:
             if cur in ("--git-dir", "--work-tree"):
                 target = None
@@ -434,7 +523,7 @@ def _git_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
         return []
     sub, rest = args[idx], args[idx + 1 :]
     if sub == "push":
-        action = _push_action(rest, target, text)
+        action = _push_action(rest, target, text, config)
         return [action] if action else []
     return []
 
@@ -484,23 +573,130 @@ def _gh_actions(args: list[str], cwd: str | None, text: str) -> list[Action]:
                 )
             ]
         if sub == "ready" and "--undo" not in args:
-            return [Action("gh-pr-ready", cwd, text)]
+            target = PRTarget(
+                ref=positionals[2] if len(positionals) > 2 else None,
+                repo=_flag_value(args, "-R", "--repo"),
+            )
+            return [Action("gh-pr-ready", cwd, text, pr=target)]
         return []
     if group == "api":
         api_args = args[args.index("api") + 1 :] if "api" in args else []
-        api_pos = _gh_positionals(api_args, GH_API_VALUE_OPTS | GH_REPO_OPTS)
-        path = api_pos[0] if api_pos else ""
-        method = _flag_value(api_args, "-X", "--method")
-        has_fields = any(
-            a in GH_API_FIELD_OPTS or a.startswith(("--field=", "--raw-field=", "--input="))
-            for a in api_args
-        )
-        effective = (method or ("POST" if has_fields else "GET")).upper()
-        if path == "graphql" and any(GRAPHQL_PR_MUTATION.search(a) for a in api_args):
-            return [Action("gh-api-pulls", cwd, text)]
-        if effective in ("POST", "PATCH") and PULLS_PATH.search(path.split("?")[0]):
-            return [Action("gh-api-pulls", cwd, text)]
+        return _gh_api_actions(api_args, cwd, text)
     return []
+
+
+def _api_fields(api_args: list[str]) -> tuple[dict[str, str], bool]:
+    """`gh api` -f/-F key=value fields; True when some field is opaque (file/stdin)."""
+    fields: dict[str, str] = {}
+    opaque = False
+    idx = 0
+    while idx < len(api_args):
+        cur = api_args[idx]
+        value: str | None = None
+        typed = False
+        if cur in GH_API_FIELD_OPTS and cur != "--input":
+            value = api_args[idx + 1] if idx + 1 < len(api_args) else None
+            typed = cur in ("-F", "--field")
+            idx += 2
+        elif cur.startswith(("--raw-field=", "--field=")):
+            value = cur.split("=", 1)[1]
+            typed = cur.startswith("--field=")
+            idx += 1
+        elif cur == "--input" or cur.startswith("--input="):
+            opaque = True
+            idx += 2 if cur == "--input" else 1
+            continue
+        elif cur[:2] in ("-f", "-F") and len(cur) > 2:
+            value = cur[2:]
+            typed = cur[:2] == "-F"
+            idx += 1
+        elif cur in GH_API_VALUE_OPTS:
+            idx += 2
+            continue
+        else:
+            idx += 1
+            continue
+        if value is None:
+            continue
+        key, sep, val = value.partition("=")
+        if not sep:
+            continue
+        if typed and val.startswith("@"):
+            opaque = True
+            continue
+        fields[key] = val
+    return fields, opaque
+
+
+def _graphql_arg(query: str, name: str, fields: dict[str, str]) -> str | None:
+    """Literal or `$variable` value of input argument *name* in *query*."""
+    match = re.search(rf'\b{name}\s*:\s*(?:"((?:[^"\\]|\\.)*)"|\$(\w+))', query)
+    if not match:
+        return None
+    if match.group(2):
+        return fields.get(match.group(2))
+    return match.group(1)
+
+
+def _gh_api_actions(api_args: list[str], cwd: str | None, text: str) -> list[Action]:
+    """API PR writes keep the requested head/base or the target PR to look up."""
+    api_pos = _gh_positionals(api_args, GH_API_VALUE_OPTS | GH_REPO_OPTS)
+    path = api_pos[0] if api_pos else ""
+    method = _flag_value(api_args, "-X", "--method")
+    has_fields = any(
+        a in GH_API_FIELD_OPTS or a.startswith(("--field=", "--raw-field=", "--input="))
+        for a in api_args
+    )
+    effective = (method or ("POST" if has_fields else "GET")).upper()
+    fields, opaque = _api_fields(api_args)
+    if path == "graphql":
+        query = fields.get("query") or " ".join(api_args)
+        found = set(GRAPHQL_PR_MUTATION.findall(" ".join(api_args)))
+        actions = []
+        if "createPullRequest" in found:
+            head = _graphql_arg(query, "headRefName", fields)
+            action = Action(
+                "gh-api-pulls",
+                cwd,
+                text,
+                base=_graphql_arg(query, "baseRefName", fields),
+                head=head,
+            )
+            if head is None:
+                action.deny = "cannot establish the head of the GraphQL createPullRequest"
+                action.fix = FIX_PR_CREATE_TARGET
+            actions.append(action)
+        if "markPullRequestReadyForReview" in found:
+            node = _graphql_arg(query, "pullRequestId", fields)
+            action = Action("gh-api-pulls", cwd, text, pr=PRTarget(node_id=node))
+            if not node:
+                action.deny = "cannot establish the PR of markPullRequestReadyForReview"
+                action.fix = FIX_PR_READY_TARGET
+            actions.append(action)
+        return actions
+    clean = path.split("?")[0]
+    if effective not in ("POST", "PATCH") or not PULLS_PATH.search(clean):
+        return []
+    numbered = REPO_PULLS_PATH.search(clean)
+    if numbered:
+        owner, name, number = numbered.groups()
+        repo = None if "{" in owner + name else f"{owner}/{name}"
+        return [Action("gh-api-pulls", cwd, text, pr=PRTarget(ref=number, repo=repo))]
+    if PULLS_PATH.search(clean).group(2):
+        return [
+            Action(
+                "gh-api-pulls",
+                cwd,
+                text,
+                deny=f"cannot establish the PR targeted by `{clean}`",
+                fix=FIX_PR_READY_TARGET,
+            )
+        ]
+    action = Action("gh-api-pulls", cwd, text, base=fields.get("base"), head=fields.get("head"))
+    if opaque or not action.head:
+        action.deny = "cannot establish the head of the API PR creation"
+        action.fix = FIX_PR_CREATE_TARGET
+    return [action]
 
 
 def _command_actions(argv: list[str], cwd: str | None, depth: int) -> list[Action]:
@@ -582,7 +778,10 @@ def _classify_script(script: str, cwd: str | None, depth: int = 0) -> list[Actio
             current = None
         elif argv:
             run_dir = _resolve_dir(current, env_dir) if env_dir else current
-            found += _command_actions(argv, run_dir, depth)
+            here = _command_actions(argv, run_dir, depth)
+            if any(_GIT_CONFIG_ENV.match(w) for w in words[: len(words) - len(argv)]):
+                _deny_implicit_push(here)
+            found += here
         if writers:
             _mark_chained(found, writers[0])
         actions += found
@@ -591,6 +790,14 @@ def _classify_script(script: str, cwd: str | None, depth: int = 0) -> list[Actio
     if backticked and writers:
         _mark_chained(backticked, writers[0])
     return backticked + actions
+
+
+def _deny_implicit_push(actions: list[Action]) -> None:
+    """GIT_CONFIG_* assignments can set push.default / remote.<name>.push."""
+    for action in actions:
+        if action.implicit and action.deny is None:
+            action.deny = "implicit `git push` under GIT_CONFIG_* overrides is not verifiable"
+            action.fix = FIX_IMPLICIT_PUSH
 
 
 def _mark_chained(actions: list[Action], segment: str) -> None:
@@ -619,6 +826,29 @@ def _marks_ready(args: dict) -> bool:
     return str(args.get("state", "")).strip().lower() == "ready"
 
 
+def _tool_ready_action(name: str, args: dict, cwd: str | None) -> Action:
+    """update_pull_request marking ready: the PR number is required to look it up."""
+    number = next(
+        (
+            args[k]
+            for k in ("pullNumber", "pull_number", "pr_number", "number")
+            if args.get(k) not in (None, "")
+        ),
+        None,
+    )
+    owner, repo = args.get("owner"), args.get("repo")
+    full = f"{owner}/{repo}" if isinstance(owner, str) and isinstance(repo, str) else None
+    if isinstance(number, bool) or not str(number or "").strip().isdigit():
+        return Action(
+            "tool-pr-ready",
+            cwd,
+            name,
+            deny=f"cannot establish which PR `{name}` marks ready (no PR number)",
+            fix=FIX_PR_READY_TARGET,
+        )
+    return Action("tool-pr-ready", cwd, name, pr=PRTarget(ref=str(number).strip(), repo=full))
+
+
 def classify(tool_name: str, tool_args: object, cwd: str | None) -> list[Action]:
     """Return gated actions for one tool call (empty list = not gated)."""
     name = (tool_name or "").strip()
@@ -630,7 +860,7 @@ def classify(tool_name: str, tool_args: object, cwd: str | None) -> list[Action]
             return []
         return _classify_script(command, cwd)
     if lowered.endswith(PR_UPDATE_SUFFIX):
-        return [Action("tool-pr-ready", cwd, name)] if _marks_ready(args) else []
+        return [_tool_ready_action(name, args, cwd)] if _marks_ready(args) else []
     if lowered.endswith(PR_TOOL_SUFFIX):
         base = args.get("base") or args.get("base_branch")
         head = args.get("head") or args.get("head_branch")
@@ -771,14 +1001,125 @@ def _verify_freshness(
 
 
 def _resolve_head_arg(value: str, root: str) -> str | None:
+    """A PR head names a branch: the local one, else origin's remote-tracking ref."""
     branch = value.split(":", 1)[1] if ":" in value else value
-    return lib.rev_commit(branch, root) or lib.rev_commit(f"refs/remotes/origin/{branch}", root)
+    if not branch or branch.startswith("-"):
+        return None
+    return lib.rev_commit(f"refs/heads/{branch}", root) or lib.rev_commit(
+        f"refs/remotes/origin/{branch}", root
+    )
 
 
+def lookup_pr(root: str, target: PRTarget) -> dict | None:
+    """{headRefOid, baseRefName} of an existing PR via `gh`, or None.
+
+    Bounded by PR_LOOKUP_TIMEOUT_S so the hook stays well inside its timeout.
+    """
+    if target.node_id:
+        query = (
+            "query($id: ID!) { node(id: $id) { ... on PullRequest { headRefOid baseRefName } } }"
+        )
+        argv = ["gh", "api", "graphql", "-f", f"query={query}", "-f", f"id={target.node_id}"]
+        argv += ["--jq", ".data.node"]
+    else:
+        argv = ["gh", "pr", "view", *([target.ref] if target.ref else [])]
+        argv += ["--json", "headRefOid,baseRefName"]
+        if target.repo:
+            argv += ["-R", target.repo]
+    env = dict(os.environ, GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1", NO_COLOR="1")
+    try:
+        proc = subprocess.Popen(  # noqa: S603 - fixed gh argv, no shell
+            argv,
+            cwd=root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        out, _ = proc.communicate(timeout=PR_LOOKUP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not isinstance(data.get("headRefOid"), str) or not isinstance(data.get("baseRefName"), str):
+        return None
+    return data
+
+
+PRLookup = Callable[[str, PRTarget], "dict | None"]
 Problem = tuple[str, str | None]
 
 
-def verify_action(action: Action, receipt: dict, root: str, hint: str = "") -> Problem | None:
+def _base_problem(wanted: str, receipt: dict, hint: str) -> Problem | None:
+    if wanted == receipt.get("base_branch"):
+        return None
+    why = f"PR base {wanted!r} differs from the preflight base {receipt.get('base_branch')!r}"
+    fix = (
+        f"Fix: target `{receipt.get('base_branch')}`, or re-run preflight against that "
+        f"base: {hint} --base origin/{wanted}"
+    )
+    return why, fix
+
+
+def _implicit_push_problem(action: Action, root: str) -> str | None:
+    """An implicit push publishes more than HEAD under matching / remote refspecs."""
+    default = None
+    for key, value in action.config:
+        if _is_push_default(key):
+            default = value
+    if default is None:
+        default = lib.git_out(["config", "--get", "push.default"], root)
+    if (default or "").strip().lower() == "matching":
+        return "implicit `git push` with push.default=matching can publish every matching branch"
+    remote_push = any(_is_remote_push(key) for key, _ in action.config) or lib.git_out(
+        ["config", "--get-regexp", r"^remote\..*\.push$"], root
+    )
+    if remote_push:
+        return "implicit `git push` uses configured remote.<name>.push refspecs"
+    return None
+
+
+def _verify_existing_pr(
+    action: Action, receipt: dict, root: str, hint: str, lookup: PRLookup
+) -> Problem | None:
+    """Ready operations publish the PR's actual head, not the local HEAD."""
+    target = action.pr or PRTarget()
+    info = lookup(root, target)
+    if info is None:
+        return f"cannot establish the head of PR {target.label()}", FIX_PR_READY_TARGET
+    verified = str(receipt.get("head"))
+    head = str(info["headRefOid"])
+    if head != verified:
+        current, _ = lib.head_and_tree(root)
+        why = (
+            f"PR {target.label()} head ({head[:12]}) is not the preflight-verified "
+            f"commit {verified[:12]}"
+        )
+        return why, (FIX_PR_PUSH_FIRST if current == verified else None)
+    return _base_problem(str(info["baseRefName"]), receipt, hint)
+
+
+def verify_action(
+    action: Action,
+    receipt: dict,
+    root: str,
+    hint: str = "",
+    lookup: PRLookup | None = None,
+) -> Problem | None:
     """Action-specific binding to the receipt commit: (why, fix) or None.
 
     A None fix means "re-run preflight" (the default Fix line).
@@ -786,8 +1127,14 @@ def verify_action(action: Action, receipt: dict, root: str, hint: str = "") -> P
     verified = str(receipt.get("head"))
     if action.deny:
         return action.deny, action.fix
+    if action.pr is not None:
+        return _verify_existing_pr(action, receipt, root, hint, lookup or lookup_pr)
     current, _ = lib.head_and_tree(root)
     if action.kind == "git-push":
+        if action.implicit:
+            why = _implicit_push_problem(action, root)
+            if why:
+                return why, FIX_IMPLICIT_PUSH
         for src in action.sources:
             full = lib.git_out(["rev-parse", "--symbolic-full-name", src], root) or ""
             if full.startswith("refs/tags/"):
@@ -811,17 +1158,8 @@ def verify_action(action: Action, receipt: dict, root: str, hint: str = "") -> P
     if head != verified:
         why = f"HEAD ({str(head)[:12]}) is not the preflight-verified commit {verified[:12]}"
         return why, (None if head == current else FIX_OTHER_SOURCE)
-    if action.kind in ("gh-pr-create", "tool-create-pr"):
-        wanted = action.base or "main"
-        if wanted != receipt.get("base_branch"):
-            why = (
-                f"PR base {wanted!r} differs from the preflight base {receipt.get('base_branch')!r}"
-            )
-            fix = (
-                f"Fix: target `{receipt.get('base_branch')}`, or re-run preflight against that "
-                f"base: {hint} --base origin/{wanted}"
-            )
-            return why, fix
+    if action.kind in ("gh-pr-create", "tool-create-pr", "gh-api-pulls"):
+        return _base_problem(action.base or "main", receipt, hint)
     return None
 
 
@@ -891,6 +1229,7 @@ class GateConfig:
     scripts_dir: Path = _HERE
     bundle_hash_for: Callable[[str], str | None] = lib.deployed_bundle_hash
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    pr_lookup: PRLookup = lookup_pr
 
 
 def _runner_hint(host_root: str, scripts_dir: Path) -> str:
@@ -991,7 +1330,7 @@ def _decide(tool: str, actions: list[Action], env: dict[str, str], cfg: GateConf
             failed = _failed_checks(receipt) if receipt is not None else []
             return deny_json(compose_reason(why, _head7(root), hint, failed))
         if receipt is not None:
-            problem = verify_action(action, receipt, root, hint)
+            problem = verify_action(action, receipt, root, hint, cfg.pr_lookup)
             if problem:
                 return deny_json(compose_reason(problem[0], _head7(root), hint, fix=problem[1]))
     return None

@@ -10,8 +10,9 @@ Repo-local APM package for microsoft/apm. It ships:
   `*create_pull_request` tools and `*update_pull_request` calls that clear
   draft, unless that receipt is fresh, green, complete and matches the
   pushed commit. A push/PR must be its own tool call: only read-only
-  segments (`cd`, `echo`, `git status/log/diff/show/fetch/rev-parse`, ...)
-  may precede it, so `git commit && git push` is denied.
+  segments (`cd`, `echo`, `git status/log/diff/show/rev-parse`, ...)
+  may precede it, so `git commit && git push` (or `git fetch && git push`)
+  is denied.
 
 There is intentionally no skill. The hook is the only agent-facing surface:
 every deny reason is self-sufficient (why, with HEAD sha; the exact runner
@@ -20,6 +21,22 @@ agent that has never heard of preflight can recover from the denial alone.
 
 CI stays the authority. The gate is a guardrail against skipped local
 verification, not a tamper-proof control.
+
+## Activation by Copilot surface
+
+- Copilot CLI and cloud agent load repo `.github/hooks/*.json`: the gate is
+  active after `apm install`.
+- The Copilot desktop app does not load repo `.github/hooks`; it loads
+  user-level `~/.copilot/hooks/*.json`. Add this shim as
+  `~/.copilot/hooks/apm-preflight-gate-shim.json`; it runs the repo's own
+  launcher only in repos that have the package, so the repo copy stays the
+  single source of truth:
+
+```json
+{"version":1,"hooks":{"preToolUse":[{"type":"command","matcher":"bash|Bash|write_bash|shell|powershell|pwsh|run_in_terminal|runInTerminal|.*create_pull_request|.*update_pull_request","bash":"L=.github/hooks/scripts/preflight-gate/.apm/hooks/scripts/gate-launcher.sh; root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; [ -f \"$root/$L\" ] || exit 0; bash \"$root/$L\" || true; exit 0","powershell":"exit 0","timeoutSec":15}]}}
+```
+
+- Hooks are read at session start: restart existing sessions to pick it up.
 
 ## Run
 
@@ -110,9 +127,19 @@ value is ignored. Bypasses are appended to `apm-preflight/bypass.log`.
 - Not detected (CI remains the authority): git aliases, including
   `git -c alias.p=push p`; a dynamically built argv0 such as
   `$(echo git) push`; plumbing such as `git send-pack`; `gh` aliases.
-- Tag, `--all`, `--mirror` and wildcard pushes are always denied.
+- Tag, `--all`, `--mirror` and wildcard pushes are always denied. An
+  implicit push (no refspec) is denied when `push.default=matching` or any
+  `remote.<name>.push` is configured (including `git -c`, `--config-env`
+  and `GIT_CONFIG_*` overrides); name the source, e.g. `git push origin HEAD`.
+- API PR creation (`gh api` POST `pulls`, GraphQL `createPullRequest`) is
+  bound to its requested head branch and base; a head that cannot be read
+  from the command (e.g. `--input`) is denied.
+- Ready operations (`gh pr ready`, `gh api` PATCH `pulls/N`, GraphQL
+  `markPullRequestReadyForReview`, `*update_pull_request`) look up the PR's
+  actual head and base with `gh` (8 s timeout) and are denied when the PR
+  cannot be established (offline, no PR number).
 - Pushes from a shell whose cwd changed in an earlier tool call are not
-  tracked; `gh pr ready` does not verify the PR base.
+  tracked.
 - Hooks require `executables.allow` in the root `apm.yml`; the grant is pinned
   to this package's version, so bump both together.
 

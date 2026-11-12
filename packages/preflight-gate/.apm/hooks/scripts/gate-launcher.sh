@@ -13,10 +13,16 @@
 payload=""
 IFS= read -r -d '' payload 2>/dev/null || true
 publish=""
+# Each pattern is checked on its own: a tool name mentioned in some argument
+# (e.g. a PR title) must never mask a gh / push publish in the same payload.
 case "$payload" in
   *create_pull_request*|*push*) publish=1 ;;
+esac
+case "$payload" in
   *update_pull_request*)
     case "$payload" in *draft*|*ready*|*Ready*) publish=1 ;; esac ;;
+esac
+case "$payload" in
   *'gh '*|*'gh\t'*)
     case "$payload" in
       *'pr '*|*'pr\t'*|*'pr"'*|*pulls*|*createPullRequest*|*markPullRequestReadyForReview*)

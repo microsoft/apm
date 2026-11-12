@@ -18,6 +18,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse  # noqa: E402
+import contextlib  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import platform  # noqa: E402
@@ -141,18 +142,37 @@ def shell_prelude(checks: list, warnings: list[str]) -> tuple[str, str | None]:
     return "", "host grep lacks -P and ggrep is missing (macOS: brew install grep)"
 
 
+def _group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _kill_group(proc: subprocess.Popen) -> None:
-    """Terminate the check's whole process group (xdist workers, uv, ...)."""
-    for sig, wait in ((signal.SIGTERM, KILL_GRACE_S), (signal.SIGKILL, KILL_GRACE_S)):
-        try:
-            os.killpg(proc.pid, sig)
-        except (ProcessLookupError, PermissionError):
+    """Terminate the check's whole process group (xdist workers, uv, ...).
+
+    SIGTERM, a grace period, then SIGKILL to the group even when the leader
+    already exited: a child ignoring SIGTERM must not outlive the check.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=KILL_GRACE_S)
+        return
+    deadline = time.monotonic() + KILL_GRACE_S
+    while time.monotonic() < deadline:
+        if proc.poll() is not None and not _group_alive(proc.pid):
             return
-        try:
-            proc.wait(timeout=wait)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+        time.sleep(0.05)
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=KILL_GRACE_S)
 
 
 def _run_command(
@@ -442,6 +462,9 @@ def run(
     # env) and always prefer the project env's tools over anything on PATH.
     venv_bin = lib.project_env(root, dict(os.environ)) / "bin"
     env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
+    # tests/integration/conftest.py prefers APM_BINARY_PATH, then dist/, then
+    # PATH: pin the binary so lifecycle checks never run a stale dist/ build.
+    env["APM_BINARY_PATH"] = str(venv_bin / "apm")
     env.update({"UV_NO_SYNC": "1", "UV_FROZEN": "1"})
     env.update(
         {

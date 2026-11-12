@@ -36,6 +36,8 @@ def _actions(command: str) -> list[gate.Action]:
         ("bash -c 'git commit -m x && git push'", "git commit -m x"),
         ("git commit -m x; echo `git push`", "git commit -m x"),
         ("git stash && gh pr ready 3", "git stash"),
+        ("git fetch origin other:other && git push origin other", "git fetch origin other:other"),
+        ("git fetch origin && git push origin HEAD", "git fetch origin"),
     ],
 )
 def test_mutating_segment_before_publish_is_denied(command: str, segment: str) -> None:
@@ -57,7 +59,7 @@ def test_mutating_segment_before_publish_is_denied(command: str, segment: str) -
         "true && git push",
         "echo pushing; printf 'x' && git push",
         "git status && git push",
-        "git fetch origin && git log -1 && git diff --stat && git push origin HEAD",
+        "git log -1 && git diff --stat && git push origin HEAD",
         "git show HEAD && git rev-parse HEAD && gh pr create --fill",
         "git remote -v && git push",
         "git branch --show-current && git push",
@@ -90,3 +92,16 @@ def test_gate_denies_chained_push_even_with_fresh_receipt(sandbox: Sandbox, fake
         assert out is not None, command
         reason = json.loads(out)["permissionDecisionReason"]
         assert "as its own tool call after preflight" in reason
+
+
+def test_fetch_moving_branch_before_push_is_denied(sandbox: Sandbox, fake_policy) -> None:
+    """`git fetch origin x:x` can move x after the gate checked it: never chainable."""
+    sandbox.git("branch", "other", "HEAD")
+    assert preflight.run([], policy=fake_policy, cwd=sandbox.root) == 0
+    cfg = gate.GateConfig(scripts_dir=sandbox.root / lib.DEPLOYED_SCRIPTS_REL)
+    assert gate.evaluate(_payload(sandbox, "git push origin other"), {}, cfg) is None
+    command = "git fetch origin other:other && git push origin other"
+    out = gate.evaluate(_payload(sandbox, command), {}, cfg)
+    assert out is not None
+    reason = json.loads(out)["permissionDecisionReason"]
+    assert "this call runs 'git fetch origin other:other'" in reason

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 from pathlib import Path
 
 import preflight
@@ -79,7 +81,8 @@ def test_failure_still_runs_shared_checks_of_every_tier(sandbox: Sandbox, fake_p
     sandbox.write("FAIL_T0", "1\n")
     sandbox.write("src/a.py", "x = 1\n")
     sandbox.commit()
-    assert run(sandbox, fake_policy) == 1
+    # Without --keep-going, fail-fast may cancel T1 before it starts (one core).
+    assert run(sandbox, fake_policy, "--keep-going") == 1
     receipt = sandbox.receipt()
     assert receipt["status"] == "fail"
     assert receipt["ran_tiers"] == ["T0", "T1"]
@@ -349,3 +352,26 @@ def test_isolated_home_with_locked_dirs_is_reset(sandbox: Sandbox, fake_policy) 
     locked.parent.chmod(0o200)
     assert run(sandbox, fake_policy, "--no-fetch") == 0
     assert not (lib.preflight_dir(sandbox.git_dir) / "home" / ".cache" / "apm" / "x").exists()
+
+
+def test_lifecycle_checks_pin_project_apm_over_stale_dist(
+    sandbox: Sandbox, fake_policy, monkeypatch
+) -> None:
+    """tests/integration/conftest.py prefers APM_BINARY_PATH over dist/ and PATH."""
+    stale = sandbox.root / "dist" / "apm-darwin-arm64" / "apm"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("#!/bin/sh\necho stale\n", encoding="utf-8")
+    stale.chmod(0o755)
+    sandbox.write(".gitignore", "dist/\n")
+    sandbox.commit()
+    monkeypatch.setenv("APM_BINARY_PATH", str(stale))
+    expected = lib.project_env(sandbox.root, dict(os.environ)) / "bin" / "apm"
+    fake_policy.build_checks = lambda tier, ctx: [
+        policy.Check(
+            "t0.binary",
+            "T0",
+            cmd=f'test "$APM_BINARY_PATH" = {shlex.quote(str(expected))}',
+        )
+    ]
+    assert run(sandbox, fake_policy) == 0
+    assert [(c["id"], c["exit"]) for c in sandbox.receipt()["checks"]] == [("t0.binary", 0)]

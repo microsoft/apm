@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -287,3 +288,45 @@ def test_heavy_policy_checks_are_exclusive() -> None:
     assert by_id["lifecycle.smoke-1"].exclusive
     assert by_id["lifecycle.smoke-2"].exclusive
     assert not any(c.exclusive for c in policy.build_checks("T0", ctx))
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def test_cancel_kills_child_that_ignores_sigterm(sandbox: Sandbox, workdir: Path) -> None:
+    """The leader exits on SIGTERM; its TERM-immune child must still be SIGKILLed."""
+    pidfile = workdir / "child.pid"
+    child = f"trap '' TERM; echo $$ > {shlex.quote(str(pidfile))}; while :; do sleep 0.1; done"
+    cmd = f"bash -c {shlex.quote(child)} & sleep 60"
+    check = policy.Check("resist", "T0", cmd=cmd)
+    cancel = threading.Event()
+
+    def cancel_when_child_runs() -> None:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and not pidfile.is_file():
+            time.sleep(0.05)
+        time.sleep(0.2)
+        cancel.set()
+
+    watcher = threading.Thread(target=cancel_when_child_runs, daemon=True)
+    watcher.start()
+    code = preflight._run_command(
+        check, sandbox.root, workdir / "resist.log", dict(os.environ), "", cancel
+    )
+    watcher.join()
+    assert code == preflight.CANCELLED
+    pid = int(pidfile.read_text(encoding="utf-8").strip())
+    deadline = time.monotonic() + 10
+    while _pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    alive = _pid_alive(pid)
+    if alive:
+        os.kill(pid, 9)
+    assert not alive, "a child ignoring SIGTERM survived cancellation"
