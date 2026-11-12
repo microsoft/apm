@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - OpenCode targets write native OpenCode 2 MCP entries under `mcp.servers` when `opencode.json` already declares that map, translating `enabled` to `disabled` and keeping `codemode` and other extra fields; files without it keep the OpenCode 1 layout. -- by @RamsesJM (#3414)
+- `apm marketplace add --path catalogs/<audience>/marketplace.json` registers a catalog stored anywhere inside a git-backed marketplace repository, so one repository can serve one catalog per audience; the path must stay inside the repository, is saved with the registration, and is reused by `browse`, `search`, `update` and `apm install` (#3628)
 
 ### Changed
 
