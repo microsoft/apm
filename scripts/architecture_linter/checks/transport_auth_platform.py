@@ -843,7 +843,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "pinned = (git_symlink_pin_entry(), *git_line_ending_pin_entries())",
                 "retained.extend(pinned)",
                 "def git_line_ending_pin_args(",
-                "def raise_for_symlink_capability(",
+                '_SYMLINK_PIN_VALUE = "false"',
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
         )
@@ -1068,7 +1068,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "git_symlink_pin_entry(",
                 "git_line_ending_pin_args(",
                 "git_line_ending_pin_entries(",
-                "raise_for_symlink_capability(",
+                "materialize_tracked_symlinks(",
             ),
         ),
         (
@@ -1077,7 +1077,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "git_symlink_pin_args(",
                 "git_line_ending_pin_args(",
                 "git_line_ending_pin_entries(",
-                "raise_for_symlink_capability(",
+                "materialize_tracked_symlinks(",
             ),
         ),
     ):
@@ -1088,8 +1088,8 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 _RID_GIT_CHILD_ENV,
                 path,
                 needles,
-                "Dependency checkouts must pin real symlinks and deterministic line endings,"
-                " and name capability failures",
+                "Dependency checkouts must write link text, materialize it from Git objects,"
+                " and pin deterministic line endings",
             )
         )
     findings.extend(

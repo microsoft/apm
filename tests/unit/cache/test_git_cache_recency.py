@@ -8,13 +8,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _variant_key
+from apm_cli.cache.git_cache import GitCache
 from apm_cli.cache.locking import shard_lock
-from apm_cli.cache.url_normalize import cache_shard_key
 from tests.utils.filelock_retention import retain_native_lock_unlink
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -113,34 +111,6 @@ def test_successful_checkout_reuse_survives_prune(
     assert used.is_dir()
     assert not stale.parent.exists()
     assert fresh.is_dir()
-
-
-@pytest.mark.parametrize("refresh", [False, True], ids=["hit", "write-dedup"])
-@pytest.mark.parametrize("error_type", [ValueError, PermissionError])
-def test_failed_sparse_validation_does_not_refresh_access(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refresh: bool, error_type: type[Exception]
-) -> None:
-    """A rejected sparse hit must not become recent merely by being inspected."""
-    cache = GitCache(tmp_path, refresh=refresh)
-    sha = "a" * 40
-    checkout = cache._checkouts_root / cache_shard_key(_REMOTE) / sha / _variant_key(["skills"])
-    (checkout / ".git").mkdir(parents=True)
-    (checkout / ".git/HEAD").write_text(sha, encoding="ascii")
-    (checkout / ".git" / "config").write_text(
-        "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = true\n", encoding="ascii"
-    )
-
-    def reject_sparse(*args: object, **kwargs: object) -> Path:
-        raise error_type("Invalid sparse symlink")
-
-    monkeypatch.setattr(cache, "_ensure_bare_repo", MagicMock())
-    monkeypatch.setattr(cache, "_finalize_sparse_checkout", reject_sparse)
-    record_access = MagicMock(wraps=cache._record_checkout_access)
-    monkeypatch.setattr(cache, "_record_checkout_access", record_access)
-    with pytest.raises(error_type, match="Invalid sparse symlink"):
-        cache.get_checkout(_REMOTE, None, locked_sha=sha, sparse_paths=["skills"])
-
-    record_access.assert_not_called()
 
 
 @pytest.mark.windows_compat

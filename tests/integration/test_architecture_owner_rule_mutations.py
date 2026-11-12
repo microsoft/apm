@@ -1542,7 +1542,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/deps/github_downloader.py",
         old="            return _repair(env)\n",
         new="            return True\n",
-        intent="Downloader skips the dangling-cone-symlink repair owner.",
+        intent="Downloader skips Git-object link materialization in its sparse clone.",
     ),
     MutationCase(
         guard_id="transport-platform-tls-trust-injection",
@@ -1873,7 +1873,7 @@ def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
             "src/apm_cli/cache/git_cache.py",
             "        *git_line_ending_pin_args(),\n",
             '        "-c",\n        "core.autocrlf=false",\n',
-            "Dependency checkouts must pin real symlinks and deterministic line endings",
+            "Dependency checkouts must write link text, materialize it from Git objects",
         ),
         (
             "src/apm_cli/utils/git_env.py",
