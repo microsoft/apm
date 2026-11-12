@@ -727,14 +727,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="HookIntegrator stops owning the neutral hook rewrite-scope resolver.",
     ),
     MutationCase(
-        guard_id="hooks-integrations-neutral-hook-contract",
-        rule_id="mutation_writes.neutral_hook_contract",
-        path="src/apm_cli/integration/hook_integrator.py",
-        old="drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)",
-        new="json_config.setdefault(container, {})",
-        intent="Merged hooks stop retiring events a hook source no longer declares (#3665).",
-    ),
-    MutationCase(
         guard_id="hooks-integrations-opencode-enabled-intent",
         rule_id="mutation_writes.opencode_enabled_intent",
         path="src/apm_cli/models/dependency/mcp.py",
@@ -871,14 +863,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Native MCP connection ownership loses its canonical baseline comparator.",
     ),
     MutationCase(
-        guard_id="install-deployment-mcp-ownership-migration",
-        rule_id="install-deployment-mcp-ownership-migration",
-        path="src/apm_cli/integration/mcp_integrator.py",
-        old="claude_project_enabled = project_mcp_cleanup_reachable(",
-        new='claude_project_enabled = (project_root_path / ".claude").is_dir() or bool(',
-        intent="Stale Claude MCP cleanup re-gates on the write opt-in dir (#3664).",
-    ),
-    MutationCase(
         guard_id="install-deployment-mcp-registry-resolution",
         rule_id="install-deployment-mcp-registry-resolution",
         path="src/apm_cli/registry/client.py",
@@ -901,14 +885,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def finalize_install_result(",
         new="def finalize_install_result_disabled(",
         intent="Install outcome owner stops defining the result finalizer.",
-    ),
-    MutationCase(
-        guard_id="install-deployment-outcome",
-        rule_id="install-deployment-outcome",
-        path="src/apm_cli/commands/mcp.py",
-        old='cli.main(args=forwarded, prog_name="apm")',
-        new="cli.main(args=forwarded, standalone_mode=False)",
-        intent="apm mcp install drops the forwarded install exit code (#3666).",
     ),
     MutationCase(
         guard_id="install-deployment-package-target-authorization",
@@ -1980,6 +1956,43 @@ def test_owner_rules_report_nothing_before_mutation(
 ) -> None:
     """Every owner rule is clean at HEAD, so any violation below is the mutation."""
     assert baseline_violated_rule_ids == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "mutation_writes.neutral_hook_contract",
+            "src/apm_cli/integration/hook_integrator.py",
+            "drop_source_entries(json_config[container], {source_marker}, keep_events=cleared_events)",
+            "json_config.setdefault(container, {})",
+            id="merged-hooks-stop-retiring-undeclared-events-3665",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/integration/mcp_integrator.py",
+            "claude_project_enabled = project_mcp_cleanup_reachable(",
+            'claude_project_enabled = (project_root_path / ".claude").is_dir() or bool(',
+            id="claude-mcp-cleanup-regates-on-opt-in-dir-3664",
+        ),
+        pytest.param(
+            "install-deployment-outcome",
+            "src/apm_cli/commands/mcp.py",
+            'cli.main(args=forwarded, prog_name="apm")',
+            "cli.main(args=forwarded, standalone_mode=False)",
+            id="mcp-install-drops-forwarded-exit-code-3666",
+        ),
+    ],
+)
+def test_lifecycle_sweep_guard_extensions_have_teeth(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Guard sub-rules added by the 0.36.0 lifecycle sweep (#3649) reject their regressions."""
+    source = _source(path)
+    assert source.count(old) == 1
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
 def test_claude_cleanup_guard_preserves_unresolved_path_check() -> None:
