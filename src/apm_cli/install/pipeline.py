@@ -767,6 +767,25 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             package="lockfile",
                         )
 
+        # Point users at 'apm export-patch' once, before integration
+        # re-syncs locally edited managed files (read-only check).
+        if (
+            logger is not None
+            and existing_lockfile
+            and not lockfile_only
+            and not ctx.dry_run
+            and scope == InstallScope.PROJECT
+        ):
+            from .local_edits import count_local_edits, local_edit_hint
+
+            edited = count_local_edits(
+                project_root,
+                existing_lockfile,
+                {dep.get_unique_key() for dep in ctx.deps_to_install},
+            )
+            if edited:
+                logger.info(local_edit_hint(edited, installing=True))
+
         # Normalize path separators once for O(1) lookups in check_collision
         from ..integration.base_integrator import BaseIntegrator
 

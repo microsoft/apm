@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.install.local_edits import local_edit_hint
 from apm_cli.utils.console import STATUS_SYMBOLS
 
 if TYPE_CHECKING:
@@ -101,6 +102,11 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
             if verbose and item.inline_diff:
                 lines.append(f"      {item.inline_diff}")
         lines.append("")
+
+    # Project-local content ("." owner) has no upstream package to patch.
+    local_edits = [item for item in by_kind.get("modified", []) if item.package != "."]
+    if local_edits:
+        lines.append(f"  {STATUS_SYMBOLS['info']} {local_edit_hint(len(local_edits))}")
 
     if by_kind.get("unmanaged-conflict"):
         lines.append(
