@@ -11,15 +11,15 @@ Covers two code paths fixed in issue #548:
    short-circuit the download.  Only lockfile_match (SHA comparison) may skip.
 """
 
-from types import SimpleNamespace
-
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import should_force_ref_recheck
 from apm_cli.install.phases._skip_logic import (
     _compute_skip_download,
     _should_use_locked_ref,
 )
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # Both helpers are imported directly from the production module so that any
@@ -395,12 +395,15 @@ def _recheck_dep(
     is_local: bool,
     artifactory_prefix: str | None,
     ref_kind: str | None,
-) -> SimpleNamespace:
-    """Build the minimal dependency shape consumed by the canonical owner."""
-    return SimpleNamespace(
+) -> DependencyReference:
+    """Build a real reference for the canonical source/ref owner."""
+    return DependencyReference(
+        repo_url="org/pkg",
         is_local=is_local,
+        source="local" if is_local else None,
+        local_path="./pkg" if is_local else None,
+        reference="^1.0.0" if ref_kind == "semver" else "stable",
         artifactory_prefix=artifactory_prefix,
-        ref_kind=ref_kind,
     )
 
 
@@ -461,6 +464,20 @@ class TestForceRefRecheck:
 
     def test_registry_literal_ref_no_force(self) -> None:
         """Registry dep with a literal ref (e.g. 'stable') is never force-resolved."""
+        dep = _recheck_dep(is_local=False, artifactory_prefix=None, ref_kind="literal")
+        dep.source = "registry"
+        assert (
+            should_force_ref_recheck(
+                dep,
+                LockedDependency(repo_url="org/pkg", resolved_ref="stable"),
+                update_refs=True,
+            )
+            is False
+        )
+
+    def test_git_mutable_ref_forces_resolve_on_update(self) -> None:
+        """#3392: a branch-pinned Git dep is fetched during resolution on update,
+        so its children come from the commit this update installs."""
         assert (
             should_force_ref_recheck(
                 _recheck_dep(
@@ -468,14 +485,63 @@ class TestForceRefRecheck:
                     artifactory_prefix=None,
                     ref_kind="literal",
                 ),
-                SimpleNamespace(),
+                LockedDependency(repo_url="org/pkg", resolved_ref="stable"),
+                update_refs=True,
+            )
+            is True
+        )
+
+    @pytest.mark.parametrize(
+        "field",
+        [{"is_marketplace": True}, {"marketplace_name": "corp"}, {"is_virtual": True}],
+        ids=["marketplace", "marketplace-resolved", "virtual"],
+    )
+    def test_marketplace_and_virtual_refs_keep_their_update_path(self, field) -> None:
+        """Marketplace ranges and virtual packages are re-resolved later in update;
+        fetching them during resolution would pin the stale selection."""
+        dep = _recheck_dep(is_local=False, artifactory_prefix=None, ref_kind="literal")
+        for name, value in field.items():
+            setattr(dep, name, value)
+        assert (
+            should_force_ref_recheck(
+                dep,
+                LockedDependency(repo_url="org/pkg", resolved_ref="stable"),
                 update_refs=True,
             )
             is False
         )
 
-    def test_local_dep_never_force_resolved(self) -> None:
-        """Local deps are excluded regardless of ref_kind."""
+    def test_git_full_sha_pin_no_force_on_update(self) -> None:
+        """A full commit pin cannot move, so update keeps the existing copy."""
+        sha = "a" * 40
+        assert (
+            should_force_ref_recheck(
+                DependencyReference(repo_url="org/pkg", reference=sha),
+                LockedDependency(repo_url="org/pkg", resolved_ref=sha, resolved_commit=sha),
+                update_refs=True,
+            )
+            is False
+        )
+
+    def test_git_mutable_ref_no_force_on_plain_install(self) -> None:
+        """Plain install still replays the locked commit without refetching."""
+        assert (
+            should_force_ref_recheck(
+                _recheck_dep(
+                    is_local=False,
+                    artifactory_prefix=None,
+                    ref_kind="literal",
+                ),
+                LockedDependency(repo_url="org/pkg", resolved_ref="stable"),
+                update_refs=False,
+            )
+            is False
+        )
+
+    @pytest.mark.parametrize("update_refs", [True, False])
+    def test_local_dep_always_rechecked(self, update_refs: bool) -> None:
+        """#3401/#3501: local sources change without a ref moving, so the
+        resolver must read the copy this run makes, not apm_modules."""
         assert (
             should_force_ref_recheck(
                 _recheck_dep(
@@ -484,9 +550,9 @@ class TestForceRefRecheck:
                     ref_kind="semver",
                 ),
                 None,
-                update_refs=True,
+                update_refs=update_refs,
             )
-            is False
+            is True
         )
 
     def test_artifactory_dep_never_force_resolved(self) -> None:

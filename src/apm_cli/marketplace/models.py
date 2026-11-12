@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE
 from apm_cli.models.dependency.reference import DependencyReference
@@ -75,20 +76,6 @@ def _dict_source_error(source_type: str, repo: object, url: object) -> str | Non
         if not _is_valid_remote_coordinate(locator):
             return f"source: {source_type} requires a valid non-local owner/repository or url field"
     return None
-
-
-def _extract_host_from_url(url: str) -> str:
-    """Best-effort host extraction from any URL/path; empty for local paths."""
-    if not url or _looks_like_local_path(url):
-        return ""
-    scp = _SCP_LIKE_RE.match(url)
-    if scp:
-        return scp.group("host")
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return ""
-    return parsed.hostname or ""
 
 
 def url_names_remote_manifest(url: str) -> bool:
@@ -199,9 +186,20 @@ class MarketplaceSource:
         if not self.url:
             if self.owner and self.repo:
                 host = self.host or "github.com"
-                object.__setattr__(self, "url", f"https://{host}/{self.owner}/{self.repo}")
+                owner = quote(self.owner, safe="/")
+                repo = quote(self.repo, safe="/")
+                object.__setattr__(self, "url", f"https://{host}/{owner}/{repo}")
             # If neither URL nor legacy fields are usable, leave url empty; callers/tests
             # that pass only name=... will fail later when something tries to use it.
+
+        # Validate persisted source transport through the same admission owner
+        # used by `marketplace add`; config reload must not bypass its checks.
+        identity = None
+        if self.url:
+            from apm_cli.marketplace.source_identity import parse_marketplace_source
+
+            identity = parse_marketplace_source(self.url)
+            object.__setattr__(self, "url", identity.url)
 
         # Backfill legacy mirror fields from URL when caller used URL-only signature.
         if self.url and self.path != "" and not self.owner and not self.repo:
@@ -210,10 +208,8 @@ class MarketplaceSource:
                 object.__setattr__(self, "owner", o)
             if r:
                 object.__setattr__(self, "repo", r)
-        if self.url and self.path != "" and self.host == "github.com":
-            h = _extract_host_from_url(self.url)
-            if h:
-                object.__setattr__(self, "host", h)
+        if identity is not None and self.path != "" and self.host == "github.com" and identity.host:
+            object.__setattr__(self, "host", identity.host)
 
     # -- derived properties --------------------------------------------------
 
@@ -225,12 +221,11 @@ class MarketplaceSource:
     @property
     def port(self) -> int | None:
         """Return the explicit remote URL port, if present."""
-        if not self.url or _looks_like_local_path(self.url):
+        if not self.url:
             return None
-        try:
-            return urlsplit(self.url).port
-        except ValueError:
-            return None
+        from apm_cli.marketplace.source_identity import parse_marketplace_source
+
+        return parse_marketplace_source(self.url).port
 
     @property
     def kind(self) -> str:
@@ -239,30 +234,20 @@ class MarketplaceSource:
         Classification:
         - Local filesystem path or ``file://`` URI -> ``local``
         - Direct remote marketplace.json URL (``path == ""``) -> ``url``
+        - Explicit ``ssh://`` URL -> ``git`` (preserves the selected SSH transport)
         - Host classified by AuthResolver as github/ghe_cloud/ghes -> ``github``
         - Host classified as gitlab -> ``gitlab``
         - Host classified as Azure DevOps -> ``ado`` (REST items fast path with
           generic-git fallback; see ``marketplace.client._fetch_ado``)
-        - Anything else (generic, ssh to non-classified host) -> ``git``
+        - Anything else (generic or SCP-like SSH to a non-classified host) -> ``git``
         """
         if not self.url or _looks_like_local_path(self.url):
             return "local"
         if self.is_remote_manifest_url:
             return "url"
-        host = _extract_host_from_url(self.url)
-        if not host:
-            return "git"
-        # Lazy import to keep models.py free of heavy dependencies
-        from apm_cli.core.auth import AuthResolver
+        from apm_cli.marketplace.source_identity import parse_marketplace_source
 
-        host_kind = AuthResolver.classify_host(host).kind
-        if host_kind in ("github", "ghe_cloud", "ghes"):
-            return "github"
-        if host_kind == "gitlab":
-            return "gitlab"
-        if host_kind == "ado":
-            return "ado"
-        return "git"
+        return parse_marketplace_source(self.url).kind
 
     @property
     def local_path(self) -> str:
@@ -371,6 +356,7 @@ class MarketplacePlugin:
     # ``None`` means the field was absent (old marketplace.json); the resolver
     # falls back to its built-in default in that case.
     tag_pattern: str | None = None
+    manifest: dict[str, Any] | None = field(default=None, compare=False, hash=False, repr=False)
 
     def matches_query(self, query: str) -> bool:
         """Return True if the plugin matches a search query (case-insensitive)."""
@@ -542,6 +528,11 @@ def _parse_plugin_entry(
             source_marketplace=source_name,
             registry=registry_name,
             tag_pattern=tag_pattern,
+            manifest={
+                key: deepcopy(entry[key])
+                for key in ("name", "description", "version", "lspServers", "mcpServers")
+                if key in entry
+            },
         ),
         None,
     )

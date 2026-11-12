@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
-req-tg-001..008, req-cf-001..002.
+req-tg-001..009, req-tg-014..015, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -11,6 +11,8 @@ or (c) a real apm_cli loader call where the surface exists.
 
 from __future__ import annotations
 
+import shutil
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -19,19 +21,27 @@ import jsonschema
 import pytest
 
 from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+from apm_cli.core.scope import InstallScope
+from apm_cli.deps.plugin_parser import normalize_plugin_directory
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
+    CATEGORY_ERROR,
     CATEGORY_WARNING,
     DiagnosticCollector,
 )
+from apm_cli.utils.yaml_io import yaml_to_str
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
+    load_json_fixture,
     load_schema,
     load_yaml_fixture,
     validate_against,
@@ -43,16 +53,16 @@ from tests.spec_conformance._helpers import (
 
 @pytest.mark.req("req-mf-001")
 def test_manifest_required_keys_enforced_by_schema():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     assert set(schema["required"]) == {"name", "version"}
     validate_against(
-        "manifest-v0.1.schema.json", load_yaml_fixture("manifest", "valid-minimal.yml")
+        "manifest-v0.1.41.schema.json", load_yaml_fixture("manifest", "valid-minimal.yml")
     )
 
 
 @pytest.mark.req("req-mf-002")
 def test_manifest_name_is_non_empty_string():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     assert schema["properties"]["name"]["type"] == "string"
     assert schema["properties"]["name"]["minLength"] == 1
     doc = load_yaml_fixture("manifest", "valid-minimal.yml")
@@ -63,12 +73,12 @@ def test_manifest_name_is_non_empty_string():
 def test_manifest_missing_name_rejected_by_schema():
     doc = load_yaml_fixture("manifest", "invalid-missing-name.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-004")
 def test_manifest_version_is_semver_2_0_0():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     pattern = schema["properties"]["version"]["pattern"]
     assert "0|[1-9]" in pattern, "version pattern must be semver 2.0.0 grammar"
     assert_spec_contains("semver 2.0.0", "version`")
@@ -90,12 +100,12 @@ def test_manifest_target_enum_is_pinned():
 def test_consumer_rejects_missing_source_key():
     doc = load_yaml_fixture("manifest", "invalid-no-source-key.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-007")
 def test_consumer_apm_source_field_has_supported_shapes():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry = schema["$defs"]["depEntry"]
     one_of = entry["oneOf"]
     has_string = any(s.get("type") == "string" for s in one_of)
@@ -107,14 +117,14 @@ def test_consumer_apm_source_field_has_supported_shapes():
 
 @pytest.mark.req("req-mf-008")
 def test_consumer_supports_pinned_version():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "version" in entry_obj["properties"]
 
 
 @pytest.mark.req("req-mf-009")
 def test_consumer_supports_pinned_commit():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "ref" in entry_obj["properties"], (
         "depEntry MUST permit a `ref` field for commit / branch / tag pins"
@@ -123,56 +133,64 @@ def test_consumer_supports_pinned_commit():
 
 @pytest.mark.req("req-mf-010")
 def test_consumer_supports_apm_source_short_form_string():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     one_of = schema["$defs"]["depEntry"]["oneOf"]
     string_form = next(s for s in one_of if s.get("type") == "string")
     assert string_form.get("minLength", 0) >= 1
 
 
-@pytest.mark.req("req-mf-011")
-def test_consumer_supports_apm_source_table_form():
-    schema = load_schema("manifest-v0.1.schema.json")
-    entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
-    options = entry_obj["oneOf"]
-    required_sets = sorted(tuple(sorted(o["required"])) for o in options)
-    assert required_sets == [("git",), ("id",), ("path",), ("registry",)], (
-        "table-form depEntry MUST require exactly one of git/id/path/registry"
-    )
-
-
-@pytest.mark.req("req-mf-012")
 def test_consumer_rejects_unknown_source_kind():
     doc = load_yaml_fixture("manifest", "invalid-source-kind.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-013")
 def test_consumer_supports_local_path_source():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     entry_obj = next(s for s in schema["$defs"]["depEntry"]["oneOf"] if s.get("type") == "object")
     assert "path" in entry_obj["properties"]
+
+
+@pytest.mark.req("req-mf-013")
+@pytest.mark.parametrize("reference", ["${EXAMPLE_KEY}", "${env:EXAMPLE_KEY}"])
+def test_consumer_renders_opencode_native_environment_references(tmp_path: Path, reference: str):
+    """The dispatch matrix uses the active target's native environment syntax."""
+    adapter = OpenCodeClientAdapter(project_root=tmp_path)
+    rendered = adapter.render_server_config(
+        {
+            "name": "native-reference",
+            "_raw_stdio": {
+                "command": "echo",
+                "args": [reference],
+                "env": {"TOKEN": reference, "STATIC": "literal"},
+            },
+        }
+    )
+    assert rendered["command"] == ["echo", "{env:EXAMPLE_KEY}"]
+    assert rendered["environment"] == {"TOKEN": "{env:EXAMPLE_KEY}", "STATIC": "literal"}
+    assert_spec_contains("`{env:VAR}` for OpenCode")
 
 
 @pytest.mark.req("req-mf-014")
 def test_producer_rejects_non_http_registry_scheme():
     """Schema pattern `^https?://` is the regression handle."""
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     reg = schema["properties"]["registries"]["additionalProperties"]["oneOf"][1]
     assert reg["properties"]["url"]["pattern"] == "^https?://"
     doc = load_yaml_fixture("manifest", "invalid-registry-scheme.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-015")
 def test_producer_rejects_unknown_registries_keys():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     reg = schema["properties"]["registries"]["additionalProperties"]["oneOf"][1]
     assert reg["additionalProperties"] is False
     doc = load_yaml_fixture("manifest", "invalid-registries-typo.yml")
     with pytest.raises(jsonschema.ValidationError):
-        validate_against("manifest-v0.1.schema.json", doc)
+        validate_against("manifest-v0.1.41.schema.json", doc)
 
 
 @pytest.mark.req("req-mf-016")
@@ -195,14 +213,14 @@ def test_producer_publishes_apm_yml_at_repo_root():
 
 @pytest.mark.req("req-mf-018")
 def test_consumer_restricts_policy_hash_algorithm_to_strong_set():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     enum = schema["properties"]["policy"]["properties"]["hash_algorithm"]["enum"]
     assert set(enum) == {"sha256", "sha384", "sha512"}
 
 
 @pytest.mark.req("req-mf-019")
 def test_consumer_supports_default_host_field():
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     assert "default_host" in schema["properties"]
     doc = load_yaml_fixture("manifest", "x-extension-roundtrip.yml")
     assert doc.get("default_host"), "fixture must exercise default_host"
@@ -264,30 +282,30 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
     (available_dir / "SKILL.md").write_text("# Available", encoding="utf-8")
     diagnostics = DiagnosticCollector()
 
-    SkillIntegrator._warn_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         SkillIntegrator._skill_names_in_directory(skills_dir),
         ("missing",),
         "owner/bundle",
         diagnostics=diagnostics,
     )
 
-    warnings = diagnostics.by_category()[CATEGORY_WARNING]
-    assert len(warnings) == 1
-    assert warnings[0].package == "owner/bundle"
-    assert "Requested: missing" in warnings[0].message
-    assert "Available: available" in warnings[0].message
+    errors = diagnostics.by_category()["error"]
+    assert len(errors) == 1
+    assert errors[0].package == "owner/bundle"
+    assert "Requested: missing" in errors[0].message
+    assert "Available: available" in errors[0].message
 
     empty_diagnostics = DiagnosticCollector()
-    SkillIntegrator._warn_no_skill_filter_match(
+    SkillIntegrator._error_no_skill_filter_match(
         frozenset(),
         ("missing",),
         "owner/empty-bundle",
         diagnostics=empty_diagnostics,
     )
-    empty_warnings = empty_diagnostics.by_category()[CATEGORY_WARNING]
-    assert len(empty_warnings) == 1
-    assert empty_warnings[0].package == "owner/empty-bundle"
-    assert "Available: (none)" in empty_warnings[0].message
+    empty_errors = empty_diagnostics.by_category()["error"]
+    assert len(empty_errors) == 1
+    assert empty_errors[0].package == "owner/empty-bundle"
+    assert "Available: (none)" in empty_errors[0].message
 
     assert_spec_contains(
         "a non-empty `skills:` subset",
@@ -297,6 +315,115 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
         "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
         "requested skill names, and the available skill names",
+        "MUST fail the install operation",
+        "nonzero status",
+        "MUST preserve previously deployed skill files",
+        "their ownership records",
+        "MUST NOT interpret an",
+    )
+
+
+@pytest.mark.req("req-mf-022")
+def test_consumer_names_skills_a_plugin_collection_exposes(tmp_path: Path) -> None:
+    """The available-names half of req-mf-022 must answer with the real set.
+
+    Section 8.1 counts a plugin collection with a named-skills container
+    among the layouts that expose selectable skills. Such a container,
+    declared in the plugin manifest, was normalized under its own name --
+    one level below the depth enumeration reads -- so a subset that matched
+    nothing reported `(none)` as available for a dependency exposing two.
+    The diagnostic fired as required and named the wrong set (#2530).
+    """
+    from apm_cli.models.validation import PackageType
+
+    plugin = tmp_path / "dotnet-advanced"
+    plugin_json = plugin / ".claude-plugin" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text(
+        '{"name": "dotnet-advanced", "version": "1.0.0", "skills": ["./skills/"]}',
+        encoding="utf-8",
+    )
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    normalize_plugin_directory(plugin, plugin_json)
+
+    # The declared container names the skills; it is not itself one.
+    normalized = plugin / ".apm" / "skills"
+    assert not (normalized / "skills").exists()
+    assert (normalized / "csharp-scripts" / "SKILL.md").is_file()
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(install_path=plugin, package_type=PackageType.MARKETPLACE_PLUGIN)
+    )
+    assert available == frozenset({"csharp-scripts", "dotnet-pinvoke"})
+
+    diagnostics = DiagnosticCollector()
+    SkillIntegrator._error_no_skill_filter_match(
+        available,
+        ("missing",),
+        "acme/dotnet-advanced",
+        diagnostics=diagnostics,
+    )
+    error = diagnostics.by_category()["error"][0]
+    assert "Available: csharp-scripts, dotnet-pinvoke" in error.message
+    assert "Available: (none)" not in error.message
+
+    assert_spec_contains("with a named-skills container")
+
+
+@pytest.mark.req("req-pr-006")
+def test_plugin_skills_declaration_is_authoritative(tmp_path: Path) -> None:
+    """req-pr-006 resolves plugin names from the declaration, not the tree.
+
+    Section 8.1 settles which set that is for a plugin collection: artifacts
+    are mapped per the plugin manifest, so the resolved declaration is the
+    container of individually addressable entries. Deployment re-derived the
+    set from the raw pre-resolution `skills/` directory instead, so a plugin
+    declaring one of two sibling skills reported -- and deployed -- both. The
+    diagnostic named a skill the consumer had no manifest basis to offer
+    (#2537).
+    """
+    from apm_cli.models.validation import PackageType
+
+    plugin = tmp_path / "selective"
+    plugin_json = plugin / ".claude-plugin" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text(
+        '{"name": "selective", "version": "1.0.0", "skills": ["./skills/declared"]}',
+        encoding="utf-8",
+    )
+    for name in ("declared", "undeclared"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    normalize_plugin_directory(plugin, plugin_json)
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(install_path=plugin, package_type=PackageType.MARKETPLACE_PLUGIN)
+    )
+    assert available == frozenset({"declared"})
+
+    diagnostics = DiagnosticCollector()
+    SkillIntegrator._error_no_skill_filter_match(
+        available,
+        ("undeclared",),
+        "acme/selective",
+        diagnostics=diagnostics,
+    )
+    error = diagnostics.by_category()[CATEGORY_ERROR][0]
+    assert "Available: declared" in error.message
+    assert "undeclared" not in error.message.split("Available:")[1]
+
+    assert_spec_contains(
+        "Only an omitted",
+        "list of strings and replaces that",
+        "an explicit empty list contributes no skills",
+        "missing, unreadable, malformed, escaping,",
+        "Only the resulting names are eligible for enumeration",
     )
 
 
@@ -348,7 +475,7 @@ def test_consumer_preserves_x_extension_keys_on_round_trip():
     doc = load_yaml_fixture("manifest", "x-extension-roundtrip.yml")
     x_keys = [k for k in doc if k.startswith("x-")]
     assert x_keys, "fixture must contain at least one x-* key"
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     pp = schema.get("patternProperties", {})
     assert any(k.startswith("^x-") for k in pp), (
         "manifest schema MUST declare patternProperties for x-* keys"
@@ -589,6 +716,39 @@ def test_consumer_deploys_skills_to_agents_skills():
     )
 
 
+@pytest.mark.req("req-tg-002")
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_kiro_prompt_uses_registered_root_and_filename(tmp_path: Path, scope: InstallScope) -> None:
+    """The Kiro registry partition applies to both project and user delivery."""
+    package_root = tmp_path / "package"
+    source = package_root / ".apm/prompts/review.prompt.md"
+    source.parent.mkdir(parents=True)
+    source_bytes = b"---\nname: not-the-command\ndescription: Review\n---\nReview ${1}\n"
+    source.write_bytes(source_bytes)
+    package = PackageInfo(
+        package=APMPackage(name="prompt-kit", version="1.0.0", package_path=package_root),
+        install_path=package_root,
+    )
+    selected = tmp_path / scope.value
+    (selected / ".kiro").mkdir(parents=True)
+    unselected = tmp_path / "other/.kiro/prompts/personal.md"
+    unselected.parent.mkdir(parents=True)
+    unselected.write_bytes(b"Personal prompt\n")
+
+    result = PromptIntegrator().integrate_prompts_for_target(
+        KNOWN_TARGETS["kiro"].for_scope(scope), package, selected
+    )
+
+    deployed = selected / ".kiro/prompts/review.md"
+    assert result.files_integrated == 1
+    assert result.target_paths == [deployed]
+    assert deployed.read_bytes() == b"Review ${1}\n"
+    assert sorted(path.name for path in deployed.parent.iterdir()) == ["review.md"]
+    assert list(unselected.parent.iterdir()) == [unselected]
+    assert unselected.read_bytes() == b"Personal prompt\n"
+    assert source.read_bytes() == source_bytes
+
+
 @pytest.mark.req("req-tg-004")
 def test_consumer_routes_vendor_target_identifiers_to_handlers():
     assert_spec_contains(
@@ -600,22 +760,97 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
 
 @pytest.mark.req("req-tg-005")
 def test_consumer_deploys_antigravity_rules_with_expected_dedup():
-    # Needles updated for the v0.1.11 spec-guardian fold on req-tg-005:
-    # the anchor was reworded to (a) lowercase the `antigravity`
-    # identifier, (b) pin a canonical `globs` scalar-vs-sequence
-    # representation for hash reproducibility, and (c) redefine the
-    # deduplication scope to filenames derived from the resolved
-    # instruction primitives (fail-closed non-suppression). See
-    # Appendix D revision 0.1.11.
+    # Needles updated for the 0.1.56 amendment (issue #3472): `globs` is one
+    # comma-separated double-quoted string and unscoped rules carry
+    # `trigger: always_on`. The deduplication-scope needles are unchanged.
     assert_spec_contains(
         "For the `antigravity` target, instruction rules MUST be written under",
         "`.agents/rules/<name>.md`",
         "`trigger: glob` plus a `globs` field",
-        "emitted as a YAML scalar when `applyTo` resolves to exactly one glob",
-        "as a YAML block sequence when it resolves to two or more",
+        "emitted as a single YAML double-quoted string scalar",
+        "`globs` MUST NOT be emitted as a YAML",
+        "carry a frontmatter block declaring `trigger: always_on`",
         "names derive from the currently-resolved",
         "MUST NOT be treated as a deployed rule and MUST NOT",
     )
+
+
+@pytest.mark.req("req-tg-005")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "---\napplyTo: '*.py'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "*.py"},
+        ),
+        (
+            "---\napplyTo:\n  - '**/app/services/**'\n  - '**/app/jobs/**'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "**/app/services/**, **/app/jobs/**"},
+        ),
+        (
+            "---\napplyTo: '**/app/services/**, **/app/jobs/**'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "**/app/services/**, **/app/jobs/**"},
+        ),
+        (
+            "---\ndescription: General development principles\n---\n\nBody\n",
+            {"trigger": "always_on"},
+        ),
+        # Zero-pattern boundary: separators-only and empty sequence.
+        ("---\napplyTo: ','\n---\n\nBody\n", {"trigger": "always_on"}),
+        ("---\napplyTo: []\n---\n\nBody\n", {"trigger": "always_on"}),
+        # Brace alternation commas are not separators and stay bare.
+        (
+            "---\napplyTo: 'src/**/*.{ts,tsx}'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "src/**/*.{ts,tsx}"},
+        ),
+        # An author-escaped top-level comma keeps its `\,` escape.
+        (
+            '---\napplyTo: "a\\\\,b, c"\n---\n\nBody\n',
+            {"trigger": "glob", "globs": "a\\,b, c"},
+        ),
+        # An author-escaped literal backslash is re-encoded as two backslashes.
+        (
+            "---\napplyTo: 'a\\\\b'\n---\n\nBody\n",
+            {"trigger": "glob", "globs": "a\\\\b"},
+        ),
+        # Duplicates are retained in declaration order.
+        ("---\napplyTo: 'a, a'\n---\n\nBody\n", {"trigger": "glob", "globs": "a, a"}),
+    ],
+)
+def test_consumer_emits_antigravity_rule_frontmatter_per_native_schema(source, expected):
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+    from apm_cli.utils.yaml_io import loads_frontmatter
+
+    rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
+
+    assert loads_frontmatter(rendered).metadata == expected
+    assert rendered.endswith("\n\nBody\n")
+
+
+@pytest.mark.req("req-tg-005")
+@pytest.mark.parametrize(
+    ("source", "expected_bytes"),
+    [
+        (
+            "---\napplyTo:\n  - '*.py'\n  - 'src/**'\n---\n\n\nBody\n",
+            '---\ntrigger: glob\nglobs: "*.py, src/**"\n---\n\nBody\n',
+        ),
+        (
+            "---\ndescription: General\n---\n\nBody\n",
+            "---\ntrigger: always_on\n---\n\nBody\n",
+        ),
+        (
+            "---\napplyTo: ['caf\u00e9/**']\n---\n\nBody\n",
+            '---\ntrigger: glob\nglobs: "caf\\u00e9/**"\n---\n\nBody\n',
+        ),
+    ],
+)
+def test_consumer_emits_antigravity_rule_exact_bytes(source, expected_bytes):
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+
+    rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
+
+    assert rendered == expected_bytes
 
 
 @pytest.mark.req("req-tg-006")
@@ -736,19 +971,19 @@ def test_dependency_package_targets_are_restriction_only() -> None:
 
     assert disjoint.targets == ()
     assert tuple(target.name for target in universal.targets) == ("cursor",)
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     jsonschema.Draft202012Validator.check_schema(schema)
     validate_against(
-        "manifest-v0.1.schema.json",
+        "manifest-v0.1.41.schema.json",
         {"name": "claude-hooks", "version": "1.0.0", "targets": ["claude"]},
     )
     validate_against(
-        "manifest-v0.1.schema.json",
+        "manifest-v0.1.41.schema.json",
         {"name": "legacy-null", "version": "1.0.0", "target": None},
     )
     with pytest.raises(jsonschema.ValidationError):
         validate_against(
-            "manifest-v0.1.schema.json",
+            "manifest-v0.1.41.schema.json",
             {
                 "name": "conflicting-hooks",
                 "version": "1.0.0",
@@ -758,13 +993,13 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         )
     with pytest.raises(jsonschema.ValidationError):
         validate_against(
-            "manifest-v0.1.schema.json",
+            "manifest-v0.1.41.schema.json",
             {"name": "blank-target", "version": "1.0.0", "targets": [""]},
         )
     for malformed_token in ("Cursor", "../cursor"):
         with pytest.raises(jsonschema.ValidationError):
             validate_against(
-                "manifest-v0.1.schema.json",
+                "manifest-v0.1.41.schema.json",
                 {
                     "name": "malformed-target",
                     "version": "1.0.0",
@@ -779,7 +1014,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
     ):
         with pytest.raises(jsonschema.ValidationError):
             validate_against(
-                "manifest-v0.1.schema.json",
+                "manifest-v0.1.41.schema.json",
                 {"name": "invalid-target", "version": "1.0.0", **invalid_fields},
             )
     assert_spec_contains(
@@ -791,8 +1026,97 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
-        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),",
+        "[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),\n"
+        "[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),",
     )
+
+
+@pytest.mark.req("req-tg-014")
+def test_user_scoped_mcp_target_selection_ignores_project_signals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """User-scope MCP discovery cannot inherit project-only target signals."""
+    from apm_cli.core.target_detection import resolve_manifest_target_decision
+    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".cursor").mkdir()
+    user_manifest = tmp_path / "home" / ".apm" / "apm.yml"
+    user_manifest.parent.mkdir(parents=True)
+    user_manifest.write_text(
+        "name: user-scope\nversion: 0.1.0\ndependencies:\n  mcp: []\n",
+        encoding="ascii",
+    )
+    monkeypatch.setattr("apm_cli.config.get_install_target", lambda *, create_config=True: None)
+
+    discovery = resolve_manifest_target_decision(
+        project,
+        manifest_path=user_manifest,
+        explicit_target=None,
+        user_scope=True,
+    )
+    explicit = resolve_manifest_target_decision(
+        project,
+        manifest_path=user_manifest,
+        explicit_target="codex",
+        user_scope=True,
+    )
+    manifest_target_path = user_manifest.with_name("manifest-target.yml")
+    manifest_target_path.write_text(
+        "name: user-scope\nversion: 0.1.0\ntargets: [claude]\n",
+        encoding="ascii",
+    )
+    manifest = resolve_manifest_target_decision(
+        project,
+        manifest_path=manifest_target_path,
+        explicit_target=None,
+        user_scope=True,
+    )
+    configured_path = user_manifest.with_name("configured-target.yml")
+    configured_path.write_text(
+        "name: user-scope\nversion: 0.1.0\n",
+        encoding="ascii",
+    )
+    monkeypatch.setattr("apm_cli.config.get_install_target", lambda *, create_config=True: "vscode")
+    configured = resolve_manifest_target_decision(
+        project,
+        manifest_path=configured_path,
+        explicit_target=None,
+        user_scope=True,
+    )
+
+    assert (discovery.value, discovery.source) == (None, "auto-detect")
+    assert (explicit.value, explicit.source) == ("codex", "--target flag")
+    assert (manifest.value, manifest.source) == (["claude"], "apm.yml")
+    assert (configured.value, configured.source) == ("vscode", "apm config target")
+    assert partition_user_scope_runtimes(["vscode", "claude"]) == (["claude"], ["vscode"])
+    assert_spec_contains(
+        "User-scoped MCP target selection",
+        "Once a source selects one or more\ntargets, the consumer MUST NOT consult",
+        "Project-scoped\ntarget-detection signals outside the user scope MUST NOT",
+        "Before creating or modifying the user-scope manifest, lockfile, or target",
+        "For a mixed set, the supported\nsubset MUST become the effective target set",
+    )
+
+
+@pytest.mark.req("req-tg-014")
+def test_declared_user_mcp_targets_install_without_project_signals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bind declared user capabilities to real global CLI configuration writes."""
+    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from tests.integration.test_global_cursor_opencode_mcp import (
+        test_global_package_install_and_uninstall_preserve_foreign_servers as _run_user_scope_contract,
+    )
+
+    assert partition_user_scope_runtimes(["cursor", "opencode", "vscode"]) == (
+        ["cursor", "opencode"],
+        ["vscode"],
+    )
+    _run_user_scope_contract(tmp_path, monkeypatch)
 
 
 @pytest.mark.req("req-tg-009")
@@ -876,6 +1200,226 @@ def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None
     )
 
 
+@pytest.mark.req("req-tg-015")
+def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
+    tmp_path: Path,
+) -> None:
+    """req-tg-015: Codex model/effort preservation plus a bounded diagnostic.
+
+    Exercises the actual generated Codex agent output (parsed TOML, not
+    string matching) for: both fields present, only one present, neither
+    present, a non-string value, and an unsupported non-capability field
+    that must be named in a diagnostic bounded on BOTH the number of named
+    keys and each key's displayed length -- never the value. Also confirms
+    req-tg-006's own tools-capability diagnostic and non-Codex target
+    deployment are unaffected by this clause.
+    """
+    # Both fields present -> both reach the generated TOML verbatim.
+    both_source = tmp_path / "both.agent.md"
+    both_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', 'model_reasoning_effort': 'high'})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    both_target = tmp_path / "both.toml"
+    both_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        both_source, both_target, diagnostics=both_diagnostics, package_name="spec-fixture"
+    )
+    both_doc = tomllib.loads(both_target.read_text(encoding="utf-8"))
+    assert both_doc["model"] == "gpt-5.6-sol"
+    assert both_doc["model_reasoning_effort"] == "high"
+    assert both_diagnostics.by_category() == {}
+
+    # Only one present -> the other key is absent (not null/empty) from the
+    # parsed TOML.
+    one_source = tmp_path / "one.agent.md"
+    one_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol'})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    one_target = tmp_path / "one.toml"
+    AgentIntegrator._write_codex_agent(
+        one_source, one_target, diagnostics=DiagnosticCollector(), package_name="spec-fixture"
+    )
+    one_doc = tomllib.loads(one_target.read_text(encoding="utf-8"))
+    assert one_doc["model"] == "gpt-5.6-sol"
+    assert "model_reasoning_effort" not in one_doc
+
+    # Neither present -> neither key appears.
+    neither_source = tmp_path / "neither.agent.md"
+    neither_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer'})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    neither_target = tmp_path / "neither.toml"
+    AgentIntegrator._write_codex_agent(
+        neither_source,
+        neither_target,
+        diagnostics=DiagnosticCollector(),
+        package_name="spec-fixture",
+    )
+    neither_doc = tomllib.loads(neither_target.read_text(encoding="utf-8"))
+    assert "model" not in neither_doc
+    assert "model_reasoning_effort" not in neither_doc
+
+    # A non-string value -> dropped, with a bounded diagnostic naming the
+    # field (not its value).
+    bad_source = tmp_path / "bad.agent.md"
+    bad_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model_reasoning_effort': 7})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    bad_target = tmp_path / "bad.toml"
+    bad_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        bad_source, bad_target, diagnostics=bad_diagnostics, package_name="spec-fixture"
+    )
+    bad_doc = tomllib.loads(bad_target.read_text(encoding="utf-8"))
+    assert "model_reasoning_effort" not in bad_doc
+    bad_warnings = bad_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert len(bad_warnings) == 1
+    assert "model_reasoning_effort" in bad_warnings[0].message
+    assert "must be a string" in bad_warnings[0].message
+    assert "7" not in bad_warnings[0].message
+
+    # Unsupported non-capability metadata, both over the count bound (8
+    # keys, one more than _MAX_DROPPED_FIELDS_SHOWN = 5) and with one
+    # individually oversized key name (20000 chars) -- the diagnostic must
+    # be bounded on BOTH axes and must never include a value.
+    oversized_key = "k" * 20_000
+    unsupported = {
+        oversized_key: "do-not-leak-this-value",
+        "bad\x1b[31mkey": "do-not-leak-this-value-either",
+        "field_c": "value_c",
+        "field_d": "value_d",
+        "field_e": "value_e",
+        "field_f": "value_f",
+        "field_g": "value_g",
+        "field_h": "value_h",
+    }
+    meta_source = tmp_path / "meta.agent.md"
+    meta_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', **unsupported})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    meta_target = tmp_path / "meta.toml"
+    meta_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        meta_source, meta_target, diagnostics=meta_diagnostics, package_name="spec-fixture"
+    )
+    meta_doc = tomllib.loads(meta_target.read_text(encoding="utf-8"))
+    assert meta_doc["model"] == "gpt-5.6-sol"
+    assert all(field not in meta_doc for field in unsupported)
+    meta_warnings = meta_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    metadata_warning = next(w for w in meta_warnings if "not translated by APM" in w.message)
+    # Count bound: 8 unsupported keys supplied, only 5 named explicitly.
+    assert "(and 3 more)" in metadata_warning.message
+    # Per-key length bound: the raw 20000-char key never appears whole.
+    assert oversized_key not in metadata_warning.message
+    assert "...(truncated)" in metadata_warning.message
+    # No value ever leaks into the diagnostic.
+    for value in unsupported.values():
+        assert value not in metadata_warning.message
+    # ASCII-safe even with a control-character key.
+    assert all(32 <= ord(c) <= 126 or c in "\n\r\t" for c in metadata_warning.message)
+    # Overall message length stays bounded despite the 20000-char input key.
+    assert len(metadata_warning.message) < 600
+
+    # req-tg-006's own capability-restriction diagnostic is unaffected: a
+    # dropped `tools` field still fires its own, separate warning.
+    tools_source = tmp_path / "tools.agent.md"
+    tools_source.write_text(
+        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', 'tools': ['read']})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    tools_target = tmp_path / "tools.toml"
+    tools_diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        tools_source, tools_target, diagnostics=tools_diagnostics, package_name="spec-fixture"
+    )
+    tools_doc = tomllib.loads(tools_target.read_text(encoding="utf-8"))
+    assert tools_doc["model"] == "gpt-5.6-sol"
+    tools_warnings = tools_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
+    assert any("field 'tools' was dropped" in w.message for w in tools_warnings)
+
+    # A different (non-Codex) target is unaffected by this clause: deploy
+    # through the real integration dispatch (not a write+reread of the
+    # source alone) and confirm the target file carries the frontmatter
+    # verbatim, including `model`/`model_reasoning_effort`/the unsupported
+    # `model_verbosity` key, because non-Codex/non-Kiro targets copy the
+    # agent through `copy_agent` with no field-level filtering.
+    from datetime import datetime
+
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import (
+        APMPackage,
+        GitReferenceType,
+        PackageInfo,
+        ResolvedReference,
+    )
+
+    nc_project_root = tmp_path / "nc_project"
+    (nc_project_root / ".claude").mkdir(parents=True)
+    nc_package_dir = tmp_path / "nc_pkg"
+    nc_apm_agents = nc_package_dir / ".apm" / "agents"
+    nc_apm_agents.mkdir(parents=True)
+    verbatim_content = (
+        "---\nname: reviewer\nmodel: native-model\nmodel_reasoning_effort: high\n"
+        "model_verbosity: low\n---\nReview changes.\n"
+    )
+    verbatim_source = nc_apm_agents / "verbatim.agent.md"
+    verbatim_source.write_text(verbatim_content, encoding="utf-8")
+
+    nc_package = APMPackage(
+        name="nc-pkg",
+        version="1.0.0",
+        package_path=nc_package_dir,
+        source="github.com/test/nc-pkg",
+    )
+    nc_resolved_ref = ResolvedReference(
+        original_ref="main",
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit="abc123",
+        ref_name="main",
+    )
+    nc_pi = PackageInfo(
+        package=nc_package,
+        install_path=nc_package_dir,
+        resolved_reference=nc_resolved_ref,
+        installed_at=datetime.now().isoformat(),
+    )
+
+    nc_diagnostics = DiagnosticCollector()
+    nc_result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["claude"],
+        nc_pi,
+        nc_project_root,
+        diagnostics=nc_diagnostics,
+    )
+    assert nc_result.files_integrated == 1
+    nc_target_path = nc_project_root / ".claude" / "agents" / "verbatim.md"
+    assert nc_target_path.read_text(encoding="utf-8") == verbatim_content
+    # No req-tg-015 diagnostic fires for this target: the dropped-field
+    # bounding/preservation clause is Codex-specific and copy_agent never
+    # inspects frontmatter keys.
+    assert nc_diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []) == []
+
+    # The editorial fold removes the undefined "accepted" qualifier and
+    # explicitly binds the already-tested non-string value exclusion.
+    assert_spec_contains(
+        "A conforming **consumer** implementation providing the\nCodex-native agent conversion capability MUST preserve a\nsource-declared",
+        "MUST leave either field absent from the generated file when it is\nabsent from the source",
+        "This clause does not require or imply\npreservation of any other",
+        "define behavior for any other conversion target. A source-declared\n`model` or `model_reasoning_effort` value that is not a YAML string\nscalar is not subject to preservation under this clause, and the\nconsumer MUST still emit a diagnostic for it.",
+        "That diagnostic MUST\nidentify the field name but MUST NOT include the rejected value.",
+        "it MUST emit a diagnostic naming the source agent,\nand MUST bound both",
+        "limit (the named-field-name\nlimit MUST be at least one when at least one field was dropped)",
+        "each\nnamed field name MUST be sanitized to printable ASCII (U+0020 through\nU+007E), replacing or escaping any byte outside that range before\ndisplay",
+        "the diagnostic MUST NOT include the dropped field's value",
+        "existing capability-restriction diagnostic\nis unaffected and continues to apply on its own terms",
+    )
+
+
 # --- req-cf-001..002 --------------------------------------------------
 
 
@@ -925,10 +1469,264 @@ def test_project_scoped_native_hook_command_is_portably_anchored() -> None:
     )
 
 
+@pytest.mark.req("req-tg-011")
+def test_agent_plugin_target_exclusion_stays_opaque_after_materialization() -> None:
+    """Target exclusion permits acquisition and lock state but no deployment."""
+    assert_spec_contains(
+        "opaque at the deployment\nboundary",
+        "materialization beneath the resolved dependency root, and lock\nidentity recording MAY",
+        "MUST NOT create target-native registration, settings,\ncatalog, or ownership state",
+        "ordinary dependencies in the same install MUST remain\neligible",
+    )
+
+
+@pytest.mark.req("req-tg-011")
+def test_agent_plugin_target_exclusion_materializes_without_projection(
+    tmp_path, monkeypatch
+) -> None:
+    """Bind req-tg-011 to the real excluded-target install lifecycle."""
+    from tests.unit.copilot_plugins.test_install_lifecycle import (
+        test_non_copilot_target_plugin_noop_fails_without_committing_state as _run_boundary_contract,
+    )
+
+    _run_boundary_contract(tmp_path, monkeypatch)
+
+
+@pytest.mark.req("req-tg-012")
+def test_plugin_root_hook_resolution_preserves_quoting_and_warns(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Split-quoted roots resolve, while malformed roots remain visible."""
+    package = tmp_path / "package"
+    script = package / "hooks" / "probe.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("print('ok')\n", encoding="utf-8")
+    integrator = HookIntegrator()
+
+    for source_command in (
+        'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+        r"python3 '${CLAUDE_PLUGIN_ROOT}'\hooks\probe.py",
+    ):
+        command, scripts = integrator._rewrite_command_for_target(
+            source_command,
+            package,
+            "plugin",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in command
+        assert command.count('"') == 2
+        assert len(scripts) == 1
+    assert "Unresolved plugin-root reference" not in capsys.readouterr().out
+
+    integrator._rewrite_command_for_target(
+        "python3 \"${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+        package,
+        "plugin",
+        "claude",
+    )
+    assert "Unresolved plugin-root reference" in capsys.readouterr().out
+
+
 @pytest.mark.req("req-sc-014")
 def test_bin_deployment_defaults_to_deny_in_non_interactive_context() -> None:
     """Per-invocation consent: non-TTY defaults to deny; explicit opt-in overrides."""
     assert_spec_contains(
         "MUST deny\nthat deployment by default when its standard output is not connected to a",
         "explicitly opted in for that invocation",
+    )
+
+
+@pytest.mark.req("req-sc-015")
+def test_authorized_source_plan_limits_scanning_and_skill_materialization(tmp_path: Path) -> None:
+    """Selected deployable files alone are scanned and admitted to a skill copy."""
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
+    package_root = tmp_path / "package"
+    selected = package_root / "skills" / "selected" / "SKILL.md"
+    source_only = package_root / "source-only.txt"
+    selected.parent.mkdir(parents=True)
+    selected.write_text("selected\n", encoding="utf-8")
+    source_only.write_text("source-only\u202e\n", encoding="utf-8")
+    target = SimpleNamespace(primitives={"skills": object()})
+    plan = DeployableSourcePlan.create(
+        SimpleNamespace(install_path=package_root),
+        [target],
+        skill_subset=("selected",),
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+    )
+
+    assert not plan.includes("source-only.txt")
+    assert plan.copy_ignore(str(package_root), ["source-only.txt"]) == ["source-only.txt"]
+    assert not SecurityGate.scan_files(
+        package_root,
+        policy=BLOCK_POLICY,
+        path_filter=plan.includes,
+    ).has_findings
+
+    selected.write_text("selected\u202e\n", encoding="utf-8")
+    assert SecurityGate.scan_files(
+        package_root,
+        policy=BLOCK_POLICY,
+        path_filter=plan.includes,
+    ).has_findings
+
+
+@pytest.mark.req("req-sc-015")
+def test_authorized_source_plan_fixture_oracle_covers_symlinked_content(tmp_path: Path) -> None:
+    """The portable oracle keeps scan and materialization on one safe source set."""
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
+    fixture = load_json_fixture("source-plan", "req-sc-015.json")
+    assert fixture["spec_anchor"] == "req-sc-015"
+    source = fixture["input"]
+    expected = fixture["expected"]
+    package_root = tmp_path / "package"
+    for entry in source["package_files"]:
+        path = package_root / entry["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(entry["content"], encoding="utf-8")
+    for entry in source["external_files"]:
+        path = tmp_path / entry["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(entry["content"], encoding="utf-8")
+    for entry in source["symlinks"]:
+        path = package_root / entry["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        target = package_root / entry["target"] if entry["internal"] else tmp_path / entry["target"]
+        path.symlink_to(target, target_is_directory=entry["kind"] == "directory")
+
+    target = SimpleNamespace(primitives={"skills": object()})
+    kwargs = {
+        "skill_subset": tuple(source["skill_subset"]),
+        "hooks_approved": False,
+        "canvas_approved": False,
+        "skip_bin": True,
+    }
+    plan = DeployableSourcePlan.create(
+        SimpleNamespace(install_path=package_root),
+        [target],
+        **kwargs,
+    )
+    expected_paths = frozenset(expected["authorized_paths"])
+    lifecycle_expectations = expected["lifecycles"]
+
+    assert plan.paths == expected_paths
+    assert all(not plan.includes(path) for path in expected["source_only_paths"])
+    assert all(not plan.includes(path) for path in expected["symlink_paths"])
+    install_scan = SecurityGate.scan_files(
+        package_root,
+        policy=BLOCK_POLICY,
+        path_filter=plan.includes,
+    )
+    assert install_scan.scanned_files == expected_paths
+
+    def materialize(destination: Path, source_plan: DeployableSourcePlan) -> frozenset[str]:
+        shutil.copytree(package_root, destination, ignore=source_plan.copy_ignore)
+        return frozenset(
+            path.relative_to(destination).as_posix()
+            for path in destination.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        )
+
+    assert set(install_scan.scanned_files) == set(
+        lifecycle_expectations["install"]["scanned_paths"]
+    )
+    assert materialize(tmp_path / "materialized", plan) == frozenset(
+        lifecycle_expectations["install"]["materialized_paths"]
+    )
+    reintegration_plan = DeployableSourcePlan.create(
+        SimpleNamespace(install_path=package_root),
+        [target],
+        **kwargs,
+    )
+    reintegration_scan = SecurityGate.scan_files(
+        package_root,
+        policy=BLOCK_POLICY,
+        path_filter=reintegration_plan.includes,
+    )
+    assert reintegration_plan.paths == frozenset(
+        lifecycle_expectations["reintegration"]["authorized_paths"]
+    )
+    assert set(reintegration_scan.scanned_files) == set(
+        lifecycle_expectations["reintegration"]["scanned_paths"]
+    )
+    assert materialize(tmp_path / "reintegrated", reintegration_plan) == frozenset(
+        lifecycle_expectations["reintegration"]["materialized_paths"]
+    )
+
+
+@pytest.mark.req("req-sc-015")
+@pytest.mark.parametrize("directory_link", [False, True])
+def test_agent_skip_diagnostic_preserves_authorized_scan_and_materialization(
+    tmp_path: Path, directory_link: bool
+) -> None:
+    """req-sc-015 owns exclusion; the paired warning is APM UX, not a spec mandate."""
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.models.apm_package import PackageInfo, PackageType
+    from apm_cli.security.gate import BLOCK_POLICY
+
+    source = tmp_path / "source"
+    (source / ".apm").mkdir(parents=True)
+    (source / "safe.agent.md").write_text(
+        "---\nname: safe\ndescription: Safe agent.\n---\nBody.\n", encoding="utf-8"
+    )
+    hidden = source / "unselected"
+    hidden.mkdir()
+    (hidden / "hidden.agent.md").write_text("not scanned\u202e\n", encoding="utf-8")
+    link = source / (".apm/agents" if directory_link else "linked.agent.md")
+    link.symlink_to(
+        hidden if directory_link else hidden / "hidden.agent.md",
+        target_is_directory=directory_link,
+    )
+    package = PackageInfo(
+        package=APMPackage(name="source", version="1.0.0"),
+        install_path=source,
+        package_type=PackageType.APM_PACKAGE,
+    )
+    diagnostics = DiagnosticCollector()
+    target = KNOWN_TARGETS["claude"]
+    plan = DeployableSourcePlan.create(
+        package,
+        [target],
+        skill_subset=None,
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+        diagnostics=diagnostics,
+        package_name="source",
+    )
+    scan = plan.scan_security(policy=BLOCK_POLICY)
+    assert plan.paths == scan.scanned_files == frozenset({"safe.agent.md"})
+    assert not scan.has_findings
+
+    destination = tmp_path / "destination"
+    (destination / ".claude").mkdir(parents=True)
+    result = AgentIntegrator().integrate_agents_for_target(
+        target, package, destination, source_plan=plan, diagnostics=diagnostics
+    )
+    expected = destination / ".claude" / "agents" / "safe.md"
+    assert result.files_integrated == 1
+    assert result.target_paths == [expected]
+    assert list((destination / ".claude" / "agents").iterdir()) == [expected]
+    warnings = diagnostics.by_category()[CATEGORY_WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].message.startswith(
+        f"Skipped symlinked agent source: {link.relative_to(source).as_posix()}."
+    )
+
+
+@pytest.mark.req("req-sc-015")
+def test_authorized_source_plan_requirement_covers_reintegration_and_symlinks() -> None:
+    """The citation names every lifecycle and excludes symlink source entries."""
+    assert_spec_contains(
+        "including\ninstall and re-integration after uninstall. The set MUST exclude symlink\n"
+        "files and MUST NOT traverse symlinked directories.",
+        "MUST materialize primitive files only from that\nsame set; each primitive-integrator "
+        "materialization path MUST consume the\ncanonical set rather than derive a second classifier.",
     )

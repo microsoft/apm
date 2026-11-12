@@ -29,7 +29,11 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.requires_apm_binary,
+]
 
 _OWNER = "apm-fixture-org"
 _REPO_NAME = "virtual-lifecycle-proof"
@@ -110,3 +114,92 @@ def test_url_rewrite_subprocess_env_reaches_owned_commit_through_real_cli_instal
 
     deployed_skill = project.root / ".agents" / "skills" / _SKILL_NAME / "SKILL.md"
     assert deployed_skill.read_bytes() == _SKILL_BYTES
+
+
+@pytest.mark.parametrize(
+    ("replacement", "message"),
+    (
+        ("https://token@mirror.example/repo", "must not contain credentials"),
+        ("http://127.0.0.1:9/repo", "must not rewrite to insecure HTTP"),
+        ("git://mirror.example/repo", "must not rewrite to an insecure transport"),
+        ("ext::helper", "remote-helper syntax"),
+        ("https::http://127.0.0.1:9/repo", "remote-helper syntax"),
+    ),
+)
+def test_install_rejects_unsafe_rewrite_after_safe_indexes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    replacement: str,
+    message: str,
+) -> None:
+    """A packaged CLI install validates every indexed rewrite before network use."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "scenario",
+        base_env=dict(os.environ),
+    )
+    child_env = isolated.subprocess_env()
+    child_env["GIT_CONFIG_COUNT"] = "2"
+    child_env["GIT_CONFIG_KEY_0"] = "url.file:///unrelated/.insteadOf"
+    child_env["GIT_CONFIG_VALUE_0"] = "https://unrelated.example/repo"
+    child_env["GIT_CONFIG_KEY_1"] = f"url.{replacement}.insteadOf"
+    child_env["GIT_CONFIG_VALUE_1"] = _REMOTE_URL
+
+    project = LocalPackageFactory(isolated.work_root).create(
+        "unsafe-rewrite-consumer",
+        dependencies=(_DEPENDENCY,),
+        targets=("copilot",),
+    )
+    result = subprocess.run(
+        (str(apm_binary_path), *_INSTALL_ARGS, "--https"),
+        cwd=project.root,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode != 0
+    output = f"{result.stdout}\n{result.stderr}"
+    normalized = " ".join(output.split())
+    assert message in output
+    assert "git config" in normalized
+    assert "--show-origin" in normalized
+    assert "remove the unsafe rule" in normalized
+
+
+def test_install_rejects_authenticated_cross_origin_rewrite_before_network(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A managed Git credential cannot follow an HTTPS rewrite to another origin."""
+    remote_url = "https://company.ghe.com/apm-fixture-org/private-repo"
+    dependency = "company.ghe.com/apm-fixture-org/private-repo/skills/auth#main"
+    secret = "cross-origin-secret"
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "scenario",
+        base_env=dict(os.environ),
+    )
+    child_env = isolated.subprocess_env()
+    child_env["GITHUB_APM_PAT"] = secret
+    child_env["GIT_CONFIG_COUNT"] = "1"
+    child_env["GIT_CONFIG_KEY_0"] = "url.https://mirror.example/repo.insteadOf"
+    child_env["GIT_CONFIG_VALUE_0"] = remote_url
+    project = LocalPackageFactory(isolated.work_root).create(
+        "cross-origin-rewrite-consumer",
+        dependencies=(dependency,),
+        targets=("copilot",),
+    )
+
+    result = subprocess.run(
+        (str(apm_binary_path), *_INSTALL_ARGS, "--https"),
+        cwd=project.root,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode != 0
+    assert "different network host" in output
+    assert secret not in output

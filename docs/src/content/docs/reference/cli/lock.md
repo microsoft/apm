@@ -72,10 +72,11 @@ apm lock --verbose
 - **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. Fresh lock-only runs add no deployed files, and existing deployed-file rows, hashes, and deployment-ledger entries stay recorded while those bytes remain on disk.
 - **No files deployed or deleted.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
+- **Conflicted lockfiles fail closed.** If `apm.lock.yaml` still contains git merge conflict markers, `apm lock` reports the conflict and exits without modifying the file. See the [lockfile specification](../../lockfile-spec/#versioning).
 
 ## Export (SBOM inventory)
 
-`apm lock export` serializes the existing lockfile into an SBOM document. It is an **inventory** export, not a security attestation: it reads `apm.lock.yaml` only and never re-resolves, re-hashes, or touches the network or filesystem.
+`apm lock export` serializes the existing lockfile into an SBOM document. It is an **inventory** export, not a security attestation: `apm.lock.yaml` takes precedence, with legacy `apm.lock` read in place when the current filename is absent. Export never migrates or rewrites the lockfile, re-resolves dependencies, re-hashes content, or uses the network. `--output` writes only the exported document.
 
 ```bash
 apm lock export [OPTIONS]
@@ -86,7 +87,7 @@ apm lock export [OPTIONS]
 | `--format FORMAT`, `-f FORMAT` | `cyclonedx` | SBOM output format: `cyclonedx` (1.5) or `spdx` (2.3). |
 | `--output FILE`, `-o FILE` | stdout | Write the SBOM to a file instead of stdout. |
 | `--global`, `-g` | off | Read the user-scope (`~/.apm/`) lockfile instead of the current project. |
-| `--timestamp TS` | auto | Pin the SBOM timestamp (ISO 8601, e.g. `2024-06-01T00:00:00+00:00`) for reproducible output. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`. |
+| `--timestamp TS` | auto | Pin the SBOM timestamp for reproducible output. The value must be ISO 8601 with a timezone (e.g. `2024-06-01T00:00:00+00:00`); malformed or timezone-naive values fail. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's legacy `generated_at`, then the Unix epoch. |
 
 Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. Diagnostics and update notifications route to stderr from process startup, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.
 

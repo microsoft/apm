@@ -18,8 +18,13 @@ no Antigravity-unique signal -> never auto-detected, never part of `--target all
 from __future__ import annotations
 
 import json
+import os
+import stat
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from apm_cli.adapters.client.antigravity import AntigravityClientAdapter
 from apm_cli.core.target_detection import (
@@ -138,7 +143,7 @@ def test_antigravity_never_auto_detected_from_shared_agents_dir(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
-# Instructions -> .agents/rules/<name>.md (plain markdown, frontmatter stripped)
+# Instructions -> .agents/rules/<name>.md (trigger/globs frontmatter)
 # ---------------------------------------------------------------------------
 
 
@@ -197,12 +202,31 @@ def test_antigravity_instructions_deploy_multi_glob_to_agents_rules(tmp_path: Pa
     assert target.read_text(encoding="utf-8") == (
         "---\n"
         "trigger: glob\n"
-        "globs:\n"
-        '  - "src/**/*.py"\n'
-        '  - "tests/**/*.py"\n'
+        'globs: "src/**/*.py, tests/**/*.py"\n'
         "---\n\n"
         "# Style\n\nUse type hints.\n"
     )
+
+
+def test_antigravity_unscoped_instructions_deploy_always_on_rule(tmp_path: Path) -> None:
+    (tmp_path / ".agents").mkdir()
+    package_dir = tmp_path / "pkg"
+    instructions_dir = package_dir / ".apm" / "instructions"
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "principles.instructions.md").write_text(
+        "---\ndescription: General development principles\n---\n\nFail fast.\n",
+        encoding="utf-8",
+    )
+
+    result = InstructionIntegrator().integrate_instructions_for_target(
+        KNOWN_TARGETS["antigravity"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".agents" / "rules" / "principles.md"
+    assert target.read_text(encoding="utf-8") == "---\ntrigger: always_on\n---\n\nFail fast.\n"
 
 
 # -----------------------------------------------------------------------------------------------------------
@@ -252,6 +276,7 @@ def test_antigravity_mcp_user_path_is_gemini_config_mcp_config() -> None:
     )
 
 
+@pytest.mark.windows_compat
 def test_antigravity_mcp_writes_mcp_servers_to_dedicated_file(tmp_path: Path) -> None:
     (tmp_path / ".agents").mkdir()
     adapter = AntigravityClientAdapter(project_root=tmp_path, user_scope=False)
@@ -265,6 +290,61 @@ def test_antigravity_mcp_writes_mcp_servers_to_dedicated_file(tmp_path: Path) ->
     assert not settings_file.exists()
     data = json.loads(config_file.read_text(encoding="utf-8"))
     assert data["mcpServers"]["demo"]["command"] == "npx"
+    if hasattr(os, "fchmod"):
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
+
+
+@pytest.mark.windows_compat
+def test_antigravity_mcp_atomic_failure_preserves_original(tmp_path: Path) -> None:
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    config_file = agents_dir / "mcp_config.json"
+    original = b'{"theme":"dark","mcpServers":{"user":{"command":"keep"}}}\n'
+    config_file.write_bytes(original)
+    os.chmod(config_file, 0o600)
+    adapter = AntigravityClientAdapter(project_root=tmp_path, user_scope=False)
+
+    with (
+        patch(
+            "apm_cli.utils.atomic_io._replace_atomic_file",
+            side_effect=OSError("simulated crash"),
+        ),
+        pytest.raises(OSError, match="simulated crash"),
+    ):
+        adapter.update_config({"demo": {"command": "npx"}})
+
+    assert config_file.read_bytes() == original
+    if hasattr(os, "fchmod"):
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
+    assert list(agents_dir.glob("apm-atomic-*")) == []
+
+
+@pytest.mark.windows_compat
+def test_antigravity_mcp_atomic_merge_preserves_user_entries(tmp_path: Path) -> None:
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    config_file = agents_dir / "mcp_config.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "mcpServers": {"user": {"command": "keep"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(config_file, 0o600)
+
+    AntigravityClientAdapter(project_root=tmp_path, user_scope=False).update_config(
+        {"managed": {"command": "npx"}}
+    )
+
+    config = json.loads(config_file.read_text(encoding="utf-8"))
+    assert config["theme"] == "dark"
+    assert config["mcpServers"]["user"]["command"] == "keep"
+    assert config["mcpServers"]["managed"]["command"] == "npx"
+    if hasattr(os, "fchmod"):
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
 
 
 # ---------------------------------------------------------------------------

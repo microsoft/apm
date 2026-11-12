@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from collections.abc import Iterable
+from dataclasses import replace
 
 import click
 
@@ -57,6 +58,8 @@ def _strip_v(ref: str) -> str:
 
 def _package_basename(dep: LockedDependency, dep_ref: DependencyReference | None = None) -> str:
     """Return the display name used in ``{name}`` tag patterns."""
+    if dep.replacement is not None:
+        return revision_pin_package_name(dep_ref or dependency_ref_from_locked(dep))
     if dep.marketplace_plugin_name:
         return dep.marketplace_plugin_name
     # For virtual subdirectory packages, derive the name from the virtual path
@@ -262,6 +265,23 @@ def _check_revision_pin_ref(
 
 
 def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
+    """Compare selected bytes while keeping original ownership in the result."""
+    if dep.replacement is not None and dep.is_local_source:
+        return OutdatedRow(
+            package=dep.get_unique_key(),
+            current="local",
+            latest="-",
+            status="not-comparable",
+            source=f"replacement: {dep.to_dependency_ref().local_path}",
+        )
+    row = _check_selected_dep(dep, downloader, verbose, registry_ctx)
+    if dep.replacement is not None:
+        source = dependency_ref_from_locked(dep).to_display_reference()
+        return replace(row, source=f"replacement: {source} ({row.source})")
+    return row
+
+
+def _check_selected_dep(dep, downloader, verbose, registry_ctx=None):
     """Check a single dependency against remote refs.
 
     Returns an ``OutdatedRow`` instance.
@@ -274,7 +294,7 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
         return check_registry_locked_dep(dep, registry_ctx, verbose=verbose)
 
     # Try marketplace-based check first for marketplace-sourced deps
-    marketplace_result = _check_marketplace_ref(dep, verbose)
+    marketplace_result = _check_marketplace_ref(dep, verbose) if dep.replacement is None else None
     if marketplace_result is not None:
         return marketplace_result
 
@@ -438,7 +458,7 @@ def outdated(global_, verbose, parallel_checks):
     """
     from ..core.command_logger import CommandLogger
     from ..core.scope import InstallScope, get_apm_dir
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 
     logger = CommandLogger("outdated", verbose=verbose)
 
@@ -446,8 +466,7 @@ def outdated(global_, verbose, parallel_checks):
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = get_apm_dir(scope)
 
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
     lockfile = LockFile.read(lockfile_path)
 
     if lockfile is None:
@@ -543,13 +562,27 @@ def outdated(global_, verbose, parallel_checks):
     # Check if everything is up-to-date
     has_outdated = any(row.status == "outdated" for row in rows)
     has_unknown = any(row.status == "unknown" for row in rows)
+    has_outside_constraint = any(row.outside_constraint for row in rows)
 
-    if not has_outdated and not has_unknown:
+    has_replacements = any(dep.replacement is not None for dep in checkable)
+    for dep in checkable:
+        if dep.replacement is not None:
+            logger.verbose_detail(
+                f"Replacement: {dep.get_unique_key()} "
+                f"-> {dependency_ref_from_locked(dep).to_display_reference()}"
+            )
+    if not has_outdated and not has_unknown and not has_outside_constraint and not has_replacements:
         logger.success("All dependencies are up-to-date")
         return
 
+    show_wanted = any(row.wanted is not None for row in rows)
+    sources = [
+        f"{row.source} (outside constraint)" if row.outside_constraint else row.source
+        for row in rows
+    ]
     # Render the table
     try:
+        from rich.box import ASCII
         from rich.table import Table
 
         from ._helpers import _get_console
@@ -562,42 +595,60 @@ def outdated(global_, verbose, parallel_checks):
             title="Dependency Status",
             show_header=True,
             header_style="bold cyan",
+            box=ASCII,
         )
-        table.add_column("Package", style="white", min_width=20)
-        table.add_column("Current", style="white", min_width=10)
-        table.add_column("Latest", style="white", min_width=10)
-        table.add_column("Status", min_width=12)
-        table.add_column("Source", style="dim", min_width=20, no_wrap=True)
+        table.add_column(
+            "Package",
+            style="white",
+            min_width=20,
+            overflow="fold" if has_replacements else "ellipsis",
+        )
+        table.add_column("Current", style="white", min_width=1 if has_replacements else 10)
+        if show_wanted:
+            table.add_column("Wanted", style="white", min_width=1 if has_replacements else 10)
+        table.add_column("Latest", style="white", min_width=1 if has_replacements else 10)
+        table.add_column("Status", min_width=14 if has_replacements else 12)
+        table.add_column("Source", style="dim", min_width=20, overflow="fold")
 
         status_styles = {
             "up-to-date": "green",
             "outdated": "yellow",
             "unknown": "dim",
+            "not-comparable": "dim",
         }
 
-        for row in rows:
+        for row, source in zip(rows, sources, strict=True):
             style = status_styles.get(row.status, "white")
             table.add_row(
                 row.package,
                 row.current,
+                *([row.wanted or "-"] if show_wanted else []),
                 row.latest,
                 f"[{style}]{row.status}[/{style}]",
-                row.source,
+                source,
             )
 
             if verbose and row.extra_tags:
                 tags_str = ", ".join(row.extra_tags)
-                table.add_row("", "", f"[dim]tags: {tags_str}[/dim]", "", "")
+                table.add_row(
+                    "", "", *([""] if show_wanted else []), f"[dim]tags: {tags_str}[/dim]", "", ""
+                )
 
         console.print(table)
 
     except (ImportError, Exception):
         # Fallback: plain text output
-        click.echo(f"{'Package':<24}{'Current':<13}{'Latest':<13}{'Status':<15}{'Source'}")
-        click.echo("-" * 82)
-        for row in rows:
+        wanted_header = f"{'Wanted':<13}" if show_wanted else ""
+        header = (
+            f"{'Package':<24}{'Current':<13}{wanted_header}{'Latest':<13}{'Status':<15}{'Source'}"
+        )
+        click.echo(header)
+        click.echo("-" * len(header))
+        for row, source in zip(rows, sources, strict=True):
+            wanted_cell = f"{row.wanted or '-':<13}" if show_wanted else ""
             click.echo(
-                f"{row.package:<24}{row.current:<13}{row.latest:<13}{row.status:<15}{row.source}"
+                f"{row.package:<24}{row.current:<13}{wanted_cell}"
+                f"{row.latest:<13}{row.status:<15}{source}"
             )
             if verbose and row.extra_tags:
                 click.echo(f"{'':24}tags: {', '.join(row.extra_tags)}")
@@ -610,7 +661,25 @@ def outdated(global_, verbose, parallel_checks):
             f"{'dependency' if outdated_count == 1 else 'dependencies'} found"
         )
     elif has_unknown:
-        logger.progress("Some dependencies could not be checked (branch/commit refs)")
+        logger.progress("Some dependencies could not be checked")
+    if has_unknown:
+        from ..deps.registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            logger.info(
+                "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
+                "newer versions because the registry proxy exposes no version listing. "
+                "Exact pins still install through the proxy; unset PROXY_REGISTRY_ONLY "
+                "to check against the source host."
+            )
+    if any(row.status == "not-comparable" for row in rows):
+        logger.progress("Local replacement sources are not remotely comparable")
+    if has_outside_constraint:
+        logger.progress(
+            "Registry Latest is published; Wanted respects the manifest constraint. "
+            "'apm update' stays within that constraint. Select a newer version explicitly "
+            "in apm.yml, then run 'apm install' to take an outside-constraint release."
+        )
 
 
 def _check_deps_with_progress(

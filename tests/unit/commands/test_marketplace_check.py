@@ -5,7 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path  # noqa: F401
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
+from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
@@ -165,6 +166,192 @@ class TestCheckExplicitRef:
         result = runner.invoke(marketplace, ["check"])
         assert result.exit_code == 1
         assert "1 entries have issues" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Entry with a commit-SHA ref (#3458)
+# ---------------------------------------------------------------------------
+
+_PIN_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _yml_with_ref(ref: str) -> str:
+    return textwrap.dedent(f"""\
+        name: test-marketplace
+        description: Test marketplace
+        version: 1.0.0
+        owner:
+          name: Test Owner
+        packages:
+          - name: sha-pkg
+            source: acme-org/sha-pkg
+            ref: "{ref}"
+    """)
+
+
+def _flat(text: str) -> str:
+    """Drop all whitespace so assertions survive any terminal-width wrapping."""
+    return "".join(text.split())
+
+
+class TestCheckCommitShaRef:
+    """A full commit SHA ``ref`` is verified on the remote, not matched by name."""
+
+    @pytest.fixture
+    def sha_cwd(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # Plain one-line rows keep detail assertions independent of terminal width.
+        monkeypatch.setattr("apm_cli.commands.marketplace._get_console", lambda: None)
+        return tmp_path
+
+    @staticmethod
+    def _write(cwd, ref):
+        (cwd / "marketplace.yml").write_text(_yml_with_ref(ref), encoding="utf-8")
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_reachable_sha_passes(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.commit_exists.return_value = True
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        assert _flat("All 1 entries OK") in _flat(result.output)
+        mock_inst.commit_exists.assert_called_once_with("acme-org/sha-pkg", _PIN_SHA)
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_sha_at_advertised_tip_passes_without_fetch(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/main", sha=_PIN_SHA),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    @pytest.mark.parametrize(
+        "tag_ref",
+        [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_PIN_SHA),
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_B, peeled_sha=_PIN_SHA),
+        ],
+    )
+    def test_tagged_sha_is_still_verified_as_commit(self, MockResolver, runner, sha_cwd, tag_ref):
+        # A tag can name a tree or blob, so only branch tips skip the fetch.
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [tag_ref]
+        mock_inst.commit_exists.return_value = False
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        mock_inst.commit_exists.assert_called_once_with("acme-org/sha-pkg", _PIN_SHA)
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_unreachable_sha_fails_with_actionable_message(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.commit_exists.return_value = False
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert _flat(f"Commit '{_PIN_SHA}' not reachable on remote") in _flat(result.output)
+        assert _flat("not found") not in _flat(result.output)
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "0123456",  # abbreviated
+            _PIN_SHA[:39],  # one char short
+            _PIN_SHA.upper(),  # pack only pins lowercase SHAs
+            _PIN_SHA + "0",  # too long
+        ],
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_malformed_sha_fails_with_actionable_message(self, MockResolver, runner, sha_cwd, ref):
+        self._write(sha_cwd, ref)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert _flat(f"Ref '{ref}' not found") in _flat(result.output)
+        assert _flat("full 40-char lowercase SHA") in _flat(result.output)
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_branch_named_like_hex_still_matches_by_name(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, "cafe123")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/cafe123", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_non_hex_missing_ref_keeps_plain_message(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, "v9.9.9")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert _flat("Ref 'v9.9.9' not found") in _flat(result.output)
+        assert _flat("40-char") not in _flat(result.output)
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_offline_sha_not_at_tip_fails_without_network(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+
+        result = runner.invoke(marketplace, ["check", "--offline"])
+
+        assert result.exit_code == 1
+        assert _flat(f"Commit '{_PIN_SHA}' cannot be verified offline") in _flat(result.output)
+        mock_inst.commit_exists.assert_not_called()
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_fetch_error_reports_unreachable_remote(self, MockResolver, runner, sha_cwd):
+        self._write(sha_cwd, _PIN_SHA)
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.commit_exists.side_effect = GitLsRemoteError(
+            package="", summary="git fetch timed out", hint="retry"
+        )
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 1
+        assert _flat("git fetch timed out") in _flat(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +737,172 @@ class TestCheckRefHeadsPrefix:
 
 
 class TestCheckPerHostResolution:
+    @pytest.mark.parametrize("configured_host", [None, "", "github.example.com"])
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(
+            token="ghp-private",
+            auth_scheme="basic",
+            host_info=SimpleNamespace(kind="github"),
+        ),
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_default_host_shorthand_uses_standard_auth_resolution(
+        self, MockResolver, mock_token, configured_host, runner, tmp_path, monkeypatch
+    ):
+        """Resolve auth for bare owner/repo sources on the configured default host."""
+        monkeypatch.chdir(tmp_path)
+        if configured_host is None:
+            monkeypatch.delenv("GITHUB_HOST", raising=False)
+            expected_host = "github.com"
+        else:
+            monkeypatch.setenv("GITHUB_HOST", configured_host)
+            expected_host = configured_host or "github.com"
+        (tmp_path / "marketplace.yml").write_text(_YML_WITH_REF, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        mock_token.assert_called_once_with(
+            expected_host, offline=False, org=None, auth_resolver=ANY
+        )
+        MockResolver.assert_called_once_with(
+            offline=False,
+            host=expected_host,
+            token="ghp-private",
+            auth_scheme="basic",
+            git_env=ANY,
+            auth_resolver=ANY,
+            auth_target=expected_host,
+        )
+        mock_inst.list_remote_refs.assert_called_once_with("acme-org/pinned-pkg")
+
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(
+            token="ado-pat",
+            auth_scheme="bearer",
+            host_info=SimpleNamespace(kind="azure_devops"),
+        ),
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_encoded_ado_source_base_and_https_source_share_decoded_identity(
+        self, MockResolver, mock_token, runner, tmp_path, monkeypatch
+    ):
+        """Use the same decoded ADO identity and org hint for both source forms."""
+        monkeypatch.chdir(tmp_path)
+        encoded_source = "https://dev.azure.com/cont%6Fso/My%20Projects/_git/agent-skills"
+        (tmp_path / "marketplace.yml").write_text(
+            textwrap.dedent(f"""\
+                name: encoded-ado
+                description: Encoded Azure DevOps sources
+                version: 1.0.0
+                owner:
+                  name: Contoso
+                sourceBase: https://dev.azure.com/cont%6Fso/My%20Projects/_git
+                packages:
+                  - name: from-base
+                    source: agent-skills
+                    version: "^1.0.0"
+                  - name: direct
+                    source: {encoded_source}
+                    version: "^1.0.0"
+                """),
+            encoding="utf-8",
+        )
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = _REFS_GOOD
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check", "--verbose"])
+
+        assert result.exit_code == 0
+        displayed_paths = [
+            urlparse(token.strip("(),.;'\"")).path
+            for token in result.output.split()
+            if token.startswith("https://")
+        ]
+        assert displayed_paths == [
+            "/cont%6Fso/My%20Projects/_git/agent-skills",
+            "/cont%6Fso/My%20Projects/_git/agent-skills",
+        ]
+        mock_token.assert_called_once_with(
+            "dev.azure.com", offline=False, org="contoso", auth_resolver=ANY
+        )
+        mock_inst.list_remote_refs.assert_has_calls(
+            [
+                call("contoso/My Projects/agent-skills"),
+                call("contoso/My Projects/agent-skills"),
+            ]
+        )
+
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(
+            token="glpat-xyz",
+            auth_scheme="basic",
+            host_info=SimpleNamespace(kind="gitlab"),
+        ),
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_encoded_gitlab_source_base_and_https_source_keep_transport_path(
+        self, MockResolver, mock_token, runner, tmp_path, monkeypatch
+    ):
+        """Keep encoded non-ADO paths intact through check and git resolution."""
+        monkeypatch.chdir(tmp_path)
+        encoded_source = "https://gitlab.example.com/team/My%20Group/direct-tool"
+        (tmp_path / "marketplace.yml").write_text(
+            textwrap.dedent(f"""\
+                name: encoded-gitlab
+                description: Encoded GitLab sources
+                version: 1.0.0
+                owner:
+                  name: Team
+                sourceBase: https://gitlab.example.com/team/My%20Group
+                packages:
+                  - name: from-base
+                    source: agent-skills
+                    version: "^1.0.0"
+                  - name: direct
+                    source: {encoded_source}
+                    version: "^1.0.0"
+                """),
+            encoding="utf-8",
+        )
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = _REFS_GOOD
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check", "--verbose"])
+
+        assert result.exit_code == 0
+        displayed_paths = [
+            urlparse(token.strip("(),.;'\"")).path
+            for token in result.output.split()
+            if token.startswith("https://")
+        ]
+        assert displayed_paths == [
+            "/team/My%20Group/agent-skills",
+            "/team/My%20Group/direct-tool",
+        ]
+        mock_token.assert_has_calls(
+            [
+                call("gitlab.example.com", offline=False, org="team", auth_resolver=ANY),
+                call("gitlab.example.com", offline=False, org=None, auth_resolver=ANY),
+            ]
+        )
+        mock_inst.list_remote_refs.assert_has_calls(
+            [
+                call("team/My%20Group/agent-skills"),
+                call("team/My%20Group/direct-tool"),
+            ]
+        )
+
     @patch(
         "apm_cli.commands.marketplace.check.resolve_auth_for_host",
         return_value=SimpleNamespace(

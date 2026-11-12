@@ -405,7 +405,14 @@ class TestRemoveStale:
         claude_dir.mkdir()
         mcp_json = tmp_path / ".mcp.json"
         mcp_json.write_text(
-            json.dumps({"mcpServers": {"stale-claude": {}, "keep": {}}}),
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "stale-claude": {"type": "stdio", "command": "old", "args": []},
+                        "keep": {},
+                    }
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -414,6 +421,14 @@ class TestRemoveStale:
                 {"stale-claude"},
                 project_root=tmp_path,
                 logger=MagicMock(),
+                stored_configs={
+                    "stale-claude": {
+                        "name": "stale-claude",
+                        "registry": False,
+                        "transport": "stdio",
+                        "command": "old",
+                    }
+                },
             )
 
         result = json.loads(mcp_json.read_text(encoding="utf-8"))

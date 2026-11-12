@@ -26,14 +26,24 @@ jobs:
       contents: read
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: astral-sh/setup-uv@v6
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Ruff lint
-      run: uv run --frozen --extra dev ruff check src/ tests/
+      run: >-
+        uv run --frozen --extra dev ruff check
+        src/ tests/
+        scripts/lint_architecture_boundaries.py
+        scripts/architecture_linter/
+        scripts/windows_native_symlink_probe_entry.py
 
     - name: Ruff format check
-      run: uv run --frozen --extra dev ruff format --check src/ tests/
+      run: >-
+        uv run --frozen --extra dev ruff format --check
+        src/ tests/
+        scripts/lint_architecture_boundaries.py
+        scripts/architecture_linter/
+        scripts/windows_native_symlink_probe_entry.py
 
     - name: Check YAML encoding safety
       run: |
@@ -55,8 +65,13 @@ jobs:
         # Ruff has no max-module-lines rule. This check prevents new files from
         # exceeding the current worst case. Tighten the threshold over time.
         MAX_LINES=2100   # Stage 1 (was 2450); target 1400 deferred to Stage 2
-        VIOLATIONS=$(find src/ -name '*.py' -print0 | xargs -0 -I{} awk -v max="$MAX_LINES" \
-          'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {})
+        VIOLATIONS=$(
+          {
+            find src/ scripts/architecture_linter/ -name '*.py' -print0
+            printf '%s\0' scripts/lint_architecture_boundaries.py
+          } | xargs -0 -I{} awk -v max="$MAX_LINES" \
+            'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {}
+        )
         if [ -n "$VIOLATIONS" ]; then
           echo "::error::Source files exceed $MAX_LINES-line limit:"
           echo "$VIOLATIONS"
@@ -77,7 +92,10 @@ jobs:
           --disable=all --enable=R0801 \
           --min-similarity-lines=10 \
           --fail-on=R0801 \
-          src/apm_cli/
+          src/apm_cli/ \
+          scripts/lint_architecture_boundaries.py \
+          scripts/architecture_linter/ \
+          scripts/windows_native_symlink_probe_entry.py
 
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
@@ -100,10 +118,10 @@ jobs:
       contents: read
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
 
@@ -114,12 +132,12 @@ jobs:
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -134,10 +152,13 @@ jobs:
         where git
 
     - name: Run cross-platform contract family
+      env:
+        APM_E2E_TESTS: '1'
       run: >-
         uv run --extra dev pytest -p no:cacheprovider -v
         -m windows_compat
         tests/unit
+        tests/integration
 
     - name: Diagnostics on failure
       if: failure()
@@ -149,23 +170,154 @@ jobs:
         git config --list --show-origin
         echo "::endgroup::"
 
-  test-architecture:
-    name: Test Architecture Ratchets
+  windows-native-standard-user-symlink-gate:
+    name: Windows Native Symlink Acceptance
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      env:
+        GIT_CONFIG_COUNT: '1'
+        GIT_CONFIG_KEY_0: core.autocrlf
+        GIT_CONFIG_VALUE_0: 'false'
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
+    - name: Prove native standard-user fallback
+      shell: pwsh
+      timeout-minutes: 10
+      env:
+        APM_NATIVE_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: >-
+        ./scripts/windows_native_standard_user_symlink_gate.ps1
+        -ExpectedHead $env:APM_NATIVE_EXPECTED_HEAD
+
+    - name: Restore owned native fixture
+      if: always()
+      shell: pwsh
+      timeout-minutes: 2
+      run: ./scripts/windows_native_standard_user_symlink_gate.ps1 -CleanupOnly
+
+    - name: Retain native proof and restoration evidence
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: windows-native-symlink-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/apm-native-symlink-evidence/
+        if-no-files-found: error
+        retention-days: 30
+
+  windows-git-discovery:
+    name: Windows Git Discovery (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
+
+    - name: Record native toolchain
+      run: |
+        uv run --frozen python -c "import platform, sys; print(platform.platform()); print(sys.version)"
+        git --version
+        gh --version
+        git rev-parse HEAD
+
+    - name: Run trusted executable contracts
+      run: >-
+        uv run --frozen --extra dev pytest -p no:cacheprovider -v
+        -m trusted_executable
+        tests/unit/cache/test_git_env.py
+        tests/integration/test_trusted_executable_discovery.py
+
+    - name: Prove legacy PATHEXT regression
+      shell: python
+      run: |
+        import pathlib
+        import subprocess
+        import tempfile
+        import xml.etree.ElementTree as ET
+
+        source = pathlib.Path("src/apm_cli/utils/git_env.py")
+        original = source.read_bytes()
+        guard = b'if candidate is None and os.name == "nt" and sys.version_info < (3, 12):'
+        assert original.count(guard) == 1, "PATHEXT mutation guard changed"
+        try:
+            source.write_bytes(original.replace(guard, b"if False:"))
+            with tempfile.TemporaryDirectory() as directory:
+                report = pathlib.Path(directory) / "mutation.xml"
+                result = subprocess.run([
+                    "uv", "run", "--frozen", "--extra", "dev",
+                    "pytest", "-p", "no:cacheprovider", "-q",
+                    "-m", "trusted_executable",
+                    "-k", "real_tools_resolve or install_reinstall_and_update",
+                    "tests/integration/test_trusted_executable_discovery.py",
+                    f"--junitxml={report}",
+                ], timeout=300, check=False)
+                assert result.returncode == 1, "Legacy resolver mutation must fail tests"
+                cases = ET.parse(report).getroot().findall(".//testcase")
+                assert len(cases) == 5, "Both tools, shadows, and real install must execute"
+                for case in cases:
+                    failure = case.find("failure")
+                    assert failure is not None, case.attrib
+                    assert "executable not found" in (failure.text or ""), case.attrib
+                print("PATHEXT mutation killed by all five native consumer cases")
+        finally:
+            source.write_bytes(original)
+
+  # Separate the two unchanged workloads so setup and cleanup fit each cap.
+  test-architecture-contracts:
+    name: Architecture Ratchet Contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -181,7 +333,57 @@ jobs:
           tests/unit/scripts/test_check_exact_test_duplicates.py \
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
+          tests/quality/test_lifecycle_bug_ledger.py \
           tests/quality/test_ci_topology.py
+
+  test-architecture-scaling:
+    name: Architecture Scaling (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
+    - name: Run bounded architecture scaling gate
+      env:
+        PYTEST_PERF: '1'
+      run: >-
+        uv run --frozen --extra dev pytest -p no:cacheprovider -q
+        -m benchmark
+        tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
+
+  test-architecture:
+    name: Test Architecture Ratchets
+    needs: [test-architecture-contracts, test-architecture-scaling]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+    - name: Require both architecture executions
+      env:
+        CONTRACT_RESULT: ${{ needs.test-architecture-contracts.result }}
+        SCALING_RESULT: ${{ needs.test-architecture-scaling.result }}
+      run: |
+        if [ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]; then
+          echo "Architecture execution failed: contracts=$CONTRACT_RESULT scaling=$SCALING_RESULT"
+          exit 1
+        fi
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
@@ -213,11 +415,11 @@ jobs:
         shard: [1, 2]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Node.js
       if: matrix.shard == 1
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
 
@@ -229,12 +431,12 @@ jobs:
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -271,7 +473,7 @@ jobs:
 
     - name: Upload coverage data
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: unit-coverage-shard-${{ matrix.shard }}
         path: .coverage.unit-shard-${{ matrix.shard }}
@@ -298,10 +500,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -310,7 +512,7 @@ jobs:
 
       - name: Download shard coverage
         if: always()
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: unit-coverage-shard-*
           path: coverage-shards/
@@ -353,15 +555,20 @@ jobs:
       contents: read
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+    # Build the way build-release.yml builds Linux release binaries: uv-managed
+    # Python plus the glibc 2.28 check in build-binary.sh.
+    - name: Use uv-managed Python
+      run: |
+        {
+          echo "UV_PYTHON_PREFERENCE=only-managed"
+          echo "UV_PYTHON=${PYTHON_VERSION}"
+          echo "APM_MAX_GLIBC=2.28"
+        } >> "$GITHUB_ENV"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -377,6 +584,15 @@ jobs:
       run: |
         chmod +x scripts/build-binary.sh
         uv run ./scripts/build-binary.sh
+
+    - name: Test packaged audit workspace identity
+      timeout-minutes: 5
+      env:
+        APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
+      run: >-
+        uv run --frozen --extra dev pytest
+        tests/integration/test_audit_workspace_identity_lifecycle.py
+        -vv -ra --tb=long --show-capture=all --no-showlocals
 
   # Dogfood the audit-only CI gate we ship and document to users:
   #   - `apm audit --ci` -- the full producer+consumer gate. Runs the
@@ -394,7 +610,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Dogfood the repo's OWN apm (built from this branch), not a published
       # binary. A self-check that runs a stale released apm structurally
@@ -407,7 +623,7 @@ jobs:
       # committed managed files are preserved: content-integrity detects
       # tampered file hashes and the drift replay compares the committed tree
       # (including .agents/skills/) against a fresh cache-free replay.
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -474,42 +690,53 @@ jobs:
   # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
   # credentials.
   #
-  # Why timeout-minutes: 5
+  # Why timeout-minutes: 10
   # ------------------------
-  # Recent hosted runs of the current required selection complete in about
-  # three minutes. The 5-minute job cap includes checkout/setup/sync and
-  # still fails fast on accidental network retries or unreviewed marker growth.
-  # Hosted job duration is the release authority.
+  # Four xdist workers use the public Ubuntu runner's four CPUs without
+  # changing the required selection.
+  # loadgroup preserves xdist_group serialization for HOME-mutating tests,
+  # matching the merge-group integration scheduler. The cap includes
+  # checkout/setup/sync/cleanup; hosted job duration is the release authority.
+  # The growing corpus exhausted this cap on run 39737354179. Two shards
+  # retain the full selection and xdist affinity without increasing the cap.
+  # pytest-split balances whole affinity units by their member counts;
+  # these weights are not claimed as measured test durations.
+  # The required aggregate checks both explicit job results independently.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
   # merge-group-only, and required selections and guards their set partition,
   # this exact expression, the unfiltered merge-group integration path,
   # --strict-markers, required-check membership, E2E opt-in placement, and
   # credential/network prohibitions.
-  lifecycle-smoke:
-    name: Lifecycle Smoke (Linux)
+  lifecycle-smoke-shard-1:
+    name: Lifecycle Smoke Shard 1 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
+    env:
+      LIFECYCLE_SHARD: "1"
 
-    steps:
-    - uses: actions/checkout@v4
+    steps: &lifecycle-smoke-steps
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+
+    - name: Install Unix shell startup test runtimes
+      run: bash scripts/ci-apt-install.sh fish zsh
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -518,5 +745,37 @@ jobs:
       env:
         APM_E2E_TESTS: "1"
       run: |
-        uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+        printf 'Runner logical CPUs: '
+        nproc
+        uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+          -p scripts.lifecycle_smoke_sharding --lifecycle-shard "$LIFECYCLE_SHARD" \
+          -n 4 --dist loadgroup --durations=20 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+
+  lifecycle-smoke-shard-2:
+    name: Lifecycle Smoke Shard 2 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      LIFECYCLE_SHARD: "2"
+    steps: *lifecycle-smoke-steps
+
+  lifecycle-smoke:
+    name: Lifecycle Smoke (Linux)
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+    - name: Require both lifecycle shards
+      env:
+        SHARD_1_RESULT: ${{ needs.lifecycle-smoke-shard-1.result }}
+        SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
+      run: |
+        if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ]; then
+          echo "::error::Both lifecycle shards must succeed; got '$SHARD_1_RESULT' and '$SHARD_2_RESULT'."
+          exit 1
+        fi

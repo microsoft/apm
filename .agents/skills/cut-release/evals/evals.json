@@ -22,13 +22,13 @@
       {"id": "no-fire-01", "query": "tag v0.16.0", "expected": "no-fire", "split": "train", "notes": "Tagging is the post-merge step; cut-release explicitly stops at PR open."},
       {"id": "no-fire-02", "query": "publish a blog post about the v0.16.0 release", "expected": "no-fire", "split": "train", "notes": "Announcement work; out of scope."},
       {"id": "no-fire-03", "query": "what changed since v0.15.0?", "expected": "no-fire", "split": "train", "notes": "Pure enumeration; no release being cut."},
-      {"id": "no-fire-04", "query": "review this PR", "expected": "no-fire", "split": "train", "notes": "apm-review-panel territory."},
+      {"id": "no-fire-04", "query": "review this PR", "expected": "no-fire", "split": "train", "notes": "autopilot-pr-review-worker territory."},
       {"id": "no-fire-05", "query": "update the CHANGELOG entry for #1526", "expected": "no-fire", "split": "train", "notes": "Single-PR doc edit, not a release cut."},
       {"id": "no-fire-06", "query": "rollback to v0.15.0", "expected": "no-fire", "split": "val", "notes": "Release reversal; different workflow."},
       {"id": "no-fire-07", "query": "regenerate uv.lock after a dep bump", "expected": "no-fire", "split": "val", "notes": "Lockfile maintenance, not a release."},
       {"id": "no-fire-08", "query": "set version to 0.16.0 in pyproject.toml", "expected": "no-fire", "split": "val", "notes": "Raw version edit; bypasses the rubric and the changelog."},
       {"id": "no-fire-09", "query": "draft release notes for the website", "expected": "no-fire", "split": "val", "notes": "Marketing copy; out of scope."},
-      {"id": "no-fire-10", "query": "triage the open issues", "expected": "no-fire", "split": "val", "notes": "apm-triage-panel territory."}
+      {"id": "no-fire-10", "query": "triage the open issues", "expected": "no-fire", "split": "val", "notes": "autopilot-issue-triage-scheduler territory."}
     ]
   },
   "stop_list": [

@@ -9,20 +9,40 @@ Content transforms are selected by the ``format_id`` field in
 
 from __future__ import annotations
 
-import re
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
+
+import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.patterns import normalize_apply_to, parse_apply_to, yaml_double_quote
+from apm_cli.utils.patterns import (
+    escape_apply_to_segment,
+    normalize_apply_to,
+    parse_apply_to,
+    yaml_double_quote,
+    yaml_globs_scalar,
+    yaml_plain_scalar,
+)
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.targets import TargetProfile
+
+
+@dataclass(frozen=True)
+class _PreparedInstruction:
+    """Validated instruction source reused across target plans."""
+
+    content: str
+    body: str
 
 
 class InstructionIntegrator(BaseIntegrator):
@@ -39,6 +59,14 @@ class InstructionIntegrator(BaseIntegrator):
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
 
+    def __init__(self):
+        super().__init__()
+        self._prepared_rule_plans: dict[
+            tuple[str, str, str, str, str],
+            dict[Path, tuple[Path, str, int]],
+        ] = {}
+        self._prepared_instructions: dict[str, dict[Path, _PreparedInstruction]] = {}
+
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
     _FORMAT_CONVERTERS: ClassVar[dict[str, str]] = {
@@ -50,38 +78,109 @@ class InstructionIntegrator(BaseIntegrator):
     }
 
     @staticmethod
-    def _normalize_frontmatter_apply_to(frontmatter: str) -> str:
-        """Return canonical applyTo text from a bounded YAML frontmatter block."""
-        from apm_cli.utils.yaml_io import load_yaml_str
+    def _parse_frontmatter(content: str) -> tuple[dict, str]:
+        """Return bounded frontmatter metadata and body for instruction text."""
+        post = loads_frontmatter(content, preserve_body=True)
+        metadata = post.metadata if isinstance(post.metadata, dict) else {}
+        return metadata, post.content
 
-        try:
-            metadata = load_yaml_str(frontmatter) or {}
-        except Exception:
-            return ""
-        return normalize_apply_to(metadata.get("applyTo"), default="")
+    @staticmethod
+    def _strip_frontmatter(content: str) -> str:
+        """Strip YAML frontmatter from instruction content.
 
-    def find_instruction_files(self, package_path: Path) -> list[Path]:
+        Returns only the body text following the closing ``---`` delimiter.
+        If no frontmatter is present, returns the content unchanged.
+        Handles both LF and CRLF line endings.
+        """
+        _, body = InstructionIntegrator._parse_frontmatter(content)
+        return body
+
+    def find_instruction_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all .instructions.md files in a package.
 
         Searches in .apm/instructions/ subdirectory.
         """
-        return self.find_files_by_glob(
-            package_path,
-            "*.instructions.md",
-            subdirs=[".apm/instructions"],
+        return self.filter_authorized_files(
+            self.find_files_by_glob(
+                package_path,
+                "*.instructions.md",
+                subdirs=[".apm/instructions"],
+            ),
+            source_plan,
         )
 
-    def copy_instruction(self, source: Path, target: Path) -> int:
+    def copy_instruction(self, source: Path, target: Path, content: str | None = None) -> int:
         """Copy instruction file with link resolution.
 
         Preserves applyTo: frontmatter and all content as-is.
         """
-        content = source.read_text(encoding="utf-8")
+        content = content if content is not None else source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
         write_text_lf(target, content)
         return links_resolved
 
-    def _render_instruction(self, source: Path, target: Path, fmt: str) -> tuple[str, int]:
+    @staticmethod
+    def _package_key(package_path: Path) -> str:
+        """Return the stable cache key for one package source tree."""
+        return str(package_path.resolve())
+
+    @staticmethod
+    def _raise_frontmatter_error(source: Path, exc: yaml.YAMLError) -> None:
+        """Raise the package-facing malformed-frontmatter error."""
+        raise yaml.YAMLError(
+            f"Rejected frontmatter in {source.name}: {exc}\n"
+            "Fix or remove the invalid frontmatter, then rerun apm install."
+        ) from exc
+
+    def _prepare_instruction(
+        self,
+        source: Path,
+        *,
+        force: bool = False,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> _PreparedInstruction:
+        """Read and validate one instruction without writing target files."""
+        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
+        content = source.read_text(encoding="utf-8")
+        try:
+            metadata, body = self._parse_frontmatter(content)
+        except yaml.YAMLError as exc:
+            self._raise_frontmatter_error(source, exc)
+        decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        verdict = SecurityGate.scan_text(
+            decoded_metadata,
+            f"{source}#decoded-frontmatter",
+            policy=BLOCK_POLICY,
+            force=force,
+        )
+        if verdict.has_findings and diagnostics is not None:
+            SecurityGate.report(
+                verdict,
+                diagnostics,
+                package=package_name,
+                force=force,
+                force_action="Allowed by preflight",
+                force_detail=(
+                    "Decoded frontmatter contains critical hidden characters; "
+                    f"edit the escaped value in {source.name}"
+                ),
+            )
+        if verdict.should_block:
+            raise yaml.YAMLError(
+                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
+            )
+        return _PreparedInstruction(content=content, body=body)
+
+    def _render_instruction(
+        self,
+        source: Path,
+        target: Path,
+        fmt: str,
+        *,
+        prepared: _PreparedInstruction | None = None,
+    ) -> tuple[str, int]:
         """Render *source* to the content it would deploy for *fmt*, WITHOUT
         writing. Returns ``(content, links_resolved)``.
 
@@ -93,12 +192,141 @@ class InstructionIntegrator(BaseIntegrator):
         the single home for "which formats transform".  Any ``fmt`` outside it
         is copied verbatim (identity transform).
         """
-        content = source.read_text(encoding="utf-8")
+        content = prepared.content if prepared is not None else source.read_text(encoding="utf-8")
         if fmt in RULE_FORMATS:
             converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
-            content = converter(content)
+            try:
+                content = converter(content)
+            except yaml.YAMLError as exc:
+                self._raise_frontmatter_error(source, exc)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
+
+    @staticmethod
+    def _plan_key(
+        package_path: Path,
+        project_root: Path,
+        deploy_dir: Path,
+        extension: str,
+        fmt: str,
+    ) -> tuple[str, str, str, str, str]:
+        """Return the per-package, per-target identity for a prepared rule plan."""
+        return (
+            str(package_path.resolve()),
+            str(project_root.resolve()),
+            str(deploy_dir.resolve()),
+            extension,
+            fmt,
+        )
+
+    def _prepare_rule_plan(
+        self,
+        instruction_files: list[Path],
+        deploy_dir: Path,
+        extension: str,
+        fmt: str,
+        prepared_instructions: dict[Path, _PreparedInstruction] | None = None,
+    ) -> dict[Path, tuple[Path, str, int]]:
+        """Render every converted rule without writing target files."""
+        plan: dict[Path, tuple[Path, str, int]] = {}
+        for source_file in instruction_files:
+            stem = source_file.name
+            if stem.endswith(".instructions.md"):
+                stem = stem[: -len(".instructions.md")]
+            target_path = deploy_dir / f"{stem}{extension}"
+            ensure_path_within(target_path, deploy_dir)
+            content, links_resolved = self._render_instruction(
+                source_file,
+                target_path,
+                fmt,
+                prepared=(prepared_instructions or {}).get(source_file),
+            )
+            plan[source_file] = (target_path, content, links_resolved)
+        return plan
+
+    def deployed_rule_matches(self, source: Path, target: TargetProfile, deploy_root: Path) -> bool:
+        """Prove native delivery using the same filename and renderer as install.
+
+        Without a package link resolver, rewritten links conservatively retain
+        the compiled fallback rather than guessing semantic equivalence.
+        Filesystem and parse errors are reported by the compilation caller.
+        """
+        mapping = target.primitives.get("instructions")
+        if mapping is None or not mapping.output_compare:
+            return False
+        rules_dir = deploy_root / mapping.subdir
+        ensure_path_within(rules_dir, deploy_root)
+        if not rules_dir.is_dir():
+            return False
+        plan = self._prepare_rule_plan([source], rules_dir, mapping.extension, mapping.format_id)
+        rule_path, expected, _ = plan[source]
+        ensure_path_within(rule_path, deploy_root)
+        if has_symlink_component(deploy_root, rule_path):
+            return False
+        if not rule_path.is_file():
+            return False
+        return rule_path.read_text(encoding="utf-8") == normalize_crlf_to_lf(expected)
+
+    def preflight_instructions_for_targets(
+        self,
+        targets: list[TargetProfile],
+        package_info,
+        project_root: Path,
+        source_plan: DeployableSourcePlan,
+        *,
+        force: bool = False,
+        diagnostics=None,
+    ) -> None:
+        """Validate authorized instructions and prepare conversions before writes."""
+        self._prepared_rule_plans.clear()
+        self._prepared_instructions.clear()
+        eligible_targets = []
+        for target in targets:
+            mapping = target.primitives.get("instructions")
+            if not mapping:
+                continue
+            if not target.auto_create and not (project_root / target.root_dir).is_dir():
+                continue
+            eligible_targets.append((target, mapping))
+        if not eligible_targets:
+            return
+
+        package_path = Path(package_info.install_path)
+        instruction_files = self.find_instruction_files(package_path, source_plan)
+        if not instruction_files:
+            return
+
+        self.init_link_resolver(package_info, project_root)
+        package_name = getattr(getattr(package_info, "package", None), "name", "")
+        prepared_instructions = {
+            source_file: self._prepare_instruction(
+                source_file,
+                force=force,
+                diagnostics=diagnostics,
+                package_name=package_name,
+            )
+            for source_file in instruction_files
+        }
+        self._prepared_instructions[self._package_key(package_path)] = prepared_instructions
+        for target, mapping in eligible_targets:
+            if not mapping.output_compare:
+                continue
+            effective_root = mapping.deploy_root or target.root_dir
+            deploy_dir = project_root / effective_root / mapping.subdir
+            key = self._plan_key(
+                package_path,
+                project_root,
+                deploy_dir,
+                mapping.extension,
+                mapping.format_id,
+            )
+            self._prepared_rule_plans[key] = self._prepare_rule_plan(
+                instruction_files,
+                deploy_dir,
+                mapping.extension,
+                mapping.format_id,
+                prepared_instructions,
+            )
 
     # ------------------------------------------------------------------
     # Target-driven API (data-driven dispatch)
@@ -114,6 +342,7 @@ class InstructionIntegrator(BaseIntegrator):
         managed_files: set[str] | None = None,
         diagnostics=None,
         scope=None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate instructions for a single *target*.
 
@@ -141,25 +370,31 @@ class InstructionIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         self.init_link_resolver(package_info, project_root)
-        instruction_files = self.find_instruction_files(package_info.install_path)
+        package_path = Path(package_info.install_path)
+        prepared_instructions = self._prepared_instructions.get(self._package_key(package_path))
+        instruction_files = (
+            list(prepared_instructions)
+            if prepared_instructions is not None
+            else self.find_instruction_files(package_path, source_plan)
+        )
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
+        if prepared_instructions is None:
+            package_name = getattr(getattr(package_info, "package", None), "name", "")
+            prepared_instructions = {
+                source_file: self._prepare_instruction(
+                    source_file,
+                    force=force,
+                    diagnostics=diagnostics,
+                    package_name=package_name,
+                )
+                for source_file in instruction_files
+            }
 
         deploy_dir = target_root / mapping.subdir
         deploy_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = mapping.format_id
-
-        if fmt == "copilot_user_instructions":
-            return self._integrate_copilot_user_instructions(
-                instruction_files,
-                deploy_dir,
-                project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
-                pkg_source=getattr(getattr(package_info, "package", None), "source", None),
-            )
 
         # APM-owned rule dirs (.claude/rules, .cursor/rules, .windsurf/rules):
         # the deployed file is a format-transform of its source and the target
@@ -173,22 +408,42 @@ class InstructionIntegrator(BaseIntegrator):
         files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
+        plan_key = self._plan_key(
+            package_path,
+            project_root,
+            deploy_dir,
+            mapping.extension,
+            fmt,
+        )
+        rendered_rules = self._prepared_rule_plans.pop(plan_key, None)
+        if apm_owned_rule_dir:
+            # Direct integrator callers may bypass install-level preflight.
+            if rendered_rules is None:
+                rendered_rules = self._prepare_rule_plan(
+                    instruction_files,
+                    deploy_dir,
+                    mapping.extension,
+                    fmt,
+                    prepared_instructions,
+                )
+        else:
+            rendered_rules = {}
 
         for source_file in instruction_files:
             if apm_owned_rule_dir:
-                stem = source_file.name
-                if stem.endswith(".instructions.md"):
-                    stem = stem[: -len(".instructions.md")]
-                target_name = f"{stem}{mapping.extension}"
+                target_path, new_content, links_resolved = rendered_rules[source_file]
             else:
-                target_name = source_file.name
-
-            target_path = deploy_dir / target_name
-            # target_name is Path.name (no separators), so traversal via
-            # deploy_dir is impossible.  Validated against deploy_dir (not
-            # project_root) so user-scope targets whose root resolves
-            # outside the workspace still work correctly.
-            ensure_path_within(target_path, deploy_dir)
+                target_path = deploy_dir / source_file.name
+                # source_file.name has no separators, so traversal via
+                # deploy_dir is impossible. Validate against deploy_dir (not
+                # project_root) so user-scope targets outside the workspace work.
+                ensure_path_within(target_path, deploy_dir)
+                new_content, links_resolved = self._render_instruction(
+                    source_file,
+                    target_path,
+                    fmt,
+                    prepared=prepared_instructions[source_file],
+                )
 
             rel_path = portable_relpath(target_path, project_root)
 
@@ -206,9 +461,6 @@ class InstructionIntegrator(BaseIntegrator):
                 # transformed *output*: adopt when up-to-date (no churn), else
                 # (re)write. Always record the path so it stays managed on the
                 # next run.
-                new_content, links_resolved = self._render_instruction(
-                    source_file, target_path, fmt
-                )
                 # Compare the on-disk bytes against the exact bytes
                 # write_text_lf would emit (LF-normalized). A text-mode
                 # read_text() comparison would collapse CRLF->LF and wrongly
@@ -234,7 +486,14 @@ class InstructionIntegrator(BaseIntegrator):
                 continue
 
             skip, adopted = self._check_adopt_or_skip(
-                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+                target_path,
+                source_file,
+                rel_path,
+                managed_files,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=new_content,
             )
             if skip:
                 if adopted:
@@ -243,7 +502,7 @@ class InstructionIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            links_resolved = self.copy_instruction(source_file, target_path)
+            write_text_lf(target_path, new_content)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -269,28 +528,32 @@ class InstructionIntegrator(BaseIntegrator):
         if not mapping:
             return {"files_removed": 0, "errors": 0}
         effective_root = mapping.deploy_root or target.root_dir
-        if mapping.format_id == "copilot_user_instructions":
-            prefix = f"{effective_root}/copilot-instructions.md"
+        prefix = f"{effective_root}/{mapping.subdir}/"
+        legacy_dir = project_root / effective_root / mapping.subdir
+        if mapping.format_id == "cursor_rules":
+            legacy_pattern = "*.mdc"
+        elif mapping.format_id == "windsurf_rules":
+            # Do not use a broad legacy glob for Windsurf rules to avoid
+            # deleting user-authored .md files under .windsurf/rules/.
             legacy_pattern = None
-            legacy_dir = None
+        elif mapping.format_id == "claude_rules":
+            # Do not use a broad legacy glob for Claude rules to avoid
+            # deleting user-authored .md files under .claude/rules/.
+            legacy_pattern = None
+        elif mapping.format_id == "kiro_steering":
+            # Do not delete user-authored steering markdown under .kiro/steering/.
+            legacy_pattern = None
+        elif mapping.format_id == "github_instructions" and target.root_dir == target.user_root_dir:
+            # Copilot user scope only recently gained modular instructions
+            # (~/.copilot/instructions/**/*.instructions.md). A broad legacy
+            # glob there could delete user-authored instruction files for
+            # other tools sharing that directory tree, so skip it -- same
+            # precedent as Claude/Windsurf/Kiro above. Project scope
+            # (.github/instructions/) keeps the broad glob below since that
+            # directory has always been APM-managed.
+            legacy_pattern = None
         else:
-            prefix = f"{effective_root}/{mapping.subdir}/"
-            legacy_dir = project_root / effective_root / mapping.subdir
-            if mapping.format_id == "cursor_rules":
-                legacy_pattern = "*.mdc"
-            elif mapping.format_id == "windsurf_rules":
-                # Do not use a broad legacy glob for Windsurf rules to avoid
-                # deleting user-authored .md files under .windsurf/rules/.
-                legacy_pattern = None
-            elif mapping.format_id == "claude_rules":
-                # Do not use a broad legacy glob for Claude rules to avoid
-                # deleting user-authored .md files under .claude/rules/.
-                legacy_pattern = None
-            elif mapping.format_id == "kiro_steering":
-                # Do not delete user-authored steering markdown under .kiro/steering/.
-                legacy_pattern = None
-            else:
-                legacy_pattern = "*.instructions.md"
+            legacy_pattern = "*.instructions.md"
         return self.sync_remove_files(
             project_root,
             managed_files,
@@ -299,134 +562,6 @@ class InstructionIntegrator(BaseIntegrator):
             legacy_glob_pattern=legacy_pattern,
             targets=[target],
         )
-
-    # ------------------------------------------------------------------
-    # Copilot user-scope concat support
-    # ------------------------------------------------------------------
-
-    # Sentinel line written as the first line of every APM-managed
-    # copilot-instructions.md.  Its presence distinguishes the file from
-    # a user-authored one, enabling multi-package accumulation without
-    # collision false-positives.
-    _APM_COPILOT_HEADER: str = "<!-- apm-managed: copilot-instructions.md -->"
-
-    # Matches a single package's provenance-marked section.
-    _APM_SOURCE_RE: re.Pattern[str] = re.compile(
-        r"<!-- apm:source:(?P<source>[^>]*?) -->\n(?P<body>.*?)<!-- /apm:source -->",
-        re.DOTALL,
-    )
-
-    @staticmethod
-    def _strip_frontmatter(content: str) -> str:
-        """Strip YAML frontmatter from instruction content.
-
-        Returns only the body text following the closing ``---`` delimiter.
-        If no frontmatter is present, returns the content unchanged.
-        Handles both LF and CRLF line endings.
-        """
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            return content[fm_match.end() :]
-        return content
-
-    @classmethod
-    def _is_apm_managed_copilot(cls, content: str) -> bool:
-        """Return True if *content* starts with the APM managed-file sentinel."""
-        return content.startswith(cls._APM_COPILOT_HEADER)
-
-    @classmethod
-    def _build_copilot_section(cls, pkg_source: str, body: str) -> str:
-        """Wrap *body* in APM provenance markers for *pkg_source*."""
-        # Sanitize source so it cannot accidentally close the HTML comment.
-        safe_source = pkg_source.replace("-->", "__")
-        return f"<!-- apm:source:{safe_source} -->\n{body}\n<!-- /apm:source -->"
-
-    @classmethod
-    def _update_copilot_managed(cls, existing: str, pkg_source: str, section: str) -> str:
-        """Replace or append *section* in the APM-managed file content.
-
-        If a section for *pkg_source* already exists, it is replaced in-place
-        so that the file stays ordered and does not grow on re-install.
-        Otherwise the section is appended.
-        """
-        for m in cls._APM_SOURCE_RE.finditer(existing):
-            if m.group("source") == pkg_source.replace("-->", "__"):
-                return existing[: m.start()] + section + existing[m.end() :]
-        # Not yet present: append after stripping trailing newlines.
-        return existing.rstrip("\n") + "\n\n" + section + "\n"
-
-    def _integrate_copilot_user_instructions(
-        self,
-        instruction_files: list[Path],
-        deploy_dir: Path,
-        project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
-        pkg_source: str | None = None,
-    ) -> IntegrationResult:
-        """Concatenate all instruction files into ~/.copilot/copilot-instructions.md.
-
-        Copilot CLI at user scope reads a single file rather than individual
-        ``*.instructions.md`` files.  This method strips YAML frontmatter from
-        each source file, wraps the combined body in a per-package provenance
-        marker, and accumulates sections across packages in the same file so
-        that multi-package installs are fully represented.
-
-        File ownership logic:
-        - APM-managed (starts with ``_APM_COPILOT_HEADER``): always update --
-          either replace this package's existing section or append a new one.
-          This path is taken even when the file is not in *managed_files*,
-          allowing a second package in the same install session to contribute
-          without a false collision.
-        - In *managed_files* but no header (pre-provenance format): upgrade to
-          the sectioned format in-place.
-        - User-authored (no header, not in *managed_files*, not *force*):
-          collision -- skip and warn.
-        - *force* is True: overwrite any existing content.
-        """
-        target_path = deploy_dir / "copilot-instructions.md"
-        ensure_path_within(target_path, deploy_dir)
-        rel_path = portable_relpath(target_path, project_root)
-
-        bodies: list[str] = []
-        for source_file in instruction_files:
-            raw = source_file.read_text(encoding="utf-8")
-            body = self._strip_frontmatter(raw).strip()
-            if body:
-                bodies.append(body)
-
-        if not bodies:
-            return IntegrationResult(0, 0, 0, [])
-
-        deploy_dir.mkdir(parents=True, exist_ok=True)
-        combined_body = "\n\n".join(bodies)
-        section = self._build_copilot_section(pkg_source or "unknown", combined_body)
-
-        if target_path.exists():
-            existing = target_path.read_text(encoding="utf-8")
-            if self._is_apm_managed_copilot(existing):
-                # APM-managed: update or append this package's provenance section.
-                updated = self._update_copilot_managed(existing, pkg_source or "unknown", section)
-                write_text_lf(target_path, updated)
-                return IntegrationResult(1, 0, 0, [target_path])
-            norm_rel = rel_path.replace("\\", "/")
-            if norm_rel in (managed_files or set()) or force:
-                # Either was managed on a previous run (pre-provenance format)
-                # or caller explicitly requested overwrite.
-                new_content = self._APM_COPILOT_HEADER + "\n" + section + "\n"
-                write_text_lf(target_path, new_content)
-                return IntegrationResult(1, 0, 0, [target_path])
-            # User-authored file: emit collision warning and skip.
-            self.check_collision(
-                target_path, rel_path, managed_files, force, diagnostics=diagnostics
-            )
-            return IntegrationResult(0, 0, 1, [])
-
-        new_content = self._APM_COPILOT_HEADER + "\n" + section + "\n"
-        write_text_lf(target_path, new_content)
-        return IntegrationResult(1, 0, 0, [target_path])
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)
@@ -486,25 +621,14 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_cursor_rules(content: str) -> str:
         """Convert APM instruction content to Cursor Rules ``.mdc`` format.
 
-        Parses existing YAML frontmatter, maps ``applyTo`` → ``globs``,
-        extracts or generates a ``description``, and rewrites the
-        frontmatter in Cursor's expected format.
+        Map ``applyTo`` to one comma-joined ``globs`` scalar and preserve
+        or derive the description. Ordinary globs stay bare; unsafe
+        characters are escaped. Re-escape each segment before joining
+        to preserve APM's literal-comma and backslash boundaries.
         """
-        body = content
-        apply_to = ""
-        description = ""
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end() :]
-            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("description:"):
-                    description = line_stripped[len("description:") :].strip().strip("'\"")
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
+        description = str(metadata.get("description", "")).strip()
 
         # Generate description from first content sentence if missing
         if not description:
@@ -517,13 +641,11 @@ class InstructionIntegrator(BaseIntegrator):
         # Build Cursor Rules frontmatter
         parts = ["---"]
         if description:
-            parts.append(f"description: {description}")
+            parts.append(f"description: {yaml_plain_scalar(description)}")
         globs = parse_apply_to(apply_to)
-        if len(globs) == 1:
-            parts.append(f"globs: {yaml_double_quote(globs[0])}")
-        elif globs:
-            parts.append("globs:")
-            parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+        if globs:
+            joined = ", ".join(escape_apply_to_segment(g) for g in globs)
+            parts.append(f"globs: {yaml_globs_scalar(joined)}")
         parts.append("---")
 
         return "\n".join(parts) + "\n\n" + body.lstrip("\n")
@@ -584,21 +706,14 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_windsurf_rules(content: str) -> str:
         """Convert APM instruction content to Windsurf rules ``.md`` format.
 
-        Parses existing YAML frontmatter via ``yaml.safe_load``, maps
+        Parses existing YAML frontmatter through the canonical bounded loader, maps
         ``applyTo`` to Windsurf's ``trigger: glob`` + ``globs`` frontmatter.
         Instructions without ``applyTo`` become ``trigger: always_on`` rules.
 
         Ref: https://docs.windsurf.com/windsurf/cascade/memories
         """
-        body = content
-        apply_to = ""
-
-        # Parse existing frontmatter with the bounded loader so a hostile
-        # frontmatter block in an untrusted package cannot hang the parser.
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_match.group(1))
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
@@ -642,28 +757,10 @@ class InstructionIntegrator(BaseIntegrator):
         path-scoped guidance. APM's ``applyTo`` frontmatter is the source of
         truth for that scoping.
         """
-        from ..utils.yaml_io import load_yaml_str
-
-        body = content
-        globs = []
-
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception:
-                fm = {}
-            raw_apply_to = fm.get("applyTo", "")
-            if isinstance(raw_apply_to, list):
-                globs = [
-                    s
-                    for item in raw_apply_to
-                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
-                ]
-            else:
-                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
-                globs = parse_apply_to(safe_apply_to)
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
 
         parts = ["---"]
         if globs:
@@ -694,15 +791,8 @@ class InstructionIntegrator(BaseIntegrator):
 
         Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
         """
-        body = content
-        apply_to = ""
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end() :]
-            apply_to = InstructionIntegrator._normalize_frontmatter_apply_to(fm_block)
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
 
         # Build Claude rules frontmatter (only when path-scoped)
         globs = parse_apply_to(apply_to)
@@ -719,52 +809,30 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_antigravity_rules(content: str) -> str:
         """Convert APM instruction content to Antigravity CLI rules format.
 
-        Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
-        ``trigger: glob`` + ``globs`` frontmatter.
+        Parses existing YAML frontmatter and maps ``applyTo`` to
+        ``trigger: glob`` plus ONE double-quoted, comma-separated ``globs``
+        string (Antigravity rejects a YAML sequence). Each segment is
+        re-escaped before joining to preserve APM's literal-comma and
+        backslash boundaries. Instructions without ``applyTo`` become
+        ``trigger: always_on`` rules, since Antigravity discards rule files
+        lacking a valid ``trigger``.
+
+        Ref: https://antigravity.google/docs/rules
         """
-        from ..utils.yaml_io import load_yaml_str
+        metadata, body = InstructionIntegrator._parse_frontmatter(content)
+        apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
 
-        body = content
-        globs = []
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception as e:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Failed to parse instruction frontmatter YAML: %s", e
-                )
-                fm = {}
-            raw_apply_to = fm.get("applyTo", "")
-            if isinstance(raw_apply_to, list):
-                globs = [
-                    s
-                    for item in raw_apply_to
-                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
-                ]
-            else:
-                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
-                globs = parse_apply_to(safe_apply_to)
-
-        # Build Antigravity rules frontmatter
         parts = ["---"]
         if globs:
+            joined = ", ".join(escape_apply_to_segment(g) for g in globs)
             parts.append("trigger: glob")
-            if len(globs) == 1:
-                parts.append(f"globs: {yaml_double_quote(globs[0])}")
-            else:
-                parts.append("globs:")
-                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
-            parts.append("---")
-            return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
-
-        # No applyTo -> unconditional rule, return body without frontmatter
-        return body.lstrip("\r\n")
+            parts.append(f"globs: {yaml_double_quote(joined)}")
+        else:
+            parts.append("trigger: always_on")
+        parts.append("---")
+        return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.

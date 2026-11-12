@@ -14,9 +14,9 @@ This module collapses that work via a four-tier waterfall executed by
 * **L1 CommitsAPI** -- cheap ``GET /repos/.../commits/{ref}`` against the
   GitHub-family host_backend, with ``Accept: application/vnd.github.sha``
   + optional ``HttpCache`` ETag. ~1 RTT.
-* **L2 BareRevParse** -- if the cross-run :class:`GitCache` already has a
-  bare clone of the URL, ``git rev-parse refs/heads/REF`` against it.
-  Zero network. Catches the second-run case.
+* **L2 BareRevParse** -- read a recorded current-remote observation first;
+  if absent, use ``git rev-parse`` against an existing cached bare clone.
+  Zero network. Catches the second-run case without reviving superseded refs.
 * **L3 LegacyClone** -- delegates to the legacy
   :meth:`GitReferenceResolver.resolve` (shallow clone + introspect).
   Behaviourally identical to the pre-#1369 path; always succeeds or
@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from ..cache.git_cache import GitCache
     from ..deps.git_reference_resolver import GitReferenceResolver
     from ..deps.github_downloader import GitHubPackageDownloader
+    from ..deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class RefFreshnessPolicy(Enum):
     """Canonical authority for which resolver caches may establish a ref."""
 
     REPRODUCIBLE = "reproducible"
+    LOCKED_OR_CURRENT = "locked-or-current"
     CURRENT_REMOTE = "current-remote"
 
     @classmethod
@@ -83,12 +85,12 @@ class RefFreshnessPolicy(Enum):
         """Map install command intent to one resolver freshness policy."""
         if update_refs or refresh:
             return cls.CURRENT_REMOTE
-        return cls.REPRODUCIBLE
+        return cls.LOCKED_OR_CURRENT
 
     @property
     def allows_lock_seed(self) -> bool:
-        """Return whether a lockfile SHA may seed the per-run L0 cache."""
-        return self is self.REPRODUCIBLE
+        """Return whether a matching dependency may replay a lockfile SHA."""
+        return self is not self.CURRENT_REMOTE
 
     @property
     def allows_bare_cache(self) -> bool:
@@ -97,7 +99,7 @@ class RefFreshnessPolicy(Enum):
 
     @property
     def requires_remote(self) -> bool:
-        """Return whether the ref must be established from a remote tier."""
+        """Return whether even locked refs must be refreshed from upstream."""
         return self is self.CURRENT_REMOTE
 
 
@@ -107,6 +109,7 @@ class RefFreshnessContext(Protocol):
     ref_freshness_policy: RefFreshnessPolicy | None
     update_refs: bool
     refresh: bool
+    existing_lockfile: LockFile | None
 
 
 def ref_freshness_policy_for_install(
@@ -118,6 +121,8 @@ def ref_freshness_policy_for_install(
         if not isinstance(configured, RefFreshnessPolicy):
             raise TypeError("ref_freshness_policy must be a RefFreshnessPolicy")
         return configured
+    if context.existing_lockfile is None:
+        return RefFreshnessPolicy.CURRENT_REMOTE
     return RefFreshnessPolicy.for_install_intent(
         update_refs=context.update_refs,
         refresh=context.refresh,
@@ -266,10 +271,11 @@ class L1CommitsAPI:
 
 
 class L2BareRevParse:
-    """Resolve by ``git rev-parse`` against an already-cached bare clone.
+    """Resolve from a remote-observation receipt, then a cached bare clone.
 
-    No network. Hits only when :class:`GitCache` has a bare clone of the
-    URL from a previous run. Cheap follow-up tier after L0/L1 miss --
+    No network. A corrupt receipt misses rather than reviving an older bare
+    ref. Without a receipt, a cached bare clone supplies the legacy fallback.
+    Cheap follow-up tier after L0/L1 miss --
     catches repeat reproducible installs where the bare exists but the cheap
     API is unavailable (e.g. ADO). Current-state commands exclude this tier.
     """
@@ -284,6 +290,10 @@ class L2BareRevParse:
             return None
         if _SHA_RE.match(ref):
             return ref.lower()
+
+        recorded, sha = self._git_cache.read_resolved_ref(dep_ref.to_github_url(), ref)
+        if recorded:
+            return sha
 
         try:
             from ..cache.url_normalize import cache_shard_key
@@ -325,7 +335,7 @@ class L2BareRevParse:
         for candidate in candidates:
             try:
                 result = subprocess.run(
-                    [git_exe, "-C", str(bare_dir), "rev-parse", "--verify", candidate],
+                    [git_exe, "--git-dir", str(bare_dir), "rev-parse", "--verify", candidate],
                     capture_output=True,
                     text=True,
                     timeout=5,
@@ -410,8 +420,10 @@ class TieredRefResolver:
         self._cache = cache
         self._legacy = legacy
         self.freshness_policy = freshness_policy
+        self._lock_seeds: dict[tuple[str, str, tuple[str, str], str], str] = {}
         self._coalesce: dict[tuple[str, str], threading.Event] = {}
         self._coalesce_lock = threading.Lock()
+        self._remote_resolutions: dict[tuple[str, str], str] = {}
         # Diagnostics: counts per tier across the run. Read by tests.
         self.stats: dict[str, int] = {tier.name: 0 for tier in tiers}
         self.stats["coalesced"] = 0
@@ -419,8 +431,14 @@ class TieredRefResolver:
         # so verbose tier stats do not inflate the commits-API count.
         self.stats["sha_passthrough"] = 0
 
+    def remotely_resolved(self, dep_ref: DependencyReference, sha: str) -> bool:
+        """Authorize persistence only for a current-remote tier's exact observation."""
+        key = (_repository_cache_identity(dep_ref), dep_ref.reference or "")
+        with self._coalesce_lock:
+            return self._remote_resolutions.get(key) == sha
+
     def seed(self, repo_ref: str | DependencyReference, ref: str, sha: str) -> bool:
-        """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
+        """Record a dependency-scoped lockfile ``ref -> sha``.
 
         Used by the resolve phase to inject a lockfile-recorded commit
         (``resolved_commit``) for a named ``resolved_ref`` -- a branch OR a
@@ -431,15 +449,47 @@ class TieredRefResolver:
         unless ``sha`` is a full 40-char hex commit and ``ref`` is
         non-empty. Returns ``True`` when a value was stored.
 
-        Safe because the seeded SHA is the lockfile's own trust anchor --
-        the same value ``resolve()`` would otherwise fetch from the network
-        and cache. No behavior change beyond eliminating the round-trip.
+        Lock seeds must not enter the repository-wide fresh-result cache:
+        a sibling virtual package without a matching lock entry must still
+        establish the current upstream ref. Historical provider metadata
+        that can no longer be classified is rejected, not replayed.
         """
-        if not ref or not sha or not _SHA_RE.match(sha):
+        if (
+            not self.freshness_policy.allows_lock_seed
+            or not ref
+            or not sha
+            or not _SHA_RE.match(sha)
+        ):
             return False
         dep_ref = self._normalize(repo_ref)
-        self._cache.put(_repository_cache_identity(dep_ref), ref, sha.lower())
+        # Only historical admission is recoverable; current declarations
+        # still use strict classification during parsing and resolution.
+        try:
+            key = self._lock_seed_key(dep_ref, ref)
+        except (ValueError, RuntimeError) as exc:
+            _log.debug(
+                "Skipping lock seed: historical provider identity is unclassifiable (%s)",
+                type(exc).__name__,
+            )
+            return False
+        with self._coalesce_lock:
+            self._lock_seeds[key] = sha.lower()
         return True
+
+    @staticmethod
+    def _lock_seed_key(
+        dep_ref: DependencyReference, ref: str
+    ) -> tuple[str, str, tuple[str, str], str]:
+        from ..core.host_providers import effective_host_provider_identity
+
+        return (
+            dep_ref.get_unique_key(),
+            _repository_cache_identity(dep_ref),
+            effective_host_provider_identity(
+                dep_ref.host or default_host(), host_type=dep_ref.host_type
+            ),
+            ref,
+        )
 
     def resolve(self, repo_ref: str | DependencyReference) -> ResolvedReference:
         """Resolve a git reference, dispatching through the tier waterfall.
@@ -464,6 +514,14 @@ class TieredRefResolver:
         if _SHA_RE.match(ref):
             self.stats["sha_passthrough"] = self.stats.get("sha_passthrough", 0) + 1
             return self._build_result(dep_ref, ref, ref.lower(), tier_name="sha_passthrough")
+
+        if self._lock_seeds:
+            lock_key = self._lock_seed_key(dep_ref, ref)
+            with self._coalesce_lock:
+                locked = self._lock_seeds.get(lock_key)
+            if locked is not None:
+                self.stats["per_run_cache"] += 1
+                return self._build_result(dep_ref, ref, locked, tier_name="lock_seed")
 
         key = (_repository_cache_identity(dep_ref), ref)
 
@@ -518,6 +576,13 @@ class TieredRefResolver:
             if sha and _SHA_RE.match(sha):
                 self.stats[tier.name] = self.stats.get(tier.name, 0) + 1
                 self._last_tier = tier.name
+                if self.freshness_policy.requires_remote and tier.name in (
+                    "commits_api",
+                    "legacy_clone",
+                ):
+                    key = (_repository_cache_identity(dep_ref), ref)
+                    with self._coalesce_lock:
+                        self._remote_resolutions[key] = sha.lower()
                 return sha.lower()
         return None
 
@@ -575,9 +640,9 @@ def build_tiered_ref_resolver(
 ) -> TieredRefResolver | None:
     """Construct the production tier stack, or ``None`` if disabled.
 
-    The default is deliberately ``REPRODUCIBLE`` so ordinary installs retain
-    lockfile and local-cache behavior. Callers that report or change current
-    state must opt into ``CURRENT_REMOTE`` explicitly.
+    The compatibility default permits bare-cache answers. Install callers use
+    ``LOCKED_OR_CURRENT`` to replay matching lock seeds while resolving every
+    unseeded ref upstream. Commands changing current state use ``CURRENT_REMOTE``.
 
     Returns ``None`` when ``APM_TIERED_RESOLVER`` is disabled so callers
     can opt out by simply leaving ``downloader._tiered_resolver = None``;

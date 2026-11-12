@@ -66,7 +66,7 @@ def _seed_signal(project: Path, target: str) -> None:
 
 def _copilot_mcp_path(project: Path) -> Path:
     """Project-scoped copilot MCP config path."""
-    return project / ".vscode" / "mcp.json"
+    return project / ".github" / "mcp.json"
 
 
 def _cursor_mcp_path(project: Path) -> Path:
@@ -112,9 +112,8 @@ class TestMCPTargetsGatingE2E:
         pre-fix, foreign-signal directories silently received MCP writes
         despite the explicit whitelist.
 
-        The copilot adapter writes to user-scope ``~/.copilot/`` (not the
-        project), so we monkeypatch ``HOME`` to a tmp path to keep the
-        test hermetic.  The load-bearing assertions are:
+        The Copilot CLI adapter writes `.github/mcp.json` at project scope.
+        The load-bearing assertions are:
 
         * ``.cursor/mcp.json`` is NOT written
         * ``.codex/config.toml`` is NOT written
@@ -139,7 +138,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Targeting declared target from apm.yml: vscode" in captured.out
+        assert "Targeting declared target from apm.yml: copilot" in captured.out
 
         assert not _cursor_mcp_path(project).exists(), (
             "cursor MCP config MUST NOT be written when cursor is absent "

@@ -85,6 +85,14 @@ describe("getPrs", () => {
   });
 });
 
+describe("refreshData", () => {
+  it("calls POST /refresh-data", async () => {
+    setup();
+    await api.refreshData();
+    assertJsonPost(fetchCalls[0], "/refresh-data", {});
+  });
+});
+
 describe("getIssueDetail", () => {
   it("calls GET /api/issue/{number}", async () => {
     setup();

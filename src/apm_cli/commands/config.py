@@ -10,7 +10,9 @@ import click
 
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle
 from ..version import get_version
+from . import self_update as self_update_command
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
 
 # Restore builtin since a subcommand is named ``set``
@@ -26,6 +28,7 @@ _CONFIG_KEY_DISPLAY_NAMES = {
     "copilot_cowork_skills_dir": "copilot-cowork-skills-dir",
     "allow_protocol_fallback": "allow-protocol-fallback",
     "prefer_ssh": "prefer-ssh",
+    "github_auth_first": "github-auth-first",
 }
 
 
@@ -48,23 +51,35 @@ def _parse_bool_value(value: str) -> bool:
 
 def _get_config_setters():
     """Return config setters keyed by CLI option name."""
-    from ..config import set_allow_protocol_fallback, set_auto_integrate, set_prefer_ssh
+    from ..config import (
+        set_allow_protocol_fallback,
+        set_auto_integrate,
+        set_github_auth_first,
+        set_prefer_ssh,
+    )
 
     return {
         "auto-integrate": (set_auto_integrate, "Auto-integration"),
         "allow-protocol-fallback": (set_allow_protocol_fallback, "Protocol fallback"),
         "prefer-ssh": (set_prefer_ssh, "SSH transport preference"),
+        "github-auth-first": (set_github_auth_first, "GitHub auth-first"),
     }
 
 
 def _get_config_getters():
     """Return config getters keyed by CLI option name."""
-    from ..config import get_allow_protocol_fallback, get_auto_integrate, get_prefer_ssh
+    from ..config import (
+        get_allow_protocol_fallback,
+        get_auto_integrate,
+        get_github_auth_first,
+        get_prefer_ssh,
+    )
 
     return {
         "auto-integrate": get_auto_integrate,
         "allow-protocol-fallback": get_allow_protocol_fallback,
         "prefer-ssh": get_prefer_ssh,
+        "github-auth-first": get_github_auth_first,
     }
 
 
@@ -81,6 +96,7 @@ def _valid_config_keys() -> str:
         "temp-dir",
         "allow-protocol-fallback",
         "prefer-ssh",
+        "github-auth-first",
     ]
     if is_enabled("external_scanners"):
         keys.append("audit-on-install")
@@ -100,6 +116,7 @@ def _show_all_user_config(logger: CommandLogger) -> None:
     from ..config import (
         get_allow_protocol_fallback,
         get_auto_integrate,
+        get_github_auth_first,
         get_install_target,
         get_mcp_registry_url,
         get_prefer_ssh,
@@ -128,6 +145,8 @@ def _show_all_user_config(logger: CommandLogger) -> None:
         click.echo("  allow-protocol-fallback: true")
     if get_prefer_ssh():
         click.echo("  prefer-ssh: true")
+    if get_github_auth_first():
+        click.echo("  github-auth-first: true")
 
     from ..core.experimental import is_enabled
 
@@ -247,6 +266,7 @@ def config(ctx):
             config_table.add_row("Global", "APM CLI Version", get_version())
 
             from ..config import get_allow_protocol_fallback as _get_apf
+            from ..config import get_github_auth_first as _get_gaf
             from ..config import get_prefer_ssh as _get_prefer_ssh_cfg
             from ..config import get_self_update_channel as _get_self_update_channel_cfg
             from ..config import get_self_update_install_dir as _get_self_update_install_dir_cfg
@@ -270,10 +290,13 @@ def config(ctx):
             # false-default rows add noise for users who never configured them.
             _apf = _get_apf()
             _prefer_ssh = _get_prefer_ssh_cfg()
+            _gaf = _get_gaf()
             if _apf:
                 config_table.add_row("", "Allow Protocol Fallback", "true")
             if _prefer_ssh:
                 config_table.add_row("", "Prefer SSH Transport", "true")
+            if _gaf:
+                config_table.add_row("", "GitHub Auth-first", "true")
 
             from ..core.experimental import is_enabled as _is_enabled
 
@@ -309,6 +332,7 @@ def config(ctx):
             click.echo(f"  APM CLI Version: {get_version()}")
 
             from ..config import get_allow_protocol_fallback as _get_apf_fb
+            from ..config import get_github_auth_first as _get_gaf_fb
             from ..config import get_prefer_ssh as _get_prefer_ssh_fb
             from ..config import get_self_update_channel as _get_self_update_channel_fb
             from ..config import get_self_update_install_dir as _get_self_update_install_dir_fb
@@ -326,6 +350,7 @@ def config(ctx):
 
             click.echo(f"  allow-protocol-fallback: {str(_get_apf_fb()).lower()}")
             click.echo(f"  prefer-ssh: {str(_get_prefer_ssh_fb()).lower()}")
+            click.echo(f"  github-auth-first: {str(_get_gaf_fb()).lower()}")
 
             from ..core.experimental import is_enabled as _is_enabled_fb
 
@@ -342,6 +367,7 @@ def config(ctx):
 @config.command(help="Set a configuration value")
 @click.argument("key")
 @click.argument("value")
+@serialized_lifecycle
 def set(key, value):  # noqa: F811
     """Set a configuration value.
 
@@ -471,7 +497,13 @@ def set(key, value):  # noqa: F811
 
         try:
             install_dir = set_self_update_install_dir(value)
-            logger.success(f"Self-update install directory saved: {install_dir}")
+            if self_update_command._is_windows_platform():
+                logger.success(f"Self-update install directory saved: {install_dir}")
+            else:
+                logger.success(
+                    f"Self-update launcher directory preference saved: {install_dir} "
+                    "(must match the existing Unix installation)"
+                )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -492,7 +524,12 @@ def set(key, value):  # noqa: F811
 
         try:
             set_mcp_registry_url(value)
-            logger.success(f"MCP registry URL set to: {get_mcp_registry_url()}")
+            configured_url = get_mcp_registry_url()
+            logger.success(f"MCP registry URL set to: {configured_url}")
+            if configured_url and configured_url.startswith("http://"):
+                logger.info(
+                    "Set MCP_REGISTRY_ALLOW_HTTP=1 when using this trusted plaintext endpoint."
+                )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -629,7 +666,13 @@ def get(key):
 
             value = get_self_update_install_dir()
             if value is None:
-                click.echo("self-update.install-dir: Not set (using installer default)")
+                if self_update_command._is_windows_platform():
+                    click.echo("self-update.install-dir: Not set (using installer default)")
+                else:
+                    click.echo(
+                        "self-update.install-dir: Not set "
+                        "(preserving the detected Unix installation)"
+                    )
             else:
                 click.echo(f"self-update.install-dir: {value}")
             return
@@ -698,6 +741,7 @@ def list_config():
 
 @config.command(help="Unset a configuration value")
 @click.argument("key")
+@serialized_lifecycle
 def unset(key):
     """Unset (remove) a configuration value.
 
@@ -758,7 +802,13 @@ def unset(key):
         from ..config import unset_self_update_install_dir
 
         unset_self_update_install_dir()
-        logger.success("Self-update install directory removed (will use installer default)")
+        if self_update_command._is_windows_platform():
+            logger.success("Self-update install directory removed (will use installer default)")
+        else:
+            logger.success(
+                "Self-update launcher directory preference removed "
+                "(will preserve the detected Unix installation)"
+            )
         return
 
     if key == "mcp-registry-url":
@@ -802,6 +852,13 @@ def unset(key):
 
         unset_prefer_ssh()
         logger.success("SSH transport preference removed (will use env var or default)")
+        return
+
+    if key == "github-auth-first":
+        from ..config import unset_github_auth_first
+
+        unset_github_auth_first()
+        logger.success("GitHub auth-first preference removed (will use env var or default)")
         return
 
     if key == "copilot-cowork-skills-dir":

@@ -137,7 +137,13 @@ reported:
 | `unintegrated` | A `.apm/` source exists, but its deployed counterpart is missing. Fix: `apm install`. |
 | `modified` | A deployed file's content differs from what install would produce. Fix: revert the hand-edit, or move it into source. |
 | `orphaned` | A deployed file exists with no current source. Fix: `apm install` (orphan cleanup runs automatically). |
-| `unrecorded` | Install replay produces the same normalized bytes as the project, but no exact or directory `deployed_files` claim covers the path. Shared merge-hook targets and sidecars are exempt; differing bytes report `modified`. Fix: `apm install`, then commit the regenerated `apm.lock.yaml`. |
+| `unrecorded` | Install replay produces the same normalized bytes as the project, but no exact or directory `deployed_files` claim covers the path. Shared merge-hook configs compare only APM-owned entries, so user hooks do not create drift; the APM-owned sidecar remains byte-for-byte checked. Fix: `apm install`, then commit the regenerated `apm.lock.yaml`. |
+
+When your project has `.apm/` content, install does not promote a sibling
+`skills/<name>/SKILL.md` at the project root into a project-local skill. Audit
+replays the same interpretation instead of reporting that skill as `unintegrated`.
+Other [source layouts](../../producer/pack-a-bundle/#source-layout-and-install-time-discovery)
+and dependency skill bundles keep their existing discovery behavior.
 
 Bare `apm audit` keeps the replay cache-only: it does no network I/O and
 does not write to your project. If the cache is missing the entries the

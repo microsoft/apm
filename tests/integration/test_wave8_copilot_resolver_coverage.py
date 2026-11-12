@@ -156,13 +156,12 @@ class TestStringifyEnvLiteral:
 class TestCopilotConfigPaths:
     """CopilotClientAdapter config path resolution."""
 
-    def test_get_config_path(self) -> None:
+    def test_get_config_path(self, tmp_path: Path) -> None:
         from apm_cli.adapters.client.copilot import CopilotClientAdapter
 
-        adapter = CopilotClientAdapter()
+        adapter = CopilotClientAdapter(project_root=tmp_path)
         path = adapter.get_config_path()
-        assert path.endswith("mcp-config.json")
-        assert ".copilot" in path
+        assert Path(path) == tmp_path / ".github" / "mcp.json"
 
     def test_get_current_config_missing_file(self, tmp_path: Path) -> None:
         from apm_cli.adapters.client.copilot import CopilotClientAdapter

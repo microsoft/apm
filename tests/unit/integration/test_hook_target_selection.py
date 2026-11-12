@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -16,12 +16,12 @@ from apm_cli.utils.diagnostics import DiagnosticCollector
 
 class _NoopSkillIntegrator:
     def integrate_package_skill(self, package_info, project_root: Path, **kwargs):
-        return SimpleNamespace(
-            target_paths=[],
+        return SkillIntegrationResult(
             skill_created=False,
-            sub_skills_promoted=0,
-            bin_deployed=0,
-            bin_skipped_reason="",
+            skill_updated=False,
+            skill_skipped=True,
+            skill_path=None,
+            references_copied=0,
         )
 
 

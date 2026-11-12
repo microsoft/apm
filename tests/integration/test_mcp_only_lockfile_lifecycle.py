@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
@@ -142,6 +143,78 @@ def test_mcp_only_install_audit_and_repeat_are_byte_identical(
     repeated = _snapshot(project)
     _assert_same_state(first, repeated)
     assert_unchanged(first_cache, ArtifactSnapshot.capture(isolated.cache_root))
+
+
+@pytest.mark.parametrize("with_skill", (False, True), ids=("mcp-only", "mcp-and-skill"))
+def test_uninstall_preserves_unmanaged_skills(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    with_skill: bool,
+) -> None:
+    """Uninstall preserves personal skills while removing owned resources (#2946)."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "unmanaged-skills", base_env=dict(os.environ)
+    )
+    environment = isolated.subprocess_env()
+    project = LocalPackageFactory(isolated.work_root).create(
+        "consumer", targets=("claude", "kiro", "codex")
+    )
+    packages = LocalPackageFactory(isolated.package_root)
+    package = packages.create("mcp-package", mcp_dependencies=(_MCP_DEPENDENCY,))
+    if with_skill:
+        packages.add_skill(
+            package,
+            "owned-skill",
+            "---\nname: owned-skill\ndescription: APM-managed skill.\n---\nOwned skill.\n",
+        )
+    skill_roots = [project.root / target / "skills" for target in (".claude", ".kiro", ".agents")]
+    for skill_root in skill_roots:
+        personal = skill_root / "personal"
+        personal.mkdir(parents=True)
+        (personal / "SKILL.md").write_text(
+            "---\nname: personal\ndescription: Personal unmanaged skill.\n---\nPreserve me.\n",
+            encoding="utf-8",
+        )
+        (personal / "reference.txt").write_text("Personal reference material.\n", encoding="utf-8")
+    before = [ArtifactSnapshot.capture(root) for root in skill_roots]
+    personal_before = [ArtifactSnapshot.capture(root / "personal") for root in skill_roots]
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=60)
+
+    installed = runner.run(
+        ("install", str(package.root), "--target", "claude,kiro,codex", "--no-policy"),
+        scenario_id="unmanaged-skills-install-mcp-only",
+        cwd=project.root,
+        env=environment,
+    )
+    _assert_success(installed)
+    lockfile = LockFile.read(project.root / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.dependencies
+    deployed_files = {path for dep in lockfile.dependencies.values() for path in dep.deployed_files}
+    assert bool(deployed_files) == with_skill
+    for path in deployed_files:
+        assert (project.root / path).exists()
+    assert lockfile.mcp_servers
+    mcp_config = project.root / ".mcp.json"
+    assert "fixture-mcp" in json.loads(mcp_config.read_text(encoding="utf-8"))["mcpServers"]
+    for expected in personal_before:
+        assert_unchanged(expected, ArtifactSnapshot.capture(expected.root))
+
+    removed = runner.run(
+        ("uninstall", str(package.root)),
+        scenario_id="unmanaged-skills-uninstall-mcp-only",
+        cwd=project.root,
+        env=environment,
+    )
+    _assert_success(removed)
+    for expected, root in zip(before, skill_roots, strict=True):
+        assert_unchanged(expected, ArtifactSnapshot.capture(root))
+    assert not (project.root / "apm.lock.yaml").exists()
+    assert not (project.root / "apm_modules" / "_local" / package.name).exists()
+    assert not load_yaml(project.manifest_path).get("dependencies", {}).get("apm", [])
+    assert "fixture-mcp" not in json.loads(mcp_config.read_text(encoding="utf-8"))["mcpServers"]
+    for path in deployed_files:
+        assert not (project.root / path).exists()
 
 
 @pytest.mark.parametrize(

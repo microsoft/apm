@@ -33,6 +33,16 @@ def _clear_binary_resolution_cache() -> None:
     integration_conftest._resolve_apm_binary.cache_clear()
 
 
+def test_engine_command_is_explicitly_independent_of_packaged_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boundary-fault contracts use the installed engine, never a frozen fallback."""
+    monkeypatch.setenv("APM_BINARY_PATH", "/deliberately/not/an/engine")
+    command = integration_conftest.apm_engine_command.__wrapped__()
+    assert command[0] == sys.executable
+    assert command[1:] == ("-m", "apm_cli.cli")
+
+
 def test_explicit_binary_path_is_authoritative(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
@@ -196,6 +197,40 @@ class TestCIOutputFormats:
         data = json.loads(result.stdout)
         assert data["version"] == "2.1.0"
         assert "runs" in data
+
+    @pytest.mark.parametrize("output_format", ("json", "sarif"))
+    def test_native_drift_boundary_remains_structured(
+        self,
+        runner,
+        tmp_path,
+        output_format,
+    ):
+        _setup_clean_project(tmp_path)
+        error = AgentPluginDeploymentBoundaryError(
+            "Native Agent Plugin components are not enabled yet"
+        )
+        with (
+            patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path),
+            patch("apm_cli.install.drift.run_replay", side_effect=error),
+        ):
+            result = runner.invoke(
+                audit,
+                ["--ci", "--no-policy", "-f", output_format],
+            )
+
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        if output_format == "json":
+            drift = next(check for check in payload["checks"] if check["name"] == "drift")
+            assert drift["passed"] is False
+            assert "drift replay blocked" in drift["message"]
+            assert drift["details"] == [str(error)]
+        else:
+            drift = next(
+                item for item in payload["runs"][0]["results"] if item["ruleId"] == "drift"
+            )
+            assert drift["level"] == "error"
+            assert str(error) in drift["message"]["text"]
 
     def test_json_output_with_failures(self, runner, tmp_path):
         _setup_failing_project(tmp_path)

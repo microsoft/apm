@@ -1,11 +1,13 @@
 """Unit tests for is_ado_auth_failure_signal predicate.
 
 The predicate is the single source of truth for the ADO auth-failure
-signal set used to gate PAT->bearer fallback. Tests assert all five
-signals (401, 403, authentication failed, unauthorized, could not read
-username) match case-insensitively, and that None/empty/non-matching
-inputs return False. Drift in this set caused #1212.
+signal set used to gate PAT->bearer fallback. Tests assert phrase
+signals and anchored HTTP 401/403 match case-insensitively, and that
+None/empty/non-matching inputs return False. Drift in this set caused
+#1212.
 """
+
+import subprocess
 
 import pytest
 
@@ -65,3 +67,25 @@ class TestAdoAuthFailureSignal:
             "fatal: Authentication failed for 'https://dev.azure.com/org/proj'\n"
         )
         assert is_ado_auth_failure_signal(blob) is True
+
+    @pytest.mark.parametrize(
+        "stderr_text",
+        [
+            "remote: TF401019: The Git repository does not exist",
+            "TF401027: You need the Git 'GenericContribute' permission",
+            "VS403403: The item does not exist",
+        ],
+    )
+    def test_ado_work_item_codes_are_not_http_auth(self, stderr_text: str) -> None:
+        assert is_ado_auth_failure_signal(stderr_text) is False
+
+    def test_flattens_called_process_error_stderr_on_cause(self) -> None:
+        inner = subprocess.CalledProcessError(
+            128,
+            ["git", "clone"],
+            stderr=b"fatal: unable to access: The requested URL returned error: 401",
+        )
+        wrapped = RuntimeError("git clone failed")
+        wrapped.__cause__ = inner
+        assert is_ado_auth_failure_signal(wrapped) is True
+        assert is_ado_auth_failure_signal(str(wrapped)) is False

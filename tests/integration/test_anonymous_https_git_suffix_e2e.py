@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 from urllib.parse import urlparse
 
 import pytest
@@ -124,15 +125,20 @@ def test_generic_anonymous_https_clone_url_keeps_git_suffix_end_to_end(
         (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
         return _FakeRepo()
 
-    monkeypatch.setattr("apm_cli.deps.github_downloader.Repo.clone_from", fake_clone_from)
     monkeypatch.setattr(
         GitHubPackageDownloader,
         "resolve_git_reference",
         lambda self, repo_ref: _resolved_main(),
     )
 
+    repo_cls = MagicMock()
+    repo_cls.clone_from.side_effect = fake_clone_from
+    monkeypatch.setattr("apm_cli.deps.github_downloader.Repo", repo_cls)
     downloader = GitHubPackageDownloader()
-    result = downloader.download_package(dep_ref, tmp_path / "apm_modules" / "owner" / "repo")
+    result = downloader.download_package(
+        dep_ref,
+        tmp_path / "apm_modules" / "owner" / "repo",
+    )
 
     clone_url = captured["url"]
     assert isinstance(clone_url, str)

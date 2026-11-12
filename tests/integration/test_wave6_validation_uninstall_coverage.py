@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from apm_cli.deps.lockfile import LockedDependency
+
 # ---------------------------------------------------------------------------
 # install/validation.py -- TLS helpers
 # ---------------------------------------------------------------------------
@@ -75,7 +77,11 @@ class TestTLSHelpers:
         logger = MagicMock()
         _log_tls_failure("github.com", RuntimeError("ssl err"), None, logger)
         logger.warning.assert_called_once()
-        assert "TLS" in logger.warning.call_args[0][0]
+        guidance = logger.warning.call_args[0][0]
+        assert "TLS" in guidance
+        assert "APM_EXTRA_CA_BUNDLE" in guidance
+        assert "retaining public trust" in guidance
+        assert "REQUESTS_CA_BUNDLE only to replace" in guidance
 
     def test_log_tls_failure_verbose(self) -> None:
         from apm_cli.install.validation import _log_tls_failure
@@ -125,7 +131,7 @@ class TestLocalPathFailureReason:
         ref.local_path = str(f)
         result = _local_path_failure_reason(ref)
         assert result is not None
-        assert "not a directory" in result
+        assert "Unsupported single-file dependency" in result
 
     def test_dir_without_markers(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason
@@ -282,14 +288,10 @@ class TestUninstallEngineHelpers:
     def test_build_children_index_with_deps(self) -> None:
         from apm_cli.commands.uninstall.engine import _build_children_index
 
-        dep1 = MagicMock()
-        dep1.resolved_by = "org/parent"
-        dep2 = MagicMock()
-        dep2.resolved_by = "org/parent"
-        dep3 = MagicMock()
-        dep3.resolved_by = "other/pkg"
-        dep4 = MagicMock()
-        dep4.resolved_by = None
+        dep1 = LockedDependency(resolved_by="org/parent", repo_url="owner/dep1")
+        dep2 = LockedDependency(resolved_by="org/parent", repo_url="owner/dep2")
+        dep3 = LockedDependency(resolved_by="other/pkg", repo_url="owner/dep3")
+        dep4 = LockedDependency(resolved_by=None, repo_url="owner/dep4")
         lockfile = MagicMock()
         lockfile.get_package_dependencies.return_value = [dep1, dep2, dep3, dep4]
         result = _build_children_index(lockfile)

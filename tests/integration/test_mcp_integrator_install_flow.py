@@ -513,10 +513,13 @@ class TestRemoveStaleOpencode:
 
 class TestRemoveStaleClaudeProject:
     def test_removes_from_claude_mcp_json(self, tmp_path):
+        from tests.utils.managed_mcp import install_managed_mcp
+
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
-        config = {"mcpServers": {"stale-srv": {}, "keep-srv": {}}}
+        config = {"mcpServers": {"keep-srv": {}}}
         (tmp_path / ".mcp.json").write_text(json.dumps(config), encoding="utf-8")
+        stored, hashes = install_managed_mcp(tmp_path, "claude", "stale-srv")
 
         logger = MagicMock()
         MCPIntegrator.remove_stale(
@@ -524,11 +527,13 @@ class TestRemoveStaleClaudeProject:
             runtime="claude",
             project_root=tmp_path,
             logger=logger,
+            stored_configs=stored,
+            native_hashes=hashes,
         )
 
         data = json.loads((tmp_path / ".mcp.json").read_text())
         assert "stale-srv" not in data["mcpServers"]
-        assert "keep-srv" in data["mcpServers"]
+        assert data["mcpServers"] == {"keep-srv": {}}
 
     def test_no_mcp_json_is_noop(self, tmp_path):
         MCPIntegrator.remove_stale(
