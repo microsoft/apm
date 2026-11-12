@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.github_host import has_parser_dependent_url_chars
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
 
 # Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
@@ -373,6 +374,12 @@ class MCPDependency:
                     raise ValueError(
                         f"Invalid header '{k_str}={v_str}': control characters "
                         f"(CR/LF) not allowed in keys or values"
+            if has_parser_dependent_url_chars(self.url):
+                raise ValueError(
+                    f"Invalid MCP url {self.url!r}: backslashes, whitespace and "
+                    f"control characters are not allowed. Use a plain "
+                    f"http:// or https:// URL."
+                )
                     )
         if self.command is not None:
             if not isinstance(self.command, str):

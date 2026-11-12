@@ -569,10 +569,14 @@ class MCPClientAdapter(ABC):
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
+        payload = json.dumps(config, indent=2) + ("
+" if self.json_config_trailing_newline else "")
         if shared:
             atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
             return
+        if config_path.is_file():
+            # Tighten first: the atomic write keeps an existing file's mode.
+            os.chmod(config_path, 0o600)
         atomic_write_text(config_path, payload, new_file_mode=0o600)
         os.chmod(config_path, 0o600)
 
