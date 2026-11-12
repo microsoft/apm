@@ -22,7 +22,10 @@ import yaml
 from ..core.deployment_state import DeploymentLedger
 from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
-from ..models.dependency.identity import normalize_package_repo_url
+from ..models.dependency.identity import (
+    is_case_insensitive_package_identity,
+    normalize_package_repo_url,
+)
 from ..models.dependency.object_fields import parse_alias_override
 from ..models.dependency.reference import (
     build_canonical_dependency_string,
@@ -1299,6 +1302,24 @@ class LockFile:
         data = _validate_lockfile_container(loaded)
         return cls._from_validated_data(data)
 
+    def _canonicalize_legacy_parents(self) -> None:
+        """Point a mixed-case legacy ``resolved_by`` at its locked parent's identity.
+
+        Locks written before parents were recorded canonically (#3698) may name
+        a case-insensitive parent ``Owner/Repo`` while its entry is ``owner/repo``.
+        """
+        known = {dep.repo_url for dep in self.dependencies.values()}
+        canonical = {
+            dep.repo_url.casefold(): dep.repo_url
+            for dep in self.dependencies.values()
+            if is_case_insensitive_package_identity(
+                host=dep.host, source=dep.source, registry_prefix=dep.registry_prefix
+            )
+        }
+        for dep in self.dependencies.values():
+            if dep.resolved_by and dep.resolved_by not in known:
+                dep.resolved_by = canonical.get(dep.resolved_by.casefold(), dep.resolved_by)
+
     @classmethod
     def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
         """Construct a lockfile from an already validated YAML mapping."""
@@ -1339,6 +1360,8 @@ class LockFile:
         if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
             raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
         lock._validate_replacement_evidence()
+        if lock.replacements is None:
+            lock._canonicalize_legacy_parents()
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
