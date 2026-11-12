@@ -37,7 +37,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 102 | 1 | 0 | 0 |
+| Consumer | 103 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 21 | 0 | 0 | 0 |
 
@@ -182,6 +182,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 1 | - |
 | [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 2 | - |
 | [req-tg-017](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-017) | MUST | 8.5.9 | consumer | active | 3 | - |
+| [req-tg-018](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-018) | MUST | 8.5.10 | consumer | active | 9 | - |
 
 ## Waivers
 

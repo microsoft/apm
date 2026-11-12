@@ -499,6 +499,11 @@ requirements:
     section: "8.5.9"
     conformance_class: consumer
     notes: "a Cursor-native hook installation implementation detects, before writing, an observable overlap with an in-effect Claude-settings hook import for either install order, and rejects the write with an actionable diagnostic rather than merging, redirecting, or broadening accepted input, without altering the Claude import's own settings"
+  - id: req-tg-018
+    keyword: MUST
+    section: "8.5.10"
+    conformance_class: consumer
+    notes: "a Cursor instruction whose normalized applyTo is exactly one universal ** pattern (scalar, padded, or single-item list) emits alwaysApply: true with no globs at project and user scope; other non-empty sets, including ** mixed with scoped patterns, keep globs; absent, empty, or null applyTo emits neither key"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"
