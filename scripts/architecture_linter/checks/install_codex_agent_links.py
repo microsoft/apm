@@ -1,10 +1,10 @@
 """Keep Codex agent conversion on the shared install-time link resolver (#2966).
 
 The production Codex branch of ``AgentIntegrator.integrate_agents_for_target``
-must hand ``_write_codex_agent`` a ``resolve_body_links`` callback bound to
-``BaseIntegrator.resolve_links`` with the real source and the generated target,
-and the writer must apply it before TOML serialization. Direct static callers
-of ``_write_codex_agent`` (tests, spec conformance) stay exempt.
+must hand ``_write_codex_agent`` the ``BaseIntegrator.resolve_links`` owner and
+report the writer's resolved-link count. The writer must call that owner with
+its own source and target and serialize the resolved body. Direct static
+callers of ``_write_codex_agent`` (tests, spec conformance) stay exempt.
 """
 
 from __future__ import annotations
@@ -22,28 +22,16 @@ GUARD_CODEX_AGENT_LINKS = "install-deployment-codex-agent-link-resolution"
 _CONSUMER = "src/apm_cli/integration/agent_integrator.py"
 _INTEGRATE = "AgentIntegrator.integrate_agents_for_target"
 _WRITER = "AgentIntegrator._write_codex_agent"
-_CALLBACK = "resolve_body_links"
-_EXPECTED_BINDING = {"source": "source_file", "target": "target_path"}
+_HOOK = "resolve_links"
+_OWNER_CALL = f"self.{_HOOK}"
+_WRITER_CALL = f"{_HOOK}(body, source, target)"
 
 
-def _keyword(call: ast.Call, name: str) -> ast.expr | None:
-    return next((item.value for item in call.keywords if item.arg == name), None)
-
-
-def _is_bound_resolver(node: ast.expr | None) -> bool:
-    """Return whether `node` is ``functools.partial(self.resolve_links, ...)``."""
-    if not isinstance(node, ast.Call) or ast.unparse(node.func) not in {
-        "functools.partial",
-        "partial",
-    }:
-        return False
-    if not node.args or ast.unparse(node.args[0]) != "self.resolve_links":
-        return False
-    for name, expected in _EXPECTED_BINDING.items():
-        value = _keyword(node, name)
-        if value is None or ast.unparse(value) != expected:
-            return False
-    return True
+def _assign_targets(index, node: ast.AST) -> list[str] | None:
+    parent = index.parent(node)
+    if not isinstance(parent, ast.Assign):
+        return None
+    return [ast.unparse(target) for target in parent.targets]
 
 
 def check_codex_agent_link_resolution(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -75,20 +63,16 @@ def check_codex_agent_link_resolution(provider: FactsProvider) -> tuple[Violatio
             _summary(rule, _CONSUMER, f"{_INTEGRATE} must deploy Codex agents via {_WRITER}")
         )
     for call in writer_calls:
-        if not _is_bound_resolver(_keyword(call, _CALLBACK)):
+        hook = next((item.value for item in call.keywords if item.arg == _HOOK), None)
+        if hook is None or ast.unparse(hook) != _OWNER_CALL:
             findings.append(
                 _summary(
                     rule,
                     _CONSUMER,
-                    "Codex agent deployment must pass resolve_body_links="
-                    "functools.partial(self.resolve_links, source=source_file, "
-                    "target=target_path) to _write_codex_agent",
+                    f"Codex agent deployment must pass {_HOOK}={_OWNER_CALL} to _write_codex_agent",
                 )
             )
-        parent = index.parent(call)
-        if not isinstance(parent, ast.Assign) or [ast.unparse(t) for t in parent.targets] != [
-            "links_resolved"
-        ]:
+        if _assign_targets(index, call) != ["links_resolved"]:
             findings.append(
                 _summary(
                     rule,
@@ -99,22 +83,29 @@ def check_codex_agent_link_resolution(provider: FactsProvider) -> tuple[Violatio
             )
 
     writer_nodes = index.walk(writer)
-    callback_lines = [
-        node.lineno
+    hook_calls = [
+        node
         for node in writer_nodes
-        if isinstance(node, ast.Call) and ast.unparse(node.func) == _CALLBACK
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == _HOOK
     ]
     dump_lines = [
         node.lineno
         for node in writer_nodes
         if isinstance(node, ast.Call) and ast.unparse(node.func).endswith(".dumps")
     ]
-    if not callback_lines or not dump_lines or min(callback_lines) > min(dump_lines):
+    applied = [
+        node
+        for node in hook_calls
+        if ast.unparse(node) == _WRITER_CALL
+        and _assign_targets(index, node) == ["(body, links_resolved)"]
+    ]
+    if not applied or not dump_lines or min(node.lineno for node in applied) > min(dump_lines):
         findings.append(
             _summary(
                 rule,
                 _CONSUMER,
-                f"{_WRITER} must apply resolve_body_links to the body before TOML serialization",
+                f"{_WRITER} must assign body, links_resolved = {_WRITER_CALL} "
+                "before TOML serialization",
             )
         )
     return tuple(findings)

@@ -683,9 +683,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-codex-agent-link-resolution",
         rule_id="install-deployment-codex-agent-link-resolution",
         path="src/apm_cli/integration/agent_integrator.py",
-        old="self.resolve_links, source=source_file, target=target_path",
-        new="self.resolve_links, source=target_path, target=target_path",
-        intent="Codex agent links resolve from the generated file instead of the source.",
+        old="resolve_links=self.resolve_links,",
+        new="resolve_links=None,",
+        intent="Codex agent conversion bypasses the shared link resolver again.",
     ),
     MutationCase(
         guard_id="install-deployment-executable-trust-context",
