@@ -21,6 +21,7 @@ from apm_cli.cache import git_cache as git_cache_module
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.utils.git_env import (
     GitOutputDecodeError,
+    _git_command_label,
     clone_git_worktree,
     git_remote_refs,
     run_git_text,
@@ -162,6 +163,35 @@ def test_unchecked_failure_returns_visible_escapes(cp936_default_codec: None) ->
 
 def _decode_error(argv: list[str]) -> GitOutputDecodeError:
     return GitOutputDecodeError(argv, UnicodeDecodeError("utf-8", b"\x94", 0, 1, "bad"))
+
+
+_SECRET_URL = "https://x-access-token:ghp_secret@example.com/o/r.git"
+
+
+@pytest.mark.parametrize(
+    ("command", "label"),
+    [
+        (["git", "-C", "/home/u/secret", "ls-remote", _SECRET_URL], "git ls-remote"),
+        (
+            ["C:\\Git\\git.exe", "-c", f"remote.origin.url={_SECRET_URL}", "fetch", _SECRET_URL],
+            "git fetch",
+        ),
+        (["/usr/bin/git", "--git-dir", "/tmp/bare", "--config-env", "a=B", "clone"], "git clone"),
+        (["git", "--work-tree=/w", "--namespace", "ns", "checkout", "main"], "git checkout"),
+        (["git", "-c", "k=v"], "git"),
+        ([], "git"),
+    ],
+)
+def test_decode_error_names_subcommand_without_urls_or_paths(
+    command: list[str], label: str
+) -> None:
+    assert _git_command_label(command) == label
+
+    message = str(_decode_error(command))
+
+    assert message.startswith(f"'{label}' wrote output that is not valid UTF-8 (byte 0x94")
+    for secret in ("ghp_secret", "example.com", "/home/u/secret", "/tmp/bare", "a=B", "/w"):
+        assert secret not in message
 
 
 def _ok(argv: list[str]) -> subprocess.CompletedProcess[str]:

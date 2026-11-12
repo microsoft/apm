@@ -29,7 +29,7 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from apm_cli.utils.subprocess_env import external_process_env
@@ -1410,7 +1410,9 @@ def git_clone_env(
 
 
 GIT_OUTPUT_ENCODING = "utf-8"
-_GIT_OPTIONS_WITH_VALUE = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
+_GIT_OPTIONS_WITH_VALUE = frozenset(
+    {"-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace"}
+)
 
 
 def _git_command_label(command: Sequence[object]) -> str:
@@ -1443,18 +1445,26 @@ class GitOutputDecodeError(subprocess.SubprocessError):
         )
 
 
+@overload
+def _escaped_git_text(value: str | bytes) -> str: ...
+@overload
+def _escaped_git_text(value: None) -> None: ...
 def _escaped_git_text(value: object) -> object:
     """Render undecodable bytes in diagnostic output as visible backslash escapes."""
     if isinstance(value, bytes):
         return value.decode(GIT_OUTPUT_ENCODING, "backslashreplace")
-    if isinstance(value, str):
+    if isinstance(value, str) and value:
         raw = value.encode(GIT_OUTPUT_ENCODING, "surrogateescape")
         return raw.decode(GIT_OUTPUT_ENCODING, "backslashreplace")
     return value
 
 
+@overload
+def _strict_git_text(command: Sequence[object], value: str) -> str: ...
+@overload
+def _strict_git_text(command: Sequence[object], value: None) -> None: ...
 def _strict_git_text(command: Sequence[object], value: object) -> object:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not value:
         return value
     raw = value.encode(GIT_OUTPUT_ENCODING, "surrogateescape")
     try:
