@@ -4,13 +4,13 @@ import os
 import shlex
 import subprocess
 import sys
+import tomllib
 from collections import Counter
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
-import tomllib
 
 from scripts.test_file_inventory import is_test_module_path
 from tests.quality.repository_python_inventory import (
