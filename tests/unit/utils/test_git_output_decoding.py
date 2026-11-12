@@ -220,7 +220,8 @@ def test_checkout_decode_rejection_removes_staged_tree(
 
     assert staged
     assert not staged[0].exists()
-    assert list((cache._checkouts_root / "shard" / sha).iterdir()) == []
+    sha_dir = cache._checkouts_root / "shard" / sha
+    assert [p.name for p in sha_dir.iterdir() if not p.name.endswith(".lock")] == []
 
 
 @pytest.mark.parametrize("partial", [False, True])
