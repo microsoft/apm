@@ -1,0 +1,88 @@
+name: Roadmap - accepted issues
+
+# Native Project auto-add cannot set field values. When an issue gets
+# `status/accepted`, make sure it is on the APM Roadmap (Project 2304) and
+# default an empty Horizon to `Next`. A maintainer may move it afterwards;
+# this workflow never overwrites an existing Horizon.
+#
+# Requires the repository secret APM_ROADMAP_PROJECT_TOKEN: a fine-grained
+# token or GitHub App token with read/write access to organization Projects
+# (GITHUB_TOKEN cannot write organization Projects). Without it, the job
+# skips with a notice.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  set-horizon:
+    if: github.event.label.name == 'status/accepted'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Job-level so runs for other labels (skipped by `if`) never take this
+    # issue's slot and replace a pending acceptance run.
+    concurrency:
+      group: roadmap-accepted-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Add to Project 2304 with Horizon=Next
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PROJECT_TOKEN: ${{ secrets.APM_ROADMAP_PROJECT_TOKEN }}
+        with:
+          github-token: ${{ secrets.APM_ROADMAP_PROJECT_TOKEN || github.token }}
+          script: |
+            if (!process.env.PROJECT_TOKEN) {
+              core.notice('APM_ROADMAP_PROJECT_TOKEN is not set; skipping roadmap placement.');
+              return;
+            }
+            const org = 'microsoft';
+            const number = 2304;
+            const { organization } = await github.graphql(`
+              query($org: String!, $number: Int!) {
+                organization(login: $org) {
+                  projectV2(number: $number) {
+                    id
+                    field(name: "Horizon") {
+                      ... on ProjectV2SingleSelectField { id options { id name } }
+                    }
+                  }
+                }
+              }`, { org, number });
+            const project = organization && organization.projectV2;
+            if (!project || !project.field) {
+              core.setFailed('Cannot read Project 2304 or its Horizon field. Check that APM_ROADMAP_PROJECT_TOKEN has read/write access to organization Projects.');
+              return;
+            }
+            const next = project.field.options.find((o) => o.name === 'Next');
+            if (!next) {
+              core.setFailed('Horizon option "Next" not found on Project 2304.');
+              return;
+            }
+            const { addProjectV2ItemById } = await github.graphql(`
+              mutation($project: ID!, $content: ID!) {
+                addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
+                  item {
+                    id
+                    fieldValueByName(name: "Horizon") {
+                      ... on ProjectV2ItemFieldSingleSelectValue { name }
+                    }
+                  }
+                }
+              }`, { project: project.id, content: context.payload.issue.node_id });
+            const item = addProjectV2ItemById.item;
+            if (item.fieldValueByName && item.fieldValueByName.name) {
+              core.info(`Horizon already ${item.fieldValueByName.name}; leaving it.`);
+              return;
+            }
+            await github.graphql(`
+              mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $project, itemId: $item, fieldId: $field,
+                  value: { singleSelectOptionId: $option }
+                }) { clientMutationId }
+              }`, { project: project.id, item: item.id, field: project.field.id, option: next.id });
+            core.info(`Set Horizon=Next for #${context.payload.issue.number}.`);
