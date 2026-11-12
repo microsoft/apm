@@ -148,6 +148,25 @@ def _build_local_dir_index(
     return index
 
 
+def _is_manifestless_leaf(package_dir: Path) -> bool:
+    """Return True for an installed package whose format declares no APM deps.
+
+    APM dependencies live only in ``apm.yml``. A materialized skill, skill
+    bundle or hook package without one is a leaf; any other directory
+    without ``apm.yml`` (missing, empty, or an unnormalized plugin) stays
+    unverifiable so callers fail closed.
+    """
+    from apm_cli.models.validation import PackageType, detect_package_type
+
+    if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
+        return False
+    return detect_package_type(package_dir)[0] in {
+        PackageType.CLAUDE_SKILL,
+        PackageType.SKILL_BUNDLE,
+        PackageType.HOOK_PACKAGE,
+    }
+
+
 def compute_forward_reachable_keys(
     lockfile: LockFile,
     project_root: Path,
@@ -265,6 +284,8 @@ def compute_forward_reachable_keys(
                     reachable_via.setdefault(visit_key, (parent_repo_url, None))
             manifest_dir = install_path
 
+        if _is_manifestless_leaf(manifest_dir):
+            continue
         try:
             package = APMPackage.from_apm_yml(manifest_dir / "apm.yml", source_path=manifest_dir)
         except (FileNotFoundError, ValueError) as exc:
@@ -292,3 +313,35 @@ def compute_forward_reachable_keys(
         unverifiable=tuple(unverifiable),
         reachable_via=reachable_via,
     )
+
+
+def retained_lock_keys(
+    lockfile: LockFile,
+    project_root: Path,
+    apm_modules_dir: Path,
+    declared_refs: list[DependencyReference],
+) -> frozenset[str]:
+    """Return the lock keys a project still needs beyond its declarations.
+
+    The one answer ``apm prune`` and ``apm deps list`` give for which locked
+    packages are retained: every recorded transitive (``depth > 1``) plus any
+    entry recorded as direct that is no longer declared but is still
+    forward-reachable from a declared package's own manifest (a direct
+    dependency hand-removed from apm.yml that another package needs, #3668).
+    An incomplete walk fails closed and retains every such entry.
+    """
+    declared = {ref.get_unique_key() for ref in declared_refs}
+    retained: set[str] = set()
+    stale_direct: set[str] = set()
+    for dep in lockfile.get_package_dependencies():
+        key = dep.get_unique_key()
+        if dep.depth is not None and dep.depth > 1:
+            retained.add(key)
+        elif key not in declared:
+            stale_direct.add(key)
+    if stale_direct:
+        walk = compute_forward_reachable_keys(
+            lockfile, project_root, apm_modules_dir, declared_refs, frozenset(stale_direct)
+        )
+        retained |= stale_direct & walk.reachable if walk.complete else stale_direct
+    return frozenset(retained)

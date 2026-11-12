@@ -507,6 +507,29 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     findings.append(
                         violation(rule_id, path, message, line=number, column=column + 1)
                     )
+    # Prune and the expected-path selector ask the same owner which lock
+    # entries are retained instead of re-deriving ``depth > 1`` (#3668).
+    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/commands/_helpers.py"):
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures:
+            continue
+        if not _present_re(facts, re.compile(r"\bretained_lock_keys\(")):
+            findings.append(
+                _summary(rule_id, path, "Retained lock keys must come from deps/reachability.py")
+            )
+        for number, line in enumerate(_lines(facts), start=1):
+            column = line.find("depth > 1")
+            if column >= 0 and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Retained lock entries are decided by deps/reachability.py",
+                        line=number,
+                        column=column + 1,
+                    )
+                )
     return tuple(findings)
 
 

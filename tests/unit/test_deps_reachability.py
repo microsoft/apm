@@ -499,3 +499,68 @@ def test_fails_closed_on_corrupt_local_anchor_chain(tmp_path):
 
     assert result.complete is False
     assert any(shared_key == pkg_id for pkg_id, _ in result.unverifiable)
+
+
+def _stale_direct_world(tmp_path, *, parent_manifest: str | None):
+    """``acme/d`` declared; ``acme/e`` locked as direct but dropped from apm.yml."""
+    from apm_cli.deps.lockfile import LockedDependency as Locked
+
+    apm_modules_dir = tmp_path / "apm_modules"
+    for name in ("d", "e", "gone"):
+        (apm_modules_dir / "acme" / name).mkdir(parents=True)
+        (apm_modules_dir / "acme" / name / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0\n")
+    if parent_manifest is not None:
+        (apm_modules_dir / "acme" / "d" / "apm.yml").write_text(parent_manifest)
+    else:
+        (apm_modules_dir / "acme" / "d" / "apm.yml").unlink()
+    lockfile = LockFile()
+    lockfile.add_dependency(Locked(repo_url="acme/d", resolved_commit="d1"))
+    lockfile.add_dependency(Locked(repo_url="acme/e", resolved_commit="e1"))
+    lockfile.add_dependency(Locked(repo_url="acme/gone", resolved_commit="g1"))
+    lockfile.add_dependency(
+        Locked(repo_url="acme/t", depth=2, resolved_by="acme/d", resolved_commit="t1")
+    )
+    return lockfile, apm_modules_dir, [DependencyReference.parse("acme/d")]
+
+
+def test_retained_lock_keys_keeps_dropped_direct_dep_still_reachable(tmp_path):
+    """#3668: a hand-removed direct dep another package needs is retained."""
+    from apm_cli.deps.reachability import retained_lock_keys
+
+    lockfile, modules, declared = _stale_direct_world(
+        tmp_path, parent_manifest="name: d\nversion: 1.0.0\ndependencies:\n  apm:\n    - acme/e\n"
+    )
+    retained = retained_lock_keys(lockfile, tmp_path, modules, declared)
+    assert retained == {_shared_key(lockfile, "acme/e"), _shared_key(lockfile, "acme/t")}
+
+
+def test_retained_lock_keys_fails_closed_on_incomplete_walk(tmp_path):
+    from apm_cli.deps.reachability import retained_lock_keys
+
+    lockfile, modules, declared = _stale_direct_world(tmp_path, parent_manifest=None)
+    retained = retained_lock_keys(lockfile, tmp_path, modules, declared)
+    assert {_shared_key(lockfile, "acme/e"), _shared_key(lockfile, "acme/gone")} <= retained
+
+
+def test_manifestless_skill_survivor_is_a_leaf_not_unverifiable(tmp_path):
+    """A survivor that is a plain SKILL.md package declares no APM deps."""
+    apm_modules_dir = tmp_path / "apm_modules"
+    (apm_modules_dir / "acme" / "skill").mkdir(parents=True)
+    (apm_modules_dir / "acme" / "skill" / "SKILL.md").write_text("# Skill\n")
+    (apm_modules_dir / "acme" / "gone").mkdir(parents=True)
+    (apm_modules_dir / "acme" / "gone" / "apm.yml").write_text("name: gone\nversion: 1.0.0\n")
+    lockfile = LockFile()
+    lockfile.add_dependency(LockedDependency(repo_url="acme/skill", resolved_commit="s1"))
+    lockfile.add_dependency(LockedDependency(repo_url="acme/gone", resolved_commit="g1"))
+    gone = _shared_key(lockfile, "acme/gone")
+
+    result = compute_forward_reachable_keys(
+        lockfile,
+        tmp_path,
+        apm_modules_dir,
+        [DependencyReference.parse("acme/skill")],
+        frozenset({gone}),
+    )
+
+    assert result.complete is True
+    assert gone not in result.reachable
