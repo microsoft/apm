@@ -188,12 +188,23 @@ def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
     """Explain original incoming requirements, never substitute source refs.
 
     Replacement-aware locks record exact parent keys and every incoming
-    replacement request. Legacy locks retain their single repo-url parent.
+    replacement request. Legacy locks place each entry under its parent via
+    :mod:`apm_cli.deps.lock_parent_placement` using lock data alone (OpenAPM
+    req-rs-005: no installed-manifest evidence) and otherwise retain their
+    single repo-url parent. Virtual subdirectory packages are named by their
+    full unique key in legacy locks.
     Cycles terminate at the repeated owner; at most 256 paths are expanded.
     """
+    from .lock_parent_placement import place_legacy_lock_parents
     from .lockfile import lockfile_parent_identity
 
+    legacy = lockfile.replacements is None
+    project_deps = [dep for dep in lockfile.get_all_dependencies() if _is_project_dep(dep)]
+    placed_parents = place_legacy_lock_parents(project_deps).parents if legacy else {}
+
     def key_for(dep: LockedDependency) -> str:
+        if legacy and dep.is_virtual:
+            return dep.get_unique_key()
         return lockfile_parent_identity(dep, lockfile.replacements)
 
     def incoming(dep: LockedDependency) -> tuple[WhyEdge, ...]:
@@ -203,22 +214,30 @@ def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
                 WhyEdge(parent_key=request.parent, child_key=key, constraint=request.ref)
                 for request in dep.replacement.requests
             )
-        return (
-            WhyEdge(parent_key=dep.resolved_by, child_key=key, constraint=_dep_constraint(dep)),
-        )
+        placed = placed_parents.get(dep.get_unique_key())
+        parent_key = key_for(placed) if placed is not None else dep.resolved_by
+        return (WhyEdge(parent_key=parent_key, child_key=key, constraint=_dep_constraint(dep)),)
 
-    by_key: dict[str, LockedDependency] = {}
-    for dep in lockfile.get_all_dependencies():
-        if not _is_project_dep(dep):
-            continue
-        key = key_for(dep)
-        existing = by_key.get(key)
-        if (
+    def prefer(existing: LockedDependency | None, dep: LockedDependency) -> bool:
+        return (
             existing is None
             or (existing.is_virtual and not dep.is_virtual)
             or dep.depth < existing.depth
-        ):
+        )
+
+    by_key: dict[str, LockedDependency] = {}
+    by_repo_url: dict[str, LockedDependency] = {}
+    for dep in project_deps:
+        key = key_for(dep)
+        if prefer(by_key.get(key), dep):
             by_key[key] = dep
+        if legacy and prefer(by_repo_url.get(dep.repo_url), dep):
+            by_repo_url[dep.repo_url] = dep
+
+    def lookup(parent_key: str | None) -> LockedDependency | None:
+        if parent_key is None:
+            return None
+        return by_key.get(parent_key) or by_repo_url.get(parent_key)
 
     target_key = key_for(target)
     target_edges = incoming(target)
@@ -233,7 +252,7 @@ def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
             break
         chain, visited = worklist.pop()
         parent_key = chain[0].parent_key
-        parent = by_key.get(parent_key) if parent_key is not None else None
+        parent = lookup(parent_key)
         if parent is None or parent_key in visited or len(chain) > max_depth:
             paths.append(WhyPath(chain=chain))
             continue

@@ -566,6 +566,9 @@ Monorepo sibling reference (`git: parent`):
 
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. Only `git`, `path`, `ref`, and `alias` are accepted on this form. When `ref` is omitted the parent's resolved ref is inherited.
 
+For before/after manifests and a feature-branch review workflow, see
+[Make sibling dependencies follow the review branch](../../producer/repo-shapes/#make-sibling-dependencies-follow-the-review-branch).
+
 Marketplace dependency (resolved at install time):
 
 ```yaml
@@ -631,7 +634,7 @@ Registry dependency (whole package or virtual sub-path):
   targets: [docker]                # OPTIONAL - restrict deployment targets
 ```
 
-`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
+`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. Range selection skips pre-release versions unless the range itself names a pre-release on the same `major.minor.patch` (for example `>=1.2.0-alpha <1.3.0` admits `1.2.0-beta` but not `1.3.0-beta`); an exact `version:` such as `1.3.0-beta.1` still selects that release. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
 
 #### 4.1.3. Virtual Packages
 
@@ -681,7 +684,7 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 | `tools` | `list<string>` | OPTIONAL | Default: `["*"]` | Restrict which tools are exposed. |
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
-| `enabled` | any JSON value | OPTIONAL | OpenCode only | Passed unchanged to OpenCode's `opencode.json` entry. When omitted, APM keeps its existing `true` default. APM does not validate the value; OpenCode interprets it. Other targets ignore this field. |
+| `enabled` | any JSON value | OPTIONAL | OpenCode only | Passed unchanged to OpenCode's `opencode.json` entry. When omitted, APM keeps its existing `true` default. APM does not validate the value; OpenCode interprets it. In the OpenCode 2 `mcp.servers` layout, `false` becomes `disabled: true`, `true` writes no field, and other values warn and leave the file unchanged; see [OpenCode 2 configuration](../../consumer/install-mcp-servers/#opencode-2-configuration). Other targets ignore this field. |
 
 Any additional keys not listed above are preserved as **extra passthrough fields** and round-tripped verbatim into the generated target manifests. This allows harness-specific configuration (e.g. Claude Code's `oauth` block for remote-MCP OAuth client config) to be declared in `apm.yml` and appear in the generated config without modification. A warning is emitted at parse time naming each non-standard key.
 
@@ -756,6 +759,7 @@ configurations.
 - **JetBrains Copilot** has native `${env:VAR}` interpolation in `mcp.json`; APM normalizes `${VAR}` and legacy `<VAR>` to `${env:VAR}`.
 - **Copilot CLI and Kiro** have native `${VAR}` interpolation in their MCP config files; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
 - **Codex and Gemini** have no runtime interpolation for `env`, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` there at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
+- **Claude Code** expands `${VAR}` and `${VAR:-default}` in `command`, `args`, `env`, `url` and `headers` of the project-scoped `.mcp.json` when it starts a server. An unset variable without a default stays as literal text, and `claude mcp list` warns about it. At project scope APM keeps these references, normalizing `${env:VAR}` and legacy `<VAR>` to `${VAR}`, keeps static values as authored, and never writes referenced values into `.mcp.json` or `apm.lock.yaml`. Reinstall replaces values an earlier APM release expanded into `.mcp.json` when APM can confirm it wrote them; otherwise the entry is kept and install names the affected fields. User-scope installs (`-g`, `~/.claude.json`) keep resolving references at install time. See [MCP variable compatibility](../mcp-variable-compatibility/) for every harness.
 - **Cursor** resolves `${env:VAR}` references at runtime. APM translates `${VAR}` and legacy `<VAR>` into that native form in `env`, `args`, and `headers`, so referenced values are not written into the project-local Cursor config. This normalization does not cover `command` or `url`; their existing behavior is unchanged.
 - **Codex `headers` are the exception.** Codex does read a remote server's headers from the environment, through dedicated fields rather than from inside `http_headers`, which it documents as static values. APM writes `Authorization: "Bearer ${VAR}"` as `bearer_token_env_var` and a value that is exactly `${VAR}` as `env_http_headers`; Codex resolves both at server start, so no token is written to `config.toml`. A value Codex cannot express that way -- literal text around the reference, or a shell-style default such as `${VAR:-}` -- is skipped with a warning instead of being written as static text.
 - **OpenCode** translates `${VAR}`, `${env:VAR}`, and legacy `<VAR>` to native `{env:VAR}` in remote `headers`, local `environment` (manifest `env`), and command arguments. Already-native references, authored static values, command executables, and URLs stay unchanged. Registry `env` overlays preserve authored values only for declared, emitted keys. Export referenced variables when launching OpenCode: APM writes references, not their resolved values. Keep secrets out of authored static values. See [OpenCode config substitution](https://opencode.ai/docs/config/#env-vars).

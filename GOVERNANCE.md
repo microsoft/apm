@@ -7,6 +7,9 @@ The contribution process lives in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Maintainers and scope
 
+See [MAINTAINERS.md](MAINTAINERS.md) for public names, GitHub IDs, and
+affiliations.
+
 <!-- apm-scope-roster:start -->
 | Maintainer | Role | Responsibility | Approval remit |
 | --- | --- | --- | --- |
@@ -87,8 +90,24 @@ is the active planning surface, with actual issues as its records.
 Keep scope, evidence, and human approval on the issue; Horizon and priority
 order on the Project; release targeting in the issue's milestone. Link PRs
 to their issues rather than adding duplicate PR rows or draft cards. Larger
-outcomes use parent issues with bounded implementation sub-issues; a parent's
-priority does not approve every child.
+outcomes use `[EPIC]` parent issues with bounded implementation sub-issues; a
+parent's priority does not approve every child.
+
+The roadmap tells one story: APM is the open package manager for agent
+configuration: consume anywhere, produce once, govern at scale, on an open
+standard. Every roadmap item belongs to one pillar, recorded in the Project's
+`Pillar` field and its label:
+
+| Pillar | Label | Promise |
+| --- | --- | --- |
+| Consume | `pillar/consume` | Install any agent package into any harness, reproducibly. |
+| Produce | `pillar/produce` | Author, package, publish and patch with confidence. |
+| Govern | `pillar/govern` | Policy, trust, audit and supply-chain integrity for enterprises. |
+| Open ecosystem | `pillar/ecosystem` | OpenAPM spec, upstream standards, CNCF. |
+| Foundations | `pillar/foundations` | Reliability, platforms, CI, code health. |
+
+Each pillar has one or more `[EPIC]` parent issues; see the
+[Epics](https://github.com/orgs/microsoft/projects/2304/views/9) view.
 
 Anyone may propose an outcome in an issue with the problem, evidence, and
 alternatives. Area maintainers assess scope, risk, and maintenance cost;
@@ -98,13 +117,22 @@ not a separate planning committee.
 
 | Horizon | Meaning |
 | --- | --- |
-| Now | Active, reviewer-backed priorities. Start with at most three strategic outcomes alongside necessary maintenance; this is a focus guideline, not an automated cap. |
-| Next | A ranked shortlist, not permission to implement. |
+| Now | The current release. Active, reviewer-backed priorities; a focus guideline, not an automated cap. |
+| Next | The next one or two releases. A ranked shortlist, not permission to implement. |
 | Later | Deferred consideration, not a delivery promise. |
+| Exploring | Problem framing or research, with no delivery commitment. |
 
-Leave Horizon empty for unselected intake. Roadmap placement, ordering, and
-reactions neither authorize implementation nor guarantee delivery. Moving
-or removing an issue from a Horizon does not revoke its human approval.
+`Phase` records maturity: Exploring, In design (including `status/needs-design`),
+Preview (experimental or behind a flag), or GA.
+
+When `status/accepted` is applied, `.github/workflows/roadmap-accepted.yml`
+adds the issue to the Project and sets an empty Horizon to `Next`; it never
+overwrites an existing Horizon and skips with a notice when the
+`APM_ROADMAP_PROJECT_TOKEN` secret is not configured. Maintainers move the
+issue from there. Leave Horizon empty for untriaged intake. Roadmap
+placement, ordering, and reactions neither authorize implementation nor
+guarantee delivery. Moving or removing an issue from a Horizon does not
+revoke its human approval.
 Record any change to approved scope or review support explicitly on the
 issue. Accepted, unclaimed work still needs no second permission request:
 follow [the contribution process](CONTRIBUTING.md#before-you-start-implementation),
@@ -128,23 +156,32 @@ and their milestone history, including completed work in the active release.
 
 ### Native Project settings
 
-Project 2304 has public visibility, Horizon columns, Milestone grouping,
-the saved views below, and native issue-only auto-add. Maintainers keep
-the existing-issue intake current and preserve completed issue history.
+Configure Project 2304 with public visibility, the saved views below
+(Horizon columns, Pillar swimlanes, Milestone grouping), and native
+issue-only auto-add. Maintainers keep the existing-issue intake current and
+preserve completed issue history.
 
-In Project settings, use public visibility and one single-select field,
-`Horizon`, with `Now`, `Next`, and `Later` in that order. Leave it unset by
-default. Display the native Assignees, Labels, and Milestone fields; do not
-add a duplicate target-release or scope-approval field.
+In Project settings, use public visibility and these single-select fields:
+`Horizon` (Now, Next, Later, Exploring), `Pillar` (Consume, Produce, Govern,
+Open ecosystem, Foundations), `Phase` (Exploring, In design, Preview, GA),
+`Priority`, `Area`, `Kind`, and `Status`. Display the native Assignees,
+Labels, Milestone, and Parent issue fields. `Start date` and `Target date`
+only feed timeline layouts; the milestone remains the release target. Do not
+add a duplicate target-release or scope-approval field. The epic is the
+native parent issue.
 
 Save these views with `repo:microsoft/apm is:issue` plus the filters below:
 
 | View | Layout and additional filter |
 | --- | --- |
-| [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) | Board: `is:open horizon:Now,Next,Later`. Group by Horizon in Now / Next / Later order and manually rank issues within each group, highest first. Unselected intake stays out. |
+| [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) | Board: `is:open horizon:Now,Next,Later,Exploring`. Columns by Horizon, swimlanes by Pillar; rank issues within each column, highest first. Untriaged intake stays out. |
 | [Intake](https://github.com/orgs/microsoft/projects/2304/views/6) | Table: `is:open`. All open issues are visible, not implicitly approved. |
 | [Ready to contribute](https://github.com/orgs/microsoft/projects/2304/views/7) | Table: `is:open label:"status/accepted" label:"help wanted" no:assignee`. A discovery shortlist, not an approval check. |
 | [Release](https://github.com/orgs/microsoft/projects/2304/views/8) | Table: `has:milestone`, grouped by Milestone. Narrow to an existing milestone when needed; do not filter out closed issues. |
+| [Epics](https://github.com/orgs/microsoft/projects/2304/views/9) | Table: `is:open` with `parent-issue:` set to the ten `[EPIC]` issues, grouped by Parent issue. |
+| [Enterprise](https://github.com/orgs/microsoft/projects/2304/views/10) | Table: `is:open parent-issue:microsoft/apm#3297,microsoft/apm#3618,microsoft/apm#3619`, grouped by Parent issue. |
+| [Release 0.36](https://github.com/orgs/microsoft/projects/2304/views/11) | Table: `milestone:"0.36.0"`, grouped by Status. Retarget the milestone each release. |
+| [Shipped](https://github.com/orgs/microsoft/projects/2304/views/12) | Table: `is:closed status:Done`, sorted by Closed, newest first. |
 
 For Ready to contribute, maintainers keep labels and assignments current;
 contributors check the human approval, review contact, comments, and linked
@@ -155,15 +192,18 @@ Under **Workflows > Auto-add to project**, select `microsoft/apm` and use
 `is:issue is:open`. This adds visibility through Intake, without setting
 Horizon, approval, invitations, or milestones. Native auto-add handles
 matching issues as they are created or updated; enabling it does not backfill
-existing issues. Keep automatic archival off so closing an issue does not
-silently remove release history. See GitHub's
+existing issues. Keep automatic archival off; during the monthly refresh,
+archive Done items closed more than 60 days ago so active views stay
+readable. Archived items remain in the Project archive, and milestone
+history stays on the issues. See GitHub's
 [auto-add](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)
 and [view-filter](https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/filtering-projects)
 instructions.
 
 The initial rollout and its operator decisions are recorded in
 [#2960](https://github.com/microsoft/apm/issues/2960). Keep other native
-workflows off; planning and release decisions remain human-owned.
+workflows off; apart from the accepted-issue Horizon default above, planning
+and release decisions remain human-owned.
 
 ## Contributor progression
 

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from apm_cli.adapters.client.claude import ClaudeClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.intellij import IntelliJClientAdapter
@@ -23,6 +24,7 @@ pytestmark = pytest.mark.component
     "adapter_class,automatic",
     [
         (CopilotClientAdapter, "Bearer ${GITHUB_TOKEN}"),
+        (ClaudeClientAdapter, "Bearer ${GITHUB_TOKEN}"),
         (IntelliJClientAdapter, "Bearer ${env:GITHUB_TOKEN}"),
         (WindsurfClientAdapter, "Bearer ambient-sentinel"),
     ],
@@ -87,6 +89,7 @@ def test_shared_policy_preserves_registry_fallback_and_manifest_precedence(
     elif explicit:
         expected = {
             CopilotClientAdapter: "${USER_PAT}",
+            ClaudeClientAdapter: "${USER_PAT}",
             IntelliJClientAdapter: "${env:USER_PAT}",
             WindsurfClientAdapter: "user-sentinel",
         }[adapter_class]

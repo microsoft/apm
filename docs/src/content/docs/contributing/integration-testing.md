@@ -130,7 +130,7 @@ what the test family you want actually requires.
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
 | `requires_ado_bearer` | Azure CLI signed in + opt-in flag | `az login` and `export APM_TEST_ADO_BEARER=1` |
 | `requires_apm_binary` | A built `apm` binary on disk or `PATH` | `scripts/build-binary.sh` (or set `APM_BINARY_PATH`) |
-| `requires_runtime_codex` | The `codex` runtime on `PATH` or under `~/.apm/runtimes/`; optional `version="0.163.0"` requires that exact version on `PATH` | `apm runtime setup codex` |
+| `requires_runtime_codex` | The `codex` runtime on `PATH` or under `~/.apm/runtimes/`; optional `min_version="0.163.0"` requires a stable release at or above that version on `PATH` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
 | `live` | Tests that hit real third-party repositories; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
@@ -470,16 +470,16 @@ Collection proves a test is selected; a successful Windows job provides
 Windows execution evidence. The existing job timeout bounds runtime.
 
 The `trusted_executable` scheduling marker selects Git/GitHub CLI discovery
-contracts and real install/reinstall/update scenarios for additional Windows
-Python 3.10 and 3.11 jobs. These versions need explicit `PATHEXT` candidates
+contracts and real install/reinstall/update scenarios for an additional Windows
+Python 3.11 job. That version needs explicit `PATHEXT` candidates
 for directory-qualified executable lookup. The same tests also carry
 `windows_compat`, so the existing Python 3.12 gate checks compatibility.
 Run the focused contracts locally with
 `uv run --frozen --extra dev pytest -m trusted_executable tests/unit/cache/test_git_env.py tests/integration/test_trusted_executable_discovery.py`.
-The legacy jobs collect only these files so unrelated tests requiring newer
+The legacy job collects only these files so unrelated tests requiring newer
 interpreters cannot prevent collection. They select the same discovery cases
 as the marker across both test roots. Production imports on this path remain
-compatible with Python 3.10.
+compatible with Python 3.11, the minimum supported version.
 Python 3.12 and later use the standard-library lookup without the legacy
 fallback; a candidate-count regression checks linear extension scanning.
 Only a native Windows run demonstrates Windows behavior; passing mocks or
@@ -488,15 +488,16 @@ collection alone do not.
 The **Windows Native Symlink Acceptance** job checks out the exact PR head and
 uses a temporary standard account on a disposable hosted runner. It requires
 successful ordinary file I/O, no administrator or symlink privilege, and actual
-Windows error 1314 before running the Git/APM fallback regression. The test keeps
-inherited global `core.symlinks=true` while honoring Git's native local `false`;
-explicit command-scope intent remains covered separately.
+Windows error 1314 before running the Git/APM link regression. APM must
+install a package with links as their target content, with the POSIX
+`content_hash`, and `apm install --frozen` must replay that lock.
 
-The job requires a passing native case, failure after removing the local
-precedence guard in memory, and a restored pass. Empty or skipped runs fail.
+The job requires a passing native case, failure after disabling the
+Git-object link writer in memory, and a restored pass. Empty or skipped runs
+fail.
 Account, profile, scratch and any changed Developer Mode value are cleaned up
 independently, with an `always()` cleanup fallback. A restoration failure fails
-the job. This is link-text checkout evidence, not archive-symlink support, and
+the job. This is link-materialization evidence, not archive-symlink support, and
 the job does not change repository protection or replace required SDL scanning.
 
 Plugin sequential-install coverage checks deployed-file removal and lockfile

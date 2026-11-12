@@ -1,6 +1,6 @@
 """Tests for the APM lock file module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -276,7 +276,7 @@ class TestLockFile:
         lock = LockFile.read(lock_path)
         assert lock is not None
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))
-        next_write = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        next_write = datetime(2026, 1, 1, tzinfo=UTC)
         fixed_datetime = Mock()
         fixed_datetime.now.return_value = next_write
         monkeypatch.setattr("apm_cli.deps.lockfile.datetime", fixed_datetime)
@@ -323,7 +323,7 @@ class TestLockFile:
             "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: {}\n",
             encoding="utf-8",
         )
-        next_write = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        next_write = datetime(2026, 1, 1, tzinfo=UTC)
         fixed_datetime = Mock()
         fixed_datetime.now.return_value = next_write
         monkeypatch.setattr("apm_cli.deps.lockfile.datetime", fixed_datetime)

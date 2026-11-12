@@ -38,6 +38,11 @@ selection first. Audit does not adopt, overwrite, or delete either file.
 JSON retains the finding's path and kind; SARIF uses
 `apm/drift/unmanaged-conflict` with error severity.
 
+When `modified` findings belong to remote (non-local) dependencies, the text output adds a hint
+such as `[i] 2 local edit(s) to managed files; run 'apm export-patch' to export
+them as upstream patches before the next install overwrites them`. See
+[`apm export-patch`](../export-patch/).
+
 Replay and coverage use the current `apm.yml` target declaration when present,
 otherwise the concrete target identities recorded by install. An unrelated
 `.github/workflows/` file does not add a Copilot deployment to a recorded
@@ -250,7 +255,7 @@ not every file in a skill bundle.
 
 | Target | Prompt documents/fields | Hook definitions |
 |---|---|---|
-| Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt |
+| Copilot | `.github/instructions/*.instructions.md`, `prompts/*.prompt.md`, `agents/*.agent.md`, `.github/copilot-instructions.md`; shared skills | `.github/hooks/*.json`; commands are non-prompt; flat `sessionStart` prompt handlers' `prompt` field (prompt handlers on other events are unsupported) |
 | Claude | `.claude/rules/*.md`, `agents/*.md`, `commands/*.md`, `skills/**/SKILL.md` | `.claude/hooks/*.json`, `.claude/settings.json`; nested `prompt`/`agent` handlers' `prompt` field |
 | Cursor | `.cursor/rules/*.mdc`, `agents/*.md`, `commands/*.md`; shared skills | `.cursor/hooks/*.json`, `.cursor/hooks.json`; flat command handlers and prompt handlers' `prompt` field; nested handlers are unsupported |
 | Kiro | `.kiro/steering/*.md`, `agents/*.md`, `prompts/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
@@ -320,7 +325,10 @@ clean audit to exit `1`. An advisory cache-miss skip remains non-failing
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
 informational skip. `apm audit --ci` instead self-hydrates one lock-pinned
 scratch replay through `install/audit_replay.py`; materialization failures
-fail closed without mutating the checkout.
+fail closed without mutating the checkout. Replay fetches each Git dependency
+over the transport its declaring `apm.yml` states, as install does: a
+`git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
+the usual [transport selection](../../../consumer/manage-dependencies/#transport-selection).
 
 ### Deployment-owner integrity
 
@@ -371,6 +379,7 @@ CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement
 ## Related
 
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.
+- [`apm export-patch`](../export-patch/) -- turn the `modified` drift this reports into upstream patches.
 - [`apm prune`](../prune/) -- reconciles the canonical deployment-owner references this check validates.
 - [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- consumer-side overview of the two-layer security model.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.

@@ -84,16 +84,16 @@ jobs:
       # Pinned to the same Python version as ci.yml. NOTICE content
       # depends on which dist-info layout the installed wheels use, and
       # different interpreters can resolve different conditional deps
-      # (e.g. tomli is only installed under python_version<'3.11').
+      # (e.g. a dependency gated by a python_version marker).
       # Locking to 3.12 keeps the rendered output deterministic across
       # CI runs and developer machines.
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -131,9 +131,15 @@ jobs:
       # SPDX identifier the upstream metadata throws at us (BlueOak,
       # 0BSD-variants, dual-licensed `MIT OR Apache-2.0` strings, etc.)
       # and produce noisy false positives on otherwise-fine PRs.
+      #
+      # `allow-dependencies-licenses` exempts pylint (GPL-2.0-or-later)
+      # because it is a dev-only lint tool (`[dev]` extra): it is never
+      # imported by apm_cli nor bundled into the wheel or binary, so its
+      # license does not reach what we redistribute.
       - name: License policy check (PR only)
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
+          allow-dependencies-licenses: pkg:pypi/pylint
           fail-on-severity: moderate

@@ -171,6 +171,16 @@ def test_native_typed_error_guard_retains_legacy_and_rejects_broad_handlers(
             "False",
         ),
         (
+            "src/apm_cli/install/sources.py",
+            "is_codex_source_pin(cached_commit)",
+            "bool(cached_commit)",
+        ),
+        (
+            "src/apm_cli/install/sources.py",
+            "verify_marker(self.install_path, cached_commit)",
+            "None",
+        ),
+        (
             "src/apm_cli/install/drift.py",
             "codex_records = verify_codex_source_identity(",
             "codex_records = noncanonical_source_check(",
@@ -638,6 +648,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Explicit false and null become omission instead of manifest intent.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-user-hook-home-reference",
+        rule_id="mutation_writes.user_hook_home_reference",
+        path="src/apm_cli/integration/hook_integrator.py",
+        old="            if home_reference is None:\n",
+        new='            if home_reference is None or os.name == "nt":\n',
+        intent="The hook rewriter gates home anchoring on the host OS, not the capability.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-user-root-scope",
         rule_id="mutation_writes.user_root_scope",
         path="src/apm_cli/integration/targets.py",
@@ -708,6 +726,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="@serialized_lifecycle\ndef set(",
         new="def set(",
         intent="Config mutation stops routing through the canonical lifecycle lock.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-lock-parent-placement",
+        rule_id="install-deployment-lock-parent-placement",
+        path="src/apm_cli/deps/why_walker.py",
+        old="    legacy = lockfile.replacements is None\n",
+        new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
+        intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
     ),
     MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
@@ -1524,7 +1550,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/deps/github_downloader.py",
         old="            return _repair(env)\n",
         new="            return True\n",
-        intent="Downloader skips the dangling-cone-symlink repair owner.",
+        intent="Downloader skips Git-object link materialization in its sparse clone.",
     ),
     MutationCase(
         guard_id="transport-platform-tls-trust-injection",
@@ -1821,6 +1847,20 @@ def test_orphan_selection_guard_rejects_warning_bypass() -> None:
     old = "return _find_orphaned_packages(installed, expected)"
     assert source.count(old) == 1
     mutated = source.replace(old, "return sorted(set(installed) - expected)", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
+    """Targeted-install module removal cannot bypass the shared selector (#3502)."""
+    path = "src/apm_cli/install/phases/cleanup.py"
+    source = _source(path)
+    old = "for relative in _find_orphaned_packages("
+    assert source.count(old) == 1
+    mutated = source.replace(old, "for relative in sorted(", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-orphan-selection"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})

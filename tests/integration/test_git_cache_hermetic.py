@@ -86,7 +86,9 @@ class TestGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
         )
 
         with (
@@ -499,7 +501,11 @@ class TestCreateCheckout:
         final_dir = cache._checkouts_root / shard_key / ("a" * 40) / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
+        )
 
         with (
             patch("apm_cli.cache.git_cache.shard_lock", return_value=nullcontext()),
@@ -539,7 +545,7 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "b" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 3
+        assert mock_run.call_count == 4  # clone, two config pins, checkout
 
     def test_clone_failure_cleans_staged_checkout(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
@@ -589,7 +595,11 @@ class TestCreateCheckout:
         final_dir = cache._checkouts_root / shard_key / ("e" * 40) / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
+        )
         (cache._db_root / shard_key).mkdir(parents=True)
 
         verify_results = [False, True]
@@ -605,7 +615,7 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "e" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 3
+        assert mock_run.call_count == 4  # clone, two config pins, checkout
 
     def test_atomic_land_false_with_invalid_winner_evicts_and_raises(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"

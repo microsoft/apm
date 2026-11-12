@@ -77,14 +77,15 @@ fallback requires an exhausted plan with an executed same-origin effective
 HTTPS attempt. Path containment rejects symlink or traversal escapes.
 See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-self-managed).
 
-### Git symlink checkout fallback
+### Packages with symbolic links
 
-APM preserves Git's detected `core.symlinks` setting and explicit command-scope
-overrides without changing global Git configuration, so a successful checkout
-is not proof that a package requiring real symlinks works (common on non-admin
-Windows accounts). See [Install packages: symlink checkout
-fallback](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong)
-for the full behavior and troubleshooting steps.
+A link inside a dependency whose target stays in the same commit installs as
+a copy of the target's content (directory links copy the directory). APM
+resolves it from the locked commit's Git objects, so no host needs symlink
+privileges and the `content_hash` is the same on every platform. Links that
+escape the repository, are broken or loop fail the install with an error
+naming the link. See [Install packages: when things go
+wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
 ### Custom git ports
 
@@ -121,6 +122,8 @@ across protocols.
 | `https://...` or `http://...` | The explicit HTTP(S) scheme |
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Shorthand otherwise | HTTPS |
+
+`apm audit --ci` cold replay uses the same declared transport as install.
 
 A failed clone fails loudly, naming the URL and the protocol attempted.
 An explicit scheme prevents APM from selecting another protocol unless
@@ -354,7 +357,9 @@ tag lookup and installation; none inherit the catalog's authority, even when
 hostname and repository path match. Explicit dictionary `repo` URLs follow
 the same rule; bare external entries keep their normal dependency defaults.
 `git-subdir.path` owns the contained package path. These survive into the concrete `git:`, `path:`, and `ref:` manifest
-entry and the lockfile. Invalid URLs or unsafe paths fail before durable
+entry and the lockfile. A full 40-character source `sha` (on `github`, `url`
+or `git-subdir`) wins over `ref` and is the commit APM installs and writes as
+`ref:`. Invalid URLs, unsafe paths, or a malformed `sha` fail before durable
 project writes.
 
 Catalog-only entries with inline `lspServers` or `mcpServers` remain valid
@@ -422,7 +427,7 @@ Object-form fields:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `id` | yes | `owner/repo` identity at the registry |
-| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry. Ranges skip pre-releases unless the range names a pre-release on the same `major.minor.patch` |
 | `registry` | no | Name from the merged registry map; defaults to the effective default |
 | `path` | no | Sub-path to a file or directory within the published package |
 | `alias` | no | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |
@@ -577,8 +582,24 @@ dependencies:
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
         #                            OpenCode: translated to {env:VAR}; export variables at runtime.
-        #                            Windsurf/Claude/Gemini: resolved at install time.
-        #                            Codex: env resolved at install time; a remote
+        #                            Claude Code project .mcp.json: kept as ${VAR}
+        #                            (${VAR:-default} too) in command, args, env,
+        #                            url and headers; Claude Code expands them.
+        #                            Reinstall replaces values APM wrote earlier.
+        #                            Claude user scope (-g)/Windsurf/Gemini:
+        #                            resolved at install time.
+        #                            Codex project scope: a stdio env value that is
+        #                            exactly KEY: ${KEY} or KEY: ${env:KEY} becomes
+        #                            env_vars = ["KEY"], read from the environment
+        #                            that launches Codex and never written. Other
+        #                            references are still resolved at install time
+        #                            and written, with a names-only warning.
+        #                            Reinstall replaces an APM-written value only for
+        #                            an unchanged managed entry; otherwise it keeps
+        #                            the entry, exits 1, and asks you to reconcile
+        #                            by hand and rotate any committed credential.
+        #                            Codex user scope (-g): env resolved at install
+        #                            time as before; a remote
         #                            server's headers are written as
         #                            bearer_token_env_var / env_http_headers and
         #                            resolved by Codex at server-start.
@@ -645,14 +666,21 @@ for supported fields and literal-value handling.
 For OpenCode, top-level `enabled` passes the supplied value and JSON type
 unchanged, including `false`, `null`, and non-boolean values. Only omission
 defaults to `true`; OpenCode interprets the value, not APM. Reinstall applies
-changes to this field. See the
+changes to this field. When `opencode.json` declares `mcp.servers` (the
+OpenCode 2 layout), APM writes there instead: `false` becomes
+`disabled: true`, `true` or omission writes no field, and other values warn
+and leave the file unchanged. Set `codemode: false` as an extra field to
+bypass Code Mode. See the
 [manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#422-dependenciesmcp)
-for the dependency contract.
+for the dependency contract and
+[OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
+for format selection.
 
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker
 run options before the image, and appends package arguments after the
-image. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
+image. Options-only `runtimeArguments` (no leading `run`) gain
+`run -i --rm` ahead of them. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
 then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
 available when the harness starts an OCI server. Do not add per-target
 launcher overrides.

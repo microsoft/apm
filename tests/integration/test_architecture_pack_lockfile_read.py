@@ -38,7 +38,9 @@ def test_bundle_lockfile_reads_have_one_registered_owner() -> None:
 @pytest.mark.parametrize(
     ("before", "after"),
     [
-        ("and not new_path.is_symlink()", "and True"),
+        # Trailing newline pins the read-only resolver clause; the migration
+        # guard repeats it mid-line and must not satisfy the rule.
+        ("and not new_path.is_symlink()\n", "and True\n"),
         ("legacy_path.exists() or legacy_path.is_symlink()", "legacy_path.exists()"),
         ("not path.exists() and not path.is_symlink()", "not path.exists()"),
     ],
