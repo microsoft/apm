@@ -83,32 +83,44 @@ def _get_config_getters():
     }
 
 
-def _valid_config_keys() -> str:
-    """Return valid config keys for messages."""
+# Single registry of user-facing config keys: (name, experimental flag, unsettable).
+# Messages derive the valid-key list from it; tests pin it to the dispatch below.
+_CONFIG_KEYS: tuple[tuple[str, str | None, bool], ...] = (
+    ("auto-integrate", None, False),
+    ("target", None, True),
+    ("self-update.channel", None, True),
+    ("self-update.install-dir", None, True),
+    ("mcp-registry-url", None, True),
+    ("temp-dir", None, True),
+    ("allow-protocol-fallback", None, True),
+    ("prefer-ssh", None, True),
+    ("github-auth-first", None, True),
+    ("audit-on-install", "external_scanners", True),
+    ("external.<name>.llm", "external_scanners", True),
+    ("external.<name>.args", "external_scanners", True),
+    ("copilot-cowork-skills-dir", "copilot_cowork", True),
+    ("registry.<name>.url", "registries", True),
+    ("registry.<name>.token", "registries", True),
+    ("registry.<name>.default", "registries", True),
+)
+
+
+def _valid_config_keys(*, unset: bool = False) -> str:
+    """Return the keys the current flags expose, for messages."""
     from ..core.experimental import is_enabled
 
-    keys = [
-        "auto-integrate",
-        "target",
-        "self-update.channel",
-        "self-update.install-dir",
-        "mcp-registry-url",
-        "temp-dir",
-        "allow-protocol-fallback",
-        "prefer-ssh",
-        "github-auth-first",
-    ]
-    if is_enabled("external_scanners"):
-        keys.append("audit-on-install")
-        keys.append("external.<name>.llm")
-        keys.append("external.<name>.args")
-    if is_enabled("copilot_cowork"):
-        keys.append("copilot-cowork-skills-dir")
-    if is_enabled("registries"):
-        keys.append("registry.<name>.url")
-        keys.append("registry.<name>.token")
-        keys.append("registry.<name>.default")
-    return ", ".join(keys)
+    return ", ".join(
+        name
+        for name, flag, unsettable in _CONFIG_KEYS
+        if (flag is None or is_enabled(flag)) and (unsettable or not unset)
+    )
+
+
+def _reject_unknown_key(logger: CommandLogger, key: str, *, unset: bool = False) -> None:
+    """Report an unknown key with the valid-key list and exit 1."""
+    logger.error(f"Unknown configuration key: '{key}'")
+    logger.progress(f"Valid keys: {_valid_config_keys(unset=unset)}")
+    sys.exit(1)
 
 
 def _show_all_user_config(logger: CommandLogger) -> None:
@@ -557,12 +569,7 @@ def set(key, value):  # noqa: F811
     setters = _get_config_setters()
     config_entry = setters.get(key)
     if config_entry is None:
-        logger.error(f"Unknown configuration key: '{key}'")
-        logger.progress(f"Valid keys: {_valid_config_keys()}")
-        logger.progress(
-            "This error may indicate a bug in command routing. Please report this issue."
-        )
-        sys.exit(1)
+        _reject_unknown_key(logger, key)
 
     try:
         enabled = _parse_bool_value(value)
@@ -716,12 +723,7 @@ def get(key):
 
         getter = getters.get(key)
         if getter is None:
-            logger.error(f"Unknown configuration key: '{key}'")
-            logger.progress(f"Valid keys: {_valid_config_keys()}")
-            logger.progress(
-                "This error may indicate a bug in command routing. Please report this issue."
-            )
-            sys.exit(1)
+            _reject_unknown_key(logger, key)
         value = getter()
         # Render booleans as lowercase true/false (npm convention).
         if isinstance(value, bool):
@@ -870,6 +872,4 @@ def unset(key):
         logger.success("Cowork skills directory configuration removed")
         return
 
-    logger.error(f"Unknown configuration key: '{key}'")
-    logger.progress(f"Valid keys: {_valid_config_keys()}")
-    sys.exit(1)
+    _reject_unknown_key(logger, key, unset=True)
