@@ -1138,8 +1138,12 @@ class DownloadDelegate:
 
         api_url = _raw_url(ref)
 
+        # A token-bearing request uses the credential-scoped session so the
+        # PRIVATE-TOKEN header never follows a redirect to another origin.
+        gitlab_get = partial(self._host._resilient_get, allow_netrc=not token)
+
         try:
-            response = self._host._resilient_get(api_url, headers=headers, timeout=30)
+            response = gitlab_get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
             if verbose_callback:
                 verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
@@ -1153,7 +1157,7 @@ class DownloadDelegate:
                 fallback_ref = "master" if ref == "main" else "main"
                 fallback_url = _raw_url(fallback_ref)
                 try:
-                    response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
+                    response = gitlab_get(fallback_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     if verbose_callback:
                         verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")

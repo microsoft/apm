@@ -25,6 +25,8 @@ from urllib.parse import quote
 
 import requests as _requests
 
+from ..utils.http_credentials import strip_cross_origin_credential_headers
+
 if TYPE_CHECKING:
     from .registry_proxy import RegistryConfig
 
@@ -48,12 +50,8 @@ class _NoNetrcSession(_requests.Session):
         prepared_request: _requests.PreparedRequest,
         response: _requests.Response,
     ) -> None:
-        """Strip explicit auth across authorities without reapplying netrc."""
-        if "Authorization" in prepared_request.headers and self.should_strip_auth(
-            response.request.url,
-            prepared_request.url,
-        ):
-            del prepared_request.headers["Authorization"]
+        """Strip every credential header across origins without reapplying netrc."""
+        strip_cross_origin_credential_headers(self, prepared_request, response)
 
 
 class ArtifactoryRegistryClient:

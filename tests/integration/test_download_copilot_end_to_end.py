@@ -885,7 +885,11 @@ class TestDownloadGitlabFile:
             "/api/v4/projects/group%2Fproject/repository/files/apm.yml/raw",
         )
         assert parse_qs(url.query) == {"ref": ["main"]}
-        assert call.kwargs == {"headers": {"PRIVATE-TOKEN": "gl-token"}, "timeout": 30}
+        assert call.kwargs == {
+            "headers": {"PRIVATE-TOKEN": "gl-token"},
+            "timeout": 30,
+            "allow_netrc": False,
+        }
 
     def test_404_tries_master_fallback(self, gitlab_downloader: GitHubPackageDownloader) -> None:
         """On 404 with ref=main, retries with master."""

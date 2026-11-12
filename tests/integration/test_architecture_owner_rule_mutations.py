@@ -1452,6 +1452,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A transport attempt invokes the clone action without canonical connection recovery.",
     ),
     MutationCase(
+        guard_id="transport-platform-credential-origin-scope",
+        rule_id="transport-platform-credential-origin-scope",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="return cfg.headers_for(scheme, host)",
+        new="return cfg.get_headers()",
+        intent="Artifactory downloads attach the registry token to any requested origin.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
