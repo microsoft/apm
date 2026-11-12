@@ -104,6 +104,7 @@ class TestRunMcpIntegrationInstallBranch:
             mcp_configs={"io.github.acme/server": dep.to_dict()},
             mcp_target_servers={},
             mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
+            native_hashes={},
             logger=ANY,
             fail_on_write_error=True,
         )

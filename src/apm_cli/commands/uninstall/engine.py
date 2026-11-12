@@ -4,6 +4,7 @@ import builtins
 import contextlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ...constants import APM_MODULES_DIR
@@ -20,6 +21,9 @@ from ...models.dependency.selection import (
 )
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
+
+if TYPE_CHECKING:
+    from ...core.deployment_ledger import DeploymentMaterializationSession
 
 
 class MCPUninstallCleanupError(RuntimeError):
@@ -659,6 +663,7 @@ def _validate_uninstall_packages(
         )
 
     packages_to_remove = []
+    seen_entry_ids: set[int] = set()
     packages_not_found = []
 
     for package in packages:
@@ -698,7 +703,10 @@ def _validate_uninstall_packages(
         selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
-            if matched_dep not in packages_to_remove:
+            # Selection returns the original manifest object, including unhashable mappings.
+            entry_id = id(matched_dep)
+            if entry_id not in seen_entry_ids:
+                seen_entry_ids.add(entry_id)
                 packages_to_remove.append(matched_dep)
             if not log_matches:
                 continue
@@ -1073,6 +1081,7 @@ class IntegrationCleanupOutcome:
     deployed_files: dict[str, list[str]]
     failed_paths: list[str]
     error_count: int
+    materialization_session: "DeploymentMaterializationSession | None" = None
 
     @property
     def complete(self) -> bool:
@@ -1106,6 +1115,7 @@ def _sync_integrations_after_uninstall(
     modules_dir: Path | None = None,
     survivor_plan: list[tuple[DependencyReference, object]] | None = None,
     deployed_file_hashes: dict[str, str] | None = None,
+    excluded_survivor_keys: frozenset[str] = frozenset(),
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1116,7 +1126,11 @@ def _sync_integrations_after_uninstall(
     lockfile (orphans already deleted). The on-disk lockfile is still
     stale at this point in the uninstall pipeline, so Phase 2 must not
     re-read it from disk.
+
+    Survivors in *excluded_survivor_keys* are not re-integrated, such as
+    packages just removed from the selected profile only.
     """
+    from ...core.deployment_ledger import DeploymentMaterializationSession
     from ...install.services import (
         IntegratorBundle,
         integrate_package_primitives,
@@ -1171,6 +1185,8 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
+        if dep_ref.get_unique_key() in excluded_survivor_keys:
+            continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             dep_ref.target_subset,
@@ -1275,12 +1291,19 @@ def _sync_integrations_after_uninstall(
         # prefix (.copilot/skills/) and cowork:// paths would be silently
         # skipped by the startswith() guard inside sync_integration.
         _sync_targets = None if _has_cowork_skills else _resolved_targets
-        result = _integrators["skills"].sync_integration(
-            apm_package,
-            project_root,
-            managed_files=_buckets["skills"] if _buckets else None,
-            targets=_sync_targets,
-        )
+        removed_skill_paths: list[Path] = []
+        try:
+            result = _integrators["skills"].sync_integration(
+                apm_package,
+                project_root,
+                managed_files=_buckets["skills"] if _buckets else None,
+                targets=_sync_targets,
+                removed_paths=removed_skill_paths,
+            )
+        finally:
+            DeploymentMaterializationSession.retire_removed(
+                project_root, removed_skill_paths, user_scope=user_scope
+            )
         counts["skills"] = result.get("files_removed", 0)
 
     # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
@@ -1370,36 +1393,42 @@ def _sync_integrations_after_uninstall(
     _rebuild_scope = InstallScope.USER if user_scope else InstallScope.PROJECT
     _allow_executables = getattr(apm_package, "allow_executables", None)
     reintegration_diagnostics = DiagnosticCollector()
-    for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
-        dep_key = dep_ref.get_unique_key()
-        deployed_files = package_deployed_files.setdefault(dep_key, [])
+    materialization_session = (
+        DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)
+        if target_survivor_plan
+        else None
+    )
+    with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):
+        for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
+            dep_key = dep_ref.get_unique_key()
+            deployed_files = package_deployed_files.setdefault(dep_key, [])
 
-        try:
-            integration_result = integrate_package_primitives(
-                pkg_info,
-                project_root,
-                targets=authorized_targets,
-                integrators=_integrator_bundle,
-                force=False,
-                managed_files=None,
-                diagnostics=reintegration_diagnostics,
-                package_name=dep_ref.get_identity(),
-                logger=logger,
-                scope=_rebuild_scope,
-                allow_executables=_allow_executables,
-                trust_bin=False,
-                bin_skip_reason_override="not_retrusted_on_uninstall",
-            )
-            deployed_files.extend(integration_result["deployed_files"])
-        except Exception as exc:
-            pkg_id = _dependency_public_label(dep_ref)
-            logger.warning(
-                f"Best-effort re-integration skipped for {pkg_id}. "
-                "Run 'apm install' to rebuild integrated files."
-            )
-            logger.verbose_detail(
-                f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
-            )
+            try:
+                integration_result = integrate_package_primitives(
+                    pkg_info,
+                    project_root,
+                    targets=authorized_targets,
+                    integrators=_integrator_bundle,
+                    force=False,
+                    managed_files=None,
+                    diagnostics=reintegration_diagnostics,
+                    package_name=dep_ref.get_identity(),
+                    logger=logger,
+                    scope=_rebuild_scope,
+                    allow_executables=_allow_executables,
+                    trust_bin=False,
+                    bin_skip_reason_override="not_retrusted_on_uninstall",
+                )
+                deployed_files.extend(integration_result["deployed_files"])
+            except Exception as exc:
+                pkg_id = _dependency_public_label(dep_ref)
+                logger.warning(
+                    f"Best-effort re-integration skipped for {pkg_id}. "
+                    "Run 'apm install' to rebuild integrated files."
+                )
+                logger.verbose_detail(
+                    f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
+                )
 
     reintegration_diagnostics.render_summary()
     return IntegrationCleanupOutcome(
@@ -1407,6 +1436,7 @@ def _sync_integrations_after_uninstall(
         deployed_files=package_deployed_files,
         failed_paths=failed_hook_paths,
         error_count=result.get("errors", 0),
+        materialization_session=materialization_session,
     )
 
 
@@ -1436,6 +1466,9 @@ def _remove_stale_mcp_from_recorded_targets(
         )
 
     failures: list[tuple[str, Exception]] = []
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
     for runtime, managed_servers in sorted(target_servers.items()):
         scoped_stale = stale_servers.intersection(managed_servers)
         if not scoped_stale:
@@ -1449,6 +1482,7 @@ def _remove_stale_mcp_from_recorded_targets(
                 scope=scope,
                 fail_on_write_error=True,
                 stored_configs=lockfile.mcp_configs,
+                native_hashes=native_hashes,
             )
         except Exception as exc:
             failures.append((runtime, exc))

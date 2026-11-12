@@ -538,6 +538,30 @@ class APMDependencyResolver:
         with self._download_lock:
             self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
 
+    def expand_transitive_declaration(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+        child_dep: DependencyReference,
+    ) -> DependencyReference | None:
+        """Expand one declaration of *parent_pkg* as breadth-first resolution does.
+
+        Applies ``git: parent`` inheritance and remote same-repository ``path:``
+        expansion without reporting. Returns ``None`` where resolution would
+        reject the declaration.
+        """
+        if child_dep.is_parent_repo_inheritance:
+            try:
+                child_dep = self.expand_parent_repo_decl(parent_dep, child_dep)
+            except ValueError:
+                return None
+        if child_dep.is_local and child_dep.local_path and self._is_remote_parent(parent_pkg):
+            try:
+                return self._expand_remote_parent_local_path(parent_dep, parent_pkg, child_dep)
+            except PathTraversalError:
+                return None
+        return child_dep
+
     def _expand_or_reject_remote_parent_local_path(
         self,
         parent_dep: DependencyReference,

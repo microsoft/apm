@@ -13,6 +13,7 @@ Covers missing lines/branches identified in coverage-unit.json:
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -319,8 +320,11 @@ class TestCleanupTransitiveOrphans:
         assert removed == 0
         assert len(orphans) == 0
 
-    def test_orphan_removed(self, tmp_path):
+    @pytest.mark.windows_compat
+    def test_orphan_removed(self, tmp_path: Path) -> None:
+        """An orphan's real install directory is removed on every platform."""
         from apm_cli.commands.uninstall.engine import _cleanup_transitive_orphans
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
 
         logger = _make_logger()
         apm_modules = tmp_path / "apm_modules"
@@ -330,9 +334,8 @@ class TestCleanupTransitiveOrphans:
         child_dir = org_dir / "child"
         child_dir.mkdir()
 
-        orphan = _make_locked_dep("org/child", "child", resolved_by="org/parent")
-        lf = _make_lockfile({"org/child": orphan})
-        lf.get_dependency.return_value = orphan
+        orphan = LockedDependency(repo_url="org/child", resolved_by="org/parent")
+        lf = LockFile(dependencies={orphan.get_unique_key(): orphan})
 
         (tmp_path / "apm.yml").write_text("name: test\n")
 
@@ -340,10 +343,13 @@ class TestCleanupTransitiveOrphans:
             patch("apm_cli.utils.yaml_io.load_yaml", return_value={}),
             patch("apm_cli.integration.base_integrator.BaseIntegrator.cleanup_empty_parents"),
         ):
-            removed, _orphans = _cleanup_transitive_orphans(
+            removed, orphans = _cleanup_transitive_orphans(
                 lf, ["org/parent"], apm_modules, tmp_path / "apm.yml", logger
             )
-        assert removed >= 0  # May or may not remove depending on remaining deps
+        assert removed == 1
+        assert orphans == {"org/child"}
+        assert not child_dir.exists()
+        logger.error.assert_not_called()
 
     def test_orphan_removal_error_logged(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _cleanup_transitive_orphans

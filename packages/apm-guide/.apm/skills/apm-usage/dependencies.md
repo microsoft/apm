@@ -122,6 +122,8 @@ across protocols.
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Shorthand otherwise | HTTPS |
 
+`apm audit --ci` cold replay uses the same declared transport as install.
+
 A failed clone fails loudly, naming the URL and the protocol attempted.
 An explicit scheme prevents APM from selecting another protocol unless
 cross-protocol fallback is enabled. Git still applies a matching safe
@@ -301,9 +303,13 @@ Unknown fields, duplicate selectors, collisions and cycles fail.
 Original identity and selections still own one installed slot. Auth, policy,
 integrity and executable approval evaluate the selected source; upstream consent
 is not transferred. HTTP replacement sources are rejected, even with CLI consent.
-Missing/invalid selected sources never fall back upstream. Unused rules warn
-without accessing their sources. Removing a rule and running `apm install`
+Missing/invalid selected sources never fall back upstream. Removing a rule and running `apm install`
 restores upstream obligations and reconciles owned outputs.
+
+Ordinary `apm install` persists the entire normalized root replacement table in
+`apm.lock.yaml`, even after the last dependency is removed. This includes
+clearing it with `replace: []` or removing `replace`. Recording dormant rules
+does not read or fetch their sources, even if a local path is absent.
 
 The complete table and incoming requests are recorded in candidate lock version
 `"3"`. Verified v0.25.0/v0.32.0/v0.33.0 readers reject the selector/version;
@@ -574,7 +580,18 @@ dependencies:
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
         #                            OpenCode: translated to {env:VAR}; export variables at runtime.
         #                            Windsurf/Claude/Gemini: resolved at install time.
-        #                            Codex: env resolved at install time; a remote
+        #                            Codex project scope: a stdio env value that is
+        #                            exactly KEY: ${KEY} or KEY: ${env:KEY} becomes
+        #                            env_vars = ["KEY"], read from the environment
+        #                            that launches Codex and never written. Other
+        #                            references are still resolved at install time
+        #                            and written, with a names-only warning.
+        #                            Reinstall replaces an APM-written value only for
+        #                            an unchanged managed entry; otherwise it keeps
+        #                            the entry, exits 1, and asks you to reconcile
+        #                            by hand and rotate any committed credential.
+        #                            Codex user scope (-g): env resolved at install
+        #                            time as before; a remote
         #                            server's headers are written as
         #                            bearer_token_env_var / env_http_headers and
         #                            resolved by Codex at server-start.
@@ -648,7 +665,8 @@ for the dependency contract.
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker
 run options before the image, and appends package arguments after the
-image. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
+image. Options-only `runtimeArguments` (no leading `run`) gain
+`run -i --rm` ahead of them. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
 then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
 available when the harness starts an OCI server. Do not add per-target
 launcher overrides.

@@ -13,6 +13,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         """Set up test fixtures."""
         # Mock the factory and adapter
         self.mock_adapter = Mock()
+        self.mock_adapter.written_mcp_hashes = {}
         self.mock_conflict_detector = Mock()
 
         with (
@@ -29,6 +30,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         # Setup mocks
         self.mock_conflict_detector.check_server_exists.return_value = False
         self.mock_adapter.configure_mcp_server.return_value = True
+        self.mock_adapter.written_mcp_hashes = {"github": "sha256:" + "a" * 64}
 
         # Install server
         summary = self.installer.install_servers(["github"])
@@ -38,6 +40,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(len(summary.skipped), 0)
         self.assertEqual(len(summary.failed), 0)
         self.assertEqual(summary.installed[0], "github")
+        self.assertEqual(summary.native_hashes, self.mock_adapter.written_mcp_hashes)
 
         # Verify adapter was called
         self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
@@ -91,6 +94,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         # Setup mocks
         self.mock_conflict_detector.check_server_exists.return_value = False
         self.mock_adapter.configure_mcp_server.return_value = False
+        self.mock_adapter.written_mcp_hashes = {"github": "sha256:" + "a" * 64}
 
         # Install server
         summary = self.installer.install_servers(["github"])
@@ -101,6 +105,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(len(summary.failed), 1)
         self.assertEqual(summary.failed[0]["server"], "github")
         self.assertEqual(summary.failed[0]["reason"], "configuration failed")
+        self.assertEqual(summary.native_hashes, {})
 
     def test_handle_configuration_exception(self):
         """Test handling exception during server configuration."""

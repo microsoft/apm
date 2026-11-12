@@ -258,14 +258,20 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             prefix=_SRC_PREFIX,
             pattern=re.compile(
                 r"^[ \t]*(?:def (?:compare_native_mcp_connection|"
-                r"require_removable_mcp_connections)\(|class NativeMcpConnectionState\b)"
+                r"require_removable_mcp_connections|mcp_native_hash|"
+                r"retain_deferred_mcp_claims)\(|class NativeMcpConnectionState\b)"
             ),
             owner=_MCP_OWNERSHIP_OWNER,
             message="Native MCP connection ownership must stay owned by install/mcp/ownership.py",
             respect_exempt=False,
         )
     )
-    for name in ("compare_native_mcp_connection", "require_removable_mcp_connections"):
+    for name in (
+        "compare_native_mcp_connection",
+        "require_removable_mcp_connections",
+        "mcp_native_hash",
+        "retain_deferred_mcp_claims",
+    ):
         if not _present_re(owner, re.compile(rf"^def {name}\(")):
             findings.append(
                 _summary(rule_id, _MCP_OWNERSHIP_OWNER, f"Missing canonical MCP owner: {name}")
@@ -297,6 +303,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         )
     for path, function, required_call in (
         (_MCP_INTEGRATOR, "_install_self_defined_deps", "compare_native_mcp_connection"),
+        (_MCP_INTEGRATOR, "_install_registry_group", "compare_native_mcp_connection"),
         (_MCP_INTEGRATOR, "run_mcp_install", "compare_native_mcp_connection"),
         (
             _MCP_OWNERSHIP_OWNER,
@@ -308,10 +315,35 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "remove_stale",
             "require_removable_mcp_connections",
         ),
+        (_MCP_OWNERSHIP_OWNER, "compare_native_mcp_connection", "mcp_native_hash"),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "run_mcp_integration",
+            "retain_deferred_mcp_claims",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "run_owned_mcp_integration",
+            "retain_deferred_mcp_claims",
+        ),
+        ("src/apm_cli/adapters/client/claude.py", "configure_mcp_server", "mcp_native_hash"),
+        ("src/apm_cli/adapters/client/codex.py", "configure_mcp_server", "mcp_native_hash"),
+        (
+            "src/apm_cli/install/phases/lockfile.py",
+            "_preserve_existing_mcp_state",
+            "DeploymentLedgerCodec.mcp_native_hashes",
+        ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
-        if not failures and required_call not in _name_calls_in(facts, function):
+        if (
+            not failures
+            and required_call not in _name_calls_in(facts, function)
+            and not any(
+                call.scope == function and call.qualname == required_call
+                for call in getattr(facts, "calls", ())
+            )
+        ):
             findings.append(
                 _summary(
                     rule_id,
@@ -320,6 +352,27 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                 )
             )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
+    index = cleanup.tree_index
+    if index is not None:
+        for node in index.nodes:
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"_clean_toml_mcp_config", "_clean_claude_config"}
+                and (
+                    len(node.args) < 2
+                    or not isinstance(node.args[1], ast.Name)
+                    or node.args[1].id != "verified_keys"
+                )
+            ):
+                findings.append(
+                    violation(
+                        rule_id,
+                        cleanup.path,
+                        "Claude/Codex cleanup must consume exact keys returned by the MCP owner",
+                        line=node.lineno,
+                    )
+                )
     if (
         sum(
             call.scope == "remove_stale"

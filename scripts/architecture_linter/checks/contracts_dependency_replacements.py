@@ -73,6 +73,7 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
     for path, name in (
         (PLAN_INPUTS, "build_resolved_update_plan"),
         (RESOLUTION_REPORT, "report_resolved_dependencies"),
+        ("src/apm_cli/install/plan.py", "lockfile_satisfies_replacements"),
     ):
         findings.extend(_unique_definitions(provider, RULE, path, (name,)))
     required = {
@@ -97,8 +98,23 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
         ),
         "src/apm_cli/install/pipeline.py": (
             "dep = dep.source_reference",
+            "local_cleanup_pending=(\n            not lockfile_only\n"
+            "            and local_rows_need_reconciling(",
             "from apm_cli.install.helpers.plan_inputs import build_resolved_update_plan",
             "plan = build_resolved_update_plan(ctx, _early_lockfile)",
+            "apm_package=apm_package,\n        logger=logger,\n    ):",
+        ),
+        "src/apm_cli/commands/install.py": (
+            "or not lockfile_satisfies_replacements(_existing_lock, apm_package.replace_rules)[0]",
+        ),
+        "src/apm_cli/install/helpers/no_work.py": (
+            "builder.save_replacement_intent()",
+            "apm_dir, apm_package=apm_package, logger=logger, lockfile_only=lockfile_only",
+        ),
+        "src/apm_cli/install/phases/lockfile.py": (
+            "lockfile_satisfies_replacements(self.ctx.existing_lockfile, rules)",
+            "lockfile = copy.deepcopy(existing) if existing is not None else LockFile()",
+            "self._write_if_changed(lockfile, get_lockfile_path(self.ctx.apm_dir), LockFile)",
         ),
         "src/apm_cli/install/phases/resolve.py": (
             "from apm_cli.install.presentation.resolution import report_resolved_dependencies",

@@ -242,6 +242,7 @@ class InstallLogger(CommandLogger):
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
+        self._lockfile_written = False
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -354,6 +355,10 @@ class InstallLogger(CommandLogger):
     def record_dry_run_incomplete(self, incomplete: bool) -> None:
         """Record whether offline metadata can support a complete preview."""
         self._dry_run_incomplete = incomplete
+
+    def record_lockfile_write(self) -> None:
+        """Keep metadata-only persistence out of the unchanged summary."""
+        self._lockfile_written = True
 
     def nothing_to_install(
         self,
@@ -972,6 +977,8 @@ class InstallLogger(CommandLogger):
                 f"Cleaned {stale_cleaned} stale {file_noun}{timing_suffix}.",
                 symbol="sparkles",
             )
+        elif self._lockfile_written:
+            _rich_success(f"Updated apm.lock.yaml{timing_suffix}.", symbol="success")
         else:
             _rich_info(
                 f"No changes -- install state already up to date{timing_suffix}.",

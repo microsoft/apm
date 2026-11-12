@@ -296,7 +296,7 @@ def discover_policy_with_chain(
         if pin is not None:
             expected_hash = pin.normalized
 
-    local_override = bool(policy_override and Path(policy_override).is_file())
+    local_override = bool(policy_override and _expand_policy_path(policy_override).is_file())
     if cache_only and not local_override and not policy_cache_available(project_root):
         if expected_hash is not None:
             return _unverifiable_cache_pin(expected_hash, "")
@@ -729,6 +729,8 @@ def discover_policy(
 
     Resolution order:
     1. If policy_override is a local file path -> load from file
+       (an unambiguous local path that does not exist returns
+       ``outcome="absent"`` with an error instead of a repo lookup)
     2. If policy_override is an https:// URL -> fetch from URL
        (http:// is rejected for security)
     3. If policy_override is "org" -> auto-discover from project's git remote
@@ -746,9 +748,17 @@ def discover_policy(
     must always be treated fail-closed by callers.
     """
     if policy_override:
-        path = Path(policy_override)
+        path = _expand_policy_path(policy_override)
         if path.exists() and path.is_file():
             return _load_from_file(path, expected_hash=expected_hash)
+        if _is_unambiguous_local_policy_path(policy_override):
+            kind = "path is not a file" if path.exists() else "file not found"
+            return PolicyFetchResult(
+                error=f"Policy {kind}: {policy_override}",
+                source=f"file:{policy_override}",
+                outcome="absent",
+                not_found=True,
+            )
         if policy_override.startswith("http://"):
             return PolicyFetchResult(
                 error="Refusing plaintext http:// policy URL -- use https://",
@@ -785,6 +795,23 @@ def discover_policy(
         expected_hash=expected_hash,
         cache_only=cache_only,
     )
+
+
+def _expand_policy_path(ref: str) -> Path:
+    """Expand ``~`` in a policy ref; an unknown ``~user`` stays literal."""
+    try:
+        return Path(ref).expanduser()
+    except RuntimeError:
+        return Path(ref)
+
+
+def _is_unambiguous_local_policy_path(ref: str) -> bool:
+    """True when *ref* can only be a local path (``owner/name.yml`` stays a repo ref)."""
+    if ref.startswith(("https://", "http://")):
+        return False
+    if ref.startswith((".", "/", "~")) or "\\" in ref or Path(ref).is_absolute():
+        return True
+    return "/" not in ref and ref.lower().endswith((".yml", ".yaml"))
 
 
 def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFetchResult:

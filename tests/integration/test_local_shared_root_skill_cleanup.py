@@ -186,6 +186,52 @@ def _assert_bundle_kept(project: Path, bundled: str) -> None:
     ) == frozenset({bundled})
 
 
+def _assert_replacement_intent_preserves_receipts(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = project / "apm.lock.yaml"
+    before = LockFile.read(lock_path)
+    manifest_path = project / "apm.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["$schema"] = (
+        "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+    )
+    rule = {"for": {"git": "https://github.com/example/base.git"}, "with": {"path": "./absent"}}
+    for declared in ([rule], []):
+        manifest["replace"] = declared
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+        _install(project, monkeypatch, "--no-policy")
+        after = LockFile.read(lock_path)
+        assert before is not None and after is not None
+        assert after.replacements == declared
+        assert after.lockfile_version == "3"
+        after.replacements = before.replacements
+        after.lockfile_version = before.lockfile_version
+        assert after.is_semantically_equivalent(before)
+        stable = lock_path.read_bytes()
+        _install(project, monkeypatch, "--no-policy")
+        assert lock_path.read_bytes() == stable
+        assert not (project / "absent").exists()
+
+
+@pytest.mark.parametrize("targets", [None, ("claude", "copilot")])
+def test_bundle_only_receipts_allow_replacement_intent_persistence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, targets: tuple[str, ...] | None
+) -> None:
+    manifest: dict[str, object] = {"name": "bundle-only", "version": "1.0.0"}
+    if targets:
+        manifest["targets"] = list(targets)
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    LockFile(replacements=[]).save(tmp_path / "apm.lock.yaml")
+    bundled = _record_bundle(tmp_path, "bundled")
+
+    _assert_replacement_intent_preserves_receipts(tmp_path, monkeypatch)
+
+    _assert_bundle_kept(tmp_path, bundled)
+    assert (tmp_path / bundled).read_text(encoding="utf-8") == "bundled"
+    assert not (tmp_path / "apm_modules").exists()
+
+
 @pytest.mark.parametrize(
     "between",
     [("install",), ("uninstall", "./dep"), ("install", "--legacy-skill-paths")],
@@ -334,6 +380,8 @@ def test_deleted_local_tree_without_known_targets_stays_a_no_op(
     _install(tmp_path, monkeypatch)
 
     assert (tmp_path / "apm.lock.yaml").read_bytes() == before
+    assert (tmp_path / ".agents" / "skills" / "demo" / "SKILL.md").exists()
+    _assert_replacement_intent_preserves_receipts(tmp_path, monkeypatch)
     assert (tmp_path / ".agents" / "skills" / "demo" / "SKILL.md").exists()
 
 

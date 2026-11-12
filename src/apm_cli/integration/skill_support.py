@@ -1,11 +1,40 @@
 """Supporting value objects and cleanup helpers for skill integration."""
 
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.core.deployment_state import MaterializationResult
+
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_link_like(path: str | Path) -> bool:
+    """Treat symlinks and Windows reparse points (junctions) as links; fail closed."""
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return True
+    return os.path.islink(path) or bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def skill_dir_has_content(path: Path) -> bool:
+    """Return whether a skill destination holds content; an empty directory tree does not.
+
+    Fails closed: symlinks, junctions, any non-directory entry, and unreadable
+    subtrees count as content so unmanaged material is never treated as absent.
+    """
+    if not os.path.lexists(path):
+        return False
+    if _is_link_like(path) or not path.is_dir():
+        return True
+    errors: list[OSError] = []
+    for root, dirs, files in os.walk(path, onerror=errors.append):
+        if files or errors or any(_is_link_like(os.path.join(root, d)) for d in dirs):
+            return True
+    return bool(errors)
 
 
 def build_skill_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dict[str, str]]:
@@ -86,6 +115,7 @@ def clean_orphaned_skills(
     *,
     project_root: Path | None,
     get_lockfile_owned_agent_skills: Callable[[Path], set[str]],
+    removed_paths: list[Path] | None = None,
 ) -> dict[str, int]:
     """Remove legacy-orphan skill directories without touching foreign agents."""
     protected_names = set(installed_skill_names)
@@ -107,6 +137,8 @@ def clean_orphaned_skills(
         try:
             shutil.rmtree(skill_subdir)
             files_removed += 1
+            if removed_paths is not None:
+                removed_paths.append(skill_subdir)
         except Exception:
             errors += 1
 

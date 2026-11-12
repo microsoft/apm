@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from hashlib import sha256
-from os import stat_result
+from os import readlink, stat_result
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -391,16 +391,27 @@ def test_absent_other_primitive_claim_is_not_authorized_by_skill_completion(
     assert value in warnings[0].detail
 
 
-@pytest.mark.parametrize("content", ["edited", "untracked", "directory", "symlink"])
+@pytest.mark.parametrize(
+    "content",
+    [
+        "edited",
+        "untracked",
+        "directory",
+        pytest.param("symlink", marks=pytest.mark.windows_compat),
+        pytest.param("relative-symlink", marks=pytest.mark.windows_compat),
+    ],
+)
 def test_present_ambiguous_content_retains_every_view(tmp_path: Path, content: str) -> None:
     path = tmp_path / _OBSOLETE
     path.parent.mkdir(parents=True)
     if content == "directory":
         path.mkdir()
-    elif content == "symlink":
-        path.symlink_to(path.parent / "missing-destination")
+    elif content in {"symlink", "relative-symlink"}:
+        destination = path.parent / "missing-destination"
+        path.symlink_to(destination.name if content == "relative-symlink" else destination)
     else:
         path.write_text(content, encoding="ascii")
+    link_target = readlink(path) if path.is_symlink() else None
 
     files, hashes, ledger = _block(tmp_path)
 
@@ -410,9 +421,9 @@ def test_present_ambiguous_content_retains_every_view(tmp_path: Path, content: s
     assert len(ledger.records) == 2
     if content == "directory":
         assert path.is_dir()
-    elif content == "symlink":
+    elif content in {"symlink", "relative-symlink"}:
         assert path.is_symlink()
-        assert path.readlink() == path.parent / "missing-destination"
+        assert readlink(path) == link_target
     else:
         assert path.read_text(encoding="ascii") == content
 

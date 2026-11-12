@@ -539,12 +539,18 @@ class TestMaybeRollbackManifest:
         assert target.read_bytes() == b"original"
         logger.progress.assert_called_once_with("apm.yml restored to its previous state.")
 
-    def test_reports_actionable_warning_on_restore_failure(self, tmp_path):
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize(
+        "missing_parent", ["nonexistent", r"missing\directory"], ids=["plain", "escaped"]
+    )
+    def test_reports_actionable_warning_on_restore_failure(
+        self, tmp_path: Path, missing_parent: str
+    ) -> None:
         """Restore failures expose the actual error without requiring verbose."""
         from apm_cli.install.transaction import _maybe_rollback_manifest
 
         # Point at a non-existent directory so tempfile.mkstemp fails
-        bad_path = tmp_path / "nonexistent" / "apm.yml"
+        bad_path = tmp_path / missing_parent / "apm.yml"
 
         logger = MagicMock()
         # Should not raise -- best-effort
@@ -553,7 +559,7 @@ class TestMaybeRollbackManifest:
         logger.warning.assert_called_once()
         warning = logger.warning.call_args.args[0]
         assert "Failed to restore apm.yml" in warning
-        assert str(bad_path.parent) in warning
+        assert repr(str(bad_path.parent))[1:-1] in warning
         assert "before retrying" in warning
         logger.error.assert_not_called()
 

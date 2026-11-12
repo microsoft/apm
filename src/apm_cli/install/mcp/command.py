@@ -37,6 +37,7 @@ try:
     from ...deps.lockfile import (
         LockFile,
         LockfileConflictError,
+        LockfileSymlinkError,
         get_lockfile_path,
         migrate_lockfile_if_needed,
     )
@@ -227,6 +228,16 @@ def run_mcp_install(  # noqa: PLR0913
                 migrate_lockfile_if_needed(apm_dir)
                 _mcp_lock_path = get_lockfile_path(apm_dir)
                 _existing_lock = LockFile.read(_mcp_lock_path)
+                from ...core.deployment_ledger import DeploymentLedgerCodec
+
+                native_hashes = (
+                    DeploymentLedgerCodec.mcp_native_hashes(_existing_lock)
+                    if _existing_lock
+                    else {}
+                )
+                old_native_hashes = {
+                    target_name: dict(hashes) for target_name, hashes in native_hashes.items()
+                }
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
                 old_provenance = (
@@ -289,6 +300,7 @@ def run_mcp_install(  # noqa: PLR0913
                         user_scope=user_scope,
                         managed_target_servers=requested_target_servers,
                         prevalidated_registry_servers=prevalidated_registry_servers,
+                        native_hashes=native_hashes,
                     )
                 except MCPNativeConflictError as exc:
                     if not exc.wrote_connections:
@@ -311,8 +323,7 @@ def run_mcp_install(  # noqa: PLR0913
                 retired_targets = {
                     previous_target: {mcp_name}
                     for previous_target, server_names in old_target_servers.items()
-                    if mcp_name in server_names
-                    and mcp_name not in requested_target_servers.get(previous_target, set())
+                    if mcp_name in server_names and previous_target not in requested_target_servers
                 }
                 if retired_targets and conflict is None:
                     # Cleanup can fail after a destination write. Keep both deployments
@@ -323,6 +334,7 @@ def run_mcp_install(  # noqa: PLR0913
                         mcp_configs=merged_configs,
                         mcp_target_servers=merged_target_servers,
                         mcp_config_provenance=merged_provenance,
+                        native_hashes=native_hashes,
                         logger=logger,
                         fail_on_write_error=True,
                     )
@@ -335,6 +347,7 @@ def run_mcp_install(  # noqa: PLR0913
                             scope=scope,
                             fail_on_write_error=True,
                             stored_configs=old_configs,
+                            native_hashes=old_native_hashes,
                         )
                         merged_target_servers[previous_target].difference_update(retired)
                 MCPIntegrator.update_lockfile(
@@ -343,6 +356,7 @@ def run_mcp_install(  # noqa: PLR0913
                     mcp_configs=merged_configs,
                     mcp_target_servers=merged_target_servers,
                     mcp_config_provenance=merged_provenance,
+                    native_hashes=native_hashes,
                     logger=logger,
                     fail_on_write_error=True,
                 )
@@ -357,6 +371,11 @@ def run_mcp_install(  # noqa: PLR0913
                 logger.error("MCP server written to apm.yml but tool integration failed.")
                 raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
             except Exception as exc:
+                symlink_error = exc if isinstance(exc, LockfileSymlinkError) else exc.__cause__
+                if isinstance(symlink_error, LockfileSymlinkError):
+                    logger.error(str(symlink_error))
+                    logger.error("MCP server written to apm.yml but tool integration failed.")
+                    raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
                 # Keep the raw exception (which may contain internal paths,
                 # credentials, or stack-trace fragments) at verbose level
                 # only; surface a fixed actionable string to the user, then

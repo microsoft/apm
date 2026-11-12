@@ -413,6 +413,13 @@ apm audit --ci --policy ./apm-policy.yml    # local policy file
 apm audit --ci --policy https://...         # remote policy URL
 ```
 
+An explicit `--policy` path, URL, or `owner/repo` that cannot be loaded
+(missing file, unreachable, malformed, garbage, not found) exits 1 with
+`[x] Policy '<source>' could not be loaded: <cause>`, regardless of
+`policy.fetch_failure_default`. Auto-discovery and `--policy org` keep the
+warn-by-default behaviour. CI JSON/SARIF report `policy.enforced` so a
+wrapper can tell whether policy checks actually ran.
+
 ## Install-time enforcement
 
 **Note:** Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the shipping design.

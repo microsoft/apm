@@ -1310,7 +1310,10 @@ class TestLocalPathFailureReason:
         dep_ref.is_local = True
         dep_ref.local_path = str(tmp_path / "nonexistent")
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "path does not exist"
+        assert reason == (
+            f"Local package path does not exist: {dep_ref.local_path}. "
+            "Restore the source or correct the dependency path, then rerun apm install."
+        )
 
     def test_path_is_a_file_not_directory(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason
@@ -1321,7 +1324,11 @@ class TestLocalPathFailureReason:
         dep_ref.is_local = True
         dep_ref.local_path = str(f)
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "path is not a directory"
+        assert reason == (
+            "Unsupported single-file dependency: file.txt. "
+            "Use .prompt.md, .instructions.md, .agent.md, "
+            "or a directory package with apm.yml for companion assets."
+        )
 
     def test_directory_with_no_package_markers(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason
@@ -1332,7 +1339,11 @@ class TestLocalPathFailureReason:
         dep_ref.is_local = True
         dep_ref.local_path = str(d)
         reason = _local_path_failure_reason(dep_ref)
-        assert reason == "no apm.yml, SKILL.md, or plugin.json found"
+        assert reason == (
+            "Local package is not a valid APM package "
+            f"(no apm.yml, SKILL.md, or plugin.json): {d}. "
+            "Select a package directory or a supported single-file primitive."
+        )
 
 
 class TestLocalPathNoMarkersHint:

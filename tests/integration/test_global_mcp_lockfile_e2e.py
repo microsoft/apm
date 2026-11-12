@@ -11,35 +11,14 @@ with ``Path.home()`` overridden to an isolated temporary directory.
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-
-
-def _stub_downloader_for_lockfile(mock_dl_cls) -> None:
-    """Configure a patched ``GitHubPackageDownloader`` class mock so the
-    install pipeline's lockfile writer can serialize the downloader's
-    return value. Without string-typed ``resolved_commit`` /
-    ``package_type.value``, pyyaml raises and the install reports an
-    error, which under Bug 2 (#1496) exits non-zero. These tests only
-    care about lockfile MCP-server bookkeeping, not downloader internals.
-    """
-    instance = mock_dl_cls.return_value
-    pkg_info = MagicMock()
-    pkg_info.resolved_reference.resolved_commit = "0" * 40
-    pkg_info.resolved_reference.ref_name = "main"
-    pkg_info.resolved_reference.is_branch = True
-    pkg_info.resolved_reference.is_tag = False
-    pkg_info.resolved_reference.is_sha = False
-    pkg_info.package_type.value = "apm_package"
-    pkg_info.package.name = "stub-package"
-    pkg_info.package.version = "0.0.0"
-    instance.download_package.return_value = pkg_info
-
+from tests.utils.materialized_downloader import stub_materialized_downloader
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,10 +125,10 @@ class TestGlobalMCPLockfilePlacement:
         global_env,
     ):
         """MCP server entries must land in ~/.apm/apm.lock.yaml, not cwd."""
-        _stub_downloader_for_lockfile(mock_dl_cls)
         fake_home, work_dir, runner = global_env
         apm_dir = fake_home / ".apm"
         apm_modules = apm_dir / "apm_modules"
+        stub_materialized_downloader(mock_dl_cls, apm_modules)
 
         # Root manifest with a dependency that transitively declares MCP
         _write_apm_yml(
@@ -230,10 +209,10 @@ class TestGlobalMCPLockfilePlacement:
         global_env,
     ):
         """When the manifest has no MCP deps, global lockfile mcp_servers is cleared."""
-        _stub_downloader_for_lockfile(mock_dl_cls)
         fake_home, work_dir, runner = global_env
         apm_dir = fake_home / ".apm"
         apm_modules = apm_dir / "apm_modules"
+        stub_materialized_downloader(mock_dl_cls, apm_modules)
 
         # Root manifest with NO MCP dependencies
         _write_apm_yml(

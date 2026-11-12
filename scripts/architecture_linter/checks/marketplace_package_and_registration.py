@@ -566,11 +566,11 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_CLAUDE,
             "src/apm_cli/integration/mcp_config_view.py",
             (
-                "package_dir = _local_claude_mcp_snapshot(package_dir, scratch)",
-                "package_type, manifest = detect_package_type(package_dir)",
-                'validate_legacy_marketplace_plugin(staged, staged / ".claude-plugin/plugin.json")',
+                "elif _is_local_claude_plugin_source(dependency, package_dir):",
+                'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
             ),
-            "Raw local Claude MCP inspection must use canonical parsing only in scratch",
+            "Local Claude MCP inspection must read the install-synthesized manifest, "
+            "never the writable source",
         )
     )
     findings.extend(
@@ -609,6 +609,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
         ("compute_native_bundle_hash", "src/apm_cli/utils/content_hash.py"),
         ("owns_codex_dependency", _CODEX_PREFIX + "registrar.py"),
         ("verify_codex_source_identity", _CODEX_PREFIX + "registrar.py"),
+        ("is_codex_source_pin", _CODEX_PREFIX + "registrar.py"),
     ):
         count = _count_across(
             provider,
@@ -622,7 +623,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
     required = {
         _CODEX_PREFIX + "client.py": (
             '"expectedVersion": version',
-            'QUALIFIED_CODEX_VERSION = "0.163.0"',
+            'MINIMUM_CODEX_VERSION = "0.163.0"',
         ),
         _CODEX_PREFIX + "admission.py": (
             "record_native_exec_status(",
@@ -669,6 +670,8 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
             "ctx.package_deployed_files.get(key)",
         ),
         "src/apm_cli/install/sources.py": (
+            "is_codex_source_pin(cached_commit)",
+            "verify_marker(self.install_path, cached_commit)",
             "is_codex_compatibility_manifest(install_path, detect_package_type(install_path)[1])",
             "native_validation = validate_apm_package(install_path, source_path=install_path)",
         ),

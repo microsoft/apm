@@ -9,12 +9,21 @@ import pytest
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_dependency_replacement_lifecycle import (
     _INSTALL,
+    _assert_empty_graph_replacement_lifecycle,
     _replacement_fixture,
     _snapshot,
 )
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 
 pytestmark = pytest.mark.e2e
+
+
+@pytest.mark.req("req-rpl-003", "req-rpl-004")
+@pytest.mark.parametrize("keep_targets", [True, False], ids=["declared-targets", "no-target"])
+def test_empty_graph_replacement_intent_is_persisted(tmp_path: Path, keep_targets: bool) -> None:
+    _assert_empty_graph_replacement_lifecycle(
+        tmp_path, ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli")), keep_targets
+    )
 
 
 @pytest.mark.req("req-rpl-002", "req-rpl-004")
