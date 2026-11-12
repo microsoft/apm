@@ -370,6 +370,7 @@ during contained package materialization:
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
 - **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
+- **Deploy destinations** -- install refuses when a project target root, a primitive directory (for example `.github/prompts` or `.claude/commands`), or a deploy file location is a symlink. Nothing is written through the link.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
 - **Lockfile writes** -- when the project or global `apm.lock.yaml` is a symlink, commands that write the lockfile (such as `apm lock` and `apm install`) exit non-zero with an error naming the link and its target. Neither the link nor its target is modified; `apm update`, `apm install --update` and `apm uninstall` refuse before deploying, deleting or editing anything else. Replace the link with a regular file to continue.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
