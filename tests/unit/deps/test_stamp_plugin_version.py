@@ -283,3 +283,58 @@ def test_in_flight_parse_cannot_repoison_cache_after_invalidation(tmp_path):
     # rewritten bytes.
     fresh = APMPackage.from_apm_yml(apm_yml)
     assert fresh.version == "2c7ec5e"
+
+
+def _write_marketplace_plugin(root):
+    """A Claude marketplace plugin without its own apm.yml (no version)."""
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_bytes(
+        b'{"name": "plug", "description": "Demo plugin"}\n'
+    )
+    skill = root / "skills" / "demo"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"---\nname: demo\ndescription: Demo\n---\n\n# Demo\n")
+
+
+@pytest.mark.windows_compat
+def test_same_process_redownload_hash_matches_lockfile_and_fresh_install(tmp_path):
+    """#3585: a same-process re-download (e.g. ``apm install --update``
+    re-acquiring a package) must land a stamped tree whose content hash
+    equals the hash recorded by the first download AND the hash a later
+    fresh process computes, so the lockfile integrity check passes.
+
+    Drives the real materialization consumers: ``validate_apm_package``
+    synthesizes apm.yml (0.0.0) and loads it via ``from_apm_yml``, then
+    ``stamp_plugin_version`` rewrites it with the short SHA. Without
+    cache invalidation the second load returned the stale stamped
+    instance, the stamp guard skipped, and the tree hashed unstamped.
+    """
+    import shutil
+
+    from apm_cli.models.apm_package import clear_apm_yml_cache
+    from apm_cli.models.validation import validate_apm_package
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    sha = "2c7ec5e78b8e5d43ea02e90bb8826f6b9f147b0c"
+    pristine = tmp_path / "pristine"
+    _write_marketplace_plugin(pristine)
+    target = tmp_path / "apm_modules" / "plug"
+
+    def materialize() -> str:
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(pristine, target)
+        result = validate_apm_package(target)
+        assert result.is_valid, result.errors
+        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+        stamp_plugin_version(result.package, result.package_type, sha, target)
+        assert b"version: 2c7ec5e" in (target / "apm.yml").read_bytes()
+        return compute_package_hash(target)
+
+    recorded = materialize()  # first download: hash written to apm.lock.yaml
+    redownloaded = materialize()  # same-process re-acquisition
+    clear_apm_yml_cache()  # a later, fresh install process
+    fresh = materialize()
+
+    assert redownloaded == recorded
+    assert fresh == recorded
