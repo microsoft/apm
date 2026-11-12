@@ -12,7 +12,9 @@ These tests keep the run hermetic by stubbing only external I/O seams:
   records the dependency reference it received.
 
 Everything between ``apm install plugin@marketplace`` and the downloader call
-runs on production code.
+runs on production code. Real artifact selection (deployed bytes and resolved
+commit from distinct default and ``release/pilot`` branches) is proven by the
+installed-CLI tests in ``test_marketplace_registered_ref_lifecycle.py``.
 """
 
 from __future__ import annotations

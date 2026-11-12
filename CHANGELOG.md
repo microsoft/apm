@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
+- Regression tests prove that a marketplace registered with a non-default branch (`apm marketplace add ... --ref release/pilot`) installs that branch's plugin files and commit on the GitHub and GitLab `git` + `path` routes, while explicit plugin pins and `plugin@marketplace#ref` overrides keep precedence. -- by @abhinavgautam01 (#1994)
 
 ### Added
 
