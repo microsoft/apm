@@ -7,9 +7,9 @@ description: >-
   (WHAT), Implementation (HOW), validated mermaid diagrams when
   structure is non-trivial, explicit trade-offs, validation evidence,
   and a How-to-test section -- with every WHY-claim backed by a
-  PROSE or Agent Skills. Activate when the user asks to "write a PR
-  description", "draft a PR body", "open a PR", "fill in the PR
-  template", or any equivalent.
+  verbatim quote from PROSE or Agent Skills. Activate when the user
+  asks to "write a PR description", "draft a PR body", "open a PR",
+  "fill in the PR template", or any equivalent.
 ---
 
 # PR Description Skill -- Anchored, Concise, Validated PR Bodies
@@ -72,7 +72,7 @@ Per-section ceilings (enforced by `assets/section-rubric.md`):
 | Problem (WHY) | max 6 bullets, max 3 quoted anchors total |
 | Approach (WHAT) | a table OR 3-7 bullets; may be skipped if PR is purely additive (say "additive: see Implementation") |
 | Implementation (HOW) | one short paragraph per file, OR a table; no prose walls |
-| Diagrams | Include 1-3 validated mermaid blocks only when structure or control flow is non-trivial; simple, docs-only, and mechanical PRs may omit the section |
+| Diagrams | Required (1-3 validated mermaid blocks) when structure or control flow is non-trivial; optional for simple, docs-only, and mechanical PRs |
 | Trade-offs | 3-5 bullets; mechanical PRs may be 1-2 |
 | Benefits | 3-5 numbered items, each measurable |
 | Validation | copy-paste real command output; do not narrate |
@@ -114,9 +114,9 @@ quote, it is downgraded to a "should" with the reason given.
    ["Add what the agent lacks, omit what it knows"](https://agentskills.io/skill-creation/best-practices).
 
 4. **Visual aid where structure is non-trivial.** Changes with
-   non-trivial structure or control flow SHOULD include 1-3 mermaid
-   diagrams. Simple, docs-only, and mechanical PRs may omit the
-   section. Add a second only when the relationships are non-trivial.
+   non-trivial structure or control flow MUST include 1-3 validated
+   mermaid diagrams. Simple, docs-only, and mechanical PRs may omit
+   the section. Add a second only when the relationships are non-trivial.
    Never add a third unless it earns its place. Each diagram MUST be
    preceded by a one-sentence legend.
 

@@ -149,8 +149,9 @@ validation block.
 
 ## Final pass -- run before saving
 
-- [ ] All required sections present; Diagrams is present only when
-      the PR has non-trivial structure or control flow.
+- [ ] All required sections present; Diagrams present (1-3 validated
+      blocks) when structure or control flow is non-trivial, optional
+      otherwise.
 - [ ] **Scenario Evidence table present in Validation** (or skip
       clause justified in trade-offs per
       `assets/scenario-evidence-rubric.md`).

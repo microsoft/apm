@@ -513,6 +513,13 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
    personas. Record `personas_spawned[]` (and ad-hoc reasons)
    for the CEO return and the comment one-liner.
 
+2b. **Persona preflight.** Run `scripts/check_required_agents.py`
+    (see "panel-mode") with every slug in `personas_spawned[]` plus
+    `apm-ceo`, using the consumer's `.github/agents` as
+    `--agents-dir`. If it exits nonzero, stop and report every
+    `missing_roles` entry. Do not spawn panelists or post a partial
+    review.
+
 3. **Fan out panelist tasks.** Spawn the resolved roster in PARALLEL
    via the `task` tool, one task per active persona. Do not spawn
    omitted personas. Pin model class per the Models section.

@@ -205,6 +205,10 @@ def test_external_persona_preflight_fails_closed_for_clean_consumers(tmp_path: P
         assert "check_required_agents.py" in skill
         assert "stop and report" in skill.lower()
         assert "](../../agents/" not in skill
+        checklist = skill.split("## Execution checklist", 1)[1]
+        preflight_step = checklist.index("\n2b. ")
+        fan_out_step = checklist.index("\n3. ", preflight_step)
+        assert "check_required_agents.py" in checklist[preflight_step:fan_out_step]
         if package == "autopilot-pr-review-worker":
             assert "`.github/agents/apm-ceo.agent.md`" in skill
             assert "`.apm/agents/apm-ceo.agent.md`" not in skill
@@ -279,6 +283,10 @@ def test_pr_description_diagrams_are_conditional_and_cli_is_pinned() -> None:
     assert "@mermaid-js/mermaid-cli@12.0.0" in skill
     assert "npx --yes -p @mermaid-js/mermaid-cli mmdc" not in skill
     assert "1-3 mermaid blocks for any non-doc-only PR" not in rubric
+    assert "non-trivial structure or control flow MUST include 1-3 validated" in skill
+    assert "Required (1-3 validated mermaid blocks) when structure" in skill
+    assert "Diagrams is present only when" not in rubric
+    assert "verbatim quote from PROSE or Agent Skills" in skill
 
 
 def test_pr_review_schema_has_no_undeclared_rubric_path() -> None:

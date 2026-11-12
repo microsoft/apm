@@ -200,7 +200,7 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md
   - .agents/skills/autopilot-issue-triage-worker/scripts/check_required_agents.py
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:ade64c6c67555e7db8c32a6e53a0d70b13f1d31193f12e7d6671845b4876af19
+    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:4702c14aa0279bb9cc0a06575f1ff46fa4026b15dd7bbda2a86c2abf234ae0eb
     .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:6a1d75dbe58a16fc7e6076eb41a262cb79a9ef53177a4913660b82dc31e307b6
     .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:e37365e25911cca25775b1b111f38bbd1ccd09f6b57b7739ea09471d245d3d35
@@ -209,7 +209,7 @@ dependencies:
   local_path: ../autopilot-issue-triage-worker
   declaring_parent: ./packages/autopilot/autopilot-issue-triage-scheduler
   anchored_local_path: packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:03e99a0116aa24c031351ac1aa45d8df6b63faa2b4c8cd7cf73ddd69fd42cc94
+  content_hash: sha256:493a24398117aab669eb35e321bbfaadc2a6f874781e8053fc236bbded9365eb
   declared_license: MIT
 - repo_url: _local/autopilot-pr-review-worker
   name: autopilot-pr-review-worker
@@ -236,7 +236,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
   - .agents/skills/autopilot-pr-review-worker/scripts/check_required_agents.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:831bcacd9edd56c081f1291de7ed88da8943f495fe0762cd1dceff06668bca14
+    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:5d4568a08e3dfae2e47e74c347293f71ff1a76c9fe1d19abf6a325aeb9bf8c79
     .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:9af47f3903be23621b93f8892a2918a83b32bab24756243a43592e60f111c09e
     .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
     .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md: sha256:2d535e4ee141fcb865df7689f2be100d636e3dfa0410054d610cf9a1d9623c8d
@@ -256,7 +256,7 @@ dependencies:
   local_path: ../autopilot-pr-review-worker
   declaring_parent: ./packages/autopilot/autopilot-pr-review-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:0db51827e525d3116ef4fe2f9481cd1f7d3eea7ba593e0653da49f0ff0d60b28
+  content_hash: sha256:538839312e2bed212fd7e4e15318ca2f8ab83b42a85941e5b122c3e7a4706be1
   declared_license: MIT
 - repo_url: _local/autopilot-pr-triage-worker
   name: autopilot-pr-triage-worker
@@ -309,12 +309,12 @@ dependencies:
   - .agents/skills/pr-description-skill/evals/triggers.json
   - .agents/skills/pr-description-skill/scripts/run_evals.py
   deployed_file_hashes:
-    .agents/skills/pr-description-skill/SKILL.md: sha256:579bb13c1284c74a95054e631aa9f502078e0c1c39016fe0455aafedc5be5b5f
+    .agents/skills/pr-description-skill/SKILL.md: sha256:38f166ecccf6d91f607e29934ca9bc6330ed5bfe76a3c691e07502dcc133b011
     .agents/skills/pr-description-skill/apm.yml: sha256:b1b14312551ef99f23742f4a57a1351abc69dde2af084b864246c80edb8df9b2
     .agents/skills/pr-description-skill/assets/mermaid-conventions.md: sha256:3d9c7adf95d40db00833ec087d699a7d04b3d799e9b9d07271cf2ae7d51524ca
     .agents/skills/pr-description-skill/assets/pr-body-template.md: sha256:f8349ee0ffecb420863fc3d771efcceb4bcf8a53c17d4a197a87976999d2468e
     .agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md: sha256:bbb386b6f48974bbb78a380fd4674ed7a3a81810a6c2136e30c80158153596ae
-    .agents/skills/pr-description-skill/assets/section-rubric.md: sha256:5d0f56220a26c2edc69533a0805fe07b1c32f29ffe6758484b82308e4ac003bb
+    .agents/skills/pr-description-skill/assets/section-rubric.md: sha256:313da11153811e5807027c6a252a3175cf6cfa52b0cfbcd22ec3b674568290c6
     .agents/skills/pr-description-skill/evals/.gitignore: sha256:dc810cf3561d22d2d47b89fd0697de46aff0068819b3514577842cb2a2a1c332
     .agents/skills/pr-description-skill/evals/README.md: sha256:92b4529515917d25cbf5e597d1d46751e602dd4eb80be20a97ac81597f410cd0
     .agents/skills/pr-description-skill/evals/content/auth-refactor.json: sha256:86791ada2f4983fde709237eaae9ef9c5a0f87a28f14e8b0f26b4b7e5b0e73c9
@@ -334,7 +334,7 @@ dependencies:
   local_path: ../../pr-description-skill
   declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
   anchored_local_path: packages/pr-description-skill
-  content_hash: sha256:16051a82e2b6b512b8c0cc3dd34d8cd6e2a2c2b9810882b19455b9ce6c59ec6f
+  content_hash: sha256:bc521ebcc831101ed9098ee7a4bc08458eceea74cf437a1fb0c7998a776a9590
   declared_license: MIT
 deployments:
 - kind: project-relative
@@ -678,7 +678,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:ade64c6c67555e7db8c32a6e53a0d70b13f1d31193f12e7d6671845b4876af19
+  content_hash: sha256:4702c14aa0279bb9cc0a06575f1ff46fa4026b15dd7bbda2a86c2abf234ae0eb
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-worker/apm.yml
@@ -867,7 +867,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:831bcacd9edd56c081f1291de7ed88da8943f495fe0762cd1dceff06668bca14
+  content_hash: sha256:5d4568a08e3dfae2e47e74c347293f71ff1a76c9fe1d19abf6a325aeb9bf8c79
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/apm.yml
@@ -1110,7 +1110,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:579bb13c1284c74a95054e631aa9f502078e0c1c39016fe0455aafedc5be5b5f
+  content_hash: sha256:38f166ecccf6d91f607e29934ca9bc6330ed5bfe76a3c691e07502dcc133b011
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/apm.yml
@@ -1155,7 +1155,7 @@ deployments:
   owners:
   - local:packages/pr-description-skill
   active_owner: local:packages/pr-description-skill
-  content_hash: sha256:5d0f56220a26c2edc69533a0805fe07b1c32f29ffe6758484b82308e4ac003bb
+  content_hash: sha256:313da11153811e5807027c6a252a3175cf6cfa52b0cfbcd22ec3b674568290c6
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill/evals/.gitignore

@@ -382,6 +382,12 @@ write/receipt step.
    Python Architect, Doc Writer -- using the rules in "Conditional
    panelists" above. For each, record either an activation decision
    or `<Persona> inactive reason: <one sentence>` in working notes.
+2b. Run the persona preflight from "Agent roster": pass
+   `scripts/check_required_agents.py` the three always-active slugs
+   plus every conditional slug activated in step 2, with the
+   consumer's `.github/agents` as `--agents-dir`. If it exits
+   nonzero, stop and report every `missing_roles` entry. Do not read
+   persona files or produce advice.
 3. For each mandatory persona (plus any conditional persona that
    activated), follow the **Persona pass procedure** below, one
    persona at a time. Do not try to play multiple personas in a
