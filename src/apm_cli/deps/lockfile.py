@@ -174,6 +174,17 @@ class LockfileSymlinkError(OSError):
         )
 
 
+def ensure_lockfile_writable(path: Path) -> None:
+    """Raise :class:`LockfileSymlinkError` when *path* cannot be written.
+
+    Single owner of the "never write through a symlinked lockfile" rule:
+    :meth:`LockFile.write` enforces it, and commands that will rewrite the
+    lockfile call it before any other project write so a refusal is atomic.
+    """
+    if path.is_symlink():
+        raise LockfileSymlinkError(path)
+
+
 # Git writes each marker at the start of a line, followed by a space and a label
 # (or nothing, for a bare ``=======`` separator). A separator alone is not
 # evidence of a conflict, so only the labelled markers are matched here.
@@ -1328,8 +1339,7 @@ class LockFile:
         if suppressed is not None:
             suppressed.append(self.to_yaml())
             return
-        if path.is_symlink():
-            raise LockfileSymlinkError(path)
+        ensure_lockfile_writable(path)
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
