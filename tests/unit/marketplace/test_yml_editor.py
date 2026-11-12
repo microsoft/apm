@@ -245,6 +245,13 @@ class TestUpdatePluginHappy:
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         assert data["packages"][0]["category"] == "productivity"
 
+    def test_update_category_replaces_existing_value(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        update_plugin_entry(yml, "existing-package", category="productivity")
+        update_plugin_entry(yml, "existing-package", category="developer-tools")
+        data = yaml.safe_load(yml.read_text(encoding="utf-8"))
+        assert data["packages"][0]["category"] == "developer-tools"
+
     def test_setting_ref_clears_version(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         update_plugin_entry(yml, "existing-package", ref="deadbeef")

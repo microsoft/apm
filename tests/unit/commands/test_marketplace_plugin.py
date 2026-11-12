@@ -14,6 +14,8 @@ from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.marketplace.plugin import _SHA_RE, _resolve_ref  # noqa: F401
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.install.locking import lifecycle_lock
+from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
+from apm_cli.marketplace.migration import load_marketplace_config
 from apm_cli.marketplace.ref_resolver import RemoteRef
 
 # ---------------------------------------------------------------------------
@@ -859,3 +861,89 @@ class TestPackageSetApmYmlBranch:
         )
         # Either resolves or errors, but line 69 should have been hit
         assert result.exit_code in (0, 1, 2), result.output
+
+
+# ---------------------------------------------------------------------------
+# --category end to end: CLI-authored entries reach Claude and Codex output
+# ---------------------------------------------------------------------------
+
+_CLAUDE_CODEX_APM_YML = """\
+name: category-market
+description: Test
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  outputs:
+    claude: {}
+    codex: {}
+  packages:
+    - name: seeded-tool
+      source: ./plugins/seeded-tool
+      version: 0.1.0
+      category: productivity
+"""
+
+
+def _compose_claude_and_codex(project_root: Path, name: str) -> tuple[dict, dict]:
+    config = load_marketplace_config(project_root)
+    builder = MarketplaceBuilder.from_config(config, project_root, BuildOptions(offline=True))
+    entry = next(p for p in config.packages if p.name == name)
+    resolved = [builder._resolve_entry(entry)]
+    claude_doc = builder.compose_marketplace_json(resolved)
+    codex_doc, _warnings = builder.compose_codex_marketplace_json(resolved)
+    claude_plugin = next(p for p in claude_doc["plugins"] if p["name"] == name)
+    codex_plugin = next(p for p in codex_doc["plugins"] if p["name"] == name)
+    return claude_plugin, codex_plugin
+
+
+class TestCategoryReachesMarketplaceOutputs:
+    """``--category`` satisfies Codex output without hand-editing ``apm.yml``."""
+
+    @pytest.fixture
+    def project(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_CLAUDE_CODEX_APM_YML, encoding="utf-8")
+        for name in ("seeded-tool", "new-tool"):
+            (tmp_path / "plugins" / name).mkdir(parents=True)
+        return tmp_path
+
+    def test_add_with_category_emits_category_in_claude_and_codex(self, runner, project):
+        result = runner.invoke(
+            marketplace,
+            [
+                "package",
+                "add",
+                "./plugins/new-tool",
+                "--version",
+                "0.1.0",
+                "--category",
+                "developer-tools",
+                "--no-verify",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        claude_plugin, codex_plugin = _compose_claude_and_codex(project, "new-tool")
+        assert claude_plugin["category"] == "developer-tools"
+        assert codex_plugin["category"] == "developer-tools"
+
+    def test_add_without_category_is_rejected_for_codex_and_restores_file(self, runner, project):
+        apm_yml = project / "apm.yml"
+        before = apm_yml.read_text(encoding="utf-8")
+        result = runner.invoke(
+            marketplace,
+            ["package", "add", "./plugins/new-tool", "--version", "0.1.0", "--no-verify"],
+        )
+        assert result.exit_code == 2
+        assert "category" in result.output
+        assert apm_yml.read_text(encoding="utf-8") == before
+
+    def test_set_category_replaces_value_in_claude_and_codex(self, runner, project):
+        result = runner.invoke(
+            marketplace,
+            ["package", "set", "seeded-tool", "--category", "developer-tools"],
+        )
+        assert result.exit_code == 0, result.output
+        claude_plugin, codex_plugin = _compose_claude_and_codex(project, "seeded-tool")
+        assert claude_plugin["category"] == "developer-tools"
+        assert codex_plugin["category"] == "developer-tools"
