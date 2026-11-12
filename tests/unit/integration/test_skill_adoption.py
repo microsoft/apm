@@ -75,12 +75,12 @@ def test_ignored_source_members_are_not_expected(tmp_path: Path) -> None:
     assert destination / "SKILL.md" in _members(source, destination, ignore=ignore)
 
 
+@pytest.mark.windows_compat
 def test_comparison_uses_rendered_markdown(tmp_path: Path) -> None:
     source, destination = _tree(tmp_path)
     assert _members(source, destination, resolve_links=_rewrite_links) == frozenset()
-    (destination / "SKILL.md").write_text(
-        "---\nname: s\n---\nSee [x](rendered/sibling.md).\n", encoding="ascii"
-    )
+    # Rendered members are deployed LF-only (write_text_lf); write_text would emit CRLF on Windows.
+    (destination / "SKILL.md").write_bytes(b"---\nname: s\n---\nSee [x](rendered/sibling.md).\n")
     assert destination / "SKILL.md" in _members(source, destination, resolve_links=_rewrite_links)
 
 

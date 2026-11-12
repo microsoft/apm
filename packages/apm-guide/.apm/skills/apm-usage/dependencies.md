@@ -581,7 +581,12 @@ dependencies:
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
         #                            OpenCode: translated to {env:VAR}; export variables at runtime.
-        #                            Windsurf/Claude/Gemini: resolved at install time.
+        #                            Claude Code project .mcp.json: kept as ${VAR}
+        #                            (${VAR:-default} too) in command, args, env,
+        #                            url and headers; Claude Code expands them.
+        #                            Reinstall replaces values APM wrote earlier.
+        #                            Claude user scope (-g)/Windsurf/Gemini:
+        #                            resolved at install time.
         #                            Codex project scope: a stdio env value that is
         #                            exactly KEY: ${KEY} or KEY: ${env:KEY} becomes
         #                            env_vars = ["KEY"], read from the environment

@@ -198,6 +198,65 @@ Local-path entries skip remote resolution. Each plugin's own
 marketplace index. Pick a versioning strategy that matches how you
 tag releases -- see [Versioning strategies](../versioning-strategies/).
 
+### Make sibling dependencies follow the review branch
+
+For a bundle at `bundles/my-bundle/apm.yml` in `acme/ai-monorepo`,
+replace full Git coordinates for same-repository siblings:
+
+```yaml
+# Before: each sibling resolves its own ref
+dependencies:
+  apm:
+    - git: acme/ai-monorepo
+      path: plugins/plugin-a
+    - git: acme/ai-monorepo
+      path: plugins/plugin-b
+```
+
+A top-level `#ref` or `ref:` applies only to that dependency. Transitive
+dependencies with full `git:` coordinates resolve their own refs, using
+their repository's default branch when omitted, even in the same repository.
+
+Use `git: parent` to inherit the declaring package's repository and resolved
+ref instead:
+
+```yaml
+# After: siblings follow the bundle's ref
+dependencies:
+  apm:
+    - git: parent
+      path: plugins/plugin-a
+    - git: parent
+      path: plugins/plugin-b
+```
+
+`path:` starts at the **repository root**, not the bundle directory.
+`git: parent` works only inside a transitively resolved remote Git package,
+not the consumer project's root manifest or a local-path dependency.
+An explicit child `ref:` overrides inheritance. See the
+[manifest reference](../../reference/manifest-schema/#412-object-form)
+for accepted fields.
+
+Review the branch from a separate consumer project. These commands assume
+no default registry is configured:
+
+```bash
+# Review the bundle and its siblings from feature-x
+apm install acme/ai-monorepo/bundles/my-bundle#feature-x
+
+# After merging, install in a new consumer project from the default branch
+apm install acme/ai-monorepo/bundles/my-bundle
+```
+
+Keep the bundle's `apm.yml` unchanged between review and merge. The second
+command uses the repository's default branch, not necessarily `main`.
+The lockfile records expanded repository/path/ref coordinates and resolved
+commits, not `parent`, preserving reproducible installs.
+
+Inheritance stops at the repository boundary. Dependencies in another
+repository keep their own `git:` coordinates and need their own `ref:` to
+select a non-default branch.
+
 ## Shipping `bin/` executables (Claude Code only)
 
 A plugin may ship a top-level `bin/` directory of executable scripts.
