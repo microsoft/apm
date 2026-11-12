@@ -39,8 +39,7 @@ def _expected_checks(event: str) -> list[str]:
 
 
 def _assert_merge_queue_lanes(workflow: dict) -> None:
-    on = workflow["on"]
-    assert "pull_request" not in on and "pull_request_target" not in on
+    assert set(workflow["on"]) == {"merge_group"}, "secret-bearing: merge-queue trigger only"
     assert workflow["env"]["HERMETIC_MARK_EXPR"] == HERMETIC
     assert workflow["env"]["NETWORK_MARK_EXPR"] == NETWORK
 
@@ -103,6 +102,12 @@ def _assert_merge_queue_lanes(workflow: dict) -> None:
 
 def test_merge_queue_lanes_are_complete_and_sharded() -> None:
     _assert_merge_queue_lanes(_mq())
+
+
+def test_release_pipeline_pushes_only_from_main_and_tags() -> None:
+    push = load_workflow(WORKFLOWS / "build-release.yml")["on"]["push"]
+    assert push["branches"] == ["main"]
+    assert push["tags"] == ["v*"]
 
 
 def test_merge_gate_requires_windows_unit_only_in_merge_group() -> None:

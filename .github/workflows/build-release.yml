@@ -14,9 +14,7 @@ env:
 
 on:
   push:
-    # TEMP-REHEARSAL (#3582): the two rehearsal branches exercise the full and
-    # promoted release paths without a tag. Remove before merge.
-    branches: [ main, danielmeppiel-ci-release-rehearsal, danielmeppiel-ci-promote-rehearsal ]
+    branches: [ main ]
     tags: [ "v*" ]
     paths-ignore:
       - 'docs/**'
@@ -73,11 +71,6 @@ jobs:
           # repository variable to that exact tag and re-run; the run then
           # validates everything itself before publishing.
           FULL_VALIDATION_TAG: ${{ vars.APM_RELEASE_FULL_VALIDATION_TAG }}
-          # TEMP-REHEARSAL (#3582): remove before merge.
-          FULL_VALIDATION_BRANCHES: danielmeppiel-ci-release-rehearsal
-          PROMOTION_BRANCHES: danielmeppiel-ci-promote-rehearsal
-          EVIDENCE_BRANCH: ${{ github.ref_name == 'danielmeppiel-ci-promote-rehearsal' && 'danielmeppiel-ci-release-rehearsal' || 'main' }}
-          EVIDENCE_EVENTS: ${{ github.ref_name == 'danielmeppiel-ci-promote-rehearsal' && 'push' || '' }}
         run: python3 scripts/release_plan.py
 
   # Plans duration-balanced integration shards while the binaries build.

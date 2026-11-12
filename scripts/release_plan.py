@@ -18,6 +18,12 @@ before publishing. The override names one tag, so it cannot linger.
 Evidence for a SHA is either a successful full run of build-release.yml on
 the evidence branch, or a successful push run of build-release.yml plus a
 successful merge-queue run of ci-integration.yml.
+
+Rehearsing a pipeline change without a tag: add rehearsal branches to the
+push trigger and set FULL_VALIDATION_BRANCHES / PROMOTION_BRANCHES (and
+EVIDENCE_BRANCH / EVIDENCE_EVENTS="push") for the release-plan step. Those
+branches never publish: publication requires a pushed tag. #3582 rehearsed
+this way and removed the trigger before merge.
 """
 
 from __future__ import annotations

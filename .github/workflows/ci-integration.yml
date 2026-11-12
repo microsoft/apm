@@ -44,10 +44,6 @@ on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
-  # TEMP-REHEARSAL (#3582): exercise the merge-queue lanes from a rehearsal
-  # branch push (write access only, same trust boundary). Remove before merge.
-  push:
-    branches: [ danielmeppiel-ci-release-rehearsal ]
 
 env:
   PYTHON_VERSION: '3.12'
