@@ -23,7 +23,8 @@ inclusion in APM. This avoids work the project cannot support or accept.
   Proposals, investigations, and design discussion need no prior permission.
 
 Follow the [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5)
-for Now / Next / Later priorities and
+for Now / Next / Later priorities across the five pillars (Consume, Produce,
+Govern, Open ecosystem, Foundations) and their `[EPIC]` parent issues, and
 [Ready to contribute](https://github.com/orgs/microsoft/projects/2304/views/7)
 for supported, unassigned work. See
 [roadmap and release planning](GOVERNANCE.md#roadmap-and-release-planning)

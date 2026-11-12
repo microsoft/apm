@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +23,7 @@ from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
 
 class _FixedDatetime:
-    instant = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    instant = datetime(2026, 1, 1, tzinfo=UTC)
 
     @classmethod
     def now(cls, tz: timezone | None = None) -> datetime:
@@ -229,8 +229,8 @@ def _run_lockfile_phase_and_local_persist(project_root: Path, instant: datetime)
 
 def test_unchanged_local_instructions_do_not_rewrite_lockfile(tmp_path: Path) -> None:
     """The lockfile stays byte-stable when local instruction hashes are unchanged."""
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
 
     _run_lockfile_phase_and_local_persist(tmp_path, first_instant)
     lock_path = get_lockfile_path(tmp_path)
@@ -253,8 +253,8 @@ def test_unchanged_local_instructions_do_not_rewrite_lockfile(tmp_path: Path) ->
 def test_unchanged_mcp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> None:
     """The real lockfile phase stays byte-stable when MCP inputs are unchanged."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
 
     _run_lockfile_phase_and_mcp_persist(tmp_path, package, first_instant)
     lock_path = get_lockfile_path(tmp_path)
@@ -275,8 +275,8 @@ def test_unchanged_mcp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
 def test_unchanged_mcp_target_servers_do_not_rewrite_lockfile(tmp_path: Path) -> None:
     """Regression for #2297: a populated mcp_target_servers must not churn generated_at."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
     target_servers = {"claude": ["atlassian"]}
 
     _run_lockfile_phase_and_mcp_persist(
@@ -317,9 +317,9 @@ def test_unchanged_mcp_target_servers_do_not_rewrite_lockfile(tmp_path: Path) ->
 def test_real_mcp_target_change_writes_once_then_converges(tmp_path: Path) -> None:
     """A meaningful target transition writes once; its next run writes zero times."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
-    third_instant = datetime(2026, 1, 1, 0, 2, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
+    third_instant = datetime(2026, 1, 1, 0, 2, 0, tzinfo=UTC)
     first_targets = {"claude": ["atlassian"]}
     changed_targets = {"codex": ["atlassian"]}
 
@@ -391,8 +391,8 @@ def test_legacy_lock_preserves_scalar_or_list_provenance_without_write(
 ) -> None:
     """Legacy locks without canonical rows remain byte-identical on a no-op."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
     targets = {"claude": ["atlassian"]}
     _run_lockfile_phase_and_mcp_persist(
         tmp_path,
@@ -436,9 +436,9 @@ def test_legacy_lock_preserves_scalar_or_list_provenance_without_write(
 def test_stale_partial_provenance_repairs_once_then_converges(tmp_path: Path) -> None:
     """A stale list-valued owner is pruned once without an earlier builder write."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
-    third_instant = datetime(2026, 1, 1, 0, 2, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
+    third_instant = datetime(2026, 1, 1, 0, 2, 0, tzinfo=UTC)
     targets = {"claude": ["atlassian"]}
     _run_lockfile_phase_and_mcp_persist(
         tmp_path,
@@ -501,8 +501,8 @@ def test_stale_partial_provenance_repairs_once_then_converges(tmp_path: Path) ->
 def test_lockfile_write_failure_preserves_original_and_reports_error(tmp_path: Path) -> None:
     """A failed atomic replacement leaves no partial lockfile behind."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
     targets = {"claude": ["atlassian"]}
     _run_lockfile_phase_and_mcp_persist(
         tmp_path,
@@ -643,8 +643,8 @@ def test_mcp_serialization_is_deterministic_across_input_order() -> None:
 def test_changed_mcp_dependencies_update_lockfile(tmp_path: Path) -> None:
     """The no-write optimization still persists changed MCP inputs."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
 
     _run_lockfile_phase_and_mcp_persist(tmp_path, package, first_instant)
     lock_path = get_lockfile_path(tmp_path)
@@ -693,8 +693,8 @@ def test_json_type_change_updates_mcp_config_baseline(tmp_path: Path) -> None:
 def test_changed_mcp_dependencies_refresh_legacy_generated_at(tmp_path: Path) -> None:
     """A substantive rewrite keeps legacy timestamp metadata current."""
     package = _write_manifest_with_mcp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
 
     _run_lockfile_phase_and_mcp_persist(tmp_path, package, first_instant)
     lock_path = get_lockfile_path(tmp_path)
@@ -717,8 +717,8 @@ def test_changed_mcp_dependencies_refresh_legacy_generated_at(tmp_path: Path) ->
 def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> None:
     """The real lockfile phase stays byte-stable when LSP inputs are unchanged."""
     package = _write_manifest_with_lsp(tmp_path)
-    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
 
     _run_lockfile_phase_and_lsp_persist(tmp_path, package, first_instant)
     lock_path = get_lockfile_path(tmp_path)

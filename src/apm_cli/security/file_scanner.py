@@ -16,12 +16,11 @@ Two scopes, because the two signals need different ones:
 from __future__ import annotations
 
 import json
+import tomllib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
-
-import tomllib
 
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..integration.base_integrator import BaseIntegrator
