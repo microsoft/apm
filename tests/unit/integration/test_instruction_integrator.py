@@ -464,8 +464,8 @@ class TestInstructionSyncIntegration:
         assert not (target_dir / "python.instructions.md").exists()
         assert (target_dir / "my-custom.instructions.md").exists()
 
-    def test_sync_legacy_fallback_removes_all_instruction_files(self):
-        """Without managed_files, falls back to glob removing all *.instructions.md."""
+    def test_sync_without_manifest_preserves_instruction_files(self):
+        """Without managed_files, nothing is lockfile-tracked, so nothing is removed."""
         target_dir = self.project_root / ".github" / "instructions"
         target_dir.mkdir(parents=True)
         (target_dir / "python.instructions.md").write_text("# Python")
@@ -476,10 +476,12 @@ class TestInstructionSyncIntegration:
             apm_package, self.project_root, managed_files=None
         )
 
-        assert result["files_removed"] == 2
+        assert result["files_removed"] == 0
+        assert (target_dir / "python.instructions.md").exists()
+        assert (target_dir / "testing.instructions.md").exists()
 
-    def test_sync_legacy_preserves_non_instruction_files(self):
-        """Legacy glob only matches *.instructions.md — other files preserved."""
+    def test_sync_without_manifest_preserves_all_files(self):
+        """Without managed_files, user instructions and other files are preserved."""
         target_dir = self.project_root / ".github" / "instructions"
         target_dir.mkdir(parents=True)
         (target_dir / "python.instructions.md").write_text("# Python")
@@ -491,7 +493,8 @@ class TestInstructionSyncIntegration:
             apm_package, self.project_root, managed_files=None
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 0
+        assert (target_dir / "python.instructions.md").exists()
         assert (target_dir / "README.md").exists()
         assert (target_dir / "notes.txt").exists()
 
@@ -1011,7 +1014,7 @@ class TestCursorRulesSyncIntegration:
         assert result["files_removed"] == 1
         assert (rules_dir / "my-custom.mdc").exists()
 
-    def test_sync_legacy_fallback_removes_all_mdc(self):
+    def test_sync_without_manifest_preserves_mdc(self):
         rules_dir = self.project_root / ".cursor" / "rules"
         rules_dir.mkdir(parents=True)
         (rules_dir / "python.mdc").write_text("# Python")
@@ -1022,7 +1025,9 @@ class TestCursorRulesSyncIntegration:
             apm_package, self.project_root, managed_files=None
         )
 
-        assert result["files_removed"] == 2
+        assert result["files_removed"] == 0
+        assert (rules_dir / "python.mdc").exists()
+        assert (rules_dir / "testing.mdc").exists()
 
     def test_sync_handles_missing_rules_dir(self):
         apm_package = Mock()

@@ -504,37 +504,13 @@ class InstructionIntegrator(BaseIntegrator):
             return {"files_removed": 0, "errors": 0}
         effective_root = mapping.deploy_root or target.root_dir
         prefix = f"{effective_root}/{mapping.subdir}/"
-        legacy_dir = project_root / effective_root / mapping.subdir
-        if mapping.format_id == "cursor_rules":
-            legacy_pattern = "*.mdc"
-        elif mapping.format_id == "windsurf_rules":
-            # Do not use a broad legacy glob for Windsurf rules to avoid
-            # deleting user-authored .md files under .windsurf/rules/.
-            legacy_pattern = None
-        elif mapping.format_id == "claude_rules":
-            # Do not use a broad legacy glob for Claude rules to avoid
-            # deleting user-authored .md files under .claude/rules/.
-            legacy_pattern = None
-        elif mapping.format_id == "kiro_steering":
-            # Do not delete user-authored steering markdown under .kiro/steering/.
-            legacy_pattern = None
-        elif mapping.format_id == "github_instructions" and target.root_dir == target.user_root_dir:
-            # Copilot user scope only recently gained modular instructions
-            # (~/.copilot/instructions/**/*.instructions.md). A broad legacy
-            # glob there could delete user-authored instruction files for
-            # other tools sharing that directory tree, so skip it -- same
-            # precedent as Claude/Windsurf/Kiro above. Project scope
-            # (.github/instructions/) keeps the broad glob below since that
-            # directory has always been APM-managed.
-            legacy_pattern = None
-        else:
-            legacy_pattern = "*.instructions.md"
+        # No legacy glob fallback: without a lockfile inventory every native
+        # instruction directory may hold user-authored files, and uninstall
+        # deletes only lockfile-tracked paths.
         return self.sync_remove_files(
             project_root,
             managed_files,
             prefix=prefix,
-            legacy_glob_dir=legacy_dir,
-            legacy_glob_pattern=legacy_pattern,
             targets=[target],
         )
 
