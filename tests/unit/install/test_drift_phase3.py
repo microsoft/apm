@@ -204,6 +204,34 @@ class TestLegacyPluginReplayNormalization:
         assert result == plugin
         assert not (tmp_path / "apm_modules").exists()
 
+    def test_apm_package_with_plugin_json_is_not_normalized(self, tmp_path: Path) -> None:
+        """Replay keeps install's apm_package classification (#3604 routing)."""
+        package = tmp_path / "plug"
+        (package / ".apm" / "instructions").mkdir(parents=True)
+        (package / "apm.yml").write_text("name: plug\nversion: 1.0.0\n", encoding="utf-8")
+        (package / ".apm" / "instructions" / "plug.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\nRules.\n", encoding="utf-8"
+        )
+        (package / "plugin.json").write_text('{"name": "plug"}\n', encoding="utf-8")
+        (package / "agents").mkdir()
+        (package / "agents" / "helper.md").write_text("Help.\n", encoding="utf-8")
+        dependency = LockedDependency(
+            repo_url="_local/plug",
+            source="local",
+            local_path="../plug",
+            package_type="apm_package",
+        )
+
+        result = _normalize_legacy_local_plugin_for_replay(
+            dependency,
+            package,
+            tmp_path / "apm_modules",
+        )
+
+        assert result == package
+        assert not (tmp_path / "apm_modules").exists()
+        assert (package / "apm.yml").read_text(encoding="utf-8") == "name: plug\nversion: 1.0.0\n"
+
 
 # ---------------------------------------------------------------------------
 # _build_package_info
