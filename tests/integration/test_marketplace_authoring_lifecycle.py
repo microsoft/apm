@@ -36,6 +36,11 @@ def _catalog(path: Path, packages: list[dict], *, plugin_root: str = "") -> None
     )
 
 
+def _unwrapped(result) -> str:
+    """Join CLI output so terminal wrapping cannot split a long path."""
+    return "".join((result.stdout + result.stderr).split())
+
+
 def test_live_local_catalog_register_browse_view_install_and_edit(tmp_path, apm_binary_path):
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     environment = isolated.subprocess_env(overrides={"COLUMNS": "240"})
@@ -179,7 +184,7 @@ def test_remote_entry_records_real_source_and_replays_without_preview(tmp_path, 
 )
 def test_failed_reregistration_preserves_registered_source(tmp_path, apm_binary_path, invalid):
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
-    environment = isolated.subprocess_env()
+    environment = isolated.subprocess_env(overrides={"COLUMNS": "240"})
     runner = ApmLifecycleRunner((str(apm_binary_path),))
     valid = isolated.work_root / "valid"
     valid.mkdir()
@@ -202,7 +207,7 @@ def test_failed_reregistration_preserves_registered_source(tmp_path, apm_binary_
         env=environment,
     )
     assert result.returncode == 1
-    assert "apm.yml" in result.stdout + result.stderr
+    assert "apm.yml" in _unwrapped(result)
     assert registry.read_bytes() == before
     # A registered source is live on reads too: a later edit or deletion must
     # fail actionably rather than serving the previous successful snapshot.
@@ -214,7 +219,7 @@ def test_failed_reregistration_preserves_registered_source(tmp_path, apm_binary_
         ("marketplace", "browse", "alice-dev"), cwd=isolated.work_root, env=environment
     )
     assert read.returncode == 1
-    assert "apm.yml" in read.stdout + read.stderr
+    assert "apm.yml" in _unwrapped(read)
     assert registry.read_bytes() == before
 
 
