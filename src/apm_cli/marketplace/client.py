@@ -1178,6 +1178,26 @@ def _fetch_file(
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
+def _auto_detect_path_with_payload(
+    source: MarketplaceSource,
+    auth_resolver: object | None = None,
+) -> tuple[str | None, dict | None]:
+    """Probe candidate locations and return the first that exists.
+
+    Returns ``(path, data)`` where ``data`` is the successfully fetched
+    catalog JSON for the winning candidate, so callers can reuse the
+    response instead of immediately re-fetching the same URL
+    (microsoft/apm#3283).  Returns ``(None, None)`` if no location
+    contains a marketplace.json.  Raises ``MarketplaceFetchError`` on
+    non-404 failures (auth errors, etc.).
+    """
+    for candidate in _MARKETPLACE_PATHS:
+        data = _fetch_file(source, candidate, auth_resolver=auth_resolver)
+        if data is not None:
+            return candidate, data
+    return None, None
+
+
 def _auto_detect_path(
     source: MarketplaceSource,
     auth_resolver: object | None = None,
@@ -1187,11 +1207,8 @@ def _auto_detect_path(
     Returns ``None`` if no location contains a marketplace.json.
     Raises ``MarketplaceFetchError`` on non-404 failures (auth errors, etc.).
     """
-    for candidate in _MARKETPLACE_PATHS:
-        data = _fetch_file(source, candidate, auth_resolver=auth_resolver)
-        if data is not None:
-            return candidate
-    return None
+    detected, _payload = _auto_detect_path_with_payload(source, auth_resolver=auth_resolver)
+    return detected
 
 
 # ---------------------------------------------------------------------------
@@ -1204,6 +1221,7 @@ def fetch_marketplace(
     *,
     force_refresh: bool = False,
     auth_resolver: object | None = None,
+    discovery_payload: dict | None = None,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -1215,6 +1233,12 @@ def fetch_marketplace(
         source: Marketplace source to fetch.
         force_refresh: Skip cache and re-fetch from network.
         auth_resolver: Optional ``AuthResolver`` instance (created if None).
+        discovery_payload: Optional catalog JSON already fetched during
+            path discovery in the same invocation (microsoft/apm#3283).
+            When provided, the network fetch of ``source.path`` is skipped
+            and the discovery response is parsed and cached instead.  The
+            payload MUST come from the same source URL and ref; callers
+            that cannot guarantee that must pass ``None``.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -1280,7 +1304,15 @@ def fetch_marketplace(
                 source_digest=result.digest,
             )
 
-        data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
+        if discovery_payload is not None:
+            # Reuse the catalog response already fetched by path discovery
+            # in this same invocation instead of re-fetching the identical
+            # URL (microsoft/apm#3283).  The payload is still written to
+            # the sidecar cache below, so later invocations see the same
+            # freshness behavior as a network fetch.
+            data = discovery_payload
+        else:
+            data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
         if data is None:
             raise MarketplaceFetchError(
                 source.name,
