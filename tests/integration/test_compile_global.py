@@ -76,6 +76,53 @@ def test_install_global_supports_claude_config_dir_outside_home(tmp_path, monkey
     assert "[x]" not in result.output
 
 
+def test_apm_home_isolates_metadata_without_redirecting_target_deployment(tmp_path, monkeypatch):
+    """Global install and lifecycle state share APM_HOME; targets do not."""
+    from apm_cli.commands.install import install as install_cmd
+    from apm_cli.core.lifecycle_scripts import _get_user_apm_yml
+    from apm_cli.core.script_executors import _get_scripts_log_path
+    from apm_cli.core.script_trust import _trust_store_path
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    apm_home = tmp_path / "isolated-metadata"
+    package_dir = tmp_path / "global-package"
+    instruction_dir = package_dir / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (package_dir / "apm.yml").write_text(
+        "name: global-package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    (instruction_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global install instructions\n---\nUse integration tests.\n",
+        encoding="utf-8",
+    )
+
+    claude_config = tmp_path / "target-config" / "claude"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(
+        install_cmd,
+        ["-g", str(package_dir), "--target", "claude"],
+    )
+
+    clear_discovery_cache()
+    assert result.exit_code == 0, result.output
+    assert (apm_home / "apm.yml").is_file()
+    assert (apm_home / "apm.lock.yaml").is_file()
+    assert (apm_home / "apm_modules").is_dir()
+    assert not (home / ".apm").exists()
+    assert (claude_config / "rules" / "global.md").is_file()
+    assert not (apm_home / "rules" / "global.md").exists()
+
+    assert _get_user_apm_yml() == apm_home / "apm.yml"
+    assert _trust_store_path() == apm_home / "scripts-trust.json"
+    assert _get_scripts_log_path() == apm_home / "logs" / "scripts.log"
+
+
 def test_compile_global_writes_claude_md_from_real_fixtures(tmp_path, monkeypatch):
     """Run apm compile --global through real discovery and filesystem writes."""
     from apm_cli.commands.compile.cli import compile as compile_cmd

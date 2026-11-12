@@ -427,7 +427,7 @@ def _check_selected_dep(dep, downloader, verbose, registry_ctx=None):
     "global_",
     is_flag=True,
     default=False,
-    help="Check user-scope dependencies (~/.apm/)",
+    help="Check dependencies in the APM user home",
 )
 @click.option(
     "--verbose",
@@ -470,7 +470,7 @@ def outdated(global_, verbose, parallel_checks):
     lockfile = LockFile.read(lockfile_path)
 
     if lockfile is None:
-        scope_hint = "~/.apm/" if global_ else "current directory"
+        scope_hint = str(project_root) if global_ else "current directory"
         logger.error(f"No lockfile found in {scope_hint}")
         sys.exit(1)
 

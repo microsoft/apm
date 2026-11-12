@@ -409,7 +409,7 @@ def _finish_selected_profile_uninstall(
     "global_",
     is_flag=True,
     default=False,
-    help="Remove from user scope (~/.apm/) instead of the current project",
+    help="Remove from the APM user home instead of the current project",
 )
 @click.pass_context
 @serialized_lifecycle
@@ -463,7 +463,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             sys.exit(1)
 
         if scope is InstallScope.USER:
-            logger.progress("Uninstalling from user scope (~/.apm/)")
+            logger.progress(f"Uninstalling from user scope ({manifest_path.parent}/)")
 
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 

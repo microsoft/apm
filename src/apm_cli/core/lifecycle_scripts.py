@@ -433,10 +433,9 @@ def _get_policy_scripts_dir() -> Path:
 
 def _get_user_apm_yml() -> Path:
     """Return the user-level apm.yml path (~/.apm/apm.yml or $APM_HOME/apm.yml)."""
-    apm_home = os.environ.get("APM_HOME")
-    if apm_home:
-        return Path(apm_home) / "apm.yml"
-    return Path.home() / ".apm" / "apm.yml"
+    from apm_cli.core.scope import get_apm_home
+
+    return get_apm_home() / "apm.yml"
 
 
 def _get_project_apm_yml(project_root: str | None = None) -> Path:

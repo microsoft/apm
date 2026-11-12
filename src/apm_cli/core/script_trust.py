@@ -68,9 +68,9 @@ _TRUST_STORE_THREAD_LOCK = threading.Lock()
 
 def _trust_store_path() -> Path:
     """Return the path to the script trust store."""
-    apm_home = os.environ.get("APM_HOME")
-    base = Path(apm_home) if apm_home else Path.home() / ".apm"
-    return base / "scripts-trust.json"
+    from apm_cli.core.scope import get_apm_home
+
+    return get_apm_home() / "scripts-trust.json"
 
 
 def script_file_fingerprint(path: Path) -> str | None:
