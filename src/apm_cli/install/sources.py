@@ -329,6 +329,9 @@ class CachedDependencySource(DependencySource):
         dep_ref = self.dep_ref
 
         cached_commit: str | None = None
+        locked_dep = (
+            ctx.existing_lockfile.get_dependency(dep_key) if ctx.existing_lockfile else None
+        )
         if self.fetched_this_run:
             cached_commit = ctx.callback_downloaded.get(dep_key)
             if (
@@ -338,14 +341,16 @@ class CachedDependencySource(DependencySource):
                 and resolved_ref.resolved_commit != "cached"
             ):
                 cached_commit = resolved_ref.resolved_commit
-        elif ctx.existing_lockfile:
-            locked_dep = ctx.existing_lockfile.get_dependency(dep_key)
-            if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
-                cached_commit = locked_dep.resolved_commit
-        if not cached_commit:
-            # A registry reference is a semver range, not a commit identity.
-            if dep_ref.source != "registry":
-                cached_commit = dep_ref.reference
+        elif locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+            cached_commit = locked_dep.resolved_commit
+        # A registry reference is a semver range, and a registry-proxy archive
+        # row locks its ref name only: neither is a commit identity (#3657).
+        if (
+            not cached_commit
+            and dep_ref.source != "registry"
+            and not (locked_dep is not None and locked_dep.registry_prefix)
+        ):
+            cached_commit = dep_ref.reference
         return cached_commit
 
     def _cached_source_pin(self, cached_commit: str | None) -> str:

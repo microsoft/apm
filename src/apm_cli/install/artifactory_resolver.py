@@ -153,41 +153,6 @@ def _proxy_probe_headers(
     return headers
 
 
-def _proxy_routing_target(
-    dep_ref: DependencyReference,
-) -> tuple[str, str, str, bool] | None:
-    """Return ``(host, prefix, scheme, is_mode_1)`` if *dep_ref* routes through the proxy.
-
-    * Mode 1 (explicit FQDN): host and prefix come from the dependency ref;
-      scheme is always ``https`` (Mode 1 deps reject ``http://`` upstream).
-    * Mode 2 (bare shorthand under ``PROXY_REGISTRY_ONLY``): host, prefix,
-      and scheme come from the registry-proxy config, so installs that
-      intentionally route through an ``http://`` proxy (isolated networks
-      using ``PROXY_REGISTRY_ALLOW_HTTP=1``) probe over the same transport.
-
-    Returns ``None`` when no proxy routing applies (regular GitHub/ADO deps)
-    or when host/prefix are not real strings (e.g. mocked dependency refs
-    in unit tests).
-    """
-    if dep_ref.is_artifactory():
-        host = dep_ref.host
-        prefix = dep_ref.artifactory_prefix
-        if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
-            return (host, prefix, "https", True)
-        return None
-    from ..deps.artifactory_orchestrator import ArtifactoryRouter
-
-    if not ArtifactoryRouter.should_use_proxy(dep_ref):
-        return None
-    cfg = ArtifactoryRouter.parse_proxy_config()
-    if cfg is None:
-        return None
-    host, prefix, scheme = cfg
-    if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
-        return (host, prefix, scheme or "https", False)
-    return None
-
-
 def _resolve_artifactory_boundary(
     package: str,
     auth_resolver,
@@ -209,7 +174,9 @@ def _resolve_artifactory_boundary(
     if dep_ref is None:
         dep_ref = DependencyReference.parse(package)
 
-    target = _proxy_routing_target(dep_ref)
+    from ..deps.artifactory_orchestrator import ArtifactoryRouter
+
+    target = ArtifactoryRouter.routing_target(dep_ref)
     if target is None:
         # Not routed through the proxy -- nothing for this resolver to do.
         return dep_ref

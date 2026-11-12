@@ -132,6 +132,13 @@ def marketplace_ref_mismatch(
     return None
 
 
+def _routes_to_locked_proxy(dep_ref: DependencyReference, locked_dep: Any) -> bool:
+    """Ask the proxy routing owner whether *dep_ref* reaches *locked_dep*'s proxy."""
+    from apm_cli.deps.artifactory_orchestrator import ArtifactoryRouter
+
+    return ArtifactoryRouter.routes_to_locked_proxy(dep_ref, locked_dep)
+
+
 def detect_ref_change(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency | None,
@@ -201,7 +208,11 @@ def detect_ref_change(
         except (ValueError, RuntimeError):
             # An unclassifiable lock cannot safely authorize replay.
             return True
-        if manifest_provider != locked_provider:
+        # A proxy-routed row records the proxy host instead of the upstream
+        # one; the current route to that same proxy keeps it the same source.
+        if manifest_provider != locked_provider and not _routes_to_locked_proxy(
+            dep_ref, selected_locked
+        ):
             return True
 
     # Registry-sourced deps: the manifest carries a semver range
@@ -234,7 +245,9 @@ def detect_ref_change(
     # instead, treat the dep as unchanged when the lockfile already
     # stores the same constraint (and we therefore trust its resolution
     # until the user runs ``--update``).
-    if getattr(dep_ref, "ref_kind", None) == "semver":
+    # A row locked without a constraint recorded the selector literally (an
+    # exact pin under PROXY_REGISTRY_ONLY), so the literal comparison applies.
+    if getattr(dep_ref, "ref_kind", None) == "semver" and locked_dep.constraint is not None:
         return dep_ref.reference != locked_dep.constraint
 
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
@@ -499,7 +512,13 @@ def build_download_ref(
             # When registry_prefix is set, also restore the artifactory_prefix
             # field on dep_ref so the downloader takes the proxy code-path and
             # uses PROXY_REGISTRY_TOKEN for auth instead of the GitHub PAT.
-            if locked_dep.registry_prefix and locked_dep.host:
+            # A dep whose current route already lands on that proxy keeps it,
+            # with the configured scheme (#3657).
+            if (
+                locked_dep.registry_prefix
+                and locked_dep.host
+                and not _routes_to_locked_proxy(dep_ref, locked_dep)
+            ):
                 overrides["host"] = locked_dep.host
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
 

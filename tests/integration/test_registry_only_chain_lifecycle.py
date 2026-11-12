@@ -109,3 +109,39 @@ def test_registry_only_exact_pin_chain_is_idempotent(tmp_path: Path, apm_binary_
         rc, text = chain.run(env, "outdated", "-j", "0", step="4-outdated")
         assert rc == 0, text
         chain.no_upstream(proxy)
+
+
+@pytest.mark.lifecycle_smoke
+def test_registry_only_frozen_replays_lock_written_through_proxy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """--frozen replays the proxy-routed lock the same proxy just wrote (#3657)."""
+    chain = _RegistryOnlyChain(tmp_path, apm_binary_path)
+    frozen = ("install", "--frozen", "--target", "copilot", "--no-policy")
+    with _recording_proxy() as proxy:
+        env = chain.env(proxy)
+        rc, text = chain.run(env, *_INSTALL, step="1-exact")
+        assert rc == 0, text
+        lock_bytes = (chain.project / "apm.lock.yaml").read_bytes()
+
+        rc, text = chain.run(env, *frozen, step="2-frozen")
+        assert rc == 0, text
+        assert (chain.project / "apm.lock.yaml").read_bytes() == lock_bytes
+
+        # Fresh CI runner: no materialized packages, same lock.
+        rc, text = chain.run(env, "cache", "clean", "--yes", step="3-cache-clean")
+        assert rc == 0, text
+        for path in sorted((chain.project / "apm_modules").rglob("*"), reverse=True):
+            path.unlink() if path.is_file() or path.is_symlink() else path.rmdir()
+        rc, text = chain.run(env, *frozen, step="4-frozen-cold")
+        assert rc == 0, text
+        assert (chain.project / "apm.lock.yaml").read_bytes() == lock_bytes
+        chain.no_upstream(proxy)
+
+        # A different proxy route is a different source: --frozen still refuses.
+        moved = dict(env)
+        moved["PROXY_REGISTRY_URL"] = _PROXY_URL.replace(_PROXY_HOST, "other-proxy.example.invalid")
+        rc, text = chain.run(moved, *frozen, step="5-frozen-other-proxy")
+        assert rc == 1, text
+        assert "out of sync" in text, text
+        assert (chain.project / "apm.lock.yaml").read_bytes() == lock_bytes

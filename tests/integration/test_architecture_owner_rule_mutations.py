@@ -2718,3 +2718,44 @@ def test_version_rendering_guard_rejects_second_renderer_in_helpers() -> None:
     report = run_selected_rules(ROOT, (_VR_RULE,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(v.rule_id == _VR_RULE for v in report.violations)
+
+
+# ---------------------------------------------------------------------------
+# Targeted proxy-route equivalence mutations (#3657)
+# ---------------------------------------------------------------------------
+
+_HOST_CRED_RULE = "transport-platform-host-credential-resolution"
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
+            "src/apm_cli/drift.py",
+            "    return ArtifactoryRouter.routes_to_locked_proxy(dep_ref, locked_dep)",
+            "    return bool(getattr(locked_dep, 'registry_prefix', None))",
+        ),
+        (
+            "src/apm_cli/deps/artifactory_orchestrator.py",
+            "        target = cls.routing_target(dep_ref)",
+            "        target = (locked_dep.host, locked_prefix, 'https', True)",
+        ),
+        (
+            "src/apm_cli/install/artifactory_resolver.py",
+            "def _resolve_artifactory_boundary(",
+            "def _proxy_routing_target(dep_ref):\n    return None\n\n\n"
+            "def _resolve_artifactory_boundary(",
+        ),
+    ],
+    ids=["drift-local-predicate", "router-skips-routing-target", "resolver-private-copy"],
+)
+def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, new: str) -> None:
+    """Proxy-route equivalence must reuse ArtifactoryRouter.routing_target."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (_HOST_CRED_RULE,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(v.rule_id == _HOST_CRED_RULE for v in report.violations)
+
