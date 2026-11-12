@@ -127,6 +127,26 @@ Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
+### Shared transitive dependencies
+
+If `security-kit` and `release-kit` both need `company-standards`, removing
+either parent keeps the shared lock entry, installed package and required
+deployed content. APM updates a removed parent's anchor to a verified surviving
+parent, including the relative source path for local dependencies. Removing
+the final parent can then clean up the shared dependency normally.
+
+Missing, malformed, unreadable, unsafe or ambiguous evidence is not proof that
+a dependency is unused. APM preserves uncertain candidates and reports the
+verification failure; restore the affected manifests or permissions, or correct
+the path/anchor evidence before retrying. A permission refusal can stop the
+command rather than complete cleanup. `--dry-run` makes the same orphan decision
+without repairing anchors or writing package state; the lifecycle-script caveat
+below still applies.
+
+The [proposed OpenAPM obligation](../../../specs/openapm-v01/#req-lk-024)
+formalizes these outcomes. Its review, version decision and publication are
+pending; it is not an adopted specification amendment or a new release claim.
+
 ### Claude Code profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
@@ -135,6 +155,8 @@ removes a package's files and lockfile rows only under the selected
 If another profile still uses the package, it stays in `~/.apm/apm.yml` and
 `apm_modules/`; uninstall it with that profile selected to remove it everywhere.
 The selected profile is matched by path; symlinks are not resolved.
+
+### Cleanup failures and ownership
 
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message

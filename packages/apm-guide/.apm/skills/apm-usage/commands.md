@@ -17,6 +17,13 @@ Standalone `apm --version` does not require Git to be installed.
 
 ## Dependency management
 
+Uninstall retains shared transitive dependencies until their final declaring
+parent is removed, repairing verified surviving-parent/local-path anchors.
+Missing, malformed, unreadable, unsafe or ambiguous evidence preserves uncertain
+candidates and reports the verification problem. Restore the affected evidence
+before retrying; a permission failure can stop the command. `--dry-run` makes the
+same orphan decisions without file changes or anchor repair, but separately
+authorized `pre-uninstall` scripts may have side effects.
 Repeating an existing positional package without a requested change reports
 `already in apm.yml` and preserves its declaration. An otherwise unchanged
 manifest is not rewritten; changed refs and explicit skill additions or resets

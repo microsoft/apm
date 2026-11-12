@@ -9,6 +9,9 @@
     "deployed-prompt-audit": "APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020), subject to the pending Section 9.3 amendment process, not adopted-spec approval. APM's own Consumer deployment implementation supplies the definitions: project and user scopes follow TargetProfile deployment roots and PrimitiveMapping formats, including shared native hook settings via native_hook_config. The target-by-target locations, supported formats, prompt applicability and exclusions are published in docs/src/content/docs/reference/cli/audit.md. ContentScanner checks hidden or suspicious Unicode code points that may conceal instructions, not semantic prompt-injection detection; a clean result is not a guarantee that prompt text is safe. App SQLite state and unrelated transcripts are excluded. Detection does not grant execution, ownership or remediation authority.",
     "staged-replacement-recovery": "APM implements the proposed staged-replacement recovery capability (req-lk-023). Section 9.3 review and public comment remain pending; this source statement does not establish specification adoption or released CLI support. The conformance oracles exercise real filesystem state with injected operation denials. Actual non-admin Windows acceptance is established separately by the native lifecycle job, not inferred from collection or portable tests."
   },
+  "proposed_amendments": {
+    "uninstall-reachability": "req-lk-024 is the proposed general uninstall reachability obligation for issue #2270, not an optional source-replacement capability or an adopted amendment. Classification, revision selection, non-author approvals, the subsequent 14-day public comment period, applicable migration and publication remain pending. The requirement binds the existing installed-CLI sequential-diamond oracle, extended to local and hermetic remote-backed sources, both removal orders, coherent local anchors, required installed bytes, final cleanup, personal content and read-only preview. Additional installed-CLI cases cover missing/malformed/unreadable manifests, unsafe remote containment and ambiguous local ancestry. POSIX read-denial cases do not establish native Windows permission behavior. Collection status is not a test-run result, specification approval, public deployment or released CLI support."
+  },
   "requirements": [
     {
       "conformance_class": "consumer",
@@ -410,6 +413,28 @@
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[independent-recovery]",
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[manifest]",
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[relocation]"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-024",
+      "keyword": "MUST",
+      "section": "5.2.2",
+      "status": "active",
+      "test_count": 12,
+      "tests": [
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_sequential_diamond_lifecycle[root-a-local]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_sequential_diamond_lifecycle[root-a-remote]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_sequential_diamond_lifecycle[root-b-local]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_sequential_diamond_lifecycle[root-b-remote]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_manifest_preserves_material_and_preview[malformed-local]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_manifest_preserves_material_and_preview[malformed-remote]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_manifest_preserves_material_and_preview[missing-local]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_manifest_preserves_material_and_preview[missing-remote]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_manifest_preserves_material_and_preview[unreadable-local]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_manifest_preserves_material_and_preview[unreadable-remote]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_path_preserves_candidate_and_external_content[ambiguous]",
+        "tests/spec_conformance/test_uninstall_reachability_reqs.py::test_uncertain_path_preserves_candidate_and_external_content[unsafe]"
       ]
     },
     {
@@ -1863,7 +1888,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 101,
+      "active": 102,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1887,5 +1912,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 136
+  "total_requirements": 137
 }

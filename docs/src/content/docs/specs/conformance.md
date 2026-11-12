@@ -28,7 +28,23 @@ uv run --extra dev python -m tests.spec_conformance.gen_statement
 git diff -- CONFORMANCE.md CONFORMANCE.json  # compare to the in-repo copies
 ```
 
-The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from those results; the final command shows whether the generated artifacts still match the checked-in copies.
+The first command executes the requirement-bound tests for which prerequisites
+are available. The generator uses the full collection's marker map, not runtime
+pass/fail results. `active` means an assertion-bearing test is bound; it is not
+a passing-run certificate. After a targeted run, collect the full suite before
+generating the final statement:
+
+```bash
+uv run --extra dev pytest tests/spec_conformance --collect-only -q
+uv run --extra dev python -m tests.spec_conformance.gen_statement
+```
+
+The proposed [uninstall reachability obligation](../openapm-v01/#req-lk-024)
+reuses the installed-CLI sequential-diamond scenario for local and
+remote-backed sources, then adds incomplete-evidence cases. Set `APM_BINARY_PATH`
+to the CLI built or installed from the checkout being verified. POSIX permission
+denial evidence does not certify Windows ACL behavior. Its collected bindings
+do not establish specification approval, publication or released CLI support.
 
 ## What conformance does NOT cover
 

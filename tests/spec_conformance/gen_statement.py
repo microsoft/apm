@@ -62,6 +62,19 @@ STAGED_REPLACEMENT_RECOVERY = (
     "denials. Actual non-admin Windows acceptance is established separately by the "
     "native lifecycle job, not inferred from collection or portable tests."
 )
+UNINSTALL_REACHABILITY = (
+    "req-lk-024 is the proposed general uninstall reachability obligation for issue #2270, "
+    "not an optional source-replacement capability or an adopted amendment. "
+    "Classification, revision selection, non-author approvals, the subsequent 14-day "
+    "public comment period, applicable migration and publication remain pending. "
+    "The requirement binds the existing installed-CLI sequential-diamond oracle, extended "
+    "to local and hermetic remote-backed sources, both removal orders, coherent local "
+    "anchors, required installed bytes, final cleanup, personal content and read-only preview. "
+    "Additional installed-CLI cases cover missing/malformed/unreadable manifests, unsafe "
+    "remote containment and ambiguous local ancestry. POSIX read-denial cases do not "
+    "establish native Windows permission behavior. Collection status is not a test-run "
+    "result, specification approval, public deployment or released CLI support."
+)
 
 
 def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
@@ -180,6 +193,7 @@ def build_json() -> dict:
             "deployed-prompt-audit": DEPLOYED_PROMPT_AUDIT,
             "staged-replacement-recovery": STAGED_REPLACEMENT_RECOVERY,
         },
+        "proposed_amendments": {"uninstall-reachability": UNINSTALL_REACHABILITY},
         "requirements": entries,
     }
 
@@ -232,6 +246,8 @@ def build_md(doc: dict) -> str:
         f"{doc['optional_features']['deployed-prompt-audit']}\n\n"
         "## Proposed staged-replacement recovery\n\n"
         f"{doc['optional_features']['staged-replacement-recovery']}\n\n"
+        "## Proposed uninstall reachability\n\n"
+        f"{doc['proposed_amendments']['uninstall-reachability']}\n\n"
     )
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"

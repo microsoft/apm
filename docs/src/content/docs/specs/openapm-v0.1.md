@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **136 normative statements (131 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **137 normative statements (132 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1037,7 +1037,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `virtual_path`            | Subpath inside repo for virtual packages.                                       |
 | `is_virtual`              | Boolean.                                                                        |
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
-| `resolved_by`             | `repo_url` of the parent that pulled this transitive dep.                       |
+| `resolved_by`             | Resolution provenance; for a local entry, its declaring-parent anchor. See proposed [Section 5.2.2](#522-uninstall-reachability-preservation-proposed) for a pending amendment affecting this field. Not a complete incoming-edge set. |
 | `package_type`            | One of `apm_package`, `skill_bundle`, etc.                                      |
 | `skill_subset`            | Selected skill names for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
 | `deployed_files`          | Project-relative paths the consumer wrote for this entry.                       |
@@ -1045,7 +1045,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `source`                  | `local` for path deps, `registry` for registry deps; absent for git.            |
 | `resolved_url`            | Registry archive download URL (advisory; see [req-rs-009](#req-rs-009)).        |
 | `resolved_hash`           | Hash envelope (`sha256:<hex>`) of the registry archive bytes. Trust anchor.     |
-| `local_path`              | Original path for local deps.                                                   |
+| `local_path`              | Original path for local deps. See proposed [Section 5.2.2](#522-uninstall-reachability-preservation-proposed) for a pending amendment also affecting this field together with `resolved_by`. |
 | `content_hash`            | Hash envelope (`sha256:<hex>`) of a local package's source tree.                |
 | `is_dev`                  | True when declared under `devDependencies`.                                     |
 | `constraint`              | git-semver discriminator: the original semver range from the manifest (verbatim). |
@@ -1316,6 +1316,68 @@ behavior-neutral errata; consumers without staged replacement acquire no
 new replacement capability.
 The optional-feature disclosure in Section 11.2 item 3 covers this capability.
 
+#### 5.2.2 Uninstall reachability preservation (proposed)
+
+> **PROPOSED amendment for issue #2270; revision/classification pending.**
+> This adds a hard consumer conformance obligation, not behavior-neutral
+> errata. Product scope acceptance and test collection do not ratify this
+> text. Section 9.3's two non-author approvals and subsequent 14-day public
+> comment period, the Section 9.2/9.4 version decision, any applicable
+> Section 9.5 migration, and publication remain outstanding. No schema or
+> lockfile-format change is proposed.
+
+Here, a surviving declared dependency is one still declared by the consumer
+manifest after the requested removal, including applicable development
+dependencies. Reachability follows declared dependency edges from those roots,
+using the relevant local-source or installed-package manifests and the
+existing locked identities. A single recorded parent is not proof that a
+dependency has no other incoming edges.
+
+<a id="req-lk-024"></a>
+**[req-lk-024]** During uninstall-time orphan cleanup, a conforming **consumer**
+MUST preserve a transitive lockfile dependency entry and the installed
+material required by it while that dependency remains reachable from a
+surviving declared dependency, including when its recorded parent is being
+removed. This applies in either parent-removal order.
+
+When a retained entry's lifecycle anchor names a removed parent, the consumer
+MUST keep its parent information coherent with a verified surviving declaring
+parent. For a local dependency, it MUST keep `resolved_by` and `local_path`
+coherent together, so resolving the relative path from that parent identifies
+the same source. An absolute local source remains absolute. This repair MUST
+NOT change package identity or selected version, commit, or constraint.
+The consumer MUST permit normal safe orphan cleanup when the true final
+declaring parent is subsequently removed and no surviving root reaches the
+entry; prior retention alone MUST NOT make it permanently uncollectable.
+
+If relevant manifest or path evidence is missing, malformed, unreadable,
+unsafe, or ambiguous such that safe removal cannot be established, the
+consumer MUST preserve the uncertain candidate entries and their required
+installed material. It MUST emit an actionable diagnostic identifying the
+failed verification with enough context to inspect or restore the evidence, without
+exposing secrets (see [req-sc-007](#req-sc-007)). It MUST NOT treat an unknown
+subtree as empty or use a partially verified graph to authorize uncertain deletion.
+
+A dry-run preview of this cleanup MUST make the same preserve/remove
+decisions from the same evidence, including uncertainty, without changing
+files or repairing lock records. This requirement concerns the consumer's
+cleanup and preview, not the side effects of separately authorized lifecycle
+scripts. Existing containment, ownership and edited-user-content protection
+requirements still apply.
+
+This outcome contract prescribes neither a traversal algorithm nor storage of
+multiple parents. Resolution-time provenance in Section 7.2 describes how a
+selection was obtained; a repaired `resolved_by` is a current lifecycle anchor,
+not a historical full constraint-chain record. Neither form alone proves
+reachability. The distinct deployed-path reconciliation rules in
+[req-lk-020](#req-lk-020) and [req-lk-021](#req-lk-021) are unchanged.
+For consumers providing the separately proposed source-replacement capability,
+[req-rpl-002](#req-rpl-002)'s selected-source and recorded-incoming-parent
+obligations remain conditional and unchanged, including its stricter refusal
+on incomplete evidence. This proposal neither ratifies that capability nor
+relaxes its safeguards. It adds no network recovery, whole-operation rollback,
+exit-code rule, or shared-file collision policy.
+
 ### 5.3 Self-entry semantics
 
 A project that ships its own primitives records the files it deploys
@@ -1566,7 +1628,8 @@ This section's normative statements are:
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
   [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
-  [req-lk-023](#req-lk-023) (proposed staged-replacement capability).
+  [req-lk-023](#req-lk-023) (proposed staged-replacement capability),
+  [req-lk-024](#req-lk-024) (proposed uninstall reachability obligation).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -2167,7 +2230,10 @@ the consumer MUST apply the following tri-modal policy:
    MUST select the **highest** version satisfying every constraint
    in the intersection. The selected version is recorded in the
    lockfile; the chain that contributed the binding tightest
-   constraint is recorded as `resolved_by`.
+   constraint is recorded as `resolved_by` at resolution time. Proposed
+   [req-lk-024](#req-lk-024) distinguishes this provenance from the
+   surviving-parent lifecycle anchor after uninstall; anchor repair does
+   not rerun version selection or change the locked constraint.
 2. **Empty-intersection fail-closed.** If the intersection of
    reachable constraints is empty, the install MUST fail with a
    diagnostic naming both root-to-conflict chains. Silent
@@ -2401,8 +2467,13 @@ dependencies:
 ```
 
 Lockfile fragment for the 3-chain intersection case
-(per [req-rs-010](#req-rs-010), `resolved_by` records the chain
-contributing the binding tightest constraint):
+(per [req-rs-001](#req-rs-001), `resolved_by` initially records the chain
+contributing the binding tightest constraint; [req-rs-010](#req-rs-010)
+separately governs conflict diagnostics). This resolution-time example is
+not a complete incoming-edge record or an uninstall reachability oracle.
+Proposed [req-lk-024](#req-lk-024) permits a verified surviving-parent
+lifecycle anchor to replace removed-parent provenance without changing
+the selection:
 
 ```yaml
 # Three chains reach acme/foo:
@@ -3788,6 +3859,8 @@ detection MUST scope per-dependency, not globally.
 For supported dependency aliases, [req-mf-025](#req-mf-025) constrains
 destinations and records canonical placement for later cleanup. Containment
 alone does not establish ownership or authorize deletion of existing content.
+Proposed [req-lk-024](#req-lk-024) preserves reachable entries and fails closed
+on uncertain evidence during uninstall-time orphan cleanup.
 
 ### 10.8 Policy bypass via crafted manifest
 
@@ -3852,7 +3925,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation, proposed [req-lk-024](#req-lk-024) | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -4115,6 +4188,7 @@ conformance statement identifying:
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
 [req-lk-023](#req-lk-023) (proposed staged-replacement capability),
+[req-lk-024](#req-lk-024) (proposed uninstall reachability obligation),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -4580,6 +4654,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-lk-022](#req-lk-022)                | MUST    | 5.2     | consumer    |
 | [req-lk-023](#req-lk-023)                | MUST    | 5.2.1   | consumer    |
+| [req-lk-024](#req-lk-024)                | MUST    | 5.2.2   | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -4666,7 +4741,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 136** (131 MUST, 5 SHOULD).
+**Total normative statements: 137** (132 MUST, 5 SHOULD).
 
 ---
 
@@ -4730,10 +4805,17 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. The revision also pins the zero-pattern boundary, the per-pattern re-encoding and the frontmatter byte layout. Under Section 9.2 this changes an already-defined emitted target representation, not a manifest, lockfile or policy field; the replaced representations were refused or discarded by the target, so no working deployment relied on them. Migration: deployed bytes, and therefore [req-lk-012] deployed_file_hashes, change for `.agents/rules/*.md` files whose `applyTo` resolves to zero patterns or to two or more patterns, and for single-pattern rules containing a literal backslash or a top-level literal comma; other single-pattern rules are byte-identical. One non-frozen `apm install` re-renders affected files and re-records their hashes; [req-lk-006] and [req-lk-017] are unchanged by this amendment. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived. |
 
-The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one
-MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place and adds none. Together, this working draft contains 136 statements
-(131 MUST, 5 SHOULD). Combining the proposals does not establish
-Section 9.3 adoption or CLI release.
+### Pending uninstall amendment (#2270)
+
+| Revision | Date | Changes |
+|----------|------|---------|
+| Revision pending (#2270, proposed) | 2026-10-21 | Adds [req-lk-024](#req-lk-024), Section 5.2.2: preserve reachable transitive entries and installed material in either parent-removal order, repair coherent surviving-parent/local-path anchors, permit final-parent cleanup, preserve uncertain candidates with an actionable diagnostic, and keep cleanup previews read-only. Reconciles resolution provenance with lifecycle anchors without changing traversal or lock formats. This is a new hard conformance obligation, not errata: implementations deleting reachable or uncertain candidates, retaining stale anchors, leaking final orphans, or mutating previews can newly fail. Section 9.2/9.4 classification and revision selection remain pending; a breaking classification requires the minor/migration route, not a patch label. Section 9.3 non-author approvals, subsequent public comment, applicable Section 9.5 migration and publication remain outstanding. The conditional req-rpl-002 proposal, historical waivers, shared-file rules and release commitments are unchanged. Statement count: 136 -> 137 (132 MUST, 5 SHOULD). Also corrects the Section 7.4 lockfile-fragment worked-example citation from req-rs-010 to req-rs-001 (resolved_by provenance, not conflict diagnostics). |
+
+The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one MUST;
+0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place and adds
+none. The proposed #2270 amendment adds one. Together, this working draft
+contains 137 statements (132 MUST, 5 SHOULD). Combining the proposals does not
+establish Section 9.3 adoption or CLI release.
 
 Errata (none at publication).
 

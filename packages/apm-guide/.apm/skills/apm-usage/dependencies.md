@@ -59,6 +59,15 @@ parity). Sibling layouts that resolve outside the consuming project root
 supported -- the consuming developer authored the manifest chain and
 already trusts the layout.
 
+**Shared dependency removal:** `resolved_by` is a single parent anchor, not
+proof that no other parent needs the package. Uninstall preserves a shared
+transitive entry and required installed material while a surviving declared
+dependency still reaches it. If its recorded parent is removed, APM repairs
+the parent and applicable relative local path together; final-parent removal
+can then clean it up. Incomplete or unsafe evidence retains uncertain candidates
+with a diagnostic. Restore manifests/permissions or correct path evidence before
+retrying. The proposed `req-lk-024` amendment is not yet adopted.
+
 Remote-cloned packages may declare a relative `path:` only when it resolves
 inside the same authenticated remote repo root. APM expands that path to the
 parent's remote host/repo/ref and fetches the sibling from the same origin.

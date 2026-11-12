@@ -12,6 +12,7 @@ from tests.spec_conformance.gen_statement import (
     CONFORMANCE_MD,
     GENERATOR,
     SPEC_VERSION,
+    UNINSTALL_REACHABILITY,
     USER_SCOPE_DISCLOSURE,
 )
 
@@ -81,3 +82,17 @@ def test_gen_statement_publishes_user_scope_disclosure():
     markdown = CONFORMANCE_MD.read_text(encoding="ascii")
     for value in USER_SCOPE_DISCLOSURE.values():
         assert value in markdown
+
+
+def test_gen_statement_distinguishes_proposal_from_runtime_and_adoption() -> None:
+    """The new general duty is not falsely advertised as an optional capability."""
+    _run_gen()
+    document = json.loads(CONFORMANCE_JSON.read_text(encoding="ascii"))
+    assert document["proposed_amendments"]["uninstall-reachability"] == UNINSTALL_REACHABILITY
+    assert "uninstall-reachability" not in document["optional_features"]
+    assert UNINSTALL_REACHABILITY in CONFORMANCE_MD.read_text(encoding="ascii")
+    requirement = next(row for row in document["requirements"] if row["id"] == "req-lk-024")
+    assert requirement["test_count"] == 12
+    assert any("sequential_diamond_lifecycle" in node for node in requirement["tests"])
+    assert any("uncertain_manifest" in node for node in requirement["tests"])
+    assert any("uncertain_path" in node for node in requirement["tests"])

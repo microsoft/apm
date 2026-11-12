@@ -18,6 +18,7 @@ import tomlkit
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.path_anchoring import resolve_local_dep_dir
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
 from apm_cli.utils.git_env import get_git_executable
@@ -229,6 +230,7 @@ def _publish(
     hook_command: str | None = None,
     mcp: bool = False,
     mcp_env: dict[str, str] | None = None,
+    dependencies: tuple[dict[str, object], ...] = (),
 ) -> _PublishedPackage:
     mcp_dependencies: tuple[dict[str, object], ...] = ()
     if mcp:
@@ -244,6 +246,7 @@ def _publish(
         )
     package = scenario.sources.create(
         name,
+        dependencies=dependencies,
         mcp_dependencies=mcp_dependencies,
     )
     if skill is not None:
@@ -2514,27 +2517,82 @@ def test_required_dependency_prune_then_uninstall_cascades_owned_state(
     assert uninstall_audit["passed"] is True
 
 
+@dataclass(frozen=True)
+class _DiamondFixture:
+    scenario: _Scenario
+    shared: LocalPackage
+    parents: tuple[LocalPackage, ...]
+    consumer: LocalPackage
+    source_instruction: Path
+    parent_arguments: dict[str, str]
+    environment: dict[str, str]
+    prefix: str
+
+
+def _diamond_fixture(tmp_path: Path, apm_binary_path: Path, source_kind: str) -> _DiamondFixture:
+    """Author one diamond; remote-shaped sources use only local Git fixtures."""
+    scenario = _new_scenario(tmp_path / "diamond-uninstall", apm_binary_path)
+    if source_kind == "local":
+        shared = scenario.consumers.create("shared")
+        source_instruction = scenario.consumers.add_instruction(
+            shared, "shared", _instruction("shared")
+        )
+        parents = (
+            scenario.consumers.create("root-a", dependencies=({"path": "../shared"},)),
+            LocalPackageFactory(scenario.isolated.work_root / "nested").create(
+                "root-b", dependencies=({"path": "../../shared"},)
+            ),
+        )
+        arguments = {"root-a": "../root-a", "root-b": "../nested/root-b"}
+        declarations = tuple({"path": path} for path in arguments.values())
+        environment = scenario.environment
+        prefix = "_local"
+    else:
+        published_shared = _publish(scenario, "shared", instruction="shared")
+        published_parents = tuple(
+            _publish(scenario, name, dependencies=(published_shared.dependency,))
+            for name in ("root-a", "root-b")
+        )
+        shared = published_shared.package
+        parents = tuple(parent.package for parent in published_parents)
+        source_instruction = shared.root / ".apm/instructions/shared.instructions.md"
+        declarations = tuple(parent.dependency for parent in published_parents)
+        arguments = {parent.name: f"{_OWNER}/{parent.name}" for parent in parents}
+        environment = scenario.repositories.url_rewrite_subprocess_env_many(
+            tuple(
+                (source.repository, source.remote_url)
+                for source in (published_shared, *published_parents)
+            )
+        )
+        prefix = _OWNER
+    consumer = scenario.consumers.create(
+        "diamond-consumer",
+        dependencies=declarations,
+        targets=("copilot",),
+    )
+    return _DiamondFixture(
+        scenario, shared, parents, consumer, source_instruction, arguments, environment, prefix
+    )
+
+
+@pytest.mark.parametrize("source_kind", ["local", "remote"])
 @pytest.mark.parametrize("first_parent", ["root-a", "root-b"])
 def test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent(
     tmp_path: Path,
     apm_binary_path: Path,
     first_parent: str,
+    source_kind: str,
 ) -> None:
-    """Guard #2852's already-correct survivor rebuild across sequential uninstalls."""
-    scenario = _new_scenario(tmp_path / "diamond-uninstall", apm_binary_path)
-    shared = scenario.consumers.create("shared")
-    source_instruction = scenario.consumers.add_instruction(
-        shared, "shared", _instruction("shared")
+    """Retain the shared graph, usable anchors and bytes until its final parent."""
+    fixture = _diamond_fixture(tmp_path, apm_binary_path, source_kind)
+    scenario, shared, parents, consumer = (
+        fixture.scenario,
+        fixture.shared,
+        fixture.parents,
+        fixture.consumer,
     )
-    parents = [
-        scenario.consumers.create(name, dependencies=({"path": "../shared"},))
-        for name in ("root-a", "root-b")
-    ]
-    consumer = scenario.consumers.create(
-        "diamond-consumer",
-        dependencies=tuple({"path": f"../{parent.name}"} for parent in parents),
-        targets=("copilot",),
-    )
+    source_instruction = fixture.source_instruction
+    prefix = fixture.prefix
     deployed_instruction = ".github/instructions/shared.instructions.md"
     user_note = consumer.root / ".github" / "instructions" / "user-notes.txt"
     user_note.parent.mkdir(parents=True)
@@ -2553,7 +2611,7 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
         scenario,
         consumer,
         (*_INSTALL_ARGS, "--target", "copilot"),
-        environment=scenario.environment,
+        environment=fixture.environment,
         scenario_id="diamond-install",
     )
     assert user_note.read_bytes() == b"Keep this user-authored note.\n"
@@ -2562,18 +2620,22 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
     assert installed.lockfile_bytes is not None
     lock = LockFile.from_yaml(installed.lockfile_bytes.decode("utf-8"))
     dependencies = {dep.repo_url: dep for dep in lock.get_package_dependencies()}
-    assert set(dependencies) == {"_local/root-a", "_local/root-b", "_local/shared"}
+    assert set(dependencies) == {f"{prefix}/root-a", f"{prefix}/root-b", f"{prefix}/shared"}
     # Empty parent deployment claims are the legacy-cleanup trigger in #2852.
-    assert dependencies["_local/root-a"].deployed_files == []
-    assert dependencies["_local/root-b"].deployed_files == []
+    assert dependencies[f"{prefix}/root-a"].deployed_files == []
+    assert dependencies[f"{prefix}/root-b"].deployed_files == []
     shared_record = next(
         record
         for record in installed.deployment_records
         if record.locator.value == deployed_instruction
     )
-    assert shared_record.owners == (f"local:{shared.root.as_posix()}",)
-    assert shared_record.active_owner == f"local:{shared.root.as_posix()}"
-    assert deployed_instruction in dependencies["_local/shared"].deployed_files
+    shared_owner = (
+        f"local:{shared.root.as_posix()}" if source_kind == "local" else f"{prefix}/shared"
+    )
+    assert shared_record.owners == (shared_owner,)
+    assert shared_record.active_owner == shared_owner
+    assert deployed_instruction in dependencies[f"{prefix}/shared"].deployed_files
+    original_declarations = load_yaml(consumer.manifest_path)["dependencies"]["apm"]
     modules = consumer.root / "apm_modules"
     installed_sources = {
         name: dep.to_dependency_ref().get_install_path(modules)
@@ -2588,11 +2650,20 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
     last_parent = "root-b" if first_parent == "root-a" else "root-a"
     for index, parent_name in enumerate((first_parent, last_parent)):
         before = ArtifactSnapshotSet.capture(roots)
+        preview = _run_success(
+            scenario,
+            consumer,
+            ("uninstall", fixture.parent_arguments[parent_name], "--dry-run"),
+            environment=fixture.environment,
+            scenario_id=f"diamond-preview-{parent_name}",
+        )
+        assert_snapshot_set_unchanged(before, ArtifactSnapshotSet.capture(roots))
+        assert ("Transitive dependencies that would be removed:" in preview.stdout) is (index == 1)
         _run_success(
             scenario,
             consumer,
-            ("uninstall", f"../{parent_name}"),
-            environment=scenario.environment,
+            ("uninstall", fixture.parent_arguments[parent_name]),
+            environment=fixture.environment,
             scenario_id=f"diamond-uninstall-{parent_name}",
         )
         after = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
@@ -2610,24 +2681,35 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
             },
             tree_prefixes={"project": {"apm_modules"}},
         )
-        assert not installed_sources[f"_local/{parent_name}"].exists()
+        assert not installed_sources[f"{prefix}/{parent_name}"].exists()
+        assert user_note.read_bytes() == b"Keep this user-authored note.\n"
         manifest_dependencies = (
             load_yaml(consumer.manifest_path).get("dependencies", {}).get("apm", [])
         )
         if index == 0:
-            assert manifest_dependencies == [{"path": f"../{last_parent}"}]
+            survivor_index = 0 if last_parent == "root-a" else 1
+            assert manifest_dependencies == [original_declarations[survivor_index]]
             assert after.file(deployed_instruction) == installed.file(deployed_instruction)
             assert after.deployment_records == installed.deployment_records
             assert after.lockfile_bytes is not None
             survivor_lock = LockFile.from_yaml(after.lockfile_bytes.decode("utf-8"))
             survivors = {dep.repo_url: dep for dep in survivor_lock.get_package_dependencies()}
-            assert set(survivors) == {f"_local/{last_parent}", "_local/shared"}
-            shared_survivor = survivors["_local/shared"]
-            assert shared_survivor.resolved_by == f"_local/{last_parent}"
-            assert shared_survivor.deployed_files == dependencies["_local/shared"].deployed_files
+            assert set(survivors) == {f"{prefix}/{last_parent}", f"{prefix}/shared"}
+            shared_survivor = survivors[f"{prefix}/shared"]
+            assert shared_survivor.resolved_by == f"{prefix}/{last_parent}"
+            if source_kind == "local":
+                expected_path = "../shared" if last_parent == "root-a" else "../../shared"
+                assert shared_survivor.local_path == expected_path
+                assert (
+                    resolve_local_dep_dir(shared_survivor, survivor_lock, consumer.root)
+                    == shared.root
+                )
+            else:
+                assert shared_survivor.local_path is None
+            assert shared_survivor.deployed_files == dependencies[f"{prefix}/shared"].deployed_files
             assert (
                 shared_survivor.deployed_file_hashes
-                == dependencies["_local/shared"].deployed_file_hashes
+                == dependencies[f"{prefix}/shared"].deployed_file_hashes
             )
             for name in survivors:
                 assert_unchanged(

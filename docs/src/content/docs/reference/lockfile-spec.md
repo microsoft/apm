@@ -290,7 +290,7 @@ with one locked coordinate, not a durable catalog trust identity.
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
-| `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
+| `local_path` | string | no | Manifest-declared local source path. A direct relative path anchors on the project root; a transitive relative path anchors on its declaring parent's source directory. Absolute paths remain absolute. Uninstall repairs this together with `resolved_by` when a verified surviving parent uses a different relative spelling. |
 | `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. GitCache-backed git-subpath checkouts pin `core.autocrlf=false` so LF-committed content is not rewritten as CRLF on checkout; this pin does not override `.gitattributes` or `core.eol`. Bytes that are committed as CRLF stay CRLF. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
@@ -307,6 +307,15 @@ with one locked coordinate, not a durable catalog trust identity.
 
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
+
+`resolved_by` is one parent anchor, not a complete list of incoming dependency
+edges. Uninstall checks surviving declared dependencies before deleting a
+transitive entry, preserves uncertain entries with a diagnostic, and can repair
+a rescued entry's parent/path pair without changing its identity or selected
+version. Later final-parent removal remains eligible for safe cleanup.
+Resolution-time constraint provenance is not an orphan-removal oracle.
+See the [proposed reachability contract](../../specs/openapm-v01/#req-lk-024);
+its normal specification review and publication remain pending.
 
 Azure DevOps uses the same generic `host` and `repo_url` fields as every other
 Git provider. APM derives its transient organization, project, and repository

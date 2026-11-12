@@ -26,6 +26,10 @@ APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020
 
 APM implements the proposed staged-replacement recovery capability (req-lk-023). Section 9.3 review and public comment remain pending; this source statement does not establish specification adoption or released CLI support. The conformance oracles exercise real filesystem state with injected operation denials. Actual non-admin Windows acceptance is established separately by the native lifecycle job, not inferred from collection or portable tests.
 
+## Proposed uninstall reachability
+
+req-lk-024 is the proposed general uninstall reachability obligation for issue #2270, not an optional source-replacement capability or an adopted amendment. Classification, revision selection, non-author approvals, the subsequent 14-day public comment period, applicable migration and publication remain pending. The requirement binds the existing installed-CLI sequential-diamond oracle, extended to local and hermetic remote-backed sources, both removal orders, coherent local anchors, required installed bytes, final cleanup, personal content and read-only preview. Additional installed-CLI cases cover missing/malformed/unreadable manifests, unsafe remote containment and ambiguous local ancestry. POSIX read-denial cases do not establish native Windows permission behavior. Collection status is not a test-run result, specification approval, public deployment or released CLI support.
+
 ## Consumer user-scope disclosure
 
 - Manifest: `~/.apm/apm.yml`
@@ -37,7 +41,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 101 | 1 | 0 | 0 |
+| Consumer | 102 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 21 | 0 | 0 | 0 |
 
@@ -73,6 +77,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 3 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 6 | - |
 | [req-lk-023](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-023) | MUST | 5.2.1 | consumer | active | 7 | - |
+| [req-lk-024](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-024) | MUST | 5.2.2 | consumer | active | 12 | - |
 | [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 4 | - |
 | [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-003](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-003) | MUST | 4.1 | producer | active | 1 | - |
