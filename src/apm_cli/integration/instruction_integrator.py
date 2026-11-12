@@ -37,6 +37,11 @@ if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
 
 
+def _is_universal_glob(globs: list[str]) -> bool:
+    """Return True when parsed ``applyTo`` is exactly one universal ``**``."""
+    return globs == ["**"]
+
+
 @dataclass(frozen=True)
 class _PreparedInstruction:
     """Validated instruction source reused across target plans."""
@@ -625,10 +630,13 @@ class InstructionIntegrator(BaseIntegrator):
         or derive the description. Ordinary globs stay bare; unsafe
         characters are escaped. Re-escape each segment before joining
         to preserve APM's literal-comma and backslash boundaries.
+        Exactly one universal ``**`` pattern becomes Cursor's native
+        ``alwaysApply: true`` with no ``globs`` key (issue #1744).
         """
         metadata, body = InstructionIntegrator._parse_frontmatter(content)
         apply_to = normalize_apply_to(metadata.get("applyTo"), default="")
-        description = str(metadata.get("description", "")).strip()
+        raw_description = metadata.get("description")
+        description = "" if raw_description is None else str(raw_description).strip()
 
         # Generate description from first content sentence if missing
         if not description:
@@ -643,7 +651,9 @@ class InstructionIntegrator(BaseIntegrator):
         if description:
             parts.append(f"description: {yaml_plain_scalar(description)}")
         globs = parse_apply_to(apply_to)
-        if globs:
+        if _is_universal_glob(globs):
+            parts.append("alwaysApply: true")
+        elif globs:
             joined = ", ".join(escape_apply_to_segment(g) for g in globs)
             parts.append(f"globs: {yaml_globs_scalar(joined)}")
         parts.append("---")
