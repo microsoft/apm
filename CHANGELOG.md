@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install DIR` with a single argument now installs an APM source package that has `apm.yml` and a root `plugin.json` as a local dependency, recording it in `apm.yml` and `apm.lock.yaml` exactly like `apm install DIR DIR`, instead of copying its source tree as a legacy bundle; real `apm pack` output, archives and legacy manifestless bundles still install as bundles. Approach from #3447 by @xubenqiang. (#3604)
 - `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
 - Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
 - Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release; a pre-release is selected only when the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1, and builds differing only in metadata resolve to the highest version string. Credit to @xubenqiang for the approach in #3469. (#3601)
