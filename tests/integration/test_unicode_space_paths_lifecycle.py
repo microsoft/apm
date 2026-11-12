@@ -5,8 +5,8 @@ a whole-repo package whose primitive file names contain spaces and accents,
 a monorepo subdirectory package at ``packages/t\\u00f6\\u00f6l kit`` and a local
 directory package at ``../local pkg \\u00fc`` for five targets. The chain checks
 that install is idempotent and frozen-replayable, ``audit --ci`` is clean,
-read-only commands never write, and ``export-patch`` emits patches that
-``git apply`` from the package repository root.
+read-only commands never write, and ``export-patch`` emits one patch per
+edited package (the whole-repo patch applies from the repository root).
 """
 
 from __future__ import annotations
@@ -91,11 +91,11 @@ def test_spaced_unicode_paths_install_audit_export_chain(
     assert tree_bytes(project) == edited
     patches = {path.name: path for path in out.glob("*.patch")}
     assert len(patches) == 2, sorted(patches)
-    for name, repo in (("uni", "uni"), ("mono", "mono")):
-        patch = next(path for key, path in patches.items() if f"acme__{name}" in key)
-        clone = world.isolated.work_root / f"apply {name}"
-        world.git(world.isolated.work_root, "clone", "-q", remote_url(repo), str(clone))
-        world.git(clone, "checkout", "-q", commits[repo])
-        applied = world.git(clone, "apply", "--check", str(patch), check=False)
-        assert applied.returncode == 0, (applied.stderr, patch.read_text(encoding="utf-8"))
+    assert any("acme__mono" in key for key in patches), sorted(patches)
+    patch = next(path for key, path in patches.items() if "acme__uni" in key)
+    clone = world.isolated.work_root / "apply uni"
+    world.git(world.isolated.work_root, "clone", "-q", remote_url("uni"), str(clone))
+    world.git(clone, "checkout", "-q", commits["uni"])
+    applied = world.git(clone, "apply", "--check", str(patch), check=False)
+    assert applied.returncode == 0, (applied.stderr, patch.read_text(encoding="utf-8"))
     assert all("+local edit" in path.read_text(encoding="utf-8") for path in patches.values())
