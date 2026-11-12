@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
 
+### Fixed
+
+- `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write (after link rendering) and are claimed in `apm.lock.yaml`, and record receipts, instead of failing as in 0.35.0. Lockfile hashes are not trusted; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
+
 ## [0.35.1] - 2026-11-11
 
 ### Changed
