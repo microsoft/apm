@@ -28,9 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
 - When a direct `apm install --mcp NAME` finds no match, the error names the searched registry and shows how to search it or choose another with `--registry <URL>`; APM never falls back to another registry. New docs page: "Choosing an MCP registry". -- by @VedanthB (#2803)
 
+### Removed
+
+- The unpublished Dev Container Feature (`devcontainer/`) and its publish and nightly test workflows are gone; it was never released to GHCR. The installation guide now has a "Dev containers" section showing the installer and pip recipes. (#3642)
+
 ### Fixed
 
 - When `apm install` fails after deploying files to harness directories such as `.claude/agents/`, the failure output now lists each file `apm.lock.yaml` does not track and says to remove them or re-run `apm install` (with `--force` if they are skipped as not managed by APM), instead of reporting that no changes were committed; the files are not removed. (#3641)
+- `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
 - Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
 - Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release; a pre-release is selected only when the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1, and builds differing only in metadata resolve to the highest version string. Credit to @xubenqiang for the approach in #3469. (#3601)
 - `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses and forms keep absolute paths. -- by @Bronyal-lzx (#2944)
