@@ -22,7 +22,9 @@ from ...models.apm_package import APMPackage
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
+    _build_expected_install_paths,
     _expand_with_ancestors,
+    _find_orphaned_packages,
     _standalone_installed_packages,
     resolve_requested_packages,
 )
@@ -239,10 +241,12 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
     declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
     physical_to_logical: dict[str, str] = {}
+    declared_deps = []
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():
             project_package = APMPackage.from_apm_yml(apm_yml_path)
+            declared_deps = project_package.get_all_apm_dependencies()
             for dep in project_package.get_apm_dependencies():
                 # Build the expected installed package name
                 repo_parts = dep.repo_url.split("/")
@@ -384,6 +388,23 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     declared_with_ancestors = _expand_with_ancestors(
         declared_sources.keys(), standalone_installed_for_check
     )
+    # Content bundled inside an expected install path belongs to that package,
+    # exactly as prune keeps it (#2926), so the shared selector decides it. The
+    # stricter warning for a real package above a declared subdirectory stays.
+    try:
+        expected_paths = _build_expected_install_paths(
+            declared_deps, lockfile_for_check, apm_modules_path
+        )
+        selected_orphans = set(
+            _find_orphaned_packages(
+                [name for _c, name, _h, _s in scanned_candidates], expected_paths
+            )
+        )
+        expected_ancestors = _expand_with_ancestors(expected_paths) - expected_paths
+    except PathTraversalError:
+        raise
+    except Exception:
+        selected_orphans, expected_ancestors = None, set()
 
     installed_packages = []
     orphaned_packages = []
@@ -396,7 +417,11 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         # orphans have their physical hash redacted; declared remote identities
         # that happen to match the slot shape remain unchanged.
         logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
-        is_orphaned = logical_name not in declared_with_ancestors
+        is_orphaned = logical_name not in declared_with_ancestors and (
+            selected_orphans is None
+            or org_repo_name in selected_orphans
+            or org_repo_name in expected_ancestors
+        )
         display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
         try:
             version = "unknown"

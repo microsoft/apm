@@ -38,6 +38,10 @@ installed package's source tree are parent-owned content, not separate
 dependencies. Real lockfile-resolved dependencies install at their own package
 roots and remain visible regardless of graph depth.
 
+A package is marked orphaned only when [`apm prune`](../prune/) would select
+it. Skills bundled inside a declared package, such as a whole-repository skill
+bundle, belong to that package and are not orphans.
+
 Declared or locked aliases are found at `apm_modules/<alias>` and displayed
 under their logical dependency identity. The selected project or user store
 remains authoritative; listing does not search another store to fill a gap.
