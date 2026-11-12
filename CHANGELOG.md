@@ -29,8 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
 - When a direct `apm install --mcp NAME` finds no match, the error names the searched registry and shows how to search it or choose another with `--registry <URL>`; APM never falls back to another registry. New docs page: "Choosing an MCP registry". -- by @VedanthB (#2803)
 
+### Removed
+
+- The unpublished Dev Container Feature (`devcontainer/`) and its publish and nightly test workflows are gone; it was never released to GHCR. The installation guide now has a "Dev containers" section showing the installer and pip recipes. (#3642)
+
 ### Fixed
 
+- Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
+- Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release; a pre-release is selected only when the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1, and builds differing only in metadata resolve to the highest version string. Credit to @xubenqiang for the approach in #3469. (#3601)
 - `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses and forms keep absolute paths. -- by @Bronyal-lzx (#2944)
 - `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; the field is omitted. `apm init` still fills it in. (#3630)
 - HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells), instead of connecting without the pin that guards against DNS rebinding; an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
