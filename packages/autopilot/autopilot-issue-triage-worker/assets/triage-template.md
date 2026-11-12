@@ -25,7 +25,7 @@ automated advice, and silence are not approval or a release commitment.
 
 ## Proposed classification
 
-<Only useful type/area/theme labels from the label contract, or none.
+<Only useful type/area/pillar labels from the label contract, or none.
 Existing human choices stay unchanged; name conflicts rather than replacing them.>
 
 ## Proposed scope brief

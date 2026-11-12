@@ -2249,3 +2249,57 @@ class TestMarketplaceRegisteredRefPropagation:
         assert dep.reference is None, (
             "Default 'main' ref must not be embedded in DependencyReference"
         )
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_string_source_head_ref_not_propagated(self, mock_get, mock_fetch):
+        """``HEAD`` on a GitLab marketplace stays implicit, like ``main``."""
+        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
+        mock_get.return_value = self._gitlab_source(ref="HEAD")
+        mock_fetch.return_value = self._manifest(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference is None
+        assert "#" not in result.canonical
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_dict_source_ref_wins_over_registered_ref(self, mock_get, mock_fetch):
+        """A plugin-declared ref on the structured route beats the registered ref."""
+        plugin = MarketplacePlugin(
+            name="dict-plugin",
+            source={
+                "type": "gitlab",
+                "repo": "acme/plugins",
+                "path": "registry/dict-plugin",
+                "ref": "v1.0.0",
+            },
+        )
+        mock_get.return_value = self._gitlab_source(ref="feat/my-feature")
+        mock_fetch.return_value = self._manifest(plugin)
+
+        result = resolve_marketplace_plugin("dict-plugin", "my-marketplace")
+
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == "v1.0.0"
+        assert dep.virtual_path == "registry/dict-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_string_source_version_spec_overrides_registered_ref(self, mock_get, mock_fetch):
+        """An install-time raw ref override beats the registered ref on GitLab."""
+        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
+        mock_get.return_value = self._gitlab_source(ref="feat/my-feature")
+        mock_fetch.return_value = self._manifest(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace", version_spec="v2.0.0")
+
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == "v2.0.0"
+        assert result.canonical.endswith("#v2.0.0")
+        assert "feat/my-feature" not in result.canonical

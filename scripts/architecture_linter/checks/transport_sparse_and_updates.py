@@ -4,7 +4,8 @@ Ports two of the ten canonical owner decisions in
 ``.apm/architecture/owners/transport-auth-platform.json``:
 
 * ``transport-platform-sparse-symlink-validation`` -- ``utils/git_sparse.py``
-  owns sparse-cone setup and dangling-symlink repair (legacy AC11a).
+  owns sparse-cone setup and Git-object link materialization (legacy AC11a,
+  #3457).
 * ``transport-platform-self-update-resolution`` -- ``commands/self_update.py``
   owns self-update release -> installer ref + VERSION (legacy AC26).
 
@@ -54,10 +55,12 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             _GIT_SPARSE_OWNER,
             (
                 ("re", r"^def apply_sparse_cone\(", 1, "eq"),
-                ("re", r"^def repair_dangling_cone_symlinks\(", 1, "eq"),
+                ("re", r"^def materialize_tracked_symlinks\(", 1, "eq"),
+                ("re", r"^def validate_materialized_symlinks\(", 1, "eq"),
+                ("re", r"^class _LinkResolver:", 1, "eq"),
                 ("re", r"^def _literal_pathspec\(", 1, "eq"),
-                ("sub", '"ls-tree",', 2, "eq"),
-                ("sub", "_literal_pathspec(path)", 2, "eq"),
+                ("sub", '"ls-tree",', 1, "eq"),
+                ("sub", "_literal_pathspec(path)", 1, "eq"),
             ),
             "Sparse-cone materialization must stay owned by utils/git_sparse.py",
         )
@@ -69,11 +72,13 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             _RID_SPARSE,
             _GIT_CACHE,
             (
-                ("re", r"^    def _finalize_sparse_checkout\(", 1, "eq"),
-                ("sub", "self._finalize_sparse_checkout(", 3, "eq"),
-                ("sub", "repair_dangling_cone_symlinks(", 1, "eq"),
+                ("sub", "materialize_tracked_symlinks(", 1, "eq"),
+                # Defined once and listed once in the pins every shard
+                # persists and every cache hit requires (#3270).
+                ("sub", "_LINK_MATERIALIZATION_PIN", 2, "eq"),
+                ("sub", "_checkout_materialization_pins()", 3, "eq"),
             ),
-            "git_cache sparse checkout must route through the canonical owner",
+            "git_cache checkouts must materialize links through the canonical owner",
         )
     )
     findings.extend(
@@ -82,8 +87,8 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             inv,
             _RID_SPARSE,
             "src/apm_cli/deps/bare_cache.py",
-            (("sub", "repair_dangling_cone_symlinks(", 1, "eq"),),
-            "bare_cache must repair dangling cone symlinks through the owner",
+            (("sub", "materialize_tracked_symlinks(", 1, "eq"),),
+            "bare_cache must materialize links through the owner",
         )
     )
     findings.extend(
@@ -92,8 +97,11 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             inv,
             _RID_SPARSE,
             _GH_DOWNLOADER,
-            (("sub", "repair_dangling_cone_symlinks(", 1, "eq"),),
-            "github_downloader must repair dangling cone symlinks through the owner",
+            (
+                ("sub", "materialize_tracked_symlinks(", 3, "eq"),
+                ("sub", "validate_materialized_symlinks(", 2, "eq"),
+            ),
+            "github_downloader must materialize and validate links through the owner",
         )
     )
     findings.extend(
@@ -103,7 +111,7 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             _RID_SPARSE,
             _GH_DOWNLOADER,
             ("return _repair(setup_env)", "return _repair(env)"),
-            "github_downloader must return the repaired sparse environment",
+            "github_downloader must materialize links in the sparse environment",
         )
     )
     findings.extend(

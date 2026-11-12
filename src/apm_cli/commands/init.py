@@ -27,6 +27,7 @@ from ..utils.console import (
     _rich_panel,
 )
 from ._helpers import (
+    ERROR,
     INFO,
     RESET,
     _create_minimal_apm_yml,
@@ -69,6 +70,15 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 ]
 
 
+def _invalid_project_name_message(name: str) -> str:
+    """Return the project-name rule shared by the argument, --name, and prompts."""
+    return (
+        f"Invalid project name '{name}': "
+        "project names must not be empty or whitespace-only and must not contain "
+        "path separators ('/' or '\\\\') or be '..'."
+    )
+
+
 @click.command(help="Initialize a new APM project")
 @click.option(
     "--discover",
@@ -99,6 +109,18 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     default=None,
     help="Comma-separated target list (skip prompt, write directly)",
 )
+@click.option(
+    "--name",
+    default=None,
+    help="Project name written to apm.yml. Ignored when a positional project name is given.",
+)
+@click.option("--description", default=None, help="Project description (default: auto-detected)")
+@click.option(
+    "--version",
+    default=None,
+    help="Project version (default: 1.0.0, or 0.1.0 with --plugin --yes)",
+)
+@click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
 @serialized_lifecycle_unless("discover_flag")
@@ -110,6 +132,10 @@ def init(
     marketplace_flag: bool,
     target_flag: str | list[str] | None,
     verbose: bool,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
     discover_flag: bool = False,
     write: bool = False,
     output_format: str = "text",
@@ -119,15 +145,28 @@ def init(
 
     Creates a minimal apm.yml with auto-detected metadata.
 
+    Metadata flags (--name, --description, --version, --author) set the
+    corresponding apm.yml field without a prompt, so scripted and CI init
+    can produce a finished manifest. Outside --yes they seed the prompt
+    defaults rather than being discarded.
+
     Producers: prefer 'apm plugin init' (plugin scaffold) or
     'apm marketplace init' (marketplace block). The --plugin and
     --marketplace flags on 'apm init' are kept for backward
     compatibility and will be removed in v0.16.
     """
     if discover_flag:
-        if project_name or plugin or marketplace_flag or target_flag:
+        metadata_flags = (name, description, version, author)
+        if (
+            project_name
+            or plugin
+            or marketplace_flag
+            or target_flag
+            or any(flag is not None for flag in metadata_flags)
+        ):
             raise click.UsageError(
-                "--discover cannot scaffold a name/plugin/marketplace or select targets."
+                "--discover cannot scaffold a name/plugin/marketplace, set project "
+                "metadata, or select targets."
             )
         run_discover(
             write=write, output_format=output_format, global_=global_, yes=yes, verbose=verbose
@@ -135,10 +174,35 @@ def init(
         return
     if write or global_ or output_format != "text":
         raise click.UsageError("--apply, --write, --global and --format require --discover.")
-    _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
+    _init_scaffold(
+        ctx,
+        project_name,
+        yes,
+        plugin,
+        marketplace_flag,
+        target_flag,
+        verbose,
+        name=name,
+        description=description,
+        version=version,
+        author=author,
+    )
 
 
-def _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+def _init_scaffold(
+    ctx,
+    project_name,
+    yes,
+    plugin,
+    marketplace_flag,
+    target_flag,
+    verbose,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
+):
     """Keep the pre-existing init flow serialized, outside read-only discovery."""
     # Soft deprecation warnings -- legacy flags still work.
     if plugin:
@@ -160,6 +224,10 @@ def _init_scaffold(ctx, project_name, yes, plugin, marketplace_flag, target_flag
         plugin=plugin,
         marketplace_flag=marketplace_flag,
         target_flag=target_flag,
+        name=name,
+        description=description,
+        version=version,
+        author=author,
         verbose=verbose,
         source="init",
     )
@@ -173,6 +241,10 @@ def _perform_init(
     marketplace_flag,
     target_flag,
     verbose,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
     source="init",
     plugin_mode: str | None = None,
 ):
@@ -181,6 +253,10 @@ def _perform_init(
     ``source`` controls the "Next steps" hint shape:
       - "init"   -> consumer-focused, teaches the noun-verb namespace
       - "plugin" -> plugin-author next steps (same as legacy --plugin)
+
+    ``name``/``description``/``version``/``author`` are the optional
+    metadata overrides (#2146). They default to ``None`` so callers that
+    predate them -- ``apm plugin init`` -- keep their existing behavior.
     """
     logger = CommandLogger(source, verbose=verbose)
     try:
@@ -196,10 +272,34 @@ def _perform_init(
 
         # Reject names containing path separators before any filesystem use
         if project_name is not None and not _validate_project_name(project_name):
+            logger.error(_invalid_project_name_message(project_name))
+            sys.exit(1)
+
+        # Metadata flags get the same whitespace trimming as prompt answers.
+        name, description, version, author = (
+            None if value is None else value.strip()
+            for value in (name, description, version, author)
+        )
+
+        # The positional argument also creates and enters a directory, so it
+        # keeps precedence over --name, which only labels the manifest. Report
+        # the ignored flag rather than dropping it silently.
+        if project_name and name is not None:
+            logger.warning(
+                f"--name '{name}' ignored: positional project name "
+                f"'{project_name}' takes precedence."
+            )
+            name = None
+
+        if name is not None and not _validate_project_name(name):
+            logger.error(_invalid_project_name_message(name))
+            sys.exit(1)
+
+        # apm.yml requires a non-empty version string.
+        if version is not None and not version:
             logger.error(
-                f"Invalid project name '{project_name}': "
-                "project names must not be empty or whitespace-only and must not contain "
-                "path separators ('/' or '\\\\') or be '..'."
+                "Invalid project version: --version must not be empty or whitespace-only. "
+                "Provide a version such as '1.0.0', or omit --version to use the default."
             )
             sys.exit(1)
 
@@ -212,14 +312,17 @@ def _perform_init(
             final_project_name = project_name
         else:
             project_dir = Path.cwd()
-            # A filesystem root has no directory name, so resolve a valid fallback.
-            derived_project_name = project_dir.name
-            final_project_name = _resolve_bootstrap_project_name(derived_project_name)
-            if final_project_name != derived_project_name:
-                logger.verbose_detail(
-                    f'Using default project name "{final_project_name}" because '
-                    f"derived name {derived_project_name!a} is invalid"
-                )
+            if name is not None:
+                final_project_name = name
+            else:
+                # A filesystem root has no directory name, so resolve a valid fallback.
+                derived_project_name = project_dir.name
+                final_project_name = _resolve_bootstrap_project_name(derived_project_name)
+                if final_project_name != derived_project_name:
+                    logger.verbose_detail(
+                        f'Using default project name "{final_project_name}" because '
+                        f"derived name {derived_project_name!a} is invalid"
+                    )
         project_root = Path.cwd()
 
         # Validate plugin name early
@@ -259,10 +362,23 @@ def _perform_init(
 
         # Get project configuration (interactive mode or defaults)
         if not yes:
-            config = _interactive_project_setup(final_project_name, logger)
+            config = _interactive_project_setup(
+                final_project_name,
+                logger,
+                description=description,
+                version=version,
+                author=author,
+            )
         else:
-            # Use auto-detected defaults
+            # Use auto-detected defaults, then let explicit flags win.
             config = _get_default_config(final_project_name)
+            for field, override in (
+                ("description", description),
+                ("version", version),
+                ("author", author),
+            ):
+                if override is not None:
+                    config[field] = override
 
         # --- Target selection (must run before the confirmation panel so
         #     the chosen targets render in the "About to create" summary). ---
@@ -280,8 +396,9 @@ def _perform_init(
         if not yes:
             _confirm_setup_summary(config, logger)
 
-        # Plugin mode uses 0.1.0 as default version
-        if plugin and yes:
+        # Plugin mode uses 0.1.0 as default version, unless --version set one.
+        # Check the raw flag, not config["version"], so an explicit value wins.
+        if plugin and yes and version is None:
             config["version"] = "0.1.0"
 
         logger.start(f"Initializing APM project: {config['name']}", symbol="running")
@@ -511,17 +628,25 @@ def _commit_staged_scaffold(
         raise
 
 
-def _interactive_project_setup(default_name, logger):
+def _interactive_project_setup(
+    default_name, logger, *, description=None, version=None, author=None
+):
     """Interactive setup for new APM projects with auto-detection.
 
     Collects only the metadata fields here; target selection and final
     confirmation are run by the caller via ``_confirm_setup_summary`` so
     targets can be shown in the same "About to create" panel.
+
+    Any metadata passed via flags seeds the matching prompt default, so a
+    flag given without ``--yes`` is still honored on an empty answer (#2146).
     """
     from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
-    auto_author = _auto_detect_author()
-    auto_description = _auto_detect_description(default_name)
+    auto_author = author if author is not None else _auto_detect_author()
+    auto_description = (
+        description if description is not None else _auto_detect_description(default_name)
+    )
+    auto_version = version if version is not None else "1.0.0"
 
     try:
         from rich.console import Console  # type: ignore
@@ -535,13 +660,9 @@ def _interactive_project_setup(default_name, logger):
             name = Prompt.ask("Project name", default=default_name).strip()
             if _validate_project_name(name):
                 break
-            console.print(
-                f"[error]Invalid project name '{name}': "
-                "project names must not be empty or whitespace-only and must not contain "
-                "path separators ('/' or '\\\\') or be '..'.[/error]"
-            )
+            console.print(f"[error]{_invalid_project_name_message(name)}[/error]")
 
-        version = Prompt.ask("Version", default="1.0.0").strip()
+        version = Prompt.ask("Version", default=auto_version).strip()
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
 
@@ -553,13 +674,9 @@ def _interactive_project_setup(default_name, logger):
             name = click.prompt("Project name", default=default_name).strip()
             if _validate_project_name(name):
                 break
-            click.echo(
-                f"{ERROR}Invalid project name '{name}': "
-                f"project names must not be empty or whitespace-only and must not contain "
-                f"path separators ('/' or '\\\\') or be '..'.{RESET}"
-            )
+            click.echo(f"{ERROR}{_invalid_project_name_message(name)}{RESET}")
 
-        version = click.prompt("Version", default="1.0.0").strip()
+        version = click.prompt("Version", default=auto_version).strip()
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()
 

@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 from git import Repo
 
 from ..models.dependency.host_virtual import dependency_repository_owner
-from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
+from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -576,7 +576,6 @@ def materialize_from_bare(
     env: dict[str, str],
     known_sha: str | None = None,
     sparse_paths: list[str] | None = None,
-    package: str | None = None,
 ) -> str:
     """Create a working-tree checkout from a bare repo via local-shared clone.
 
@@ -595,11 +594,13 @@ def materialize_from_bare(
         blocks downstream rmtree.
 
     CRLF + LFS pinning before checkout:
-      - ``core.autocrlf=false`` guarantees byte-identical content
-        across consumers regardless of the user's global git config.
-      - ``git_symlink_pin_args`` checks out in-repo links as real
-        symlinks; a host that cannot create them raises
-        :class:`GitSymlinkCapabilityError` naming ``package`` (#3457).
+      - ``git_line_ending_pin_args`` (``core.autocrlf=false`` and
+        ``core.eol`` set to ``lf``) guarantees byte-identical ``text`` /
+        ``text=auto`` content across consumers regardless of host Git
+        config or platform default (apm#3270).
+      - ``git_symlink_pin_args`` writes in-repo links as link text, so
+        checkout never needs OS symlink capability; they are then
+        replaced with their Git-object content (#3457).
       - ``filter.lfs.smudge=""`` + ``filter.lfs.required=false``
         disables LFS smudge cross-platform (the empty string trick
         works everywhere; ``cat`` is not on Windows PATH).
@@ -613,11 +614,8 @@ def materialize_from_bare(
       - Sparse-checkout failures are RAISED (not silently fallen back)
         because a silent fallback would re-introduce the 78 MB bloat
         this parameter exists to avoid.
-      - After checkout, if the cone left a dangling symlink (target
-        outside the requested paths -- #2707), falls back to
-        ``git sparse-checkout disable`` so the target resolves. This is
-        a correctness repair, not a failure fallback: it only fires
-        when the narrow cone would otherwise ship a broken checkout.
+      - A link whose target lies outside the requested paths (#2707)
+        resolves from Git objects, so the cone never has to widen.
 
     Returns:
         The resolved commit SHA. Caller threads this into
@@ -625,16 +623,17 @@ def materialize_from_bare(
     """
     from ..utils.git_env import (
         get_git_executable,
+        git_line_ending_pin_args,
+        git_line_ending_pin_entries,
         git_no_hooks_args,
         git_no_templates_args,
         git_subprocess_env,
         git_symlink_pin_args,
-        raise_for_symlink_capability,
     )
 
     git_exe = get_git_executable()
     env = git_subprocess_env(env)
-    pin_args = list(git_symlink_pin_args())
+    pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]
 
     if known_sha:
         resolved_sha = known_sha
@@ -650,14 +649,22 @@ def materialize_from_bare(
         resolved_sha = sha_result.stdout.strip()
 
     consumer_dir.parent.mkdir(parents=True, exist_ok=True)
-    # --no-checkout because we want to set core.autocrlf and disable
-    # LFS smudge BEFORE checkout writes any file content.
+    # --no-checkout because we want to pin line endings and disable
+    # LFS smudge BEFORE checkout writes any file content. ``--config``
+    # persists the line-ending pins in the clone itself (no extra spawn);
+    # the checkout also carries the ``-c`` pins, which outrank env
+    # snapshots. The symlink pin travels only as ``-c``: this consumer is
+    # not a reusable shard validated by ``_checkout_has_materialization_pins``.
+    line_ending_config = [
+        arg for key, val in git_line_ending_pin_entries() for arg in ("--config", f"{key}={val}")
+    ]
     subprocess.run(
         [
             git_exe,
             *git_no_hooks_args(),
             "clone",
             *git_no_templates_args(),
+            *line_ending_config,
             "--local",
             "--shared",
             "--no-checkout",
@@ -667,15 +674,6 @@ def materialize_from_bare(
         capture_output=True,
         text=True,
         timeout=60,
-        env=env,
-        check=True,
-    )
-    # CRLF determinism (panel: byte-identical across users).
-    subprocess.run(
-        [git_exe, "-C", str(consumer_dir), "config", "core.autocrlf", "false"],
-        capture_output=True,
-        text=True,
-        timeout=10,
         env=env,
         check=True,
     )
@@ -697,47 +695,35 @@ def materialize_from_bare(
             check=False,
         )
     checkout_target = known_sha or "HEAD"
-    try:
-        if sparse_paths:
-            apply_sparse_cone(
-                git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
-            )
-        checkout = subprocess.run(
-            [
-                git_exe,
-                *git_no_hooks_args(),
-                *pin_args,
-                "-C",
-                str(consumer_dir),
-                "checkout",
-                checkout_target,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=env,
-            check=True,
+    if sparse_paths:
+        apply_sparse_cone(
+            git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
         )
-        # Git reports a link it could not create but still exits 0.
-        raise_for_symlink_capability(checkout, package or str(consumer_dir))
-        dangling = (
-            repair_dangling_cone_symlinks(
-                git_exe, consumer_dir, list(sparse_paths), env=env, extra_git_args=pin_args
-            )
-            if sparse_paths
-            else None
-        )
-    except subprocess.CalledProcessError as exc:
-        raise_for_symlink_capability(exc, package or str(consumer_dir))
-        raise
-    if dangling is not None:
-        _log.info(
-            "Sparse-cone checkout of %s left a dangling symlink at %s "
-            "(target outside the requested cone); widened to a full "
-            "checkout so it resolves (#2707).",
-            consumer_dir,
-            dangling,
-        )
+    subprocess.run(
+        [
+            git_exe,
+            *git_no_hooks_args(),
+            *pin_args,
+            "-C",
+            str(consumer_dir),
+            "checkout",
+            checkout_target,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        check=True,
+    )
+    # Lenient: the package consumer rejects unresolvable links in its path.
+    materialize_tracked_symlinks(
+        git_exe,
+        consumer_dir,
+        list(sparse_paths) if sparse_paths else None,
+        env=env,
+        extra_git_args=[*git_no_hooks_args(), *pin_args],
+        strict=False,
+    )
     return resolved_sha
 
 

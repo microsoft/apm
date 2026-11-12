@@ -18,7 +18,8 @@ import click
         "Run environment diagnostics (git, network, auth, marketplace "
         "config). Reports a pass/fail table and exits non-zero "
         "if a critical check fails."
-    )
+    ),
+    short_help="Run environment diagnostics",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):

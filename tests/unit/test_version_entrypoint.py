@@ -63,7 +63,9 @@ def test_shared_callback_is_the_existing_cli_callback() -> None:
         (["--version=unexpected"], 2, "does not take a value"),
         (["--unknown", "--version"], 2, "No such option"),
         (["--", "--version"], 0, "Agent Package Manager (APM) CLI version"),
-        (["init", "--version"], 2, "No such option"),
+        # `apm init --version VALUE` sets the manifest version (#2146), so a bare
+        # subcommand --version is Click's missing-value error, not the CLI version.
+        (["init", "--version"], 2, "requires an argument"),
     ],
 )
 def test_argument_placement_preserves_click_behavior(

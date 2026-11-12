@@ -193,6 +193,36 @@ class TestDownloadPackageDelegation:
         assert result.dependency_ref is dep
         assert result.install_path == target
 
+    def test_whole_repo_download_carries_root_licence_next_to_skills(self, tmp_path):
+        """#3556: an Artifactory whole-repo skill below the root gets the root licence."""
+        orch, archive = self._orchestrator_with_validation_ok()
+        dep = _dep(artifactory=True, host="art.example.com", repo_url="owner/repo")
+        target = tmp_path / "pkg"
+
+        def materialize(*args, **kwargs):
+            del args, kwargs
+            (target / "skills" / "alpha").mkdir(parents=True)
+            (target / "skills" / "alpha" / "SKILL.md").write_text("# a\n", encoding="utf-8")
+            (target / "LICENSE").write_bytes(b"MIT License\n")
+
+        archive.download_artifactory_archive.side_effect = materialize
+        validation = types.SimpleNamespace(
+            is_valid=True,
+            errors=[],
+            package=types.SimpleNamespace(source=None, resolved_commit=None, name="pkg"),
+            package_type="apm",
+        )
+        with patch(
+            "apm_cli.deps.artifactory_orchestrator.validate_apm_package",
+            return_value=validation,
+        ):
+            result = orch.download_package(dep, target)
+
+        assert (target / "skills" / "alpha" / "LICENSE").read_bytes() == b"MIT License\n"
+        assert [(r.path, r.source) for r in result.carried_licenses] == [
+            ("skills/alpha/LICENSE", "LICENSE")
+        ]
+
     def test_default_ref_is_main_when_none(self, tmp_path):
         orch, archive = self._orchestrator_with_validation_ok()
         dep = _dep(
@@ -359,6 +389,45 @@ class TestDownloadSubdirectoryResolution:
         assert result.package.resolved_commit == commit
         assert result.resolved_reference.ref_type is GitReferenceType.COMMIT
         assert result.resolved_reference.resolved_commit == commit
+
+    def test_archive_root_licence_is_carried_into_subdirectory_package(self, tmp_path):
+        """#3556: the archive root LICENSE travels with an Artifactory subdirectory."""
+        archive = MagicMock()
+        orch = ArtifactoryOrchestrator(archive)
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="art.example.com",
+            artifactory_prefix="apm/github",
+            reference="main",
+            virtual_path="skills/grilling",
+        )
+        validation = types.SimpleNamespace(
+            is_valid=True,
+            errors=[],
+            package=types.SimpleNamespace(source=None, resolved_commit=None, name="pkg"),
+            package_type="apm",
+        )
+
+        def materialize(*args, **kwargs):
+            del args, kwargs
+            root = archive.download_artifactory_archive.call_args.args[5]
+            (root / "skills" / "grilling").mkdir(parents=True)
+            (root / "skills" / "grilling" / "SKILL.md").write_text("# g\n", encoding="utf-8")
+            (root / "LICENSE").write_bytes(b"MIT License\n")
+
+        archive.download_artifactory_archive.side_effect = materialize
+        with patch(
+            "apm_cli.deps.artifactory_orchestrator.validate_apm_package",
+            return_value=validation,
+        ):
+            result = orch.download_subdirectory(
+                dep,
+                tmp_path / "pkg",
+                ("art.example.com", "apm/github", "https"),
+            )
+
+        assert (tmp_path / "pkg" / "LICENSE").read_bytes() == b"MIT License\n"
+        assert [(r.path, r.source) for r in result.carried_licenses] == [("LICENSE", "LICENSE")]
 
 
 # ---------------------------------------------------------------------------

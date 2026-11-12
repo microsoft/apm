@@ -314,8 +314,14 @@ merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
 sidecar, so clones, contributors, and CI runners do not see the installer's
 machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
-references to absolute paths because the user-scope config is read
-without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+references so the user-scope config resolves without a fixed cwd. Where the
+harness documents POSIX shell execution, the path is anchored to `$HOME` on
+macOS/Linux (for example `$HOME/.claude/hooks/<pkg>/run.sh`) so the file stays
+identical across machines: Claude Code shell-form `command` (not `args` exec
+form or `shell: "powershell"`), Copilot CLI `bash`, Gemini CLI `command`, and
+Kiro command actions. Cursor, Codex, and Windsurf keep absolute paths, as do
+Windows hosts, single-quoted references, and config roots outside the home
+directory such as `CLAUDE_CONFIG_DIR`. If a manifest in `hooks/` or `.apm/hooks/` uses
 `./hooks/<script>`, APM first resolves it from the hook file directory,
 then falls back to the package root to avoid deploying a doubled
 `hooks/hooks/` path. If a referenced hook script is missing at install
@@ -456,7 +462,11 @@ target-specific YAML arrays/lists (under `paths:` / `globs:` /
 `fileMatchPattern:`) across Claude, Windsurf, and Kiro.
 For Cursor, APM emits one comma-joined scalar rather than a YAML list
 (`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
-characters are escaped. Descriptions keep printable non-ASCII text readable
+characters are escaped.
+When `applyTo` resolves to exactly one universal `**` (scalar, padded, or
+single-item list), Cursor instead gets `alwaysApply: true` and no `globs:`;
+mixed `**` plus scoped patterns keep `globs:`, and an absent, empty, or null
+`applyTo` emits neither key. Descriptions keep printable non-ASCII text readable
 and are quoted when needed to preserve their value. For Antigravity, APM
 emits `trigger: glob` plus one double-quoted comma-joined string
 (`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
@@ -619,7 +629,9 @@ authority for the preserved metadata.
 #### Codex target: native model settings
 
 Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
-`description`, and the Markdown body as `developer_instructions`.
+`description`, and the Markdown body as `developer_instructions`
+(package-relative Markdown links are rewritten for the generated file's
+location, as for verbatim agent targets).
 String `model` and `model_reasoning_effort` frontmatter values are
 preserved as top-level TOML keys:
 
@@ -643,6 +655,25 @@ generated agent. `tools` restrictions still cannot be preserved: the
 agent may inherit all project/session MCP servers. Remove `tools` only
 if unrestricted access is intentional; otherwise do not use the generated
 agent with Codex.
+
+#### Per-harness model values
+
+Agent files and model ids belong to each harness vendor. APM writes a
+string `model` verbatim to every agent target (a Claude `sonnet` also
+lands in the Codex TOML); a warning for Claude-specific values in Codex output is
+tracked in #3477. APM does not add a per-target model map or `codex:`
+override block (#3324). Workarounds:
+
+1. Omit `model` from the shared agent so each harness uses its default.
+2. Split by target: a package per harness with its own `target:` and
+   `model:`, plus a common package for shared content.
+3. A `post-install` / `post-update` lifecycle script in the consuming
+   project's `apm.yml` (trusted with `apm lifecycle trust`; a dependency
+   cannot ship one) that sets `model` in `.codex/agents/*.toml`. It edits APM-managed output, so
+   `apm audit --ci` reports drift and the script must run on every
+   install; not recommended for CI-gated teams.
+
+For a portable fix, raise it upstream with Claude Code or Codex.
 
 #### OpenCode target: frontmatter constraints
 
@@ -724,6 +755,10 @@ my-skill/
   resource1.md                         # supporting documentation
   resource2.md
 ```
+
+APM never prefixes or renames skills; same-named skills are told apart by
+native plugin namespacing (`<plugin>:<skill>`). Use
+`apm view --file <deployed-path>` to see which package deployed a skill file.
 
 ### 7. Marketplace Plugin (`plugin.json`)
 

@@ -170,6 +170,11 @@ class InstallContext:
     # from this map mean "not declared" (NOASSERTION) -- a missing entry is
     # never backfilled with a sentinel.
     package_declared_licenses: dict[str, str] = field(default_factory=dict)
+    # Verbatim licence copies carried into each materialized package (#3556),
+    # dep_key -> tuple[CarriedLicense, ...]. Set from the download result when
+    # the package was fetched this run, else from the lock entry; consumed by
+    # content-hash exclusion and LockfileBuilder._attach_carried_licenses.
+    package_carried_licenses: dict[str, tuple] = field(default_factory=dict)
     content_hash_verified_deps: set[str] = field(default_factory=set)
     callback_content_hashes: dict[str, tuple[Path, str]] = field(default_factory=dict)
     # Deps whose content hash is expected to change legitimately:
@@ -194,6 +199,7 @@ class InstallContext:
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+    skill_baseline_refused: bool = False  # integrate -- preflight refused before any write
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.
