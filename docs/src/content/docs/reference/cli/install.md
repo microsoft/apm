@@ -266,6 +266,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   authorize overwriting existing files. A fresh clone or CI runner is the one
   exception: a skill directory whose files all match what this install would
   write, and are recorded in the lockfile, is kept and receipts are recorded.
+  `apm update` also replaces such a skill when its files match what the
+  currently locked version renders, fetched from its locked commit.
   Lockfile hashes are never that proof. Preserve your edits and move the
   conflicting file aside before reinstalling. Invalid evidence fails explicitly.
   Creating this state requires filesystem hard-link support. State-write failures
