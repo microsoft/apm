@@ -22,7 +22,7 @@ pytestmark = pytest.mark.component
 SID = "S-1-5-21-1-2-3-1001"
 NATIVE_CASE = (
     '<testcase classname="tests.integration.test_windows_native_symlink" '
-    'name="test_native_standard_user_symlink_diagnostic">{}</testcase>'
+    'name="test_native_standard_user_materializes_links">{}</testcase>'
 )
 
 
@@ -282,9 +282,10 @@ def test_phase_uses_pinned_python_and_inspects_actual_result(
     assert args[:4] == [sys.executable, "-B", "-m", "pytest"]
     assert args[-1] == probe.NATIVE_NODE
     assert ("tests/unit/cache/test_git_symlink_config.py" in args) is (phase == "baseline")
-    assert command.call_args.kwargs["timeout"] == 180
+    assert (probe.FROZEN_LIFECYCLE in args) is (phase == "baseline")
+    assert command.call_args.kwargs["timeout"] == probe.PHASE_TIMEOUT_SECONDS
     assert command.call_args.kwargs["env"].get("APM_WINDOWS_NATIVE_MUTATION") == (
-        "drop-symlink-pin" if mutation else None
+        "drop-link-materialization" if mutation else None
     )
     assert actual["exit_code"] == int(mutation)
     assert actual["cases"] == (2 if phase == "baseline" else 1)
