@@ -23,7 +23,7 @@ from apm_cli.utils.git_env import (
     clone_git_worktree,
     get_gh_executable,
     get_git_executable,
-    git_autocrlf_pin_args,
+    git_line_ending_pin_args,
     git_network_env,
     git_remote_refs,
     git_subprocess_env,
@@ -1619,8 +1619,13 @@ class TestUncachedFallbackLineEndings:
     (apm#3368).
     """
 
-    def test_clone_and_checkout_pin_autocrlf_false(self, tmp_path) -> None:
-        assert git_autocrlf_pin_args() == ("-c", "core.autocrlf=false")
+    def test_clone_and_checkout_pin_line_endings(self, tmp_path) -> None:
+        assert git_line_ending_pin_args() == (
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+        )
 
         with patch(
             "apm_cli.utils.git_env.subprocess.run",
@@ -1633,9 +1638,10 @@ class TestUncachedFallbackLineEndings:
             )
 
         clone_argv = run.call_args_list[-1].args[0]
-        clone_pin = clone_argv.index("core.autocrlf=false")
-        assert clone_argv[clone_pin - 1] == "-c"
-        assert clone_pin < clone_argv.index("clone")
+        for pin in ("core.autocrlf=false", "core.eol=lf"):
+            clone_pin = clone_argv.index(pin)
+            assert clone_argv[clone_pin - 1] == "-c"
+            assert clone_pin < clone_argv.index("clone")
 
         with patch("apm_cli.utils.git_env.subprocess.run") as checkout_run:
             checkout_git_worktree(
@@ -1645,9 +1651,10 @@ class TestUncachedFallbackLineEndings:
             )
 
         checkout_argv = checkout_run.call_args.args[0]
-        checkout_pin = checkout_argv.index("core.autocrlf=false")
-        assert checkout_argv[checkout_pin - 1] == "-c"
-        assert checkout_pin < checkout_argv.index("checkout")
+        for pin in ("core.autocrlf=false", "core.eol=lf"):
+            checkout_pin = checkout_argv.index(pin)
+            assert checkout_argv[checkout_pin - 1] == "-c"
+            assert checkout_pin < checkout_argv.index("checkout")
 
     def test_locked_sha_checks_out_from_a_crlf_host(self, tmp_path, monkeypatch) -> None:
         """End-to-end reproduction: clone under a CRLF host, then check out an older SHA."""

@@ -86,7 +86,7 @@ class TestGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects\n",
             encoding="ascii",
         )
@@ -488,10 +488,17 @@ class TestEnsureBareRepo:
 class TestCreateCheckout:
     @pytest.fixture(autouse=True)
     def _validated_rewrites(self):
-        """Keep subprocess mocks focused on checkout after policy validation."""
-        with patch(
-            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
-            return_value=(None, _GitConfigSnapshot((), (), ())),
+        """Keep subprocess mocks focused on checkout after policy validation.
+
+        Link materialization has its own real-git tests; here it would feed
+        the text-mode subprocess mocks to a bytes parser.
+        """
+        with (
+            patch(
+                "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
+                return_value=(None, _GitConfigSnapshot((), (), ())),
+            ),
+            patch("apm_cli.cache.git_cache.materialize_tracked_symlinks", return_value=[]),
         ):
             yield
 
@@ -502,7 +509,7 @@ class TestCreateCheckout:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects\n",
             encoding="ascii",
         )
@@ -545,7 +552,8 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "b" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 4  # clone, two config pins, checkout
+        # clone (carries the persisted pins), checkout
+        assert mock_run.call_count == 2
 
     def test_clone_failure_cleans_staged_checkout(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
@@ -574,11 +582,10 @@ class TestCreateCheckout:
         (cache._db_root / shard_key).mkdir(parents=True)
 
         clone_result = _proc()
-        config_result = _proc()
         checkout_error = subprocess.CalledProcessError(1, "git", stderr="checkout failed")
         with (
             patch("apm_cli.cache.git_cache.shard_lock", return_value=nullcontext()),
-            patch("subprocess.run", side_effect=[clone_result, config_result, checkout_error]),
+            patch("subprocess.run", side_effect=[clone_result, checkout_error]),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.os.chmod"),
@@ -596,7 +603,7 @@ class TestCreateCheckout:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects\n",
             encoding="ascii",
         )
@@ -615,7 +622,8 @@ class TestCreateCheckout:
             result = cache._create_checkout(url, shard_key, "e" * 40)
 
         assert result == final_dir
-        assert mock_run.call_count == 4  # clone, two config pins, checkout
+        # clone (carries the persisted pins), checkout
+        assert mock_run.call_count == 2
 
     def test_atomic_land_false_with_invalid_winner_evicts_and_raises(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"

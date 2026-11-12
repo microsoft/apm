@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
+from .git_env import git_line_ending_pin_args
 from .path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -363,7 +364,10 @@ class _CheckoutBytes:
         self._repo_dir = repo_dir
         self._env = env
         self._timeout = timeout
-        self._extra_git_args = extra_git_args
+        # ``cat-file --filters`` applies checkout conversion, so it needs the
+        # same line-ending pins as the checkout itself; callers that pass no
+        # pins would otherwise inherit the host ``core.eol`` (#3270).
+        self._extra_git_args = [*(extra_git_args or []), *git_line_ending_pin_args()]
         self._cache: dict[str, bytes] = {}
         self._attr_source = True
 
