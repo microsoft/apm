@@ -3310,6 +3310,8 @@ def test_required_global_audit_rule_matrix_for_external_roots(
                     ".local/state",
                     ".local/state/gh",
                     ".local/state/gh/device-id",
+                    ".apm-local",
+                    ".apm-local/.apm-lifecycle.lock",
                     *(
                         {".apm-local", ".apm-local/.gitignore", ".apm-local/installation"}
                         if create_identity

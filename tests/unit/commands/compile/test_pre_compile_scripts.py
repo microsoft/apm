@@ -38,14 +38,20 @@ sys.exit(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
 """
 
 LOCK_PROBE = """\
+import os
 from pathlib import Path
 from filelock import FileLock, Timeout
 
-try:
-    FileLock(str(Path.home() / ".apm" / ".apm-lifecycle.lock")).acquire(timeout=0)
-    state = "free"
-except Timeout:
-    state = "held"
+def held(path):
+    try:
+        FileLock(str(path)).acquire(timeout=0)
+    except Timeout:
+        return True
+    return False
+
+metadata = Path(os.environ["APM_HOME"]) / ".apm-lifecycle.lock"
+deployment = Path.home() / ".apm-local" / ".apm-lifecycle.lock"
+state = "held" if held(metadata) and held(deployment) else "free"
 Path("lock-state").write_text(state)
 """
 

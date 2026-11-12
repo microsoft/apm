@@ -1,6 +1,8 @@
 """Unit contracts for workspace lifecycle serialization."""
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ from apm_cli.cli import cli
 from apm_cli.install.locking import (
     LifecycleBusyError,
     acquire_lifecycle_lock,
+    deployment_root_lock,
     lifecycle_lock,
 )
 
@@ -90,6 +93,55 @@ def test_busy_error_names_lock_path_and_wait(tmp_path: Path, monkeypatch) -> Non
         "Another APM operation is running; waiting up to 0.25s.",
         symbol="info",
     )
+    assert not deployment_root_lock().is_locked
+
+
+_HOLD_LIFECYCLE_LOCK = """
+import sys
+from apm_cli.install.locking import acquire_lifecycle_lock
+lock = acquire_lifecycle_lock(timeout=5)
+print("held", flush=True)
+sys.stdin.read()
+lock.release()
+"""
+
+
+def test_different_apm_homes_still_serialize_on_the_deployment_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Two APM homes share projects and harness dirs, so they must not mutate at once."""
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "APM_HOME": str(tmp_path / "apm-home-a"),
+    }
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_LIFECYCLE_LOCK],
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home-b"))
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        with (
+            patch("apm_cli.utils.console._rich_info"),
+            pytest.raises(LifecycleBusyError, match=r"\.apm-local"),
+        ):
+            acquire_lifecycle_lock(timeout=0.25)
+        assert not lifecycle_lock().is_locked
+    finally:
+        holder.communicate(input="", timeout=30)
+
+    lock = acquire_lifecycle_lock(timeout=5)
+    lock.release()
 
 
 def test_install_root_redirect_teardown_error_releases_lock(tmp_path: Path, monkeypatch) -> None:
