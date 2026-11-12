@@ -24,9 +24,8 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Resolve repo root from this file location -- the test relies on relative
