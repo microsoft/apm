@@ -693,10 +693,10 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path, or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. | `-n NAME`, `-r REF`, `--host HOST` |
+| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git` or `ssh://git@host[:PORT]/org/repo.git`), local directory or file path (including a local `apm.yml` read as a live catalog), or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. | `-n NAME`, `-r REF`, `--host HOST`, `--offline` (local `apm.yml` only) |
 | `apm marketplace list` | List registered marketplaces | -- |
-| `apm marketplace browse NAME` | Browse marketplace plugins | -- |
-| `apm marketplace update [NAME]` | Update marketplace index | -- |
+| `apm marketplace browse NAME` | Browse marketplace plugins; reread live local `apm.yml` catalogs | `--offline` (local YAML only) |
+| `apm marketplace update [NAME]` | Update marketplace index; reread live local `apm.yml` catalogs | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
 | `apm marketplace validate NAME` | Validate raw structure, plugin schema, and duplicate plugin names. Add accepts unsupported or malformed entries with a warning; validate reports paths and exits 1 without rewriting the source manifest or registered marketplace entry. | `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
@@ -704,6 +704,18 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
 
 ## Marketplace authoring
+
+For a live local preview, run `apm marketplace add ./apm.yml --name alice-dev`.
+The file must contain a valid `marketplace:` declaration. Browse, view, update
+and selected installs reread it on later invocations; relative package paths
+resolve from the file's directory. Registration neither installs inventory nor
+executes hooks, publishes packages or writes generated catalogs. `add --offline`
+and `browse --offline` are limited to local YAML: local entries and commit SHAs
+need no network, while uncached remote tags/ranges fail. Ref caches are not
+persisted across CLI invocations. Remote entries install
+through their actual dependency source and existing lock resolution, so locked
+replay does not require the preview. Local directory dependencies remain local.
+Native generated JSON and repository registration retain their existing flow.
 
 > Source of truth is the `marketplace:` block in `apm.yml`. `apm pack` produces `.claude-plugin/marketplace.json` whenever that block is present. The legacy standalone `marketplace.yml` is deprecated -- use `apm marketplace migrate` to fold it in.
 

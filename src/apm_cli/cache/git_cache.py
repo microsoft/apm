@@ -38,6 +38,7 @@ import time
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
+from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
@@ -181,10 +182,9 @@ def _unmaterialized_paths(
     git_exe: str, checkout_dir: Path, *, env: dict[str, str], timeout: int = 60
 ) -> list[str]:
     """Return tracked paths the working tree is missing (skip-worktree excluded)."""
-    result = subprocess.run(
+    result = run_git_text(
         [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "ls-files", "--deleted", "-z"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -201,16 +201,15 @@ def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str,
     """
     key, value = _SPARSE_COMPLETENESS_PIN
     try:
-        subprocess.run(
+        run_git_text(
             [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
             capture_output=True,
-            text=True,
             timeout=10,
             env=env,
             stdin=subprocess.DEVNULL,
             check=True,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    except (subprocess.SubprocessError, OSError):
         _log.debug("Could not pin sparse completeness for %s", checkout_dir)
 
 
@@ -240,7 +239,8 @@ def _sparse_checkout_is_complete(
     try:
         # Local index scan only; a short bound limits shard-lock hold time.
         missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    # SubprocessError also covers GitOutputDecodeError (#3056).
+    except (subprocess.SubprocessError, OSError):
         return False
     if missing:
         return False
@@ -617,16 +617,17 @@ class GitCache:
                 # all blobs must be present locally. The partial path
                 # relies on the consumer being configured as a promisor
                 # so missing blobs trigger an on-demand fetch.
-                subprocess.run(
+                run_git_text(
                     clone_args,
                     capture_output=True,
-                    text=True,
                     timeout=300,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056), so a
+            # rejected clone output still removes the staged tree.
+            except (subprocess.SubprocessError, OSError) as exc:
                 # Partial clone fallback: some servers reject --filter
                 # (old Gerrit / pre-2.20 GHE). Retry once without it so
                 # we never block on this optimization. The resulting
@@ -645,7 +646,7 @@ class GitCache:
                     staged.mkdir(parents=True, exist_ok=True)
                     os.chmod(str(staged), 0o700)
                     try:
-                        subprocess.run(
+                        run_git_text(
                             [
                                 git_exe,
                                 *_safe_git_args(),
@@ -658,7 +659,6 @@ class GitCache:
                                 str(staged),
                             ],
                             capture_output=True,
-                            text=True,
                             timeout=300,
                             env=subprocess_env,
                             stdin=subprocess.DEVNULL,
@@ -668,11 +668,7 @@ class GitCache:
                         from ..utils.console import _rich_warning
 
                         _rich_warning(_partial_clone_fallback_warning(url))
-                    except (
-                        subprocess.CalledProcessError,
-                        subprocess.TimeoutExpired,
-                        OSError,
-                    ) as exc2:
+                    except (subprocess.SubprocessError, OSError) as exc2:
                         from ..utils.file_ops import robust_rmtree
 
                         robust_rmtree(staged, ignore_errors=True)
@@ -821,7 +817,7 @@ class GitCache:
                 # these local values. ``remote.origin.url`` needs a separate
                 # post-clone ``git config`` because git clone always rewrites
                 # it to the clone source after applying ``-c`` overrides.
-                subprocess.run(
+                run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -850,7 +846,6 @@ class GitCache:
                         str(staged),
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
@@ -860,7 +855,7 @@ class GitCache:
                     # Point origin at the real upstream (clone set it to the
                     # local bare). Single config call; the other two promisor
                     # keys were already applied via ``-c`` above.
-                    subprocess.run(
+                    run_git_text(
                         [
                             git_exe,
                             *_safe_git_args(),
@@ -871,7 +866,6 @@ class GitCache:
                             promisor_url,
                         ],
                         capture_output=True,
-                        text=True,
                         timeout=10,
                         env=subprocess_env,
                         stdin=subprocess.DEVNULL,
@@ -895,7 +889,7 @@ class GitCache:
                         extra_git_args=_safe_git_args(),
                     )
                 # Checkout the specific SHA.
-                checkout = subprocess.run(
+                checkout = run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -905,7 +899,6 @@ class GitCache:
                         sha,
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
@@ -945,7 +938,8 @@ class GitCache:
 
                 robust_rmtree(staged, ignore_errors=True)
                 raise
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056).
+            except (subprocess.SubprocessError, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
 
                 robust_rmtree(staged, ignore_errors=True)
@@ -985,10 +979,9 @@ class GitCache:
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 [git_exe, *_safe_git_args(), "--git-dir", str(bare_dir), "cat-file", "-t", sha],
                 capture_output=True,
-                text=True,
                 timeout=10,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -1034,10 +1027,9 @@ class GitCache:
             fetch_args += ["--filter=blob:none"]
         fetch_args += [url, sha]
         try:
-            subprocess.run(
+            run_git_text(
                 fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -1056,10 +1048,9 @@ class GitCache:
             if is_partial:
                 fallback_fetch_args += ["--filter=blob:none"]
             fallback_fetch_args += [url, *_FALLBACK_REFSPECS]
-            subprocess.run(
+            run_git_text(
                 fallback_fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,

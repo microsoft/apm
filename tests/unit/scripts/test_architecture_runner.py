@@ -671,6 +671,7 @@ install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
+marketplace-integrations-authoring-source
 marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-manifest
 marketplace-integrations-codex-native-lifecycle

@@ -978,6 +978,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Portable AgentPluginComponents field set drifts from the v1 contract.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-authoring-source",
+        rule_id="marketplace-integrations-authoring-source",
+        path="src/apm_cli/marketplace/authoring_source.py",
+        old="config = load_marketplace_from_apm_yml(path)",
+        new="config = load_yaml_str(path.read_text())",
+        intent="Live authoring catalog parses apm.yml outside the canonical parser.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-catalog-manifest",
         rule_id="marketplace-integrations-catalog-manifest",
         path="src/apm_cli/deps/_shared.py",
@@ -1398,6 +1406,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="eyJ[A-Za-z0-9_-]",
         new="bad[A-Za-z0-9_-]",
         intent="Bare AAD bearer JWTs stop being redacted from Git diagnostics.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-git-output-decoding",
+        rule_id="transport-platform-git-child-environment",
+        path="src/apm_cli/deps/git_file_transport.py",
+        old="            result = run_git_text(\n                cmd,\n",
+        new="            result = subprocess.run(\n                cmd,\n                text=True,\n",
+        intent="Sparse Git output decodes with the locale codec and crashes on cp936.",
     ),
     MutationCase(
         guard_id="transport-platform-git-semver-preflight",

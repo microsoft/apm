@@ -39,6 +39,7 @@ from ..utils.git_env import (
     git_subprocess_error_text,
     git_worktree_head,
     redact_git_diagnostic,
+    run_git_text,
 )
 from ..utils.git_sparse import (
     apply_sparse_cone,
@@ -1204,7 +1205,7 @@ class GitHubPackageDownloader:
                         worktree=temp_clone_path,
                     )
                     if token is not None:
-                        remote_result = subprocess.run(
+                        remote_result = run_git_text(
                             [
                                 get_git_executable(),
                                 "remote",
@@ -1215,8 +1216,6 @@ class GitHubPackageDownloader:
                             cwd=str(temp_clone_path),
                             env=git_env,
                             capture_output=True,
-                            text=True,
-                            encoding="utf-8",
                             timeout=120,
                         )
                         if remote_result.returncode != 0:
@@ -1226,13 +1225,11 @@ class GitHubPackageDownloader:
                                 output=remote_result.stdout,
                                 stderr=remote_result.stderr,
                             )
-                    fetch_result = subprocess.run(
+                    fetch_result = run_git_text(
                         [get_git_executable(), "fetch", "origin", ref or "HEAD", "--depth=1"],
                         cwd=str(temp_clone_path),
                         env=git_env,
                         capture_output=True,
-                        text=True,
-                        encoding="utf-8",
                         timeout=120,
                     )
                     if fetch_result.returncode != 0:
@@ -1254,13 +1251,11 @@ class GitHubPackageDownloader:
                     unauth_first=True,
                     base_env=self.git_env,
                 )
-                checkout_result = subprocess.run(
+                checkout_result = run_git_text(
                     [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
                     cwd=str(temp_clone_path),
                     env=setup_env,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
                     timeout=120,
                 )
                 if checkout_result.returncode != 0:
@@ -1320,13 +1315,11 @@ class GitHubPackageDownloader:
             ]
 
             for step_name, cmd in checkout_steps:
-                result = subprocess.run(
+                result = run_git_text(
                     cmd,
                     cwd=str(temp_clone_path),
                     env=env,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
                     timeout=120,
                 )
                 if result.returncode != 0:

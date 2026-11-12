@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.errors import ConflictingTargetsError
+from apm_cli.hook_contract import HookContractError
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegrator
@@ -421,74 +422,70 @@ def _write_divergent_pair(package_path: Path, first: str, second: str) -> dict[s
         if {a, b} != {"claude", "cursor"}
     ],
 )
-def test_divergent_hook_files_route_per_target_under_multi_dep_targets(
+def test_divergent_hook_files_fail_closed_under_multi_dep_targets(
     tmp_path: Path, first: str, second: str
 ) -> None:
-    """`targets: [A, B]` must refine routing, not disable it -- for any A, B.
+    """`targets: [A, B]` never merges per-target files into every target.
 
-    Regression for the dep-target gate that merged every per-target file into
-    every active target. Each divergent file must land only in its own harness;
-    the other harness's uniquely-tagged command must not leak in. Proven across
-    every pair of merge-based harnesses APM ships, not just claude/codex.
+    Filenames no longer route (#3226). A package that relied on per-target
+    filenames fails with migration guidance before any write, so neither
+    harness receives the other's uniquely-tagged command. Proven across every
+    pair of merge-based harnesses APM ships.
     """
     project = tmp_path / "project"
     for name in (first, second):
         (project / KNOWN_TARGETS[name].root_dir).mkdir(parents=True)
     package_path = tmp_path / "pkg"
-    tags = _write_divergent_pair(package_path, first, second)
+    _write_divergent_pair(package_path, first, second)
 
-    result = integrate_package_primitives(
-        _package_info(package_path),
-        project,
-        targets=[_hook_only_target(first), _hook_only_target(second)],
-        integrators=_bundle(HookIntegrator()),
-        force=False,
-        managed_files=set(),
-        diagnostics=DiagnosticCollector(),
-        package_name="targeted-hooks",
-        dep_target_subset=[first, second],
-    )
+    with pytest.raises(HookContractError) as excinfo:
+        integrate_package_primitives(
+            _package_info(package_path),
+            project,
+            targets=[_hook_only_target(first), _hook_only_target(second)],
+            integrators=_bundle(HookIntegrator()),
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+            package_name="targeted-hooks",
+            dep_target_subset=[first, second],
+        )
 
-    assert result["hooks"] == 2
-    first_cmds = _deployed_commands(project, first)
-    second_cmds = _deployed_commands(project, second)
-
-    # Each harness gets exactly its own file's command -- no leak, no dupes.
-    assert first_cmds == [tags[first]], f"{first} config: {first_cmds}"
-    assert second_cmds == [tags[second]], f"{second} config: {second_cmds}"
-    assert tags[second] not in first_cmds, f"{second} hook leaked into {first}"
-    assert tags[first] not in second_cmds, f"{first} hook leaked into {second}"
+    message = str(excinfo.value)
+    assert f"Target '{first}' would newly activate: hooks/pkg-{second}-hooks.json" in message
+    assert f"Target '{second}' would newly activate: hooks/pkg-{first}-hooks.json" in message
+    assert _deployed_commands(project, first) == []
+    assert _deployed_commands(project, second) == []
 
 
 @pytest.mark.parametrize(
     ("active", "excluded"),
     [(a, b) for i, a in enumerate(_MERGE_HARNESSES) for b in _MERGE_HARNESSES[i + 1 :]],
 )
-def test_divergent_hook_files_route_single_target_under_single_dep_target(
+def test_divergent_hook_files_fail_closed_under_single_dep_target(
     tmp_path: Path, active: str, excluded: str
 ) -> None:
-    """`targets: [A]` installs only A's file even when B's file also ships."""
+    """`targets: [A]` never gives A the file B's filename once kept from it."""
     project = tmp_path / "project"
     for name in (active, excluded):
         (project / KNOWN_TARGETS[name].root_dir).mkdir(parents=True)
     package_path = tmp_path / "pkg"
-    tags = _write_divergent_pair(package_path, active, excluded)
+    _write_divergent_pair(package_path, active, excluded)
 
-    result = integrate_package_primitives(
-        _package_info(package_path),
-        project,
-        targets=[_hook_only_target(active), _hook_only_target(excluded)],
-        integrators=_bundle(HookIntegrator()),
-        force=False,
-        managed_files=set(),
-        diagnostics=DiagnosticCollector(),
-        package_name="targeted-hooks",
-        dep_target_subset=[active],
-    )
+    with pytest.raises(HookContractError, match=rf"Target '{active}' would newly activate"):
+        integrate_package_primitives(
+            _package_info(package_path),
+            project,
+            targets=[_hook_only_target(active), _hook_only_target(excluded)],
+            integrators=_bundle(HookIntegrator()),
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+            package_name="targeted-hooks",
+            dep_target_subset=[active],
+        )
 
-    # Only the active harness is installed, and it receives only its own file.
-    assert result["hooks"] == 1
-    assert _deployed_commands(project, active) == [tags[active]]
+    assert _deployed_commands(project, active) == []
     assert _deployed_commands(project, excluded) == []
 
 
@@ -515,55 +512,51 @@ def _write_divergent_files(package_path: Path, own: str, foreign: str) -> None:
 
 
 @pytest.mark.parametrize("foreign", [name for name in KNOWN_TARGETS if name != "copilot"])
-def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path, foreign: str) -> None:
-    """Copilot writes per-file JSON; a dep `targets:` list must not make it
-    absorb another target's per-file hook manifest."""
+def test_copilot_never_absorbs_foreign_per_file_manifest(tmp_path: Path, foreign: str) -> None:
+    """Copilot writes per-file JSON; another target's legacy-named manifest
+    fails closed instead of being absorbed (#3226)."""
     project = tmp_path / "project"
     package_path = tmp_path / "pkg"
     _write_divergent_files(package_path, own="copilot", foreign=foreign)
 
-    result = integrate_package_primitives(
-        _package_info(package_path),
-        project,
-        targets=[_hook_only_target("copilot")],
-        integrators=_bundle(HookIntegrator()),
-        force=False,
-        managed_files=set(),
-        diagnostics=DiagnosticCollector(),
-        package_name="targeted-hooks",
-        dep_target_subset=["copilot"],
-    )
+    with pytest.raises(HookContractError, match=rf"hooks/pkg-{foreign}-hooks\.json"):
+        integrate_package_primitives(
+            _package_info(package_path),
+            project,
+            targets=[_hook_only_target("copilot")],
+            integrators=_bundle(HookIntegrator()),
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+            package_name="targeted-hooks",
+            dep_target_subset=["copilot"],
+        )
 
-    assert result["hooks"] == 1
-    deployed = sorted(p.name for p in (project / ".github" / "hooks").glob("*.json"))
-    assert deployed and all("copilot" in name for name in deployed), deployed
-    assert not any(foreign in name for name in deployed), f"{foreign} file leaked into Copilot"
+    assert not (project / ".github" / "hooks").exists()
 
 
-def test_kiro_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
-    """Kiro writes one JSON per hook action; a dep `targets:` list must not make
-    it integrate another target's per-file hook manifest."""
+def test_kiro_never_absorbs_foreign_per_file_manifest(tmp_path: Path) -> None:
+    """Kiro writes one JSON per hook action; another target's legacy-named
+    manifest fails closed instead of being integrated (#3226)."""
     project = tmp_path / "project"
     (project / ".kiro").mkdir(parents=True)
     package_path = tmp_path / "pkg"
     _write_divergent_files(package_path, own="kiro", foreign="claude")
 
-    result = integrate_package_primitives(
-        _package_info(package_path),
-        project,
-        targets=[_hook_only_target("kiro")],
-        integrators=_bundle(HookIntegrator()),
-        force=False,
-        managed_files=set(),
-        diagnostics=DiagnosticCollector(),
-        package_name="targeted-hooks",
-        dep_target_subset=["kiro"],
-    )
+    with pytest.raises(HookContractError, match=r"hooks/pkg-claude-hooks\.json"):
+        integrate_package_primitives(
+            _package_info(package_path),
+            project,
+            targets=[_hook_only_target("kiro")],
+            integrators=_bundle(HookIntegrator()),
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+            package_name="targeted-hooks",
+            dep_target_subset=["kiro"],
+        )
 
-    assert result["hooks"] == 1
-    deployed = sorted(p.name for p in (project / ".kiro" / "hooks").rglob("*.json"))
-    assert deployed and all("kiro" in name for name in deployed), deployed
-    assert not any("claude" in name for name in deployed), "Claude file leaked into Kiro"
+    assert not list((project / ".kiro").rglob("*.json"))
 
 
 def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> None:

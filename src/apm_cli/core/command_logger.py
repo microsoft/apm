@@ -22,6 +22,7 @@ from apm_cli.utils.console import (
 
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
+    from apm_cli.install.failure_residue import FailedInstallResidue
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -247,6 +248,45 @@ class InstallLogger(CommandLogger):
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        self._failed_install_residue_note = ""
+
+    def failed_install_residue(self, residue: FailedInstallResidue) -> None:
+        """List native target output a failed install left behind, with one next step.
+
+        Native target integrations are outside the install transaction, so
+        this output is neither removed nor tracked by apm.lock.yaml.
+        """
+        files, entries = residue.files, residue.entries
+        if not files and not entries:
+            return
+        if files:
+            noun = "file" if len(files) == 1 else "files"
+            self.warning(
+                f"This failed install left {len(files)} native target {noun} on disk "
+                "that apm.lock.yaml does not track:"
+            )
+            for path in files:
+                self.error_detail(f"  {path}")
+        if entries:
+            noun = "entry" if len(entries) == 1 else "entries"
+            lead = "also wrote" if files else "wrote"
+            self.warning(
+                f"This failed install {lead} {len(entries)} native target {noun} "
+                "that apm.lock.yaml does not track (not plain files):"
+            )
+            for entry in entries:
+                self.error_detail(f"  {entry}")
+        command = "apm install -g" if residue.user_scope else "apm install"
+        force_hint = "(add --force if it skips them as not managed by APM)."
+        if files:
+            self.info(f"Remove these files, or re-run '{command}' {force_hint}")
+        else:
+            self.info(f"Re-run '{command}' {force_hint}")
+        total = len(files) + len(entries)
+        self._failed_install_residue_note = (
+            f"{total} native target {'item' if total == 1 else 'items'} listed above "
+            f"{'remains' if total == 1 else 'remain'} in place."
+        )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -957,10 +997,12 @@ class InstallLogger(CommandLogger):
             )
         elif disposition is InstallDisposition.FAILED:
             error_suffix = f" with {errors} error(s)" if errors > 0 else ""
+            state_note = (
+                self._failed_install_residue_note
+                or "No install transaction changes were committed."
+            )
             _rich_error(
-                "Installation failed"
-                f"{error_suffix}{timing_suffix}. "
-                "No install transaction changes were committed.",
+                f"Installation failed{error_suffix}{timing_suffix}. {state_note}",
                 symbol="error",
             )
         elif parts:
