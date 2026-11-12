@@ -6,7 +6,7 @@ import copy
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -157,7 +157,7 @@ def test_marketplace_object_install_audit_repeat_offline(
         assert dependency["version"] == "1.2.3"
         assert dependency["constraint"] == selection
         assert dependency["resolved_tag"] == _TAG
-        assert datetime.fromisoformat(dependency["resolved_at"]).tzinfo == timezone.utc
+        assert datetime.fromisoformat(dependency["resolved_at"]).tzinfo == UTC
     scenario.audit()
     scenario.run(_INSTALL)
     scenario.audit()
