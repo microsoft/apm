@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterable
 from pathlib import Path
 
 from .models import CheckResult, CIAuditResult
@@ -1191,7 +1192,7 @@ def run_dependency_policy_checks(
     manifest_includes=_INCLUDES_NOT_PROVIDED,
     registries: dict[str, str] | None = None,
     direct_dep_keys: set[str] | None = None,
-    source_deps=None,
+    source_deps: Iterable[DependencyReference] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1347,7 +1348,9 @@ def run_dependency_policy_checks(
     return result
 
 
-def _audit_source_dependencies(manifest, lock: LockFile | None) -> list:
+def _audit_source_dependencies(
+    manifest: APMPackage, lock: LockFile | None
+) -> list[DependencyReference]:
     """Return effective direct deps plus locked transitive deps for source checks.
 
     Direct production and dev declarations are projected through the
@@ -1357,7 +1360,7 @@ def _audit_source_dependencies(manifest, lock: LockFile | None) -> list:
     """
     from ..models.dependency.replacement import project_manifest_dependencies
 
-    deps = project_manifest_dependencies(manifest)
+    deps = list(project_manifest_dependencies(manifest))
     if lock is None:
         return deps
     seen = {dep.get_unique_key() for dep in deps}

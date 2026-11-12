@@ -188,11 +188,14 @@ def normalize_policy_host(host: str) -> str:
     Host names are case-insensitive. Ports are transport details, so the
     shorthand, HTTPS and SSH spellings of one host share a policy identity; a
     valid ``:port`` suffix (including one on a configured default host such as
-    ``GITHUB_HOST=ghes.corp.example:8443``) is removed.
+    ``GITHUB_HOST=ghes.corp.example:8443``) is removed, and so is one
+    trailing DNS root dot (``ghes.corp.example.`` names the same host).
     """
     host = host.strip()
     with contextlib.suppress(ValueError):
         host, _port = _split_shorthand_host_port(host)
+    if host.endswith("."):
+        host = host[:-1]
     return host.translate(_ASCII_LOWER_TRANSLATION)
 
 

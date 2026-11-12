@@ -138,6 +138,15 @@ class TestExplicitHostDependencies:
         assert not _allowed("team/repo", deny=("ghes.corp.example/**",))
         assert not _allowed("team/repo", allow=("github.com/**",))
 
+    def test_trailing_dns_dot_does_not_change_host_identity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example.")
+        assert DependencyReference.parse("team/repo").policy_host == "ghes.corp.example"
+        assert not _allowed("team/repo", deny=("ghes.corp.example/**",))
+        assert _allowed("team/repo", allow=("ghes.corp.example./**",))
+        assert not _allowed("team/repo", allow=("ghes.corp.example.evil/**",))
+
 
 class TestReferenceFormsAreEquivalent:
     @pytest.mark.parametrize(
@@ -344,6 +353,34 @@ class TestAuditDirectSources:
         assert allowlist.details == [
             "ghes.unapproved.example/example-org/tool: not in allowed sources"
         ]
+
+    def test_audit_fails_closed_when_replacements_cannot_bind(self, tmp_path: Path) -> None:
+        # A local replacement resolving to the consumer root cannot bind.
+        (tmp_path / "apm.yml").write_text(
+            textwrap.dedent(
+                f"""\
+                $schema: "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+                name: demo
+                version: 1.0.0
+                dependencies:
+                  apm:
+                    - example-org/app
+                replace:
+                  - for:
+                      git: https://github.com/example-org/app
+                    with:
+                      path: ../{tmp_path.name}
+                """
+            ),
+            encoding="utf-8",
+        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(allow=ENTERPRISE_ALLOW))
+
+        result = run_policy_checks(tmp_path, policy, fail_fast=False)
+
+        assert [c.name for c in result.checks] == ["dependency-sources"]
+        assert not result.checks[0].passed
+        assert result.checks[0].message.startswith("Cannot resolve dependency sources")
 
 
 def test_direct_and_denylist_details_name_the_effective_host() -> None:
