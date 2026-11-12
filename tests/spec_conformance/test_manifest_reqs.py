@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
-req-tg-001..009, req-tg-014..015, req-cf-001..002.
+req-tg-001..009, req-tg-014..015, req-tg-018, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -851,6 +851,39 @@ def test_consumer_emits_antigravity_rule_exact_bytes(source, expected_bytes):
     rendered = InstructionIntegrator._convert_to_antigravity_rules(source)
 
     assert rendered == expected_bytes
+
+
+@pytest.mark.req("req-tg-018")
+@pytest.mark.parametrize(
+    ("apply_to", "expected_rule_key"),
+    [
+        ("applyTo: '**'\n", "alwaysApply: true\n"),
+        ("applyTo: '  **  '\n", "alwaysApply: true\n"),
+        ("applyTo:\n  - '**'\n", "alwaysApply: true\n"),
+        ("applyTo: 'src/**/*.py'\n", "globs: src/**/*.py\n"),
+        ("applyTo: 'src/**/*.py, tests/**/*.py'\n", "globs: src/**/*.py, tests/**/*.py\n"),
+        ("applyTo:\n  - '**'\n  - 'src/**/*.py'\n", "globs: **, src/**/*.py\n"),
+        ("", ""),
+        ("applyTo: ''\n", ""),
+        ("applyTo:\n", ""),
+    ],
+    ids=["scalar", "padded", "list", "scoped", "multi", "mixed", "absent", "empty", "null"],
+)
+def test_consumer_maps_cursor_universal_instruction_to_always_apply(
+    apply_to: str, expected_rule_key: str
+) -> None:
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+
+    rendered = InstructionIntegrator._convert_to_cursor_rules(
+        f"---\ndescription: Rule\n{apply_to}---\n\nBody\n"
+    )
+
+    assert rendered == f"---\ndescription: Rule\n{expected_rule_key}---\n\nBody\n"
+    assert_spec_contains(
+        "MUST contain `alwaysApply: true` and MUST NOT contain a `globs`\nfield",
+        "`**` with scoped patterns, the emitted frontmatter MUST NOT contain\n`alwaysApply`",
+        "MUST omit both\n`alwaysApply` and `globs`",
+    )
 
 
 @pytest.mark.req("req-tg-006")

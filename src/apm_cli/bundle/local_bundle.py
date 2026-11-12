@@ -179,6 +179,12 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
     return data
 
 
+def _has_pack_manifest(bundle_dir: Path) -> bool:
+    """Return whether ``apm.lock.yaml`` carries the ``pack`` manifest written by ``apm pack``."""
+    pack = (_read_bundle_lockfile(bundle_dir) or {}).get("pack")
+    return isinstance(pack, dict) and bool(pack)
+
+
 def _extract_pack_targets(lockfile: dict[str, Any] | None) -> list[str]:
     """Return list of pack targets from a parsed bundle lockfile."""
     if not lockfile:
@@ -330,7 +336,9 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
 
     A path qualifies when it is either:
 
-    - A directory containing ``plugin.json`` at its root, OR
+    - A directory containing ``plugin.json`` at its root, unless it also has
+      an ``apm.yml`` and its ``apm.lock.yaml`` carries no ``pack`` manifest
+      (that is an APM source package, installed as a local dependency), OR
     - A ``.zip`` archive whose extracted root contains ``plugin.json``, OR
     - A ``.tar.gz`` / ``.tgz`` archive whose extracted root contains
       ``plugin.json``.
@@ -344,6 +352,8 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
 
     if path.is_dir():
         if not (path / "plugin.json").is_file():
+            return None
+        if (path / "apm.yml").is_file() and not _has_pack_manifest(path):
             return None
         return _build_info(
             path,
