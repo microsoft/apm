@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from .models import CheckResult, CIAuditResult
@@ -1063,15 +1063,23 @@ def _check_pinned_constraints(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
     direct_dep_keys: set[str] | None = None,
+    declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
 ) -> CheckResult:
     """Check: every direct dep declares a bounded constraint.
 
     Skipped (passes vacuously) when
     ``policy.require_pinned_constraint`` is ``False`` -- the default.
 
-    Operates on the **declared** constraint (``dep.reference``), not
-    the resolved one, so authors learn before the install completes
-    that a moving ref slipped past review.
+    Operates on the **declared** constraint, not the resolved one, so
+    authors learn before the install completes that a moving ref
+    slipped past review. After the resolve phase ``dep.reference``
+    already holds the selected tag, so the install-pipeline callers
+    pass ``declared_refs`` (unique key -> a snapshot of every declaration
+    of it, see ``collect_declared_refs``) and the check classifies each
+    of those instead (#3224); one bounded declaration never covers for an
+    unbounded one sharing the key. ``apm audit`` passes the same
+    snapshot (``collect_manifest_declarations``); install preflight already
+    receives source-selected manifest deps and leaves it ``None``.
 
     When ``direct_dep_keys`` is provided, the check is restricted to
     direct dependencies only -- transitives are excluded, since the
@@ -1097,14 +1105,17 @@ def _check_pinned_constraints(
 
     violations: list[str] = []
     for dep in deps:
-        if direct_dep_keys is not None and dep.get_unique_key() not in direct_dep_keys:
+        unique_key = dep.get_unique_key()
+        if direct_dep_keys is not None and unique_key not in direct_dep_keys:
             continue
-        reason = classify_unbounded_reason(dep)
-        if reason is None:
-            continue
-        key = dep.get_canonical_dependency_string()
-        hint = humanize_reason(reason, dep)
-        violations.append(f"{key}: {hint}")
+        declared = declared_refs.get(unique_key) if declared_refs else None
+        for judged in declared or (dep,):
+            reason = classify_unbounded_reason(judged)
+            if reason is None:
+                continue
+            key = judged.get_canonical_dependency_string()
+            violations.append(f"{key}: {humanize_reason(reason, judged)}")
+    violations = list(dict.fromkeys(violations))
 
     if not violations:
         return CheckResult(
@@ -1193,6 +1204,7 @@ def run_dependency_policy_checks(
     registries: dict[str, str] | None = None,
     direct_dep_keys: set[str] | None = None,
     source_deps: Iterable[DependencyReference] | None = None,
+    declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1244,6 +1256,13 @@ def run_dependency_policy_checks(
         to ``deps_to_install``. The audit wrapper passes effective direct deps
         (production, dev, and ``replace``-selected sources) plus locked
         transitive deps so every installed source is gated.
+    declared_refs:
+        Optional map of ``get_unique_key()`` -> a snapshot of every
+        declaration of that direct dep (``collect_declared_refs``). The
+        resolve phase rewrites ``dep.reference`` to the selected tag, so
+        the install-pipeline callers pass the declarations they captured
+        beforehand and ``require_pinned_constraint`` judges the authored
+        constraint rather than the selected tag (#3224).
 
     Returns
     -------
@@ -1316,7 +1335,9 @@ def run_dependency_policy_checks(
         # When direct_dep_keys is supplied, restrict to direct deps -- a
         # transitive package with an unbounded ref in its own manifest is
         # not actionable by the consumer (see Copilot review on #1494).
-        _check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys),
+        _check_pinned_constraints(
+            deps_list, policy.dependencies, direct_dep_keys, declared_refs=declared_refs
+        ),
     ]
     # MCP checks -- when mcp_deps is None (not provided), skip entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
@@ -1435,6 +1456,8 @@ def run_policy_checks(
         return result
 
     # -- Delegate dependency + MCP checks to shared seam ---------------
+    from ._constraint_pinning import collect_manifest_declarations
+
     dep_result = run_dependency_policy_checks(
         apm_deps,
         lockfile=lock,
@@ -1445,6 +1468,8 @@ def run_policy_checks(
         manifest_includes=manifest.includes,
         registries=getattr(manifest, "registries", None),
         source_deps=source_deps,
+        # Judge the same source-selected declarations as the install gate.
+        declared_refs=collect_manifest_declarations(manifest),
     )
     result.checks.extend(dep_result.checks)
 
