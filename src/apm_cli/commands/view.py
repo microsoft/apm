@@ -684,7 +684,7 @@ _VIEW_HELP = (
 @click.command(
     name="view",
     help=_VIEW_HELP,
-    short_help="View package metadata, list remote versions, or trace a file's owner",
+    short_help="View package metadata, versions, or file owner",
 )
 @click.argument("package", required=False, default=None)
 @click.argument("field", required=False, default=None)
