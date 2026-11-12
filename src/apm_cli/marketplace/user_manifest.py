@@ -104,11 +104,18 @@ def _parse_entry(entry: object, manifest_path: Path, index: int) -> DeclaredMark
             f"name '{_ascii(name)}' must only contain letters, digits, '.', '_' and '-'",
         )
     try:
-        parse_registration_source(source, ref=ref)
+        parsed = parse_registration_source(source, ref=ref)
     except ValueError as exc:
         raise _entry_error(
             manifest_path, index, f"source '{_ascii(source)}' is not valid: {exc}"
         ) from exc
+    # A relative path would resolve against wherever 'apm install -g' runs.
+    if parsed.kind == "local" and source.startswith("."):
+        raise _entry_error(
+            manifest_path,
+            index,
+            f"local source '{_ascii(source)}' must be an absolute path or start with '~/'",
+        )
     return DeclaredMarketplace(name=name, source=source, ref=ref)
 
 

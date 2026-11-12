@@ -437,7 +437,7 @@ marketplaces:
 | Sub-key | Type | Required | Constraint |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Letters, digits, `.`, `_` and `-`; unique (case-insensitive) in the list. Used as `PKG@NAME`. |
-| `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). No `--host` equivalent; use a full URL for non-default hosts. |
+| `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). No `--host` equivalent; use a full URL for non-default hosts. Local paths must be absolute or start with `~/`. |
 | `ref` | `string` | OPTIONAL | Same as `--ref`. Cannot be combined with a `#ref` in `source`. |
 
 Unknown entry keys are rejected. Registering a marketplace does not install

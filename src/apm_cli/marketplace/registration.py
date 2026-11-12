@@ -36,8 +36,8 @@ class MarketplaceManifestNotFoundError(MarketplaceError):
     def __init__(self, display_source: str, *, local: bool = False):
         self.display_source = display_source
         hint = (
-            " To register a local authoring catalog, pass the apm.yml file "
-            "itself (for example ./my-catalog/apm.yml)."
+            " To register a local authoring catalog, use the path to the apm.yml "
+            "file itself (for example ./my-catalog/apm.yml)."
             if local
             else ""
         )

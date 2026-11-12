@@ -286,7 +286,7 @@ marketplaces:
 Each entry takes a `name` and a `source` in any SOURCE form
 `apm marketplace add` accepts, plus an optional `ref` that works like
 `--ref`. There is no `--host` equivalent: use a full URL for hosts other
-than the default. `apm install -g`
+than the default. Local paths must be absolute or start with `~/`. `apm install -g`
 then:
 
 - registers declared marketplaces that are missing, and re-registers

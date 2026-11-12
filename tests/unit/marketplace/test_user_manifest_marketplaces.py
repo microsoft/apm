@@ -121,6 +121,8 @@ class TestParseDeclaredMarketplaces:
             ([{"name": "a", "source": "a/b", "branch": "x"}], "unknown key(s) branch"),
             ([{"name": "a", "source": "http://example.com/a/b"}], "Insecure HTTP"),
             ([{"name": "a", "source": "https://github.com/o/r#v1", "ref": "v2"}], "one ref source"),
+            ([{"name": "a", "source": "./catalog"}], "must be an absolute path or start with '~/'"),
+            ([{"name": "a", "source": "../c/apm.yml"}], "must be an absolute path"),
             (
                 [{"name": "a", "source": "o/r"}, {"name": "A", "source": "o/s"}],
                 "duplicate name 'A'",
