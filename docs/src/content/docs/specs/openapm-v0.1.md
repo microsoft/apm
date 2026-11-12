@@ -4812,8 +4812,9 @@ staged-replacement capability, not every consumer implementation.
 
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57 and 0.1.58
 proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises
-[req-tg-005](#req-tg-005) and 0.1.59 revises [req-pl-018](#req-pl-018) in
-place and add none. Together, this working draft
+[req-tg-005](#req-tg-005) in place and 0.1.59 revises
+[req-pl-018](#req-pl-018) in place; neither adds a statement. Together, this
+working draft
 contains 138 statements (133 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
