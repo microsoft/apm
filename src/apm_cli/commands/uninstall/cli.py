@@ -79,15 +79,14 @@ def _persist_uninstall_lockfile(
     integration_cleanup: IntegrationCleanupOutcome,
 ) -> None:
     """Bind actual survivor writes only after final lock persistence succeeds."""
-    from ...deps.lockfile import LockfileSymlinkError
+    from ...deps.lockfile import LockfileSymlinkError, ensure_lockfile_writable
     from .lockfile_state import lockfile_has_persisted_state
 
     try:
         if lockfile_has_persisted_state(lockfile):
             lockfile.write(lockfile_path)
-        elif lockfile_path.is_symlink():
-            raise LockfileSymlinkError(lockfile_path)
         else:
+            ensure_lockfile_writable(lockfile_path)
             lockfile_path.unlink(missing_ok=True)
     except LockfileSymlinkError:
         raise
@@ -173,6 +172,19 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
     return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
+
+
+def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
+    """Refuse before scripts, deletions or apm.yml edits when the lock cannot be rewritten.
+
+    Removing a locked package rewrites apm.lock.yaml, so an unwritable
+    (symlinked) lockfile must stop the uninstall while it is still a no-op.
+    """
+    if lockfile is None or not any(lockfile.get_dependency(key) for key in removed_keys):
+        return
+    from ...deps.lockfile import ensure_lockfile_writable
+
+    ensure_lockfile_writable(lockfile_path)
 
 
 def _cleanup_stale_lsp(
@@ -539,6 +551,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             excluded_keys=removed_keys | builtins.set(projected_orphans),
             source_root=manifest_path.parent,
         )
+        if not dry_run:
+            _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys)
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.

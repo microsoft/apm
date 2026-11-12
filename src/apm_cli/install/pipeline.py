@@ -353,6 +353,23 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
+def _refuse_unwritable_lockfile_before_update(ctx, lock_path, early_lockfile, update_plan):
+    """Refuse an unwritable lockfile before an update deploys or cleans anything.
+
+    An update that changes the resolved graph rewrites apm.lock.yaml; failing
+    here lets the transaction roll back to an untouched project (#3532).
+    """
+    from apm_cli.deps.lockfile import LockfileSymlinkError, ensure_lockfile_writable
+
+    try:
+        ensure_lockfile_writable(lock_path)
+    except LockfileSymlinkError:
+        if update_plan is None:
+            update_plan = build_resolved_update_plan(ctx, early_lockfile)
+        if update_plan.has_changes:
+            raise
+
+
 @transactional_pipeline
 def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     apm_package: APMPackage,
@@ -604,15 +621,21 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # write directly to stdout / call ``click.confirm`` without
     # collision.
     # ------------------------------------------------------------------
+    update_plan = None
     if plan_callback is not None:
-        plan = build_resolved_update_plan(ctx, _early_lockfile)
-        proceed = plan_callback(plan)
+        update_plan = build_resolved_update_plan(ctx, _early_lockfile)
+        proceed = plan_callback(update_plan)
         if not proceed:
             transaction.rollback()
             return InstallResult(
                 disposition=InstallDisposition.CANCELLED,
                 target_decision=target_decision,
             )
+
+    if update_refs and apm_dir and not (ctx.frozen or ctx.dry_run or lockfile_only):
+        _refuse_unwritable_lockfile_before_update(
+            ctx, get_lockfile_path(apm_dir), _early_lockfile, update_plan
+        )
 
     if target_decision.value is None and scope is InstallScope.PROJECT and not lockfile_only:
         from apm_cli.core.target_detection import resolve_effective_target_decision
