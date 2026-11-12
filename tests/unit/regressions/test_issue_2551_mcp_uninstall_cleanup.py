@@ -7,12 +7,14 @@ from apm_cli.commands.uninstall.engine import (
     MCPUninstallCleanupError,
     _remove_stale_mcp_from_recorded_targets,
 )
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.mcp import ownership
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 
 
-class _Lockfile:
+class _Lockfile(LockFile):
     def __init__(self) -> None:
+        super().__init__()
         self._mcp_target_servers_present = True
         self.mcp_target_servers = {
             "claude": ["server-a"],

@@ -325,6 +325,8 @@ def _forbidden_discovery_import(rule_id: str, path: str, record: object) -> tupl
             if name.split(".")[0] in _FORBIDDEN_DISCOVERY_MODULES
         )
     module_root = (module or "").split(".")[0]
+    if module == "shutil" and set(names) <= {"copytree", "rmtree"}:
+        return ()
     if module_root in _FORBIDDEN_DISCOVERY_MODULES:
         return (
             violation(

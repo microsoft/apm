@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -30,18 +32,11 @@ def _make_logger():
 
 
 def _make_lockfile(deps=None):
-    lf = MagicMock()
-    lf.dependencies = deps or {}
-    lf.get_package_dependencies.return_value = list((deps or {}).values())
-    return lf
+    return LockFile(dependencies=deps or {})
 
 
-def _make_locked_dep(key, repo_url=None, resolved_by=None):
-    dep = MagicMock()
-    dep.get_unique_key.return_value = key
-    dep.repo_url = repo_url or key.split("/")[-1]
-    dep.resolved_by = resolved_by
-    return dep
+def _make_locked_dep(key, resolved_by=None):
+    return LockedDependency(repo_url=key, resolved_by=resolved_by)
 
 
 def test_reachability_verbose_diagnostics_redact_local_paths():
@@ -203,7 +198,7 @@ class TestDryRunUninstall:
         apm_modules = tmp_path / "apm_modules"
         apm_modules.mkdir()
 
-        orphan_dep = _make_locked_dep("org/child", "child", resolved_by="org/repo")
+        orphan_dep = _make_locked_dep("org/child", resolved_by="org/repo")
         lf = _make_lockfile({"org/child": orphan_dep})
 
         with (
@@ -363,9 +358,8 @@ class TestCleanupTransitiveOrphans:
         child_dir = org_dir / "child"
         child_dir.mkdir()
 
-        orphan = _make_locked_dep("org/child", "child", resolved_by="org/parent")
+        orphan = _make_locked_dep("org/child", resolved_by="org/parent")
         lf = _make_lockfile({"org/child": orphan})
-        lf.get_dependency.return_value = orphan
 
         (tmp_path / "apm.yml").write_text("name: test\n")
 
@@ -389,9 +383,8 @@ class TestCleanupTransitiveOrphans:
         child_dir = org_dir / "child"
         child_dir.mkdir()
 
-        orphan = _make_locked_dep("org/child", "child", resolved_by="org/parent")
+        orphan = _make_locked_dep("org/child", resolved_by="org/parent")
         lf = _make_lockfile({"org/child": orphan})
-        lf.get_dependency.return_value = orphan
 
         (tmp_path / "apm.yml").write_text("name: test\n")
 

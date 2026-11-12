@@ -806,6 +806,7 @@ When discovery cannot reach the policy source, APM behaves as follows:
 - **Cached, stale within 7 days** -- use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
 - **Cache miss or stale beyond 7 days, fetch fails** -- emit a loud warning every invocation; **do NOT block the install** by default, to keep developers unblocked when GitHub is unreachable. Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
 - **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) -- same posture as fetch failure: warn loudly by default, block when the project pins `policy.fetch_failure_default: block`.
+- **Explicit `apm audit --ci --policy <source>`** -- the fail-open default above applies only to discovered policy (no `--policy`, or `--policy org`). When `--policy` names a local path, `https://` URL, or `owner/repo` and that policy cannot be loaded (missing file, unreachable, malformed, garbage response, or no policy at the source), audit prints `[x] Policy '<source>' could not be loaded: <cause>` and exits 1, whatever `policy.fetch_failure_default` says. A stale-but-valid cached policy within the 7-day ceiling is still enforced.
 
 #### 9.5.1. No-policy outcomes (`no_git_remote` / `absent` / `empty`)
 
@@ -820,7 +821,7 @@ These outcomes honour the same knob as fetch failures on both `apm install` and 
 - **`warn` (default):** `[!]` warning on stderr explaining the cause; install / audit proceeds.
 - **`block`:** `[x]` error on stderr; install raises `PolicyViolationError`, `apm audit --ci` exits 1.
 
-Explicit `--policy <file>` falls through these three outcomes -- an opt-in pointer at a baseline file is treated as the authoritative source.
+`--policy org` falls through these three outcomes. Any other explicit `--policy <source>` fails closed when it yields no policy (see above); a valid but `empty` policy loads and passes.
 
 Example -- consumer-side opt-in to fail-closed semantics in `apm.yml`:
 
@@ -917,9 +918,11 @@ When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci` mirrors t
 
 ```shell
 $ apm audit --ci                     # auto-discovers org policy
-$ apm audit --ci --policy <local>    # explicit override
+$ apm audit --ci --policy <local>    # explicit override; exits 1 if it cannot be loaded
 $ apm audit --ci --no-policy         # baseline checks only
 ```
+
+CI JSON output carries a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF carries the same object under `runs[0].invocations[0].properties.policy`. `enforced` is `true` only when policy checks were evaluated, so wrappers can tell "passed with policy" from "passed without policy".
 
 ### 10. Error and exit-code reference
 

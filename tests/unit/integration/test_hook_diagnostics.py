@@ -68,8 +68,8 @@ class TestHookEventExpectedCasing:
     def test_claude_expects_pascal(self):
         assert _HOOK_EVENT_EXPECTED_CASING["claude"] == "PascalCase"
 
-    def test_cursor_expects_pascal(self):
-        assert _HOOK_EVENT_EXPECTED_CASING["cursor"] == "PascalCase"
+    def test_cursor_expects_camel(self):
+        assert _HOOK_EVENT_EXPECTED_CASING["cursor"] == "camelCase"
 
     def test_vscode_expects_pascal(self):
         assert _HOOK_EVENT_EXPECTED_CASING["vscode"] == "PascalCase"

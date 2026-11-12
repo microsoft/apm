@@ -11,6 +11,7 @@ from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.file_scanner import (
     _is_safe_lockfile_path,
     _minimal_governed_prefixes,
+    _scan_deployed_trees,
     _scan_files_in_dir,
     scan_deployed_trees,
     scan_lockfile_packages,
@@ -182,25 +183,18 @@ class TestScanLockfilePackages:
         dir_path = tmp_path / ".github" / "skills" / "pkg"
         dir_path.mkdir(parents=True)
 
-        mock_findings = {"inner.md": [MagicMock()]}
-        mock_verdict = MagicMock()
-        mock_verdict.findings_by_file = mock_findings
-        mock_verdict.files_scanned = 2
-        mock_verdict.scanned_files = frozenset({"inner.md", "clean.md"})
+        (dir_path / "inner.md").write_text("hidden \u202e", encoding="utf-8")
+        (dir_path / "clean.md").write_text("clean", encoding="utf-8")
+        (dir_path / "run.py").write_text("# hidden \u202e", encoding="utf-8")
 
         dep = _make_dep([".github/skills/pkg/"])
         lock = _make_lockfile({"pkg": dep})
 
-        with (
-            patch("apm_cli.security.file_scanner.LockFile.read", return_value=lock),
-            patch(
-                "apm_cli.security.gate.SecurityGate.scan_files",
-                return_value=mock_verdict,
-            ),
-        ):
-            _findings, count = scan_lockfile_packages(tmp_path)
+        with patch("apm_cli.security.file_scanner.LockFile.read", return_value=lock):
+            findings, count = scan_lockfile_packages(tmp_path)
 
         assert count == 2
+        assert set(findings) == {".github/skills/pkg/inner.md"}
 
     def test_package_filter_limits_scan(self, tmp_path: Path) -> None:
         file_a = tmp_path / ".github" / "prompts" / "a.md"
@@ -299,6 +293,39 @@ class TestScanDeployedTrees:
 
     def test_no_deploy_tree_scans_nothing(self, tmp_path: Path) -> None:
         assert scan_deployed_trees(tmp_path) == ({}, 0)
+
+    def test_supplied_scope_resolved_targets_drive_the_walk(self, tmp_path: Path) -> None:
+        # A global audit resolves user-scope roots; re-resolving here at
+        # project scope would walk `.github/` and miss `~/.copilot/`.
+        from dataclasses import replace
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        user_scoped = replace(KNOWN_TARGETS["claude"], root_dir=".claude-user")
+        rel = ".claude-user/skills/beta/SKILL.md"
+        (tmp_path / rel).parent.mkdir(parents=True)
+        (tmp_path / rel).write_text(_BIDI_PAYLOAD, encoding="utf-8")
+
+        result = _scan_deployed_trees(tmp_path, targets=[user_scoped])
+
+        assert set(result.findings_by_file) == {rel}
+        assert scan_deployed_trees(tmp_path) == ({}, 0)
+
+    def test_walk_is_bounded_to_primitive_deploy_directories(self, tmp_path: Path) -> None:
+        # A target root also holds data APM never deploys (session
+        # transcripts, history, caches). Those are outside the audit's
+        # remit and, at user scope, gigabytes deep.
+        deployed = ".claude/skills/beta/SKILL.md"
+        (tmp_path / deployed).parent.mkdir(parents=True)
+        (tmp_path / deployed).write_text(_BIDI_PAYLOAD, encoding="utf-8")
+        for stray in (".claude/projects/session.jsonl", ".claude/history.jsonl"):
+            (tmp_path / stray).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / stray).write_text(_BIDI_PAYLOAD, encoding="utf-8")
+
+        findings, scanned = scan_deployed_trees(tmp_path)
+
+        assert scanned == 1
+        assert set(findings) == {deployed}
 
 
 class TestProjectFileScan:

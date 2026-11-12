@@ -117,6 +117,19 @@ Named issue: `--mode dispatch --number N`. If `gh` is unavailable,
 pass `--records-json` and `--labels-json`. A helper failure stops
 the run.
 
+The scheduled Triage Panel (including blank workflow dispatch) opts into
+`--scheduled-sweep`. This live issue-only profile fetches current labels
+and complete comments before selection, excludes `status/accepted`,
+`status/declined`, and any `apm-scope:v1` marker in bodies/comments, and
+caps selection at five. Its batch includes selected `contexts` for the
+worker, so initial evidence need not be fetched again. Incomplete evidence
+fails the sweep. When rebuilding planner input, preserve `scheduled_sweep:
+true` from `batch.json` and supply verified `has_scope_record` evidence;
+`plan.json` does not retain these fields. The batch's `selection_counts`
+records scanned and selected candidates; the five-item cap limits selection,
+not the evidence reads needed to find eligible issues. Default local sweeps,
+explicit issue requests, and PR selection keep their existing behavior.
+
 Do not implement. Do not open PRs. Do not fill delivery or review
 slots from this pool. Do not comment on issues. Do not add or
 remove labels. `add_labels` from `triage_state.py` is a plan for

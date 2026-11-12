@@ -17,16 +17,42 @@
     },
     {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; embedded git URL subpath validation",
-      "owner": "models/dependency/identity.py + materialization.py + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py)",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; root-owned exact source replacement and original ownership; embedded git URL subpath validation",
+      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
         "src/apm_cli/models/dependency/materialization.py",
         "src/apm_cli/models/dependency/object_fields.py",
         "src/apm_cli/models/dependency/reference.py",
-        "src/apm_cli/deps/apm_resolver.py"
+        "src/apm_cli/models/dependency/replacement.py",
+        "src/apm_cli/primitives/discovery.py",
+        "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/commands/deps/cli.py",
+        "src/apm_cli/install/phases/download.py",
+        "src/apm_cli/install/phases/integrate.py",
+        "src/apm_cli/install/helpers/plan_inputs.py",
+        "src/apm_cli/install/presentation/resolution.py",
+        "src/apm_cli/install/helpers/no_work.py",
+        "src/apm_cli/install/plan.py"
       ],
-      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity"]
+      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements"]
+    },
+    {
+      "id": "native-lifecycle-evidence",
+      "decision": "Bounded #2867 fresh source-Python lifecycle evidence, immutable witness bindings and candidate-bound native completion; not repository shipping policy",
+      "owner": "scripts/lifecycle_contracts.py (authored obligations and execution validation) + scripts/check_lifecycle_evidence.py (candidate identity and completion) + tests/utils/lifecycle_evidence.py (fresh runner/Hypothesis observation)",
+      "selectors": [
+        "scripts/check_lifecycle_evidence.py",
+        "scripts/lifecycle_contracts.py",
+        "tests/utils/lifecycle_evidence.py",
+        "tests/utils/apm_lifecycle_runner.py",
+        "tests/utils/isolated_apm_environment.py",
+        "tests/fixtures/lifecycle_bug_ledger.json",
+        "tests/fixtures/lifecycle_completion.schema.json",
+        "tests/unit/scripts/test_lifecycle_evidence.py",
+        "tests/integration/test_architecture_native_lifecycle_evidence.py"
+      ],
+      "guards": ["contracts-tooling-native-lifecycle-evidence"]
     },
     {
       "id": "generated-python-artifact-membership",
@@ -75,14 +101,15 @@
     },
     {
       "id": "read-only-lockfile-path",
-      "decision": "Lockfile read path, timestamp emission, and reproducible fallback",
-      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection)",
+      "decision": "Lockfile read path, timestamp emission, reproducible fallback, and marketplace declaration association",
+      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency)",
       "selectors": ["src/apm_cli/deps/lockfile.py"],
       "guards": [
         "contracts-tooling-lockfile-read",
         "contracts-tooling-lockfile-timestamp",
         "contracts-tooling-lockfile-timestamp-constructor",
-        "contracts-tooling-lockfile-timestamp-fallback"
+        "contracts-tooling-lockfile-timestamp-fallback",
+        "marketplace-integrations-locked-association"
       ]
     },
     {

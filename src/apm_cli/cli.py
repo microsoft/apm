@@ -14,9 +14,20 @@ import warnings
 
 import click
 
-from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status
+from apm_cli.core.tls_trust import (
+    TLSConfigurationError,
+    configure_process_tls_trust,
+    log_tls_trust_status,
+)
 
-configure_process_tls_trust()
+_TLS_BOOTSTRAP_ERROR: TLSConfigurationError | None = None
+try:
+    configure_process_tls_trust()
+except TLSConfigurationError as exc:
+    # Command modules may create Sessions at import time but do not perform
+    # network I/O. Preserve early TLS ordering, then surface a concise Click
+    # error before any command callback can make a request.
+    _TLS_BOOTSTRAP_ERROR = exc
 
 from apm_cli.commands._helpers import (
     ERROR,
@@ -26,6 +37,7 @@ from apm_cli.commands._helpers import (
     print_version,
 )
 from apm_cli.commands.approve import approve_cmd, deny_cmd
+from apm_cli.commands.auth import auth
 from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
@@ -52,6 +64,7 @@ from apm_cli.commands.view import view as view_cmd
 _CLI_EPILOG = (
     "\b\n"
     "Common workflows:\n"
+    "  apm auth <host>                Set up credentials for a git host\n"
     "  apm init                       Scaffold a new project\n"
     "  apm install                    Install dependencies from apm.yml\n"
     "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
@@ -91,6 +104,12 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "apm_cli.commands.audit",
         "audit",
         "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
+    ),
+    (
+        "export-patch",
+        "apm_cli.commands.export_patch",
+        "export_patch",
+        "Export local edits to APM-managed files as patches against their source packages",
     ),
     (
         "install",
@@ -259,6 +278,12 @@ def _configure_logging(verbose: bool = False) -> None:
 @click.pass_context
 def cli(ctx, verbose: bool) -> None:
     """Main entry point for the APM CLI."""
+    if _TLS_BOOTSTRAP_ERROR is not None:
+        raise click.ClickException(
+            f"{_TLS_BOOTSTRAP_ERROR}. "
+            "Check the APM_EXTRA_CA_BUNDLE setting, or unset it and retry. "
+            "See https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+        )
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     from apm_cli.core.output_mode import configure_output_mode, detect_output_mode
@@ -297,6 +322,7 @@ def cli(ctx, verbose: bool) -> None:
 
 # Register command groups
 cli.add_command(approve_cmd, name="approve")
+cli.add_command(auth)
 cli.add_command(cache)
 cli.add_command(deny_cmd, name="deny")
 cli.add_command(deps)
@@ -473,7 +499,6 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
-    configure_process_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

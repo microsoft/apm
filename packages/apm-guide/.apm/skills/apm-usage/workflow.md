@@ -99,9 +99,9 @@ aliases; experimental targets such as `grok-cloud` cannot be stored in
 | `apm.yml` | Yes | Manifest -- declares dependencies |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
 | `.apm/` | Yes | Local primitives (instructions, agents, etc.) |
-| Target-owned directories such as `.github/`, `.claude/`, `.grok/`, and `.agents/` | Yes | Deployed files for agent runtimes |
+| Target-owned directories such as `.github/`, `.claude/`, `.grok/`, and `.agents/` | Yes | Deployed agent files |
 | `AGENTS.md` | Yes | Compiled root context for agents-family targets |
-| `apm_modules/` | **No** | Downloaded sources -- add to `.gitignore` |
+| `apm_modules/` | **No** | Installed dependencies -- gitignored automatically; restored by `apm install` |
 
 ## Team member setup
 
@@ -111,10 +111,14 @@ cd <repo>
 apm install            # restores all deps from lockfile
 ```
 
-The lockfile ensures every team member gets the exact same dependency versions.
-`apm install` also deploys the project's own `.apm/` content (instructions, prompts, agents, skills, hooks, commands) to target directories alongside dependency content. Local content wins on collision. This works even with zero dependencies.
-Subsequent `apm install` reads locked commit SHAs for reproducible installs.
-Use `apm install --update` to refresh to latest refs.
+Committed agent files can be reviewed and discovered after clone, but linked
+package context requires `apm install`. Keep `apm_modules/` resources and
+native Copilot Agent Plugin sources available while agents or tools use them,
+even after APM exits.
+
+`apm install` also deploys local `.apm/` content, which wins collisions,
+even with no dependencies. For version replay and updates, see
+[What the lockfile pins](dependencies.md#what-the-lockfile-pins).
 
 ## Local bundle install
 

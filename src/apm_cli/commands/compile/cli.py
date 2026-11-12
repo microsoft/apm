@@ -404,7 +404,7 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
 
 
 @serialized_lifecycle_unless("dry_run")
-def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
+def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = False) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
@@ -474,6 +474,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         compile_targets,
         source_root,
         dry_run=dry_run,
+        clean=clean,
         logger=None,
     )
 
@@ -495,6 +496,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     written_count = 0
     would_write_count = 0
     unchanged_count = 0
+    removed_count = 0
     for entry in results:
         status = entry.status
         tname = entry.target
@@ -513,6 +515,32 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
             logger.info(f"{tname}: skipped (hand-authored) {display_path}", symbol="info")
         elif status == "skipped-no-instructions":
             logger.verbose_detail(f"{tname}: skipped (no global instructions)")
+        elif status == "skipped-native-rules":
+            logger.verbose_detail(f"{tname}: skipped (instructions already in native rules)")
+        elif status == "skipped-redundant":
+            logger.info(
+                f"{tname}: retained redundant {display_path}. "
+                "Run 'apm compile -g --clean --dry-run' to preview safe cleanup.",
+                symbol="info",
+            )
+        elif status in {"skipped-modified", "skipped-symlink"}:
+            reason = (
+                "edited or unverifiable generated file"
+                if status == "skipped-modified"
+                else "symlink"
+            )
+            logger.warning(
+                f"{tname}: retained {display_path} ({reason}). "
+                "Review and rename or remove it manually before regenerating."
+            )
+        elif status in {"removed", "would-remove"}:
+            removed_count += 1
+            if status == "would-remove":
+                logger.info(
+                    f"{tname}: would remove redundant {display_path} (dry-run)", symbol="preview"
+                )
+            else:
+                logger.success(f"{tname}: removed redundant {display_path}", symbol="check")
         elif status.startswith("error:"):
             logger.error(f"{tname}: {status[6:]}", symbol="error")
             has_error = True
@@ -531,7 +559,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
                 logger.info(message, symbol="preview")
             else:
                 logger.success(message, symbol="check")
-        else:
+        elif not removed_count:
             logger.info("No user-scope root context files changed.", symbol="info")
 
     return 1 if has_error else 0
@@ -544,6 +572,50 @@ def _display_user_path(path: Path) -> str:
     except ValueError:
         return str(path)
     return f"~/{rel.as_posix()}"
+
+
+def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -> None:
+    """Fire the ``pre-compile`` lifecycle event before sources are read.
+
+    Trusted scripts on this event can generate primitives under ``.apm/``
+    from the project's own toolchain, so compile reads what they wrote.
+    Best-effort, like every lifecycle event: a failing script never stops
+    the compile.
+    """
+    from ...core.lifecycle_scripts import build_runner_from_context, event_for_dependencies
+    from ...models.apm_package import APMPackage
+
+    manifest = source_root / APM_YML_FILENAME
+    if not manifest.exists():
+        return
+    project_root = str(source_root)
+    runner = build_runner_from_context(
+        logger=logger, verbose=verbose, project_root=project_root, events=("pre-compile",)
+    )
+    dependencies = []
+    if runner.scripts_for_event("pre-compile"):
+        try:
+            dependencies = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        except (OSError, ValueError) as e:
+            logger.verbose_detail(
+                f"[i] pre-compile payload lists no packages: {type(e).__name__} reading apm.yml"
+            )
+    runner.fire(
+        "pre-compile",
+        event_for_dependencies(
+            "pre-compile", dependencies, scope="project", working_directory=project_root
+        ),
+    )
+
+
+def _pre_compile_then_validate(
+    logger: CommandLogger, verbose: bool, source_root: Path | None, *, clean: bool, run: bool
+) -> None:
+    """When ``run``, fire pre-compile scripts, then check the project they may have populated."""
+    if not run or source_root is None:
+        return
+    _fire_pre_compile(logger, verbose, source_root)
+    _validate_project(logger, False, source_root, allow_empty=clean)
 
 
 def _validate_project(
@@ -562,6 +634,7 @@ def _validate_project(
     callers must keep validation and watch modes on the content-required path.
     """
     from ...compilation.constitution import find_constitution
+    from ...core.scope import InstallScope, get_modules_dir
 
     if not (source_root / APM_YML_FILENAME).exists():
         logger.error("Not an APM project - no apm.yml found")
@@ -570,7 +643,9 @@ def _validate_project(
         sys.exit(1)
 
     # Check if there are any instruction files to compile
-    apm_modules_exists = (source_root / APM_MODULES_DIR).exists()
+    apm_modules_exists = (source_root / APM_MODULES_DIR).exists() or get_modules_dir(
+        InstallScope.PROJECT
+    ).exists()
     constitution_exists = find_constitution(source_root).exists()
 
     # Check if .apm directory has actual content
@@ -787,13 +862,20 @@ def _run_compilation(
     clean: bool,
     no_dedup: bool,
     source_root: Path | None = None,
+    *,
+    run_scripts: bool = False,
 ) -> None:
     """Main compilation flow: target resolution, config, compile, and output.
+
+    With ``run_scripts``, the ``pre-compile`` lifecycle event fires first and
+    the project check follows it, both under this function's lifecycle lock,
+    so what the scripts generate is what compile reads.
 
     Handles both distributed (default) and single-file (``--single-agents``)
     strategies, emits the canonical target-provenance line, runs the
     compiler, reports results, and hard-fails on critical security findings.
     """
+    _pre_compile_then_validate(logger, verbose, source_root, clean=clean, run=run_scripts)
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,
         ResolvedTargets,
@@ -1161,7 +1243,10 @@ def _run_compilation(
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Preview compilation without writing files (shows placement decisions)",
+    help=(
+        "Preview compilation without writing files or running pre-compile scripts "
+        "(shows placement decisions)"
+    ),
 )
 @click.option("--no-links", is_flag=True, help="Skip markdown link resolution")
 @click.option("--chatmode", help="Chatmode to prepend to AGENTS.md files")
@@ -1195,6 +1280,7 @@ def _run_compilation(
     is_flag=True,
     help=(
         "Remove orphaned output files (AGENTS.md, CLAUDE.md) no longer generated. "
+        "With --global, remove an unchanged redundant generated Claude root. "
         "Hand-authored files are never deleted; use --dry-run to preview removals."
     ),
 )
@@ -1223,7 +1309,9 @@ def _run_compilation(
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
         "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, or .agents/rules/ for Antigravity. Overrides the "
+        "already populated, in .github/copilot-instructions.md even when the "
+        "matching .github/instructions/ file is deployed, or in .agents/rules/ "
+        "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "
         "duplicate context. Affects the Claude, Copilot, and Antigravity "
         "deduplication paths. Alias: --no-dedup."
@@ -1247,7 +1335,8 @@ def _run_compilation(
         "Write AGENTS.md / CLAUDE.md outputs under DIR instead of $PWD; "
         "sources (apm.yml, .apm/, project tree for placement scoring) "
         "continue resolving from $PWD. Pairs with 'apm install --root' "
-        "for scratch-dir verification. Cannot be combined with --watch."
+        "for scratch-dir verification. Cannot be combined with --watch. "
+        "Pre-compile lifecycle scripts do not run."
     ),
 )
 @click.option(
@@ -1310,6 +1399,8 @@ def compile(  # noqa: PLR0913 -- Click handler
       already in .claude/rules/ with no constitution or other keep-alive).
       Hand-authored files are never deleted. Combine with --dry-run to
       preview removals before they happen.
+      With --global, only an unchanged generated Claude root fully covered
+      by matching user rules is removed; edited roots are retained.
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
 
@@ -1334,7 +1425,7 @@ def compile(  # noqa: PLR0913 -- Click handler
     if global_:
         from click.core import ParameterSource
 
-        allowed_with_global = {"global_", "dry_run", "verbose"}
+        allowed_with_global = {"global_", "dry_run", "verbose", "clean"}
         flag_names = {
             "chatmode": "--chatmode",
             "clean": "--clean",
@@ -1357,7 +1448,7 @@ def compile(  # noqa: PLR0913 -- Click handler
                 continue
             flag = flag_names.get(name, f"--{name.replace('_', '-')}")
             raise click.UsageError(f"--global is not valid with {flag}")
-        rc = _handle_global_flag(dry_run=dry_run, logger=logger)
+        rc = _handle_global_flag(dry_run=dry_run, logger=logger, clean=clean)
         if rc != 0:
             ctx.exit(rc)
         return
@@ -1389,12 +1480,18 @@ def compile(  # noqa: PLR0913 -- Click handler
         # from. Equals $PWD unless --root redirects writes elsewhere.
         source_root = get_source_root(InstallScope.PROJECT)
 
-        _validate_project(
-            logger,
-            dry_run,
-            source_root,
-            allow_empty=clean and not validate and not watch,
-        )
+        # pre-compile scripts run inside _run_compilation, which checks the
+        # project after them so a first compile finds what they generate.
+        # --validate, --watch and --dry-run run no scripts, and neither does
+        # --root, which promises to write only under its directory.
+        run_scripts = not validate and not watch and not dry_run and not root
+        if not run_scripts:
+            _validate_project(
+                logger,
+                dry_run,
+                source_root,
+                allow_empty=clean and not validate and not watch,
+            )
 
         if validate:
             _run_validation_mode(logger, verbose, source_root)
@@ -1428,6 +1525,7 @@ def compile(  # noqa: PLR0913 -- Click handler
             clean,
             no_dedup,
             source_root=source_root,
+            run_scripts=run_scripts,
         )
 
     except ImportError as e:

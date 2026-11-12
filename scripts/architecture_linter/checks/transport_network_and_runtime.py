@@ -14,10 +14,9 @@ non-owner transport-domain guards:
   host literal parsing and loopback classification (legacy network-host
   guard).
 
-Two additional, non-owner rules port transport-domain guards whose owners are
-not among the ten registry owners above: the process-wide TLS trust-injection
-scope guard (legacy AC5 TLS, owner ``core/tls_trust.py``) and the runtime
-wall-clock deadline guard (legacy AC7, owner ``runtime/base.py``).
+The TLS rule also guards the registered package-HTTPS trust policy owner.
+The runtime wall-clock deadline rule remains a non-owner guard (legacy AC7,
+owner ``runtime/base.py``).
 
 Every check reads source exclusively through the shared
 :class:`~scripts.architecture_linter.facts.FactsProvider`; nothing here opens
@@ -142,9 +141,33 @@ def _check_ref_freshness(provider: FactsProvider) -> tuple[Violation, ...]:
             (
                 re.compile(r"^class RefFreshnessPolicy\(Enum\):"),
                 re.compile(r"^def ref_freshness_policy_for_install\("),
+                re.compile(r"^        return cls\.LOCKED_OR_CURRENT$"),
+                re.compile(r"^            dep_ref\.get_unique_key\(\),$"),
                 re.compile(r"^    if freshness_policy\.allows_bare_cache:"),
             ),
             "tiered_ref_resolver must own RefFreshnessPolicy and its install policy",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FRESHNESS,
+            _TIERED,
+            (
+                "        try:\n"
+                "            key = self._lock_seed_key(dep_ref, ref)\n"
+                "        except (ValueError, RuntimeError) as exc:\n"
+                "            _log.debug(\n"
+                '                "Skipping lock seed: historical provider identity is '
+                'unclassifiable (%s)",\n'
+                "                type(exc).__name__,\n"
+                "            )\n"
+                "            return False\n"
+                "        with self._coalesce_lock:\n"
+                "            self._lock_seeds[key] = sha.lower()",
+            ),
+            "unclassifiable historical seeds must be rejected before storage",
         )
     )
     findings.extend(
@@ -476,15 +499,60 @@ _TLS_ALLOWED: frozenset[str] = frozenset(
 
 def _check_tls_trust_injection(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
-    return _forbid_scan(
-        provider,
-        inv,
-        _RID_TLS,
-        _src_python(provider, exclude=_TLS_ALLOWED),
-        _TLS_INJECT,
-        "TLS trust injection belongs to core/tls_trust.py and the child TLS bootstrap",
-        exempt=True,
+    findings = list(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_TLS,
+            _src_python(provider, exclude=_TLS_ALLOWED),
+            _TLS_INJECT,
+            "TLS trust injection belongs to core/tls_trust.py and the child TLS bootstrap",
+            exempt=True,
+        )
     )
+    owner = "src/apm_cli/core/tls_trust.py"
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_TLS,
+            owner,
+            ("def explicit_ca_bundle_path(", "if has_explicit_ca_override(environ):"),
+            "TLS replacement precedence must remain in the TLS trust owner",
+        )
+    )
+    for pattern, allowed in (
+        (r"""["']APM_EXTRA_CA_BUNDLE["']|\b_EXTRA_CA_ENV_VAR\b""", {owner}),
+        (
+            r"""["'](?:REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)["']|\b_EXPLICIT_CA_ENV_VARS\b""",
+            _TLS_ALLOWED,
+        ),
+    ):
+        findings.extend(
+            _forbid_scan(
+                provider,
+                inv,
+                _RID_TLS,
+                _src_python(provider, exclude=allowed),
+                re.compile(pattern),
+                "TLS environment selection belongs to the TLS trust owner",
+                exempt=False,
+            )
+        )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_TLS,
+            "src/apm_cli/core/script_executors.py",
+            (
+                ("sub", "explicit_ca = explicit_ca_bundle_path()", 2, "eq"),
+                ("sub", "session.verify = explicit_ca", 2, "eq"),
+            ),
+            "Both hardened lifecycle Sessions must consume the TLS replacement owner",
+        )
+    )
+    return tuple(findings)
 
 
 _RID_RUNTIME_DEADLINE = "transport-platform-runtime-deadline-safety"
@@ -579,8 +647,8 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id=_RID_TLS,
         group=GROUP,
-        guard_ids=(),
-        description="TLS trust injection stays scoped to core/tls_trust.py and the child bootstrap.",
+        guard_ids=(_RID_TLS,),
+        description="Package HTTPS trust stays owned by tls_trust; child OS bootstrap is separate.",
         check=_check_tls_trust_injection,
     ),
     Rule(

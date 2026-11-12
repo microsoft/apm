@@ -146,7 +146,10 @@ class TestLocalPathFailureReason:
         dep.is_local = True
         dep.local_path = str(tmp_path / "nonexistent")
         reason = _local_path_failure_reason(dep)
-        assert reason == "path does not exist"
+        assert reason == (
+            f"Local package path does not exist: {dep.local_path}. "
+            "Restore the source or correct the dependency path, then rerun apm install."
+        )
 
     def test_path_is_file_not_dir_returns_message(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason
@@ -157,7 +160,11 @@ class TestLocalPathFailureReason:
         dep.is_local = True
         dep.local_path = str(f)
         reason = _local_path_failure_reason(dep)
-        assert reason == "path is not a directory"
+        assert reason == (
+            "Unsupported single-file dependency: file.txt. "
+            "Use .prompt.md, .instructions.md, .agent.md, "
+            "or a directory package with apm.yml for companion assets."
+        )
 
     def test_dir_without_markers_returns_message(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason

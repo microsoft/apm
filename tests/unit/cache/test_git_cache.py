@@ -11,6 +11,15 @@ import pytest
 
 from apm_cli.cache.git_cache import CachePruneError, GitCache
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
+
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked Git subprocesses carry no objects; real-git tests cover links."""
+    with patch("apm_cli.cache.git_cache.materialize_tracked_symlinks"):
+        yield
 
 
 @pytest.mark.parametrize("ref", ["main", "release/v1", "v1.0"])
@@ -55,6 +64,43 @@ def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Pat
     with patch.object(L2BareRevParse, "_rev_parse", return_value="a" * 40) as bare:
         assert L2BareRevParse(cache).try_resolve(dependency, "main") is None
     bare.assert_not_called()
+
+
+@pytest.mark.parametrize("receipt_state", ["valid", "absent", "corrupt"])
+def test_receipt_precedence_with_actual_stale_bare_reference(
+    tmp_path: Path, receipt_state: str
+) -> None:
+    """An actual stale Git branch cannot replace a present or corrupt receipt."""
+    from apm_cli.deps.tiered_ref_resolver import L2BareRevParse
+    from apm_cli.models.apm_package import DependencyReference
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "fixture", base_env=dict(os.environ))
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    repository = repositories.create("receipt-history")
+    payload = repository.worktree / "payload.txt"
+    payload.write_text("old\n", encoding="ascii")
+    old_commit = repositories.commit(repository, message="Old observation")
+    cache = GitCache(tmp_path / "cache")
+    dependency = DependencyReference.parse("owner/repo#main")
+    url = dependency.to_github_url()
+    bare = cache._db_root / cache_shard_key(url)
+    # Pushes can start background auto-maintenance in the origin; skip its
+    # transient lock and temp files so the snapshot copy cannot race them.
+    shutil.copytree(
+        repository.origin, bare, ignore=shutil.ignore_patterns("*.lock", "tmp_*", "gc.pid")
+    )
+    payload.write_text("current\n", encoding="ascii")
+    current_commit = repositories.commit(repository, message="Current observation")
+    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    if receipt_state != "absent":
+        cache.remember_resolved_ref(url, "main", current_commit.sha)
+        if receipt_state == "corrupt":
+            cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
+    expected = {"valid": current_commit.sha, "absent": old_commit.sha, "corrupt": None}
+    assert L2BareRevParse(cache).try_resolve(dependency, "main") == expected[receipt_state]
+    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
 
 
 @pytest.mark.windows_compat
@@ -141,7 +187,9 @@ class TestGitCacheGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
         )
 
         # Mock git rev-parse HEAD to return the expected SHA
@@ -373,7 +421,11 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
+        )
 
         with (
             patch("subprocess.run") as mock_run,
@@ -438,7 +490,11 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
+        )
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 
         def _populate(*args, **kwargs):

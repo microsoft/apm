@@ -2,8 +2,9 @@
 
 import re
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PureWindowsPath
+from typing import TYPE_CHECKING, ClassVar
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
@@ -60,6 +61,9 @@ from .object_fields import (
 )
 from .provider_coordinates import ProviderCoordinateMixin
 from .types import VirtualPackageType
+
+if TYPE_CHECKING:
+    from .replacement import ReplacementBinding
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
@@ -131,6 +135,17 @@ class DependencyReference(ProviderCoordinateMixin):
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
     marketplace_manifest: dict[str, object] | None = None
+    replacement: "ReplacementBinding | None" = field(default=None, repr=False, compare=False)
+
+    @property
+    def source_reference(self) -> "DependencyReference":
+        """Transport/cache coordinates without graph ownership redirection."""
+        return replace(self, replacement=None) if self.replacement is not None else self
+
+    @property
+    def ownership_reference(self) -> "DependencyReference":
+        """Original identity and filesystem destination selected by the consumer."""
+        return self.replacement.original if self.replacement is not None else self
 
     @property
     def canonical_repo_url(self) -> str:
@@ -210,11 +225,12 @@ class DependencyReference(ProviderCoordinateMixin):
         return "literal"
 
     # Supported file extensions for virtual packages
-    VIRTUAL_FILE_EXTENSIONS = (
-        ".prompt.md",
-        ".instructions.md",
-        ".agent.md",
-    )
+    VIRTUAL_FILE_SUBDIRECTORIES: ClassVar[dict[str, str]] = {
+        ".prompt.md": "prompts",
+        ".instructions.md": "instructions",
+        ".agent.md": "agents",
+    }
+    VIRTUAL_FILE_EXTENSIONS = tuple(VIRTUAL_FILE_SUBDIRECTORIES)
 
     # Removed collection-manifest extensions. URLs ending in one of these are
     # rejected at parse time with a migration message; the legacy
@@ -357,6 +373,8 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             str: Unique key for this dependency
         """
+        if self.replacement is not None:
+            return self.replacement.original.get_unique_key()
         return build_dependency_unique_key(
             self.repo_url,
             host=self.host,
@@ -2008,6 +2026,8 @@ class DependencyReference(ProviderCoordinateMixin):
 
     def get_display_name(self) -> str:
         """Get display name for this dependency (alias or repo name)."""
+        if self.is_marketplace:
+            return f"{self.marketplace_plugin_name}@{self.marketplace_name}"
         if self.alias:
             return self.alias
         if self.is_local and self.local_path:

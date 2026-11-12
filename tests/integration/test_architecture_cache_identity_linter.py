@@ -326,14 +326,23 @@ MUTATIONS: Mapping[str, Mutation] = {
         ),
         expected="TieredRefResolver.seed is missing",
     ),
-    "seed-put-truncated": Mutation(
+    "seed-key-dependency-truncated": Mutation(
         apply=lambda root: _rewrite(
             root,
             TIERED_RESOLVER,
-            "        self._cache.put(_repository_cache_identity(dep_ref), ref, sha.lower())\n",
-            "        self._cache.put(dep_ref.repo_url, ref, sha.lower())\n",
+            "            dep_ref.get_unique_key(),\n",
+            "            dep_ref.repo_url,\n",
         ),
-        expected="lockfile seed must call _cache.put(",
+        expected="lockfile seed key must combine dependency identity",
+    ),
+    "seed-key-repository-truncated": Mutation(
+        apply=lambda root: _rewrite(
+            root,
+            TIERED_RESOLVER,
+            "            _repository_cache_identity(dep_ref),\n",
+            "            dep_ref.repo_url,\n",
+        ),
+        expected="lockfile seed key must combine dependency identity",
     ),
     # -- Fail-closed cases ---------------------------------------------------
     "shared-source-missing": Mutation(

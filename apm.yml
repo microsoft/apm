@@ -3,7 +3,7 @@ version: 0.10.0
 description: APM (Agent Package Manager) -- ship and govern AI agent context
 includes: auto
 author: Microsoft
-license: MIT
+license: Apache-2.0
 
 # Pinned so every contributor's `apm install` deploys the same tree this
 # repo commits (.github/ plus .agents/skills/ via skills convergence),

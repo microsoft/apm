@@ -332,13 +332,28 @@ class GitHubTokenManager:
         if env is None:
             env = os.environ
 
+        source = self.get_token_env_var_for_purpose(purpose, env)
+        return env[source] if source is not None else None
+
+    def get_token_env_var_for_purpose(
+        self, purpose: str, env: dict[str, str] | None = None
+    ) -> str | None:
+        """Return the selected environment variable name without revealing its value.
+
+        The selected name follows the same precedence as
+        :meth:`get_token_for_purpose`. Caller-specific compatibility sources
+        are selected by AuthResolver, not by this low-level lookup.
+        """
+        if env is None:
+            env = os.environ
+
         if purpose not in self.TOKEN_PRECEDENCE:
             raise ValueError(f"Unknown purpose: {purpose}")
 
         for token_var in self.TOKEN_PRECEDENCE[purpose]:
-            token = env.get(token_var)
-            if token:
-                return token
+            if env.get(token_var):
+                return token_var
+
         return None
 
     def get_token_with_credential_fallback(

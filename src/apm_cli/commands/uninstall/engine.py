@@ -4,11 +4,12 @@ import builtins
 import contextlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
-from ...deps.lockfile import LockFile
+from ...deps.lockfile import LockFile, lockfile_parent_identity
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
@@ -20,6 +21,9 @@ from ...models.dependency.selection import (
 )
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
+
+if TYPE_CHECKING:
+    from ...core.deployment_ledger import DeploymentMaterializationSession
 
 
 class MCPUninstallCleanupError(RuntimeError):
@@ -40,19 +44,37 @@ def _is_marketplace_ref(package: str) -> bool:
 
 
 def _build_children_index(lockfile):
-    """Build parent_url -> [child_deps] index in a single O(n) pass.
-
-    Returns a dict mapping each ``resolved_by`` URL to the list of
-    dependency objects that claim it as their parent.
-    """
+    """Index every recorded original parent in one pass over the locked edges."""
     children = {}
     for dep in lockfile.get_package_dependencies():
-        parent = dep.resolved_by
-        if parent:
-            if parent not in children:
-                children[parent] = []
-            children[parent].append(dep)
+        for parent in dep.parent_keys:
+            if parent is not None:
+                children.setdefault(parent, []).append(dep)
     return children
+
+
+def _collect_orphan_candidates(
+    lockfile: LockFile, packages_to_remove: list[object]
+) -> tuple[set[str], set[str]]:
+    """Share the backward edge scan without changing preview's cold-cache behavior."""
+    removed_parents: set[str] = set()
+    for package in packages_to_remove:
+        try:
+            reference = _parse_dependency_entry(package)
+            removed_parents.add(lockfile_parent_identity(reference, lockfile.replacements))
+        except (ValueError, TypeError, AttributeError, KeyError):
+            removed_parents.add(str(package))
+    children = _build_children_index(lockfile)
+    candidates: set[str] = set()
+    queue = list(removed_parents)
+    while queue:
+        for dependency in children.get(queue.pop(), ()):
+            key = dependency.get_unique_key()
+            if key in candidates:
+                continue
+            candidates.add(key)
+            queue.append(lockfile_parent_identity(dependency, lockfile.replacements))
+    return candidates, removed_parents
 
 
 def _dependency_public_label(dep_entry: object) -> str:
@@ -413,7 +435,10 @@ def _compute_actual_orphans(
         remaining_deps.add(ref.get_unique_key())
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
-        if key not in orphans and dep.repo_url not in removed_repo_urls:
+        if (
+            key not in orphans
+            and lockfile_parent_identity(dep, lockfile.replacements) not in removed_repo_urls
+        ):
             remaining_deps.add(key)
 
     candidate_orphans = builtins.frozenset(orphans) - remaining_deps
@@ -427,6 +452,16 @@ def _compute_actual_orphans(
         lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans
     )
     if not reachability.complete:
+        if lockfile.replacements is not None:
+            unverifiable = sorted({key for key, _reason in reachability.unverifiable})
+            details = ", ".join(unverifiable[:3])
+            if len(unverifiable) > 3:
+                details += ", ..."
+            raise ValueError(
+                "Cannot verify replacement dependency reachability "
+                f"({len(unverifiable)} manifest(s): {details}). Restore missing or "
+                "invalid package manifests before uninstalling."
+            )
         if warn_on_incomplete:
             _warn_reachability_incomplete(reachability, logger)
         return builtins.frozenset(), {}
@@ -628,6 +663,7 @@ def _validate_uninstall_packages(
         )
 
     packages_to_remove = []
+    seen_entry_ids: set[int] = set()
     packages_not_found = []
 
     for package in packages:
@@ -667,7 +703,10 @@ def _validate_uninstall_packages(
         selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
-            if matched_dep not in packages_to_remove:
+            # Selection returns the original manifest object, including unhashable mappings.
+            entry_id = id(matched_dep)
+            if entry_id not in seen_entry_ids:
+                seen_entry_ids.add(entry_id)
                 packages_to_remove.append(matched_dep)
             if not log_matches:
                 continue
@@ -771,29 +810,11 @@ def _dry_run_uninstall(
     lockfile_path = get_lockfile_path(Path("."))
     lockfile = LockFile.read(lockfile_path)
     if lockfile:
-        removed_repo_urls = builtins.set()
-        for pkg in packages_to_remove:
-            try:
-                ref = _parse_dependency_entry(pkg)
-                removed_repo_urls.add(ref.repo_url)
-            except (ValueError, TypeError, AttributeError, KeyError):
-                removed_repo_urls.add(pkg)
-        children_index = _build_children_index(lockfile)
-        queue = builtins.list(removed_repo_urls)
-        potential_orphans = builtins.set()
-        while queue:
-            parent_url = queue.pop()
-            for dep in children_index.get(parent_url, []):
-                key = dep.get_unique_key()
-                if key in potential_orphans:
-                    continue
-                potential_orphans.add(key)
-                queue.append(dep.repo_url)
-
+        candidates, removed_parents = _collect_orphan_candidates(lockfile, packages_to_remove)
         actual_orphans, _resolved_by_repairs = _compute_actual_orphans(
             lockfile,
-            potential_orphans,
-            removed_repo_urls,
+            candidates,
+            removed_parents,
             apm_yml_path,
             packages_to_remove,
             apm_modules_dir,
@@ -971,27 +992,7 @@ def _project_transitive_orphans(
     if not lockfile or not apm_modules_dir.exists():
         return builtins.frozenset(), {}
 
-    removed_repo_urls = builtins.set()
-    for pkg in packages_to_remove:
-        try:
-            ref = _parse_dependency_entry(pkg)
-            removed_repo_urls.add(ref.repo_url)
-        except (ValueError, TypeError, AttributeError, KeyError):
-            removed_repo_urls.add(pkg)
-
-    # Find transitive orphans recursively
-    children_index = _build_children_index(lockfile)
-    orphans = builtins.set()
-    queue = builtins.list(removed_repo_urls)
-    while queue:
-        parent_url = queue.pop()
-        for dep in children_index.get(parent_url, []):
-            key = dep.get_unique_key()
-            if key in orphans:
-                continue
-            orphans.add(key)
-            queue.append(dep.repo_url)
-
+    orphans, removed_repo_urls = _collect_orphan_candidates(lockfile, packages_to_remove)
     if not orphans:
         return builtins.frozenset(), {}
 
@@ -1063,7 +1064,7 @@ def _preflight_uninstall_survivors(
         dep_ref
         for dep_ref in refs
         if dep_ref.get_unique_key() not in excluded
-        and not (source_root is not None and dep_ref.is_local)
+        and not (source_root is not None and dep_ref.is_local and dep_ref.replacement is None)
     ]
     return preflight_reintegration_survivors(
         installed_refs,
@@ -1080,6 +1081,7 @@ class IntegrationCleanupOutcome:
     deployed_files: dict[str, list[str]]
     failed_paths: list[str]
     error_count: int
+    materialization_session: "DeploymentMaterializationSession | None" = None
 
     @property
     def complete(self) -> bool:
@@ -1113,6 +1115,7 @@ def _sync_integrations_after_uninstall(
     modules_dir: Path | None = None,
     survivor_plan: list[tuple[DependencyReference, object]] | None = None,
     deployed_file_hashes: dict[str, str] | None = None,
+    excluded_survivor_keys: frozenset[str] = frozenset(),
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1123,7 +1126,11 @@ def _sync_integrations_after_uninstall(
     lockfile (orphans already deleted). The on-disk lockfile is still
     stale at this point in the uninstall pipeline, so Phase 2 must not
     re-read it from disk.
+
+    Survivors in *excluded_survivor_keys* are not re-integrated, such as
+    packages just removed from the selected profile only.
     """
+    from ...core.deployment_ledger import DeploymentMaterializationSession
     from ...install.services import (
         IntegratorBundle,
         integrate_package_primitives,
@@ -1178,6 +1185,8 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
+        if dep_ref.get_unique_key() in excluded_survivor_keys:
+            continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             dep_ref.target_subset,
@@ -1243,13 +1252,11 @@ def _sync_integrations_after_uninstall(
             counts[_entry.counter_key] += result.get("files_removed", 0)
 
     # Skills (multi-target, handled by SkillIntegrator)
-    # Check both target root_dir and deploy_root for skill directories
+    # Check the target's effective skills root (deploy_root + skills subdir)
     _skill_dirs_exist = False
     for t in _resolved_targets:
         if t.supports("skills"):
-            sm = t.primitives["skills"]
-            er = sm.deploy_root or t.root_dir
-            if (project_root / er / "skills").exists():
+            if (project_root / t.skills_rel_root).exists():
                 _skill_dirs_exist = True
                 break
 
@@ -1284,12 +1291,19 @@ def _sync_integrations_after_uninstall(
         # prefix (.copilot/skills/) and cowork:// paths would be silently
         # skipped by the startswith() guard inside sync_integration.
         _sync_targets = None if _has_cowork_skills else _resolved_targets
-        result = _integrators["skills"].sync_integration(
-            apm_package,
-            project_root,
-            managed_files=_buckets["skills"] if _buckets else None,
-            targets=_sync_targets,
-        )
+        removed_skill_paths: list[Path] = []
+        try:
+            result = _integrators["skills"].sync_integration(
+                apm_package,
+                project_root,
+                managed_files=_buckets["skills"] if _buckets else None,
+                targets=_sync_targets,
+                removed_paths=removed_skill_paths,
+            )
+        finally:
+            DeploymentMaterializationSession.retire_removed(
+                project_root, removed_skill_paths, user_scope=user_scope
+            )
         counts["skills"] = result.get("files_removed", 0)
 
     # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
@@ -1379,36 +1393,42 @@ def _sync_integrations_after_uninstall(
     _rebuild_scope = InstallScope.USER if user_scope else InstallScope.PROJECT
     _allow_executables = getattr(apm_package, "allow_executables", None)
     reintegration_diagnostics = DiagnosticCollector()
-    for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
-        dep_key = dep_ref.get_unique_key()
-        deployed_files = package_deployed_files.setdefault(dep_key, [])
+    materialization_session = (
+        DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)
+        if target_survivor_plan
+        else None
+    )
+    with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):
+        for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
+            dep_key = dep_ref.get_unique_key()
+            deployed_files = package_deployed_files.setdefault(dep_key, [])
 
-        try:
-            integration_result = integrate_package_primitives(
-                pkg_info,
-                project_root,
-                targets=authorized_targets,
-                integrators=_integrator_bundle,
-                force=False,
-                managed_files=None,
-                diagnostics=reintegration_diagnostics,
-                package_name=dep_ref.get_identity(),
-                logger=logger,
-                scope=_rebuild_scope,
-                allow_executables=_allow_executables,
-                trust_bin=False,
-                bin_skip_reason_override="not_retrusted_on_uninstall",
-            )
-            deployed_files.extend(integration_result["deployed_files"])
-        except Exception as exc:
-            pkg_id = _dependency_public_label(dep_ref)
-            logger.warning(
-                f"Best-effort re-integration skipped for {pkg_id}. "
-                "Run 'apm install' to rebuild integrated files."
-            )
-            logger.verbose_detail(
-                f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
-            )
+            try:
+                integration_result = integrate_package_primitives(
+                    pkg_info,
+                    project_root,
+                    targets=authorized_targets,
+                    integrators=_integrator_bundle,
+                    force=False,
+                    managed_files=None,
+                    diagnostics=reintegration_diagnostics,
+                    package_name=dep_ref.get_identity(),
+                    logger=logger,
+                    scope=_rebuild_scope,
+                    allow_executables=_allow_executables,
+                    trust_bin=False,
+                    bin_skip_reason_override="not_retrusted_on_uninstall",
+                )
+                deployed_files.extend(integration_result["deployed_files"])
+            except Exception as exc:
+                pkg_id = _dependency_public_label(dep_ref)
+                logger.warning(
+                    f"Best-effort re-integration skipped for {pkg_id}. "
+                    "Run 'apm install' to rebuild integrated files."
+                )
+                logger.verbose_detail(
+                    f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
+                )
 
     reintegration_diagnostics.render_summary()
     return IntegrationCleanupOutcome(
@@ -1416,6 +1436,7 @@ def _sync_integrations_after_uninstall(
         deployed_files=package_deployed_files,
         failed_paths=failed_hook_paths,
         error_count=result.get("errors", 0),
+        materialization_session=materialization_session,
     )
 
 
@@ -1445,6 +1466,9 @@ def _remove_stale_mcp_from_recorded_targets(
         )
 
     failures: list[tuple[str, Exception]] = []
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
     for runtime, managed_servers in sorted(target_servers.items()):
         scoped_stale = stale_servers.intersection(managed_servers)
         if not scoped_stale:
@@ -1457,6 +1481,8 @@ def _remove_stale_mcp_from_recorded_targets(
                 user_scope=user_scope,
                 scope=scope,
                 fail_on_write_error=True,
+                stored_configs=lockfile.mcp_configs,
+                native_hashes=native_hashes,
             )
         except Exception as exc:
             failures.append((runtime, exc))

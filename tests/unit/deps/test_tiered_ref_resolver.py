@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
 from apm_cli.cache.url_normalize import cache_shard_key
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
     L1CommitsAPI,
@@ -29,6 +30,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     _repository_cache_identity,
     build_tiered_ref_resolver,
     is_tiered_resolver_enabled,
+    ref_freshness_policy_for_install,
 )
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
@@ -50,7 +52,7 @@ def _dep(repo: str = "owner/repo", ref: str = "main") -> DependencyReference:
 @pytest.mark.parametrize(
     ("update_refs", "refresh", "expected"),
     [
-        (False, False, RefFreshnessPolicy.REPRODUCIBLE),
+        (False, False, RefFreshnessPolicy.LOCKED_OR_CURRENT),
         (True, False, RefFreshnessPolicy.CURRENT_REMOTE),
         (False, True, RefFreshnessPolicy.CURRENT_REMOTE),
         (True, True, RefFreshnessPolicy.CURRENT_REMOTE),
@@ -64,8 +66,29 @@ def test_freshness_policy_maps_install_intent_once(update_refs, refresh, expecte
 
     assert policy is expected
     assert policy.requires_remote is (expected is RefFreshnessPolicy.CURRENT_REMOTE)
-    assert policy.allows_lock_seed is (expected is RefFreshnessPolicy.REPRODUCIBLE)
-    assert policy.allows_bare_cache is (expected is RefFreshnessPolicy.REPRODUCIBLE)
+    assert policy.allows_lock_seed is (expected is RefFreshnessPolicy.LOCKED_OR_CURRENT)
+    assert policy.allows_bare_cache is False
+
+
+@pytest.mark.parametrize("has_lock", [False, True])
+@pytest.mark.parametrize("update_refs", [False, True])
+def test_install_freshness_requires_remote_without_replayable_lock(
+    has_lock: bool, update_refs: bool
+) -> None:
+    context = types.SimpleNamespace(
+        ref_freshness_policy=None,
+        update_refs=update_refs,
+        refresh=False,
+        existing_lockfile=LockFile() if has_lock else None,
+    )
+    policy = ref_freshness_policy_for_install(context)
+    assert policy is (
+        RefFreshnessPolicy.LOCKED_OR_CURRENT
+        if has_lock and not update_refs
+        else RefFreshnessPolicy.CURRENT_REMOTE
+    )
+    context.ref_freshness_policy = RefFreshnessPolicy.CURRENT_REMOTE
+    assert ref_freshness_policy_for_install(context) is RefFreshnessPolicy.CURRENT_REMOTE
 
 
 @pytest.mark.parametrize(
@@ -413,6 +436,79 @@ def test_seed_normalizes_sha_case():
     assert result.resolved_commit == "a" * 40
 
 
+@pytest.mark.parametrize("host", ["gitlab.com", "code.example.com"])
+def test_lock_seed_requires_equivalent_effective_provider(host: str) -> None:
+    """Equivalent hints replay; switching provider must establish a fresh ref."""
+    cache = PerRunRefCache()
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy],
+        cache=cache,
+        legacy=legacy,
+        freshness_policy=RefFreshnessPolicy.LOCKED_OR_CURRENT,
+    )
+    locked = DependencyReference(repo_url="owner/repo", host=host, reference="main")
+    declared = DependencyReference(
+        repo_url="owner/repo", host=host, host_type="gitlab", reference="main"
+    )
+    assert resolver.seed(locked, "main", SHA_A)
+    assert cache.size() == 0
+    assert resolver.resolve(declared).resolved_commit == (SHA_A if host == "gitlab.com" else SHA_B)
+
+
+def test_current_policy_rejects_lock_seed() -> None:
+    """Refresh intent never accepts a lock seed, even through a direct caller."""
+    cache = PerRunRefCache()
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy],
+        cache=cache,
+        legacy=legacy,
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    assert resolver.seed(_dep(), "main", SHA_A) is False
+    assert resolver.resolve(_dep()).resolved_commit == SHA_B
+
+
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
+def test_seed_rejects_unclassifiable_history_without_recording(
+    caplog: pytest.LogCaptureFixture, error_type: type[Exception]
+) -> None:
+    """Historical classification failures reject admission, not current resolution."""
+    cache = PerRunRefCache()
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy], cache=cache, legacy=legacy
+    )
+    with (
+        patch(
+            "apm_cli.core.host_providers.effective_host_provider_identity",
+            side_effect=error_type("untrusted historical metadata"),
+        ),
+        caplog.at_level("DEBUG", logger="apm_cli.deps.tiered_ref_resolver"),
+    ):
+        assert resolver.seed(_dep(), "main", SHA_A) is False
+    assert resolver._lock_seeds == {}
+    assert cache.size() == 0
+    assert resolver.remotely_resolved(_dep(), SHA_A) is False
+    assert caplog.messages == [
+        f"Skipping lock seed: historical provider identity is unclassifiable ({error_type.__name__})"
+    ]
+    assert resolver.resolve(_dep()).resolved_commit == SHA_B
+
+
+def test_seed_rejection_does_not_swallow_unexpected_errors() -> None:
+    """Programming errors are not historical-provider rejection or successful replay."""
+    resolver = TieredRefResolver([], PerRunRefCache(), _make_legacy_with(SHA_B))
+    with patch(
+        "apm_cli.core.host_providers.effective_host_provider_identity",
+        side_effect=TypeError("fixture programming error"),
+    ):
+        with pytest.raises(TypeError, match="fixture programming error"):
+            resolver.seed(_dep(), "main", SHA_A)
+    assert resolver._lock_seeds == {}
+
+
 def test_orchestrator_collapses_concurrent_resolves():
     cache = PerRunRefCache()
     legacy = _make_legacy_with(SHA_A)
@@ -565,11 +661,11 @@ def test_factory_excludes_l2_when_update_refs_true(monkeypatch):
     assert tier_names == ["per_run_cache", "commits_api", "legacy_clone"]
 
 
-def test_factory_includes_l2_when_update_refs_false(monkeypatch):
-    """update_refs=False (default install) must retain L2BareRevParse.
+def test_factory_preserves_l2_for_explicit_compatibility_policy(monkeypatch):
+    """Legacy callers explicitly selecting REPRODUCIBLE retain L2BareRevParse.
 
     This is a regression trap: the bare-rev-parse tier is a performance
-    optimisation for non-update runs and must not be accidentally removed.
+    optimisation retained by that policy, not by ordinary install intent.
     """
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
     downloader = MagicMock()
@@ -630,8 +726,8 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
     assert "bare_rev_parse" not in resolver.stats
 
 
-def test_normal_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, tmp_path):
-    """A normal warm install keeps the zero-network L2 performance boundary."""
+def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, tmp_path):
+    """Explicit compatibility policy retains legacy bare-cache behavior."""
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
     bare = tmp_path / cache_shard_key(_dep().to_github_url())
     bare.mkdir(parents=True)
@@ -658,7 +754,77 @@ def test_normal_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, t
     assert resolver.stats["legacy_clone"] == 0
 
 
-def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_path):
+@pytest.mark.parametrize("lock_shape", ["matching", "unrelated", "sibling", "empty"])
+def test_install_lock_presence_cannot_authorize_unseeded_bare_refs(
+    monkeypatch, tmp_path, lock_shape: str
+) -> None:
+    """Only a concrete matching lock seed can avoid current upstream resolution."""
+    from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+
+    monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
+    dep = _dep()
+    bare = tmp_path / cache_shard_key(dep.to_github_url())
+    bare.mkdir(parents=True)
+    locked_ref = _dep(repo="other/package") if lock_shape == "unrelated" else _dep()
+    if lock_shape == "sibling":
+        locked_ref = DependencyReference(
+            repo_url="owner/repo", reference="main", virtual_path="skills/sibling", is_virtual=True
+        )
+    locked = LockedDependency(
+        repo_url=locked_ref.repo_url,
+        virtual_path=locked_ref.virtual_path,
+        is_virtual=locked_ref.is_virtual,
+        resolved_ref="main",
+        resolved_commit=SHA_A,
+    )
+    context = types.SimpleNamespace(
+        ref_freshness_policy=None,
+        update_refs=False,
+        refresh=False,
+        existing_lockfile=LockFile(
+            dependencies={} if lock_shape == "empty" else {locked_ref.get_unique_key(): locked}
+        ),
+        logger=None,
+    )
+    downloader = MagicMock()
+    downloader._refs.resolve_commit_sha_for_ref.return_value = None
+    downloader._refs.resolve.return_value = ResolvedReference(
+        original_ref=str(dep),
+        ref_type=GitReferenceType.BRANCH,
+        resolved_commit=SHA_B,
+        ref_name="main",
+    )
+    resolver = build_tiered_ref_resolver(
+        downloader=downloader,
+        git_cache=types.SimpleNamespace(
+            _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
+        ),
+        freshness_policy=ref_freshness_policy_for_install(context),
+    )
+    assert resolver is not None
+    context.ref_resolver = resolver
+    seed_ref_resolver_from_lockfile(context)
+    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2:
+        result = resolver.resolve(dep)
+    assert result.resolved_commit == (SHA_A if lock_shape == "matching" else SHA_B)
+    stale_l2.assert_not_called()
+    if lock_shape == "matching":
+        downloader._refs.resolve.assert_not_called()
+    else:
+        downloader._refs.resolve.assert_called_once_with(dep)
+    if lock_shape == "sibling":
+        assert resolver.resolve(locked_ref).resolved_commit == SHA_A
+        other_unlocked = DependencyReference(
+            repo_url="owner/repo", reference="main", virtual_path="skills/new", is_virtual=True
+        )
+        assert resolver.resolve(other_unlocked).resolved_commit == SHA_B
+        downloader._refs.resolve.assert_called_once_with(dep)
+
+
+@pytest.mark.parametrize(
+    "policy", [RefFreshnessPolicy.CURRENT_REMOTE, RefFreshnessPolicy.LOCKED_OR_CURRENT]
+)
+def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_path, policy):
     """Freshness-required resolution never substitutes a stale L2 answer."""
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
     bare = tmp_path / cache_shard_key(_dep().to_github_url())
@@ -670,8 +836,10 @@ def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_pat
     downloader._refs = fake_refs
     resolver = build_tiered_ref_resolver(
         downloader=downloader,
-        git_cache=types.SimpleNamespace(_db_root=tmp_path),
-        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+        git_cache=types.SimpleNamespace(
+            _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
+        ),
+        freshness_policy=policy,
     )
     assert isinstance(resolver, TieredRefResolver)
 

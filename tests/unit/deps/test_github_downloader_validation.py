@@ -561,7 +561,7 @@ class TestRound3SafeRmtreeNotRobustRmtreeDirect:
         dep_ref = _make_subdir_dep(vpath="skills/x", ref="main")
         winning = gdv.AttemptSpec("plain HTTPS w/ credential helper", "https://x", {})
 
-        completed = MagicMock(stdout="100644 blob abc\tskills/x")
+        completed = MagicMock(stdout="040000 tree abc\tskills/x")
         with (
             patch("apm_cli.deps.github_downloader_validation.safe_rmtree") as safe_rm_mock,
             patch(
@@ -819,7 +819,7 @@ class TestSubdirectoryProbeOrder:
         dep_ref = _make_subdir_dep(vpath="collections/writing", ref="main")
 
         # Whitelist only `<vpath>/apm.yml`; everything else 404s.
-        def fake_download(_dr, path, _ref):
+        def fake_download(_dr, path, _ref, **kwargs):
             if path == "collections/writing/apm.yml":
                 return b"name: writing\nversion: 1.0.0\n"
             raise RuntimeError("404")

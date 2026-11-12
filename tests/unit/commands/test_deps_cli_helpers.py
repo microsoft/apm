@@ -56,12 +56,9 @@ class TestFormatPrimitiveCounts:
 
 
 def _make_dep(key="owner/repo", version=None, resolved_commit=None, resolved_ref=None):
-    dep = MagicMock()
-    dep.get_unique_key.return_value = key
-    dep.version = version
-    dep.resolved_commit = resolved_commit
-    dep.resolved_ref = resolved_ref
-    return dep
+    return LockedDependency(
+        repo_url=key, version=version, resolved_commit=resolved_commit, resolved_ref=resolved_ref
+    )
 
 
 class TestDepDisplayName:
@@ -88,16 +85,16 @@ class TestDepDisplayName:
 
 def _make_local_dep(local_path=None, repo_url="_local/pkg", version=None):
     """Local dep whose unique key would leak an absolute host slot."""
-    dep = MagicMock()
-    dep.source = "local"
-    dep.local_path = local_path
-    dep.repo_url = repo_url
-    dep.version = version
-    dep.resolved_commit = None
-    dep.resolved_ref = None
+    dep = LockedDependency(
+        repo_url=repo_url,
+        source="local",
+        local_path=local_path,
+        anchored_local_path="/abs/host/path/pkg",
+        version=version,
+    )
     # The anchored unique key is an absolute ``local:/...`` slot the display
     # must never surface for a local dep.
-    dep.get_unique_key.return_value = "local:/abs/host/path/pkg"
+    dep.get_unique_key = MagicMock(wraps=dep.get_unique_key)
     return dep
 
 

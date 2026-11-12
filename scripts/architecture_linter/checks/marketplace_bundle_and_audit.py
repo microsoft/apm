@@ -43,7 +43,7 @@ _RID_LF = "marketplace-integrations-generated-bundle-lf-writers"
 _LF_EXPECTED: tuple[tuple[str, int], ...] = (
     ("src/apm_cli/bundle/agent_plugin_exporter.py", 3),
     ("src/apm_cli/bundle/packer.py", 1),
-    ("src/apm_cli/bundle/plugin_exporter.py", 4),
+    ("src/apm_cli/bundle/plugin_exporter.py", 6),
     ("src/apm_cli/core/plugin_manifest.py", 1),
 )
 

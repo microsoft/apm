@@ -28,7 +28,9 @@ from ..utils.patterns import (
     literal_apply_to_top_level_roots,
     parse_apply_to,
 )
+from .constants import decode_utf8_prefix, has_generated_marker_header
 from .inventory import CompileInventory
+from .root_context_protection import catalog_root_context_markers
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -66,6 +68,43 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
         ".windsurf",
     }
 )
+
+
+def _has_text_outside_managed_section(content: str, start_marker: str, end_marker: str) -> bool:
+    """Return whether authored text surrounds a complete managed-section block."""
+    start = content.find(start_marker)
+    end = content.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+    if end < 0:
+        return False
+    return bool((content[:start] + content[end + len(end_marker) :]).strip())
+
+
+def _is_generated_context_output(
+    path: Path,
+    markers: tuple[str, ...] | None,
+    managed_section_markers: tuple[str, str] | None = None,
+) -> bool:
+    """Return whether ``path`` is a context file written by a prior ``apm compile``.
+
+    Only regular files with catalog context filenames are probed. Symlinks,
+    special files, unreadable or non-UTF-8 files, and managed-section files
+    with authored text outside the managed block count as authored.
+    """
+    if markers is None:
+        return False
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        with path.open("rb") as handle:
+            raw = handle.read() if managed_section_markers else handle.read(4096)
+        content = decode_utf8_prefix(raw)
+    except (OSError, UnicodeDecodeError):
+        return False
+    if managed_section_markers is not None and _has_text_outside_managed_section(
+        content, *managed_section_markers
+    ):
+        return False
+    return has_generated_marker_header(content, markers)
 
 
 @dataclass
@@ -142,12 +181,15 @@ class ContextOptimizer:
         base_dir: str = ".",
         exclude_patterns: builtins.list[str] | None = None,
         inventory: CompileInventory | None = None,
+        managed_section_markers: tuple[str, str] | None = None,
     ):
         """Initialize the context optimizer.
 
         Args:
             base_dir (str): Base directory for optimization analysis.
             exclude_patterns (Optional[List[str]]): Glob patterns for directories to exclude.
+            managed_section_markers: Configured AGENTS.md managed-section
+                start/end markers, when managed-section mode is active.
         """
         try:
             self.base_dir = Path(base_dir).resolve()
@@ -159,11 +201,13 @@ class ContextOptimizer:
 
         # Performance optimization caches
         self._glob_cache: builtins.dict[str, builtins.list[str]] = {}
-        self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
+        self._glob_set_cache: builtins.dict[str, builtins.set[str]] = {}
+        self._rel_path_cache: builtins.dict[Path, tuple[str, bool]] = {}
         self._file_list_cache: builtins.list[Path] | None = None
         self._placement_hidden_tool_trees: frozenset[str] = frozenset()
         self._scan_top_level_roots: frozenset[str] | None = None
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
+        self._resolved_dir_cache: builtins.dict[Path, Path] = {}
         self._timing_enabled = False
         self._phase_timings: builtins.dict[str, float] = {}
 
@@ -183,6 +227,7 @@ class ContextOptimizer:
         # Configurable exclusion patterns (validated at init time)
         self._exclude_patterns = validate_exclude_patterns(exclude_patterns)
         self._inventory = inventory
+        self._managed_section_markers = managed_section_markers
 
     def enable_timing(self, verbose: bool = False):
         """Enable performance timing instrumentation."""
@@ -224,13 +269,29 @@ class ContextOptimizer:
             self._glob_cache[pattern] = self._safe_recursive_glob(pattern)
         return self._glob_cache[pattern]
 
+    def _project_rel_path(self, path: Path) -> tuple[str, bool]:
+        cached = self._rel_path_cache.get(path)
+        if cached is None:
+            try:
+                cached = (path.resolve().relative_to(self.base_dir).as_posix(), True)
+            except (ValueError, OSError, RuntimeError):
+                cached = (portable_relpath(path, self.base_dir), False)
+            self._rel_path_cache[path] = cached
+        return cached
+
+    def _resolved_dir(self, path: Path) -> Path:
+        resolved = self._resolved_dir_cache.get(path)
+        if resolved is None:
+            resolved = self._resolved_dir_cache[path] = path.resolve()
+        return resolved
+
     def _safe_recursive_glob(self, pattern: str) -> builtins.list[str]:
         """Symlink-safe, exclusion-aware ``glob(recursive=True)`` replacement:
         match the cached project file list against ``pattern`` (POSIX rel paths).
         """
         results: builtins.list[str] = []
         for path in self._get_all_files():
-            rel = portable_relpath(path, self.base_dir)
+            rel = self._project_rel_path(path)[0]
             if matches_glob(rel, pattern):
                 results.append(rel)
         return results
@@ -502,6 +563,8 @@ class ContextOptimizer:
         """Project full accounting and scoped candidate files from one inventory."""
         self._directory_cache.clear()
         self._pattern_cache.clear()
+        self._rel_path_cache.clear()
+        self._resolved_dir_cache.clear()
         self._file_list_cache = []
         self._files_by_directory.clear()
         self._children_by_directory.clear()
@@ -513,13 +576,23 @@ class ContextOptimizer:
             if self._scan_top_level_roots is None
             else set(inventory.files_under(self._scan_top_level_roots))
         )
+        generated_markers_by_name = catalog_root_context_markers()
         for entry in inventory.directories:
             current_path = entry.path
             if not self._is_placement_path(current_path, entry.relative_path):
                 continue
 
+            # Prior compile outputs are not authored content; counting them
+            # feeds placement its own output and breaks idempotency (#3506).
             project_files = [
-                current_path / name for name in entry.file_names if not name.startswith(".")
+                current_path / name
+                for name in entry.file_names
+                if not name.startswith(".")
+                and not _is_generated_context_output(
+                    current_path / name,
+                    generated_markers_by_name.get(name),
+                    self._managed_section_markers,
+                )
             ]
             self._children_by_directory[current_path] = [
                 current_path / name
@@ -862,28 +935,22 @@ class ContextOptimizer:
         for expanded_pattern in expanded_patterns:
             # For patterns with **, use cached glob results
             if "**" in expanded_pattern:
-                try:
-                    # Resolve the candidate against the constructor-resolved base path.
-                    resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir)
+                rel_path, inside_project = self._project_rel_path(file_path)
 
+                # Files resolving outside the project never match recursive patterns.
+                if inside_project:
                     # Use cached glob results instead of repeated glob calls
                     matches = self._cached_glob(expanded_pattern)
-                    # Use cached Set[Path] to avoid recreating on every call
+                    # Use cached Set[str] to avoid recreating on every call
                     if expanded_pattern not in self._glob_set_cache:
-                        self._glob_set_cache[expanded_pattern] = {Path(match) for match in matches}
+                        self._glob_set_cache[expanded_pattern] = set(matches)
                     if rel_path in self._glob_set_cache[expanded_pattern]:
                         return True
-                except (ValueError, OSError):
-                    pass
             else:
                 # For non-recursive patterns, use fnmatch as before
-                try:
-                    rel_str = portable_relpath(file_path, self.base_dir)
-                    if fnmatch.fnmatch(rel_str, expanded_pattern):
-                        return True
-                except ValueError:
-                    pass
+                rel_str = self._project_rel_path(file_path)[0]
+                if fnmatch.fnmatch(rel_str, expanded_pattern):
+                    return True
 
                 # Only use filename match for patterns without directory structure
                 # This prevents "docs/**/*.md" from matching any "*.md" file anywhere
@@ -975,9 +1042,8 @@ class ContextOptimizer:
         Returns:
             float: Distribution score accounting for spread and depth diversity.
         """
-        total_dirs_with_files = sum(
-            analysis.total_files > 0 for analysis in self._directory_cache.values()
-        )
+        # _directory_cache only holds directories with files.
+        total_dirs_with_files = len(self._directory_cache)
         if total_dirs_with_files == 0:
             return 0.0
 
@@ -988,7 +1054,8 @@ class ContextOptimizer:
         if not depths:
             return base_ratio
 
-        depth_variance = sum((d - sum(depths) / len(depths)) ** 2 for d in depths) / len(depths)
+        mean_depth = sum(depths) / len(depths)
+        depth_variance = sum((d - mean_depth) ** 2 for d in depths) / len(depths)
         diversity_factor = 1.0 + (depth_variance * self.DIVERSITY_FACTOR_BASE)
 
         return base_ratio * diversity_factor
@@ -1013,10 +1080,10 @@ class ContextOptimizer:
         coverage_candidates = []
         for candidate in candidates:
             # Verify this placement can provide hierarchical coverage for ALL matching directories
-            covered_directories = self._calculate_hierarchical_coverage(
-                [candidate.directory], matching_directories
-            )
-            if covered_directories == matching_directories:
+            if all(
+                self._is_hierarchically_covered(target, candidate.directory)
+                for target in matching_directories
+            ):
                 # This candidate satisfies the mandatory coverage constraint
                 coverage_candidates.append(candidate)
 
@@ -1195,7 +1262,9 @@ class ContextOptimizer:
             return None
 
         # Convert to relative paths for easier analysis
-        relative_dirs = [d.resolve().relative_to(self.base_dir) for d in matching_directories]
+        relative_dirs = [
+            self._resolved_dir(d).relative_to(self.base_dir) for d in matching_directories
+        ]
 
         # Find the lowest common ancestor that covers all directories
         if len(relative_dirs) == 1:
@@ -1251,7 +1320,7 @@ class ContextOptimizer:
         """
         try:
             # Check if target is the same as placement or is a subdirectory of placement
-            target_dir.resolve().relative_to(placement_dir.resolve())
+            self._resolved_dir(target_dir).relative_to(self._resolved_dir(placement_dir))
             return True
         except ValueError:
             # target_dir is not under placement_dir
@@ -1394,7 +1463,7 @@ class ContextOptimizer:
 
         # Resolve working directory to handle path inconsistencies
         try:
-            resolved_working_dir = working_directory.resolve()
+            resolved_working_dir = self._resolved_dir(working_directory)
         except (OSError, ValueError):
             resolved_working_dir = working_directory.absolute()
 

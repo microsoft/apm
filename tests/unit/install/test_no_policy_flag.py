@@ -125,8 +125,8 @@ class TestHelpTextShowsNoPolicy:
         assert "intellij" in normalized
         assert "kiro" in normalized
         assert (
-            "Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf"
-            in normalized
+            "Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, "
+            "Kiro, Windsurf" in normalized
         )
 
     def test_help_text_is_plain_ascii(self):

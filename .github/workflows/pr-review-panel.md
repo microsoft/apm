@@ -53,6 +53,8 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #    ref (default main) and accepts any PR number. Useful if a
 #    maintainer needs to re-run without touching labels.
 on:
+  # Keep activation read-only while retaining compiler revocation checks.
+  report-blocked-version: false
   pull_request_target:
     types: [labeled]
   workflow_dispatch:
@@ -69,6 +71,10 @@ on:
 # changes instead of a red Failed check. workflow_dispatch is always
 # allowed through. See trigger comment block above for context.
 if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'panel-review' }}
+
+# Keep executable workspace content on the trusted base, never the PR head.
+checkout:
+  ref: ${{ github.event.pull_request.base.sha }}
 
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
 permissions:
@@ -90,6 +96,12 @@ imports:
       target: copilot
       packages:
         - microsoft/apm#main
+
+steps:
+  - name: Setup Ruby
+    uses: ruby/setup-ruby@v1.323.0
+    with:
+      ruby-version: 'ruby-3.3'
 
 tools:
   github:

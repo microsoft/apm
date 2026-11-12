@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ..install.drift import DriftFinding
     from ..integration.targets import TargetProfile
     from ..models.apm_package import APMPackage
+    from ..models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -101,16 +102,33 @@ def _check_ref_consistency(
 ) -> CheckResult:
     """Verify manifest refs match the lockfile's resolved ref and commit."""
     from ..deps.revision_pins import is_full_revision_pin
-    from ..drift import detect_ref_change
+    from ..drift import detect_ref_change, marketplace_ref_mismatch
+    from ..install.plan import lockfile_satisfies_replacements
+    from ..models.dependency.replacement import project_manifest_dependencies
 
-    mismatches: list[str] = []
+    _, mismatches = lockfile_satisfies_replacements(lock, manifest.replace_rules)
     requires_update = False
-    for dep_ref in manifest.get_all_apm_dependencies():
+    marketplace_index = lock.marketplace_index()
+    for dep_ref in project_manifest_dependencies(manifest):
         key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key)
+        display = dep_ref.get_display_name() if dep_ref.is_marketplace else key
+        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
         if locked_dep is None:
-            mismatches.append(f"{key}: not found in lockfile")
+            if dep_ref.is_marketplace:
+                pair = (dep_ref.marketplace_name, dep_ref.marketplace_plugin_name)
+                reason = "ambiguous" if pair in marketplace_index else "missing"
+                mismatches.append(
+                    f"{display}: {reason} marketplace provenance in lockfile; "
+                    "inspect the locked sources before reinstalling"
+                )
+            else:
+                mismatches.append(f"{key}: not found in lockfile")
             requires_update = requires_update or bool(lock.dependencies)
+            continue
+        if dep_ref.is_marketplace:
+            if reason := marketplace_ref_mismatch(dep_ref, locked_dep):
+                mismatches.append(f"{display}: {reason}")
+                requires_update = True
             continue
         if is_full_revision_pin(dep_ref.reference) and (
             locked_dep.resolved_commit != dep_ref.reference
@@ -206,8 +224,14 @@ def _resolve_deployed_file_path(
     candidate = Path(value.rstrip("/"))
     if not candidate.is_absolute():
         rel_path = candidate.as_posix()
-        allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets or None)
-        if ".." in rel_path or not rel_path.startswith(allowed_prefixes):
+        # Historical claims remain verifiable after current replay intent changes.
+        allowed_prefixes = (
+            *BaseIntegrator._get_integration_prefixes(),
+            *BaseIntegrator._get_integration_prefixes(targets=targets),
+        )
+        if not BaseIntegrator.validate_deploy_path(
+            rel_path, project_root, allowed_prefixes=allowed_prefixes
+        ):
             return None
         return project_root / candidate
     for target in targets:
@@ -316,11 +340,22 @@ def _check_no_orphans(
     sub-package's manifest, not the root manifest, so the root manifest
     cannot make them go away by editing its dependency lists.
     """
-    manifest_keys = {dep.get_unique_key() for dep in manifest.get_all_apm_dependencies()}
+    declared_lock_keys: set[str] = set()
+    marketplace_index = lock.marketplace_index()
+    for dep in manifest.get_all_apm_dependencies():
+        key = dep.get_unique_key()
+        declared_lock_keys.add(key)
+        if dep.is_marketplace or key.startswith("_marketplace/"):
+            locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
+            if locked_dep is not None:
+                declared_lock_keys.add(locked_dep.get_unique_key())
+
     orphaned = [
         dep_key
         for dep_key, locked_dep in lock.dependencies.items()
-        if dep_key not in manifest_keys and dep_key != _SELF_KEY and locked_dep.resolved_by is None
+        if dep_key not in declared_lock_keys
+        and dep_key != _SELF_KEY
+        and locked_dep.resolved_by is None
     ]
     if not orphaned:
         return CheckResult(
@@ -342,12 +377,30 @@ def _check_skill_subset_consistency(
     manifest: APMPackage,
     lock: LockFile,
     project_root: Path,
+    *,
+    prepared_replay: PreparedCiAuditReplay | None = None,
+    prepared_replay_error: str | None = None,
 ) -> CheckResult:
     """Verify skill subsets match the lockfile and real package tree."""
+    from ..constants import APM_MODULES_DIR
+
+    if prepared_replay_error is not None:
+        return CheckResult(
+            name="skill-subset-consistency",
+            passed=False,
+            message=f"replay failed: {prepared_replay_error}",
+            details=[prepared_replay_error],
+        )
+    modules_root = (
+        prepared_replay.modules_root
+        if prepared_replay is not None
+        else project_root / APM_MODULES_DIR
+    )
     mismatches: list[str] = []
+    marketplace_index = lock.marketplace_index()
     for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
-        locked_dep = lock.get_dependency(key)
+        locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
         if locked_dep is None:
             continue
         if not dep_ref.skill_subset and not locked_dep.skill_subset:
@@ -360,7 +413,7 @@ def _check_skill_subset_consistency(
             )
             continue
         missing = _missing_recorded_skill_subset_paths(
-            project_root,
+            modules_root,
             dep_ref,
             locked_dep.package_type,
             lock_subset,
@@ -388,8 +441,8 @@ def _check_skill_subset_consistency(
 
 
 def _missing_recorded_skill_subset_paths(
-    project_root: Path,
-    dep_ref,
+    modules_root: Path,
+    dep_ref: DependencyReference,
     package_type: str | None,
     subset: list[str],
 ) -> tuple[str, ...]:
@@ -399,7 +452,6 @@ def _missing_recorded_skill_subset_paths(
 
     from types import SimpleNamespace
 
-    from ..constants import APM_MODULES_DIR
     from ..install.outcome import missing_requested_components
     from ..integration.skill_integrator import SkillIntegrator
     from ..models.validation import PackageType
@@ -407,7 +459,7 @@ def _missing_recorded_skill_subset_paths(
     try:
         resolved_package_type = PackageType(package_type) if package_type else None
         package_info = SimpleNamespace(
-            install_path=dep_ref.get_install_path(project_root / APM_MODULES_DIR),
+            install_path=dep_ref.get_install_path(modules_root),
             package_type=resolved_package_type,
         )
         available = SkillIntegrator.available_skill_names(package_info)
@@ -434,7 +486,7 @@ def _check_config_consistency(
         return CheckResult(
             name="config-consistency",
             passed=False,
-            message=f"config-consistency replay failed: {prepared_replay_error}",
+            message=f"replay failed: {prepared_replay_error}",
             details=[prepared_replay_error],
         )
     view = CurrentMcpConfigView.derive(
@@ -444,7 +496,7 @@ def _check_config_consistency(
         if prepared_replay is not None
         else project_root / APM_MODULES_DIR,
         trust_transitive_self_defined=True,
-    )
+    ).with_recorded_omissions(lock)
     stored_configs = lock.mcp_configs or {}
     diff = view.diff(stored_configs)
 
@@ -481,7 +533,11 @@ def _check_config_consistency(
     return CheckResult(
         name="config-consistency",
         passed=False,
-        message=(f"{len(details)} MCP config inconsistenc(ies) -- run 'apm install' to reconcile"),
+        message=(
+            f"{len(details)} MCP config inconsistenc(ies) -- "
+            "repeat 'apm install' with the intended selection "
+            "('--only apm' for skills-only) to reconcile"
+        ),
         details=details,
     )
 
@@ -490,6 +546,8 @@ def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
     targets: Sequence[TargetProfile] = (),
+    *,
+    user_scope: bool = False,
 ) -> CheckResult:
     """Check deployed files for critical hidden Unicode and hash drift.
 
@@ -509,24 +567,32 @@ def _check_content_integrity(
     ownership is rooted in resolved, managed paths. Lockfile entries without a
     recorded hash (e.g. directories) are skipped silently.
     """
-    from ..security.file_scanner import scan_project_files
+    from ..security.file_scanner import scan_project_result
     from ..utils.content_hash import compute_file_hash
 
     # Reuse the already-parsed lock and union its recorded paths with the
     # independently governed deploy-tree scope. The scanner owns exact path
     # accounting and preserves lockfile findings outside resolved targets.
-    findings_by_file, _files_scanned = scan_project_files(
+    scan = scan_project_result(
         project_root,
         lockfile=lock,
         include_deployed_trees=True,
         targets=targets,
+        user_scope=user_scope,
     )
+    findings_by_file = scan.findings_by_file
 
     # Only critical findings fail this check
     critical_files: list[str] = []
     for rel_path, findings in findings_by_file.items():
         if any(f.severity == "critical" for f in findings):
             critical_files.append(rel_path)
+    critical_findings = tuple(
+        finding
+        for findings in findings_by_file.values()
+        for finding in findings
+        if finding.severity == "critical"
+    )
 
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..core.deployment_state import LocatorKind
@@ -606,16 +672,23 @@ def _check_content_integrity(
         and not hash_mismatches
         and not missing_ownership
         and not unresolved_hash_paths
+        and not scan.incomplete
     ):
         return CheckResult(
             name="content-integrity",
             passed=True,
             message="No critical hidden Unicode or hash drift detected",
+            coverage=scan.inventory,
         )
 
     details: list[str] = []
-    for rel_path in critical_files:
-        details.append(f"unicode: {rel_path}")
+    for entry in scan.incomplete:
+        details.append(f"incomplete-coverage: {entry.file}{entry.pointer}: {entry.diagnostic}")
+    details.extend(
+        dict.fromkeys(
+            f"unicode: {finding.file}{finding.pointer or ''}" for finding in critical_findings
+        )
+    )
     for rel_path in missing_ownership:
         details.append(f"missing-ownership: {rel_path}")
     for rel_path in unresolved_hash_paths:
@@ -633,9 +706,16 @@ def _check_content_integrity(
 
     parts: list[str] = []
     remedies: list[str] = []
+    if scan.incomplete:
+        parts.append(f"{len(scan.incomplete)} primitive(s) with incomplete prompt coverage")
+        remedies.append("review the reported format or file access and rerun audit")
     if critical_files:
         parts.append(f"{len(critical_files)} file(s) with critical hidden Unicode")
-        remedies.append("'apm audit --strip' to clean Unicode")
+        remedies.append(
+            "review structured prompt fields manually"
+            if scan.protected_files.intersection(critical_files)
+            else "'apm audit --strip' to clean Unicode"
+        )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
         remedies.append("'apm install' to restore drifted files")
@@ -652,6 +732,8 @@ def _check_content_integrity(
         passed=False,
         message=f"{summary} -- run {remedy}",
         details=details,
+        coverage=scan.inventory,
+        content_findings=critical_findings,
     )
 
 
@@ -721,6 +803,7 @@ def _check_drift(
     fresh checkout that has never installed.
     """
     from ..agent_plugins.errors import AgentPluginDeploymentBoundaryError
+    from ..codex_plugins.client import CodexNativeError
     from ..core.scope import get_workspace_deploy_root
     from ..deps.lockfile import get_lockfile_path
     from ..deps.path_anchoring import LocalResolutionError
@@ -729,11 +812,10 @@ def _check_drift(
         CacheMissError,
         CheckLogger,
         ReplayConfig,
-        _read_apm_yml_target,
         diff_scratch_against_project,
         run_replay,
     )
-    from ..integration.targets import resolve_targets
+    from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
     deployment_root = get_workspace_deploy_root(project_root)
@@ -749,7 +831,7 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
-        except AgentPluginDeploymentBoundaryError as exc:
+        except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
             return (
                 CheckResult(
                     name="drift",
@@ -792,10 +874,10 @@ def _check_drift(
                 ),
                 [],
             )
-        resolved_targets = resolve_targets(
+        resolved_targets = resolve_audit_targets(
             project_root,
             user_scope=user_scope,
-            explicit_target=_read_apm_yml_target(project_root),
+            lockfile=lockfile,
         )
         tracked_files = None
     else:
@@ -887,13 +969,14 @@ def run_baseline_checks(
     result = CIAuditResult()
     deployment_root = get_workspace_deploy_root(project_root)
     user_scope = deployment_root != project_root.resolve()
-    from ..install.drift import _read_apm_yml_target
-    from ..integration.targets import resolve_targets
+    from ..integration.targets import resolve_audit_targets
 
-    resolved_targets = resolve_targets(
-        deployment_root,
+    lockfile_path = get_lockfile_path(project_root)
+    lock = LockFile.read(lockfile_path)
+    resolved_targets = resolve_audit_targets(
+        project_root,
         user_scope=user_scope,
-        explicit_target=_read_apm_yml_target(project_root),
+        lockfile=lock if lock is not None else LockFile(),
     )
     apm_yml_path = project_root / "apm.yml"
 
@@ -910,8 +993,6 @@ def run_baseline_checks(
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
         return result
-
-    lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
     # (no deps needed).  Skip remaining checks -- but warn if APM artifacts
@@ -933,9 +1014,13 @@ def run_baseline_checks(
                         ),
                     )
                 )
+        result.checks.append(
+            _check_content_integrity(
+                deployment_root, LockFile(), resolved_targets, user_scope=user_scope
+            )
+        )
         return result
 
-    lock = LockFile.read(lockfile_path)
     if lock is None or manifest is None:
         return result
 
@@ -973,7 +1058,15 @@ def run_baseline_checks(
         return result
 
     # Check 6: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock, project_root)):
+    if _run(
+        _check_skill_subset_consistency(
+            manifest,
+            lock,
+            project_root,
+            prepared_replay=prepared_replay,
+            prepared_replay_error=prepared_replay_error,
+        )
+    ):
         return result
 
     # Check 7: Config consistency (MCP)
@@ -988,7 +1081,9 @@ def run_baseline_checks(
         return result
 
     # Check 8: Content integrity
-    if _run(_check_content_integrity(deployment_root, lock, resolved_targets)):
+    if _run(
+        _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+    ):
         return result
 
     # Check 9: Includes consent (advisory; never hard-fails)

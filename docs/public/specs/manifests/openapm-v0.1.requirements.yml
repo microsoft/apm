@@ -67,14 +67,19 @@ requirements:
     keyword: MUST
     section: "4.3.2"
     conformance_class: consumer
+    fixture: tests/fixtures/spec-conformance/manifest/dependency-schema-cases.json
+    notes: "conflicting-git-id exercises rejection by the corrected schema and CLI loader; Git plus path is not an identity conflict"
   - id: req-mf-012
     keyword: MUST
     section: "4.3.6"
     conformance_class: consumer
+    fixture: tests/fixtures/spec-conformance/manifest/dependency-schema-cases.json
+    notes: "self-defined MCP cases exercise missing transport, command and URL, whitespace commands without args, and explicit empty args acceptance"
   - id: req-mf-013
     keyword: MUST
     section: "4.5"
     conformance_class: consumer
+    notes: "Environment references use the target-native syntax, including {env:VAR} for OpenCode."
   - id: req-mf-014
     keyword: MUST
     section: "4.2.3"
@@ -111,6 +116,7 @@ requirements:
     keyword: MUST
     section: "4.3.2"
     conformance_class: consumer
+    notes: "an unmatched non-empty persisted skill selection fails install and preserves that dependency's previously deployed skills and ownership records"
   - id: req-mf-023
     keyword: MUST
     section: "4.5"
@@ -123,6 +129,10 @@ requirements:
     keyword: MUST
     section: "4.3.2"
     conformance_class: consumer
+  - id: req-mf-026
+    keyword: MUST
+    section: "4.5"
+    conformance_class: consumer
   - id: req-ext-001
     keyword: MUST
     section: "4.1"
@@ -131,6 +141,11 @@ requirements:
     keyword: MUST
     section: "4.1"
     conformance_class: producer
+  - id: req-ext-003
+    keyword: MUST
+    section: "4.6.2"
+    conformance_class: consumer
+    notes: "top-level keys matching x-[a-z][a-z0-9-]* are preserved without value checks and recorded in declaration order under dependency extensions; other unknown keys warn without causing failure solely for being unknown; independent validation and req-mf-006 rewrite preservation remain"
   - id: req-lk-001
     keyword: MUST
     section: "5.1"
@@ -226,6 +241,11 @@ requirements:
     section: "5.2"
     conformance_class: consumer
     notes: "source-cased materialization_repo_url remains non-identity metadata and drives rollback-safe, collision-closed materialization/link spelling"
+  - id: req-lk-023
+    keyword: MUST
+    section: "5.2.1"
+    conformance_class: consumer
+    notes: "PROPOSED amendment 0.1.52, not adopted: staged replacement retains original and secondary errors, recoverable prior data, independent restoration, safe staging and committed replacements after disposal failure; native Windows acceptance is separate from the portable conformance oracles"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"
@@ -301,6 +321,18 @@ requirements:
     section: "6.3.1"
     conformance_class: governance
     notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged"
+  - id: req-pl-019
+    keyword: MUST
+    section: "6.8.1"
+    conformance_class: governance
+  - id: req-pl-020
+    keyword: MUST
+    section: "6.8.1"
+    conformance_class: governance
+  - id: req-pl-021
+    keyword: MUST
+    section: "6.1"
+    conformance_class: governance
   - id: req-rs-001
     keyword: MUST
     section: "7.2"
@@ -452,6 +484,21 @@ requirements:
     section: "8.5.8"
     conformance_class: consumer
     notes: "user-scoped MCP target selection uses a disclosed versioned capability contract, ignores project-only detection signals, applies first-source precedence without fallback, filters mixed sets, and refuses zero-supported selections before user manifest, lockfile, or target-config mutation"
+  - id: req-tg-015
+    keyword: MUST
+    section: "8.5.1"
+    conformance_class: consumer
+    notes: "a conforming consumer providing the Codex-native agent conversion capability preserves a source-declared model or model_reasoning_effort string value in its native top-level placement, leaves either field absent when absent from the source, diagnoses a non-string source value by field name without including that value, and emits a diagnostic bounded on dropped-field count (at least one shown when any are dropped), per-field name length, and ASCII-sanitized field-name display (never the value) for any other dropped, non-capability-restriction frontmatter field"
+  - id: req-tg-016
+    keyword: MUST
+    section: "8.5.9"
+    conformance_class: consumer
+    notes: "a Cursor-native hook installation implementation fails closed (no partial write) when converting a source-declared hook configuration whose event, top-level key, or handler field falls outside the accepted Cursor-native vocabulary, emitting an actionable diagnostic naming the unrecognized value(s)"
+  - id: req-tg-017
+    keyword: MUST
+    section: "8.5.9"
+    conformance_class: consumer
+    notes: "a Cursor-native hook installation implementation detects, before writing, an observable overlap with an in-effect Claude-settings hook import for either install order, and rejects the write with an actionable diagnostic rather than merging, redirecting, or broadening accepted input, without altering the Claude import's own settings"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"
@@ -462,6 +509,11 @@ requirements:
     section: "8.1"
     conformance_class: consumer
     notes: "declared Plugin component copying canonicalizes its non-symlink source root and prunes the current operation's materialization subtree"
+  - id: req-pr-008
+    keyword: MUST
+    section: "8.3.1"
+    conformance_class: consumer
+    notes: "proposed in PR3314, Section 9.3 pending: differing unmanaged skill files cause default whole-selected-plan refusal before native deployment, success-state persistence or collateral cleanup; canonical selection/targets/authorization, prior bytes/ownership, nondestructive diagnostics and read-only conflict-versus-drift audit are preserved; no new force authority, precedence rule or non-skill policy"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"
@@ -538,3 +590,23 @@ requirements:
     keyword: MUST
     section: "12.3"
     conformance_class: consumer
+  - id: req-rpl-001
+    keyword: MUST
+    section: "4.8.1"
+    conformance_class: consumer
+    notes: "proposed opt-in root replacement syntax and exact once-only graph binding"
+  - id: req-rpl-002
+    keyword: MUST
+    section: "4.8.1"
+    conformance_class: consumer
+    notes: "proposed original ownership and selected-source lifecycle/security separation"
+  - id: req-rpl-003
+    keyword: MUST
+    section: "4.8.1"
+    conformance_class: consumer
+    notes: "proposed version-3 complete replacement table and incoming-request evidence"
+  - id: req-rpl-004
+    keyword: MUST
+    section: "4.8.1"
+    conformance_class: consumer
+    notes: "proposed frozen full-table comparison and trustworthy local-source verification"

@@ -166,6 +166,26 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     kwargs["declared_license"] = maybe(None, st.just("MIT"))
     kwargs["exec_status"] = maybe(None, st.sampled_from(_ALLOWED_EXEC_STATUS))
     kwargs["name"] = maybe(None, st.just("consume-contract"))
+    # Empty maps are omitted from to_dict(); from_dict restores {}. Include
+    # both so the round trip covers omission and a non-empty vendor map.
+    kwargs["extensions"] = draw(
+        st.one_of(
+            st.just({}),
+            st.dictionaries(
+                st.sampled_from(["x-vendor", "x-alpha", "x-zeta"]),
+                st.one_of(
+                    st.just("v"),
+                    st.integers(min_value=0, max_value=9),
+                    st.just(True),
+                    st.fixed_dictionaries({"k": st.just("v")}),
+                ),
+                min_size=1,
+                max_size=2,
+            ),
+        )
+    )
+    # Replacement evidence has cross-field constraints tested separately.
+    kwargs["replacement"] = None
     kwargs["_unknown_fields"] = draw(
         st.one_of(st.just({}), st.just({"future_consumer_field": {"enabled": True}}))
     )

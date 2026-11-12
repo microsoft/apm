@@ -226,9 +226,37 @@ class TestGetVersionPyprojectToml:
 class TestGetBuildSha:
     """Tests for get_build_sha()."""
 
-    def test_returns_build_sha_constant_when_set(self) -> None:
-        with patch.object(version_mod, "__BUILD_SHA__", "abc1234"):
+    @pytest.mark.parametrize("frozen", [False, True])
+    def test_returns_build_sha_constant_when_set(self, frozen: bool) -> None:
+        with (
+            patch.object(version_mod, "__BUILD_SHA__", "abc1234"),
+            patch("sys.frozen", frozen, create=True),
+            patch("subprocess.run") as run,
+        ):
             assert get_build_sha() == "abc1234"
+        run.assert_not_called()
+
+    def test_non_source_module_never_queries_git(self, tmp_path: Path) -> None:
+        with (
+            patch.object(version_mod, "__BUILD_SHA__", None),
+            patch.object(version_mod, "__file__", str(tmp_path / "lib/apm_cli/version.py")),
+            patch("sys.frozen", False, create=True),
+            patch(
+                "subprocess.run",
+                return_value=MagicMock(returncode=0, stdout=f"{tmp_path}\nabc1234\n"),
+            ) as run,
+        ):
+            assert get_build_sha() == ""
+        run.assert_not_called()
+
+    @pytest.mark.parametrize("output", ["", "abc1234\n", "/somewhere\n", "/a\n/b\nabc1234\n"])
+    def test_unavailable_provenance_omits_sha(self, output: str) -> None:
+        with (
+            patch.object(version_mod, "__BUILD_SHA__", None),
+            patch("sys.frozen", False, create=True),
+            patch("subprocess.run", return_value=MagicMock(returncode=0, stdout=output)),
+        ):
+            assert get_build_sha() == ""
 
     def test_build_sha_constant_skips_git(self) -> None:
         with patch.object(version_mod, "__BUILD_SHA__", "deadbeef"):
@@ -240,7 +268,8 @@ class TestGetBuildSha:
     def test_git_success_returns_sha(self) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "d1630d1\n"
+        root = Path(version_mod.__file__).resolve().parents[2]
+        mock_result.stdout = f"{root}\nd1630d1\n"
         with patch.object(version_mod, "__BUILD_SHA__", None):
             with patch("sys.frozen", False, create=True):
                 # subprocess is locally imported inside get_build_sha()
@@ -290,7 +319,7 @@ class TestGetBuildSha:
                     get_build_sha()
         call_args = mock_run.call_args
         assert Path(call_args[0][0][0]).stem == "git"
-        assert call_args[0][0][1:] == ["rev-parse", "--short", "HEAD"]
+        assert call_args[0][0][1:] == ["rev-parse", "--show-toplevel", "--short", "HEAD"]
         assert call_args[1].get("timeout") == 5
 
     def test_pyproject_no_version_field_returns_unknown(self, tmp_path: Path) -> None:

@@ -12,7 +12,9 @@ function under test.
 from __future__ import annotations
 
 from textwrap import dedent
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 # The function under test lives in the commands module.
 from apm_cli.commands.install import _check_package_conflicts, _resolve_package_references
@@ -89,6 +91,47 @@ class TestResolvePackageReferencesPopulatesIdentities:
 
 class TestResolvePackageReferencesDuplicateDetection:
     """Pre-populated identities cause duplicates to be skipped."""
+
+    @pytest.mark.parametrize("request_count", [1, 2])
+    @pytest.mark.parametrize(
+        ("entry", "package"),
+        [
+            ("owner/repo", "owner/repo"),
+            ("owner/repo#main", "owner/repo#main"),
+            ("owner/repo#v1", "owner/repo"),
+            (
+                {"git": "owner/repo", "ref": "main", "skills": ["alpha"], "targets": ["copilot"]},
+                "owner/repo#main",
+            ),
+            ({"git": "owner/repo", "alias": "local-name"}, "owner/repo"),
+        ],
+    )
+    def test_existing_dependency_without_new_intent_is_not_updated(
+        self, entry, package, request_count
+    ) -> None:
+        current_deps = [entry]
+        logger = MagicMock(verbose=False)
+        updated = []
+
+        with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+            valid, invalid, added, _, _entries, changed = _resolve_package_references(
+                [package] * request_count,
+                current_deps,
+                _check_package_conflicts(current_deps),
+                logger=logger,
+                updated_packages_out=updated,
+            )
+
+        assert invalid == []
+        assert valid == [(package, True)] * request_count
+        assert added == updated == []
+        assert changed is False
+        assert current_deps == [entry]
+        assert current_deps[0] is entry
+        assert (
+            logger.validation_pass.call_args_list
+            == [call(package, True, False, False)] * request_count
+        )
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install.DependencyReference")

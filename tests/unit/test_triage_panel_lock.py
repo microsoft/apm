@@ -83,7 +83,11 @@ def test_lock_manifest_matches_runtime_action_pins(workflow: str) -> None:
     lock_text = LOCK_PATH.with_name(f"{workflow}.lock.yml").read_text(encoding="utf-8")
     manifest = _load_lock_header(lock_text, "# gh-aw-manifest: ")
     actions_lock = json.loads(ACTIONS_LOCK_PATH.read_text(encoding="utf-8"))
-    for repo in ("github/gh-aw-actions/setup", "actions/create-github-app-token"):
+    for repo in (
+        "github/gh-aw-actions/setup",
+        "actions/create-github-app-token",
+        "ruby/setup-ruby",
+    ):
         runtime_refs = set(
             re.findall(
                 rf"^\s+uses:\s*{re.escape(repo)}@([^\s#]+)",
@@ -101,6 +105,76 @@ def test_lock_manifest_matches_runtime_action_pins(workflow: str) -> None:
             assert f"#   - {repo}@{action['sha']} # {action['version']}" in lock_text
 
 
+def test_review_panel_checkout_uses_trusted_base_revision() -> None:
+    """Keep privileged review execution separate from the untrusted PR head."""
+    source = LOCK_PATH.with_name("pr-review-panel.md").read_text(encoding="utf-8")
+    frontmatter = yaml.safe_load(source.split("---", 2)[1])
+    expected = {
+        "ref": "${{ github.event.pull_request.base.sha }}",
+    }
+    assert frontmatter["checkout"] == expected
+
+    lock = yaml.safe_load(
+        LOCK_PATH.with_name("pr-review-panel.lock.yml").read_text(encoding="utf-8")
+    )
+    checkout_steps = [
+        step
+        for step in lock["jobs"]["agent"]["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert len(checkout_steps) == 1
+    assert {key: checkout_steps[0]["with"][key] for key in expected} == expected
+    assert checkout_steps[0]["with"]["persist-credentials"] is False
+
+
+def test_ruby_override_preserves_dependency_update() -> None:
+    for workflow in ("docs-sync", "triage-panel", "pr-review-panel"):
+        source = LOCK_PATH.with_name(f"{workflow}.md").read_text(encoding="utf-8")
+        frontmatter = yaml.safe_load(source.split("---", 2)[1])
+        ruby_steps = [
+            step
+            for step in frontmatter["steps"]
+            if step.get("uses", "").startswith("ruby/setup-ruby@")
+        ]
+        assert len(ruby_steps) == 1
+        assert ruby_steps[0]["uses"] == "ruby/setup-ruby@v1.323.0"
+        assert ruby_steps[0]["with"]["ruby-version"] == "ruby-3.3"
+        text = LOCK_PATH.with_name(f"{workflow}.lock.yml").read_text(encoding="utf-8")
+        ruby_actions = [
+            action
+            for action in _load_lock_header(text, "# gh-aw-manifest: ")["actions"]
+            if action["repo"] == "ruby/setup-ruby"
+        ]
+        assert ruby_actions == [
+            {
+                "repo": "ruby/setup-ruby",
+                "version": "v1.323.0",
+                "sha": "984c0c890880bbf811283d6f09c4607c62d210a4",
+            }
+        ]
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    ["cli-consistency-checker", "docs-sync", "perf-scan", "pr-review-panel", "triage-panel"],
+)
+def test_activation_remains_read_only_with_version_check(workflow: str) -> None:
+    source = LOCK_PATH.with_name(f"{workflow}.md").read_text(encoding="utf-8")
+    frontmatter = yaml.safe_load(source.split("---", 2)[1])
+    assert frontmatter[True]["report-blocked-version"] is False
+    lock = yaml.safe_load(LOCK_PATH.with_name(f"{workflow}.lock.yml").read_text(encoding="utf-8"))
+    activation = lock["jobs"]["activation"]
+    assert activation["permissions"] == {"actions": "read", "contents": "read"}
+    version_check = next(
+        step for step in activation["steps"] if step.get("name") == "Check compile-agentic version"
+    )
+    assert version_check["env"]["GH_AW_BLOCKED_VERSION_REPORT_AS_ISSUE"] == "false"
+    assert version_check["env"]["GH_AW_COMPILED_VERSION"] == "v0.89.15"
+    assert "check_version_updates.cjs" in version_check["with"]["script"]
+    assert not version_check.get("continue-on-error", False)
+    assert lock["jobs"]["conclusion"]["permissions"]["issues"] == "write"
+
+
 def test_triage_panel_lock_pins_copilot_cli_version() -> None:
     """Keep the compiled Copilot CLI installation deterministic."""
     lock_text = LOCK_PATH.read_text(encoding="utf-8")
@@ -114,6 +188,48 @@ def test_triage_panel_lock_pins_copilot_cli_version() -> None:
         )
     )
     assert installed_versions == {copilot_version}
+
+
+def test_scheduled_sweep_prefetch_and_model_are_scoped_and_compiled() -> None:
+    """Pre-agent evidence must not alter explicit issue requests; no model pin."""
+    source = LOCK_PATH.with_suffix("").with_suffix(".md").read_text()
+    frontmatter = yaml.safe_load(source.split("---", 2)[1])
+    condition = (
+        "${{ github.event_name == 'schedule'\n"
+        "    || (github.event_name == 'workflow_dispatch' && inputs.issue_number == '') }}"
+    )
+    prefetch = next(
+        step
+        for step in frontmatter["pre-agent-steps"]
+        if step["name"] == "Fetch scheduled triage evidence"
+    )
+    assert prefetch["if"] == condition
+    assert prefetch["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert "--scheduled-sweep --repo" in prefetch["run"]
+    assert frontmatter["timeout-minutes"] == 30
+    # A hard-coded model broke every scheduled sweep once it became inaccessible.
+    assert "COPILOT_MODEL" not in frontmatter["engine"].get("env", {})
+    model = "${{ vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'auto' }}"
+    lock = yaml.safe_load(LOCK_PATH.read_text())
+    steps = lock["jobs"]["agent"]["steps"]
+    compiled = next(step for step in steps if step.get("name") == prefetch["name"])
+    assert compiled["env"]["GH_TOKEN"] == prefetch["env"]["GH_TOKEN"]
+    assert compiled["if"].strip() == prefetch["if"].strip()
+    assert compiled["run"].strip() == prefetch["run"].strip()
+    execution = next(step for step in steps if "COPILOT_MODEL" in step.get("env", {}))
+    assert execution["env"]["COPILOT_MODEL"].strip() == model
+    assert steps.index(compiled) < steps.index(execution)
+    assert "GH_TOKEN" not in execution["env"]
+    setup = next(
+        step for step in steps if step.get("name") == "Setup scheduled triage Python environment"
+    )
+    assert setup["if"].strip() == condition
+    assert setup["uses"] == "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7"
+    assert steps.index(setup) < steps.index(compiled)
+    assert "uv run --frozen --no-dev python" in compiled["run"]
+    detection_steps = lock["jobs"]["detection"]["steps"]
+    detection = next(step for step in detection_steps if "COPILOT_MODEL" in step.get("env", {}))
+    assert detection["env"]["COPILOT_MODEL"] == "detection"
 
 
 def test_triage_source_and_compiled_writers_are_advisory_only() -> None:

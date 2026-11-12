@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
+from apm_cli.deps.lockfile import LockedDependency
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ def _make_dep(
     *,
     key="org/repo",
     host="github.com",
-    repo_url="org/repo",
+    repo_url=None,
     resolved_ref="main",
     resolved_commit="abc123456789",
     source="github",
@@ -37,19 +39,16 @@ def _make_dep(
     discovered_via=None,
     marketplace_plugin_name=None,
 ):
-    dep = MagicMock()
-    dep.get_unique_key.return_value = key
-    dep.host = host
-    dep.repo_url = repo_url
-    dep.resolved_ref = resolved_ref
-    dep.resolved_commit = resolved_commit
-    dep.source = source
-    dep.registry_prefix = registry_prefix
-    dep.discovered_via = discovered_via
-    dep.marketplace_plugin_name = marketplace_plugin_name
-    dep.is_virtual = False
-    dep.virtual_path = None
-    return dep
+    return LockedDependency(
+        repo_url=repo_url or key,
+        host=host,
+        resolved_ref=resolved_ref,
+        resolved_commit=resolved_commit,
+        source=source,
+        registry_prefix=registry_prefix,
+        discovered_via=discovered_via,
+        marketplace_plugin_name=marketplace_plugin_name,
+    )
 
 
 def _make_remote_ref(name, ref_type_val, sha="abc12345678"):
@@ -301,7 +300,7 @@ class TestCheckOneDep:
             result = _check_one_dep(dep, downloader, False)
         assert result is mock_row
 
-    def test_dep_ref_parse_exception_returns_unknown(self):
+    def test_dep_ref_projection_exception_returns_unknown(self):
         from apm_cli.commands.outdated import _check_one_dep
 
         dep = _make_dep(host="", repo_url="invalid_ref")
@@ -309,8 +308,9 @@ class TestCheckOneDep:
 
         with (
             patch("apm_cli.commands.outdated._check_marketplace_ref", return_value=None),
-            patch(
-                "apm_cli.models.dependency.reference.DependencyReference.parse",
+            patch.object(
+                dep,
+                "to_dependency_ref",
                 side_effect=Exception("bad ref"),
             ),
         ):

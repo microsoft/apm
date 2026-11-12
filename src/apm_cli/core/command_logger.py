@@ -113,7 +113,7 @@ class CommandLogger:
         noun = "server" if count == 1 else "servers"
         _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
 
-    def info(self, message: str, symbol: str = "info"):
+    def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
 
         Distinct from :meth:`progress` only at the semantic level:
@@ -124,6 +124,10 @@ class CommandLogger:
         split exists so future quiet-mode policy can drop ``progress``
         without dropping advisory context.
         """
+        # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
+        if soft_wrap:
+            _rich_info(message, symbol=symbol, soft_wrap=True)
+            return
         _rich_info(message, symbol=symbol)
 
     def success(self, message: str, symbol: str = "sparkles"):
@@ -158,7 +162,7 @@ class CommandLogger:
         if count <= 0:
             return
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
+        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
@@ -241,6 +245,8 @@ class InstallLogger(CommandLogger):
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
+        self._dry_run_incomplete = False
+        self._lockfile_written = False
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -349,6 +355,14 @@ class InstallLogger(CommandLogger):
     def record_dry_run_apm_updates(self, count: int) -> None:
         """Record how many selected APM refs the preview would update."""
         self._dry_run_apm_update_count = count
+
+    def record_dry_run_incomplete(self, incomplete: bool) -> None:
+        """Record whether offline metadata can support a complete preview."""
+        self._dry_run_incomplete = incomplete
+
+    def record_lockfile_write(self) -> None:
+        """Keep metadata-only persistence out of the unchanged summary."""
+        self._lockfile_written = True
 
     def nothing_to_install(
         self,
@@ -558,7 +572,7 @@ class InstallLogger(CommandLogger):
             return
         self._stale_cleaned_total += count
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
+        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
 
     def orphan_cleanup(self, count: int):
         """Log post-install orphan-file cleanup outcome at default verbosity.
@@ -887,6 +901,14 @@ class InstallLogger(CommandLogger):
             timing_suffix = f" in {elapsed_seconds:.1f}s"
 
         if disposition is InstallDisposition.DRY_RUN:
+            if self._dry_run_incomplete:
+                noun = "dependency" if apm_count == 1 else "dependencies"
+                _rich_warning(
+                    f"Dry run incomplete: {apm_count} locally known APM {noun}. "
+                    "Run 'apm install' without --dry-run to resolve the full plan.",
+                    symbol="warning",
+                )
+                return
             dry_parts = []
             if apm_count > 0:
                 noun = "dependency" if apm_count == 1 else "dependencies"
@@ -953,6 +975,14 @@ class InstallLogger(CommandLogger):
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
             )
+        elif stale_cleaned > 0:
+            file_noun = "file" if stale_cleaned == 1 else "files"
+            _rich_success(
+                f"Cleaned {stale_cleaned} stale {file_noun}{timing_suffix}.",
+                symbol="sparkles",
+            )
+        elif self._lockfile_written:
+            _rich_success(f"Updated apm.lock.yaml{timing_suffix}.", symbol="success")
         else:
             _rich_info(
                 f"No changes -- install state already up to date{timing_suffix}.",

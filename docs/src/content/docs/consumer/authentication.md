@@ -17,10 +17,10 @@ Pick the path that matches your dependencies:
 - **Private github.com / GHE.com / GHES packages.** Either run `gh auth login` (recommended) or set `GITHUB_APM_PAT`.
 - **GitLab packages (SaaS or self-managed).** Set `GITLAB_APM_PAT`, or rely on your `git credential` helper.
 - **Azure DevOps Services packages.** Set `ADO_APM_PAT`, or run `az login`;
-  APM checks the PAT first.
+  APM checks the PAT first, then `az`, then your git credential helper.
 - **Azure DevOps Server packages.** Register the host with `ADO_HOST` or
   `APM_ADO_HOSTS`, then set `ADO_APM_PAT`. Server does not use the Azure CLI
-  bearer.
+  bearer; a rejected PAT retries `git credential fill`.
 - **Bitbucket, Gitea, or any other git host.** Use your existing `git credential` helper -- if `git clone <url>` works in your shell, `apm install` works too.
 
 That covers the consumer case. The rest of this page expands each path.
@@ -112,8 +112,9 @@ apm install
 ```
 
 Use `APM_ADO_HOSTS` instead when you have multiple Server instances. Server
-is PAT-only; the Azure CLI bearer does not apply. ADO is always
-auth-required -- there is no anonymous fallback. See the
+does not use the Azure CLI bearer; a rejected PAT retries path-scoped
+`git credential fill`. ADO is always auth-required -- there is no
+anonymous fallback. See the
 [full Azure DevOps flow](../../getting-started/authentication/#azure-devops).
 
 ## Bitbucket, Gitea, and any other git host
@@ -134,7 +135,10 @@ For non-interactive environments (CI, devcontainers), set the credential through
 For in-repository plugins from GitLab and generic git marketplaces, an SSH
 registration stays SSH when APM generates the concrete `git:` and `path:`
 dependency. Existing SSH keys keep working instead of the dependency being
-rewritten to HTTPS. See
+rewritten to HTTPS. A `github.com` marketplace registered over SSH is
+pre-flighted with `git ls-remote` over SSH as well, so a private catalog needs
+only an SSH key, not a GitHub token. Named refs on an SSH dependency also
+resolve through Git rather than the HTTPS commits API. See
 [Installing from marketplaces](../installing-from-marketplaces/#local-and-self-hosted-marketplaces).
 
 ## Going further

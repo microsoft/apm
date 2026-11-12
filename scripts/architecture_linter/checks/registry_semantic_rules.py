@@ -31,6 +31,7 @@ counterpart piped its hits through the exemption filter.
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterable, Sequence
 
@@ -169,7 +170,115 @@ _ROOT_CONTEXT_HELPER = "src/apm_cli/compilation/root_context_protection.py"
 
 _ROOT_CONTEXT_CLI = "src/apm_cli/commands/compile/cli.py"
 
-_ROOT_CONTEXT_PATHS = (_ROOT_CONTEXT_OWNER, _ROOT_CONTEXT_HELPER, _ROOT_CONTEXT_CLI)
+_USER_ROOT_CONTEXT = "src/apm_cli/compilation/user_root_context.py"
+
+_BUILD_ID_OWNER = "src/apm_cli/compilation/build_id.py"
+
+_INSTRUCTION_PROJECTION_OWNER = "src/apm_cli/integration/instruction_integrator.py"
+
+_ROOT_CONTEXT_PATHS = (
+    _ROOT_CONTEXT_OWNER,
+    _ROOT_CONTEXT_HELPER,
+    _ROOT_CONTEXT_CLI,
+    _USER_ROOT_CONTEXT,
+    _BUILD_ID_OWNER,
+)
+
+# AST statements, not source substrings: comments, imports and unused strings
+# cannot stand in for the call, its arguments, or the result-consuming branch.
+_USER_ROOT_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _ROOT_CONTEXT_HELPER,
+        "protected_user_root_status",
+        (
+            "if path.is_symlink():\n    return 'skipped-symlink'",
+            "if not content.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):\n"
+            "    return 'skipped-hand-authored'",
+            "if not has_valid_build_id(content):\n    return 'skipped-modified'",
+        ),
+    ),
+    (
+        _ROOT_CONTEXT_HELPER,
+        "clean_redundant_user_root",
+        (
+            "if path.is_symlink():\n    return 'skipped-symlink'",
+            "ensure_path_within(path, deploy_root)",
+            "existing = path.read_text(encoding='utf-8')",
+            "protected = protected_user_root_status(path, existing)",
+            "if protected is not None:\n    return protected",
+            "if existing != expected:\n    return 'skipped-modified'",
+            "if dry_run:\n    return 'would-remove'",
+            "path.unlink()",
+        ),
+    ),
+    (
+        _BUILD_ID_OWNER,
+        "has_valid_build_id",
+        (
+            "if len(matches) != 1:\n    return False",
+            "template = content[:match.start()] + BUILD_ID_PLACEHOLDER + content[match.end():]",
+            "return stabilize_build_id(template) == content",
+        ),
+    ),
+    (
+        _USER_ROOT_CONTEXT,
+        "compile_user_root_contexts",
+        (
+            "protected = protected_user_root_status(output_path, existing)",
+            "if protected is not None:\n"
+            "    results.append(UserRootCompileResult(scoped.name, output_path, protected))\n"
+            "    continue",
+            "status = clean_redundant_user_root(output_path, deploy_root, "
+            "_generate_content(unfiltered_instructions), dry_run=dry_run or not clean)",
+        ),
+    ),
+)
+
+_NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _INSTRUCTION_PROJECTION_OWNER,
+        "InstructionIntegrator.preflight_instructions_for_targets",
+        (
+            "self._prepared_rule_plans[key] = self._prepare_rule_plan(instruction_files, "
+            "deploy_dir, mapping.extension, mapping.format_id, prepared_instructions)",
+        ),
+    ),
+    (
+        _INSTRUCTION_PROJECTION_OWNER,
+        "InstructionIntegrator.integrate_instructions_for_target",
+        (
+            "rendered_rules = self._prepare_rule_plan(instruction_files, deploy_dir, "
+            "mapping.extension, fmt, prepared_instructions)",
+        ),
+    ),
+    (
+        _INSTRUCTION_PROJECTION_OWNER,
+        "InstructionIntegrator.deployed_rule_matches",
+        (
+            "mapping = target.primitives.get('instructions')",
+            "if mapping is None or not mapping.output_compare:\n    return False",
+            "rules_dir = deploy_root / mapping.subdir",
+            "ensure_path_within(rules_dir, deploy_root)",
+            "plan = self._prepare_rule_plan([source], rules_dir, "
+            "mapping.extension, mapping.format_id)",
+            "rule_path, expected, _ = plan[source]",
+            "ensure_path_within(rule_path, deploy_root)",
+            "if has_symlink_component(deploy_root, rule_path):\n    return False",
+            "if not rule_path.is_file():\n    return False",
+            "return rule_path.read_text(encoding='utf-8') == normalize_crlf_to_lf(expected)",
+        ),
+    ),
+    (
+        _USER_ROOT_CONTEXT,
+        "compile_user_root_contexts",
+        (
+            "_, coverage_verdict = CompiledOutputWriter().prepare("
+            "{output_path: _generate_content(unfiltered_instructions)})",
+            "matched = integrator.deployed_rule_matches(instruction.file_path, scoped, deploy_root)",
+            "if not matched:\n    target_instructions.append(instruction)",
+        ),
+    ),
+)
 
 _ROOT_CONTEXT_OWNER_FRAGMENTS = (
     "def _hand_authored_root_context_blocks_write(",
@@ -392,8 +501,77 @@ def _check_compile_inventory_authority(provider: FactsProvider) -> Iterable[Viol
     )
 
 
+def _function_contract_violations(
+    provider: FactsProvider,
+    rule_id: str,
+    contracts: tuple[tuple[str, str, tuple[str, ...]], ...],
+) -> Iterable[Violation]:
+    """Check bounded routing statements in their actual function scope."""
+    for path, qualname, required in contracts:
+        index = provider.tree_index(path)
+        function = index.function(qualname) if index is not None else None
+        statements = (
+            {ast.unparse(node) for node in index.own_scope(function) if isinstance(node, ast.stmt)}
+            if function is not None and index is not None
+            else set()
+        )
+        for statement in required:
+            if statement not in statements:
+                yield violation(
+                    rule_id,
+                    path,
+                    f"{qualname} must retain canonical routing: {statement!r}",
+                )
+
+
+def _check_native_instruction_projection(provider: FactsProvider) -> Iterable[Violation]:
+    """Coverage must consume the install renderer's per-source native projection."""
+    rule_id = "hooks-integrations-native-instruction-projection"
+    paths = (_INSTRUCTION_PROJECTION_OWNER, _USER_ROOT_CONTEXT)
+    _, failures = _read_required(provider, rule_id, paths)
+    if failures:
+        return failures
+    findings = list(_function_contract_violations(provider, rule_id, _NATIVE_PROJECTION_CONTRACTS))
+    index = provider.tree_index(_USER_ROOT_CONTEXT)
+    function = index.function("compile_user_root_contexts") if index is not None else None
+    loops = (
+        [
+            node
+            for node in index.own_scope(function)
+            if isinstance(node, ast.For)
+            and ast.unparse(node.target) == "instruction"
+            and ast.unparse(node.iter) == "unfiltered_instructions"
+        ]
+        if function is not None and index is not None
+        else []
+    )
+    parent = index.parent(loops[0]) if len(loops) == 1 and index is not None else None
+    if not isinstance(parent, ast.If) or ast.unparse(parent.test) != "family == 'claude'":
+        findings.append(
+            violation(
+                rule_id,
+                _USER_ROOT_CONTEXT,
+                "Native coverage must evaluate every source only for the Claude compile family.",
+            )
+        )
+    if len(loops) == 1 and index is not None:
+        handlers = [node for node in index.walk(loops[0]) if isinstance(node, ast.ExceptHandler)]
+        if len(handlers) != 1 or not any(
+            isinstance(node, ast.Assign) and ast.unparse(node) == "matched = False"
+            for node in handlers[0].body
+        ):
+            findings.append(
+                violation(
+                    rule_id,
+                    _USER_ROOT_CONTEXT,
+                    "Native verification errors must retain the compiled fallback.",
+                )
+            )
+    return findings
+
+
 def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[Violation]:
-    """Project root overwrite decisions must route through the compiler owner."""
+    """Project and user root mutations must route through their protection owner."""
     rule_id = "contracts-tooling-root-context-write-eligibility"
     facts_by_path, failures = _read_required(provider, rule_id, _ROOT_CONTEXT_PATHS)
     if failures:
@@ -432,6 +610,7 @@ def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[V
             exempt_marker=None,
         )
     )
+    findings.extend(_function_contract_violations(provider, rule_id, _USER_ROOT_CONTRACTS))
     if defects:
         findings.append(
             violation(
@@ -670,8 +849,15 @@ RULES: tuple[Rule, ...] = (
         id="contracts-tooling-root-context-write-eligibility",
         group=GROUP,
         guard_ids=("contracts-tooling-root-context-write-eligibility",),
-        description=("Project root context overwrite decisions must route through AgentsCompiler."),
+        description="Project and user root mutations must retain canonical ownership protection.",
         check=_check_root_context_write_eligibility,
+    ),
+    Rule(
+        id="hooks-integrations-native-instruction-projection",
+        group=GROUP,
+        guard_ids=("hooks-integrations-native-instruction-projection",),
+        description="Native instruction coverage must reuse the per-source install projection.",
+        check=_check_native_instruction_projection,
     ),
     Rule(
         id="registry_delegation.lockfile_version_authority",

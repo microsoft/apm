@@ -522,8 +522,8 @@ class TestMarketplaceAdd:
                     return_value=host_info,
                 ),
                 patch(
-                    "apm_cli.marketplace.client._auto_detect_path",
-                    return_value="marketplace.json",
+                    "apm_cli.marketplace.client._auto_detect_path_with_payload",
+                    return_value=("marketplace.json", None),
                 ),
                 patch(
                     "apm_cli.marketplace.client.fetch_marketplace",
@@ -563,8 +563,8 @@ class TestMarketplaceAdd:
                     return_value=host_info,
                 ),
                 patch(
-                    "apm_cli.marketplace.client._auto_detect_path",
-                    return_value=None,
+                    "apm_cli.marketplace.client._auto_detect_path_with_payload",
+                    return_value=(None, None),
                 ),
             ):
                 result = runner.invoke(cli, ["marketplace", "add", "acme/repo"])
@@ -582,8 +582,8 @@ class TestMarketplaceAdd:
                     return_value=host_info,
                 ),
                 patch(
-                    "apm_cli.marketplace.client._auto_detect_path",
-                    return_value="marketplace.json",
+                    "apm_cli.marketplace.client._auto_detect_path_with_payload",
+                    return_value=("marketplace.json", None),
                 ),
             ):
                 result = runner.invoke(
@@ -616,8 +616,8 @@ class TestMarketplaceAdd:
                     return_value=host_info,
                 ),
                 patch(
-                    "apm_cli.marketplace.client._auto_detect_path",
-                    return_value="marketplace.json",
+                    "apm_cli.marketplace.client._auto_detect_path_with_payload",
+                    return_value=("marketplace.json", None),
                 ),
                 patch(
                     "apm_cli.marketplace.client.fetch_marketplace",
@@ -646,8 +646,8 @@ class TestMarketplaceAdd:
                     return_value=host_info,
                 ),
                 patch(
-                    "apm_cli.marketplace.client._auto_detect_path",
-                    return_value="marketplace.json",
+                    "apm_cli.marketplace.client._auto_detect_path_with_payload",
+                    return_value=("marketplace.json", None),
                 ),
                 patch(
                     "apm_cli.marketplace.client.fetch_marketplace",

@@ -2,6 +2,8 @@
 name: Daily Performance Scanner
 description: Scans src/apm_cli/ daily for algorithmic performance anti-patterns and opens a GitHub Issue with findings
 on:
+  # Keep activation read-only while retaining compiler revocation checks.
+  report-blocked-version: false
   schedule:
     - cron: "0 1 * * *"
   workflow_dispatch:
@@ -16,6 +18,8 @@ safe-outputs:
     expires: 7d
     title-prefix: "[perf-scan] "
     labels: [type/performance, type/automation]
+  noop:
+    report-as-issue: false
 
 tools:
   github:
@@ -35,7 +39,8 @@ timeout-minutes: 20
 You are a performance engineering specialist scanning the APM CLI source tree for
 algorithmic performance anti-patterns. Your job is to identify concrete opportunities
 to improve code efficiency, quantify their impact, and create a GitHub Issue with
-actionable findings.
+actionable findings. When there are no confirmed findings, emit `noop` instead
+of creating an issue.
 
 Read `.github/agents/performance-expert.agent.md` for your full persona and mental
 model. When scanning non-transport code, also load
@@ -176,7 +181,7 @@ Review every candidate match from Step 3. For each one:
 
 Discard false positives silently. Only confirmed findings go into the issue.
 
-## Step 5: Create the GitHub Issue
+## Step 5: Report the result
 
 Get today's date:
 
@@ -184,16 +189,19 @@ Get today's date:
 SCAN_DATE=$(date -u +%Y-%m-%d)
 ```
 
-Determine the issue title:
-- If findings >= 1: `{SCAN_DATE} -- performance opportunities found`
-- If findings == 0: `{SCAN_DATE} -- no issues found`
+If findings == 0, do NOT create an issue. Call the `noop` safe-output tool once
+with this message and stop:
 
+```
+perf-scan {SCAN_DATE}: no confirmed findings ({total .py files} files scanned, patterns A-F).
+```
+
+If findings >= 1, create the issue using the `create-issue` safe-output tool with
+the title `{SCAN_DATE} -- performance opportunities found` and the body below.
 (The `[perf-scan] ` prefix is added automatically by the safe-output.)
-
-Create the issue using the `create-issue` safe-output tool with the body below.
 All text must be ASCII-only.
 
-### Issue body format (findings present)
+### Issue body format
 
 ```
 ## Performance Scan - {SCAN_DATE}
@@ -220,24 +228,6 @@ Automated scan of src/apm_cli/ for algorithmic performance anti-patterns.
   E (heavy top-level imports), F (sequential independent I/O)
 ```
 
-### Issue body format (no findings)
-
-```
-## Performance Scan - {SCAN_DATE}
-
-Automated scan of src/apm_cli/ for algorithmic performance anti-patterns.
-No confirmed findings.
-
-### Scan coverage
-
-- src/apm_cli/ ({total .py files} files scanned)
-- Patterns checked: A (quadratic loops), B (linear scan in loop),
-  C (unconditional expensive ops), D (redundant config parsing),
-  E (heavy top-level imports), F (sequential independent I/O)
-
-All hot-path code reviewed uses appropriate data structures and caching.
-```
-
 ## Guidelines
 
 - Every finding must reference a real line of code. Do NOT fabricate findings.
@@ -247,4 +237,5 @@ All hot-path code reviewed uses appropriate data structures and caching.
   low-priority rather than omitting it.
 - ASCII-only throughout: no emojis, no Unicode. Status indicators: `[+]` ok,
   `[!]` warning, `[x]` error.
-- The run is always visible: create an issue even when there are no findings.
+- A clean scan creates no issue: emit `noop` so the run log records it without
+  adding automation noise to the issue tracker.

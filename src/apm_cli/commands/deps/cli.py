@@ -16,8 +16,10 @@ from ...core.command_logger import CommandLogger
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
+from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
 from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
+from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
     _expand_with_ancestors,
@@ -136,6 +138,10 @@ def _dep_display_name(dep: LockedDependency) -> str:
         or dep.resolved_ref
         or "latest"
     )
+    if dep.replacement is not None:
+        return (
+            f"{key}@{version} -> {dep.to_dependency_ref().source_reference.to_display_reference()}"
+        )
     return f"{key}@{version}"
 
 
@@ -232,6 +238,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # GitHub: owner/repo or owner/virtual-pkg-name (2 levels)
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
     declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
+    physical_to_logical: dict[str, str] = {}
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():
@@ -242,6 +249,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 source = _deps_list_source_label(
                     dep.host, is_local=dep.is_local, lockfile_source=dep.source
                 )
+                if dep.alias is not None:
+                    install_path = dep.get_install_path(apm_modules_path)
+                    physical_key = install_path.relative_to(apm_modules_path).as_posix()
+                    dep_key = dep.get_canonical_dependency_string()
+                    physical_to_logical[physical_key] = dep_key
+                    declared_sources[dep_key] = source
+                    continue
                 is_ado = dep.is_azure_devops() and len(repo_parts) >= 3
                 is_gh = len(repo_parts) >= 2
 
@@ -273,6 +287,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
+    except PathTraversalError:
+        raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
 
@@ -283,18 +299,20 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Key orphan/insecure state on the logical id and remember each physical
     # slot -> logical id so the scan below can report the logical name instead
     # of leaking the hash slot into user-facing output.
-    physical_to_logical: dict[str, str] = {}
     try:
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Local deps: key on the logical lockfile identity
-                # (``repo_url``) and map the physical install slot back to it.
-                if dep.source == "local":
+                # Local slots and explicit aliases retain their logical lockfile identity.
+                if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = dep.repo_url
+                    dep_key = (
+                        dep.repo_url
+                        if dep.source == "local"
+                        else dep.get_canonical_dependency_string()
+                    )
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
@@ -303,8 +321,15 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                         dep.host,
                         lockfile_source=dep.source,
                     )
+                if dep.replacement is not None:
+                    selected = dep.to_dependency_ref()
+                    declared_sources[dep_key] = _deps_list_source_label(
+                        selected.host, is_local=selected.is_local, lockfile_source=selected.source
+                    )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
+    except PathTraversalError:
+        raise
     except Exception:
         pass  # Continue without lockfile if it can't be read
 
@@ -314,7 +339,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # First pass: collect valid candidate paths for ancestor-aware orphan check.
     scanned_candidates = []
     for candidate in apm_modules_path.rglob("*"):
-        if not candidate.is_dir() or candidate.name.startswith("."):
+        if candidate.is_symlink() or not candidate.is_dir():
+            continue
+        if candidate.name.startswith(".") and candidate.parent != apm_modules_path:
             continue
         has_apm_yml = (candidate / APM_YML_FILENAME).exists()
         has_skill_md = (candidate / SKILL_MD_FILENAME).exists()
@@ -324,7 +351,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         if not has_apm_yml and not has_skill_md and not has_plugin_manifest:
             continue
         rel_parts = candidate.relative_to(apm_modules_path).parts
-        if len(rel_parts) < 2:
+        if len(rel_parts) < 2 and "/".join(rel_parts) not in physical_to_logical:
             continue
         # Skip sub-skills inside .apm/ directories -- they belong to the parent package
         if ".apm" in rel_parts:
@@ -727,39 +754,32 @@ def _build_dep_tree(apm_dir):
                 lockfile_deps = lockfile.get_package_dependencies()
                 if lockfile_deps:
                     result["source"] = "lockfile"
+                    if lockfile.replacements is not None:
+                        result["direct"] = [dep for dep in lockfile_deps if None in dep.parent_keys]
+                        children_map: dict[str, list[LockedDependency]] = {}
+                        unresolved_by_key: dict[str, LockedDependency] = {}
+                        for dep in lockfile_deps:
+                            for parent in dep.parent_keys:
+                                if parent is None:
+                                    continue
+                                if parent not in lockfile.dependencies:
+                                    unresolved_by_key[dep.get_unique_key()] = dep
+                                    continue
+                                children_map.setdefault(parent, []).append(dep)
+                        result["children_map"] = children_map
+                        result["unresolved"] = list(unresolved_by_key.values())
+                        return result
                     result["direct"] = [d for d in lockfile_deps if d.depth <= 1]
-                    transitive = [d for d in lockfile_deps if d.depth > 1]
-                    children_map: dict[str, list[LockedDependency]] = {}
-                    unresolved = []
-                    parents_by_unique_key: dict[tuple[int, str], list[LockedDependency]] = {}
-                    parents_by_repo_url: dict[tuple[int, str], list[LockedDependency]] = {}
-                    for candidate in lockfile_deps:
-                        parents_by_unique_key.setdefault(
-                            (candidate.depth, candidate.get_unique_key()), []
-                        ).append(candidate)
-                        parents_by_repo_url.setdefault(
-                            (candidate.depth, candidate.repo_url), []
-                        ).append(candidate)
-                    for dep in transitive:
-                        parent_key = dep.resolved_by or ""
-                        parent_depth = dep.depth - 1
-                        parent_candidates = parents_by_unique_key.get(
-                            (parent_depth, parent_key), []
-                        )
-                        if not parent_candidates:
-                            parent_candidates = parents_by_repo_url.get(
-                                (parent_depth, parent_key), []
-                            )
-                        if len(parent_candidates) == 1:
-                            parent_key = parent_candidates[0].get_unique_key()
-                        else:
-                            unresolved.append(dep)
-                            continue
-                        if parent_key not in children_map:
-                            children_map[parent_key] = []
-                        children_map[parent_key].append(dep)
+                    placement = place_legacy_lock_parents(
+                        lockfile_deps, installed_manifest_children(apm_modules_path)
+                    )
+                    children_map = {}
+                    for dep in lockfile_deps:
+                        parent = placement.parents.get(dep.get_unique_key())
+                        if parent is not None:
+                            children_map.setdefault(parent.get_unique_key(), []).append(dep)
                     result["children_map"] = children_map
-                    result["unresolved"] = unresolved
+                    result["unresolved"] = list(placement.unresolved)
                     return result
     except Exception:
         pass

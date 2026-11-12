@@ -38,7 +38,7 @@ its ``--dry-run`` preview.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -48,6 +48,7 @@ from apm_cli.deps.path_anchoring import (
     resolve_local_dep_dir,
 )
 from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.dependency.replacement import build_replacement_index, parse_replace_block
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -178,6 +179,10 @@ def compute_forward_reachable_keys(
         docstring for the completeness contract.
     """
     unverifiable: list[tuple[str, str]] = []
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    replacement_index = build_replacement_index(parse_replace_block(lockfile.replacements))
     local_dir_index = _build_local_dir_index(
         lockfile, project_root, candidate_orphans, unverifiable
     )
@@ -196,20 +201,48 @@ def compute_forward_reachable_keys(
 
     while queue:
         ref, anchor, parent_repo_url = queue.popleft()
+        try:
+            ref = replacement_index.bind(
+                ref,
+                consumer_root=project_root,
+                modules_dir=apm_modules_dir,
+                parent=parent_repo_url,
+                is_dev=False,
+            )
+        except ValueError as exc:
+            unverifiable.append((ref.get_unique_key(), str(exc)))
+            continue
 
         if ref.is_local and ref.local_path:
+            if ref.replacement is not None:
+                anchor = project_root
             real_dir = _join_local(anchor, ref.local_path) if anchor else None
             if real_dir is None:
                 continue
-            visit_key = str(real_dir)
+            if ref.replacement is None and parent_repo_url is not None:
+                ref = replace(
+                    ref,
+                    declaring_parent=parent_repo_url,
+                    anchored_local_path=APMDependencyResolver._portable_anchor_identity(
+                        real_dir, project_root
+                    ),
+                )
+            visit_key = ref.get_unique_key() if ref.replacement is not None else str(real_dir)
             if visit_key in visited:
                 continue
             visited.add(visit_key)
-            matched_key = local_dir_index.get(real_dir)
+            matched_key = (
+                ref.get_unique_key()
+                if ref.replacement is not None and ref.get_unique_key() in lockfile.dependencies
+                else local_dir_index.get(real_dir)
+            )
             if matched_key is not None:
                 reachable.add(matched_key)
                 if parent_repo_url is not None:
-                    reachable_via.setdefault(matched_key, (parent_repo_url, ref.local_path))
+                    reachable_via.setdefault(
+                        matched_key,
+                        (parent_repo_url, None if ref.replacement is not None else ref.local_path),
+                    )
             manifest_dir = real_dir
         else:
             try:
@@ -249,7 +282,9 @@ def compute_forward_reachable_keys(
             # is safe and keeps this loop uniform for both source types.
             # ref.repo_url is this node's own identity, becoming the
             # recorded immediate parent for each child it declares.
-            queue.append((child_ref, manifest_dir, ref.repo_url))
+            queue.append(
+                (child_ref, manifest_dir, lockfile_parent_identity(ref, lockfile.replacements))
+            )
 
     return ReachabilityResult(
         reachable=frozenset(reachable),

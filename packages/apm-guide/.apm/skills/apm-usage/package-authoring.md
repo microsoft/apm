@@ -2,7 +2,7 @@
 
 ## Supported package layouts
 
-APM recognizes six layouts. The shape of the package root tells APM
+APM recognizes these layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
@@ -10,14 +10,29 @@ how to install it:
 | `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
-| `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
+| `hooks/*.json` or `.apm/hooks/*.json` only | Harness hook package | Add hook commands to each target's configuration and copy referenced files |
 | `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
+| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0 or later, user scope only; initially disabled, no loose projection or other-target translation |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
 An `apm.yml` is eligible when the root also has `.apm/` or the manifest
 declares APM or MCP dependencies. To intentionally select a plugin layout,
 omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
+
+Claude plugin MCP files (`.mcp.json`, `mcp.json`, `.github/.mcp.json`, or JSON
+files named by `plugin.json` `mcpServers`) may use `{"mcpServers": {...}}` or a
+flat top-level server map whose values are all server objects. A file with no
+usable server is skipped with a warning naming the file and plugin.
+
+Root `plugin.json` and `.claude-plugin/plugin.json` also precede the Codex
+compatibility overlay. The Codex route requires a native-discoverable skill
+with an unambiguous installed path. MCP declarations may be an inline server
+object or a package-relative JSON file containing `mcpServers`; referenced
+resources must be regular files inside the bundle. Symlinks and partial skill
+subsets are refused. Publisher files/version and dependency pins are preserved;
+repair generations belong only to APM transport metadata. `apm pack` output
+is unchanged. Native content discovery does not certify execution or auth.
 
 For Agent Plugins with the same declared name, a direct dependency wins over a
 transitive dependency. APM refuses same-precedence collisions and does not
@@ -44,11 +59,15 @@ backfills one from the other:
 - `name` and `version` must be non-empty strings. Quote numeric versions so
   YAML does not parse them as numbers.
 
-For alias-aware OpenAPM v0.1, amendment 0.1.41 selects
-`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json`
-as the `$schema` identity; see [schema status](../../../../../docs/src/content/docs/specs/openapm-v0.1.md#appendix-a-normative-json-schemas-inline).
-Omit `$schema` for APM's current working draft. Unknown identities fail closed;
-clients without 0.1.41 support cannot read that explicit opt-in.
+The corrected OpenAPM v0.1 candidate uses
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.48.schema.json`
+as its explicit `$schema` identity. Adopt it only after publication and with a
+CLI that recognizes it; see [schema status](../../../../../docs/src/content/docs/specs/openapm-v0.1.md#appendix-a-normative-json-schemas-inline).
+It accepts existing Git-plus-path, registry ID/version and self-defined MCP
+forms in both dependency blocks while retaining alias and connection checks.
+The older v0.1 and 0.1.41 URLs keep their bytes and their erroneous rejections.
+Omit `$schema` for APM's current working draft; do not silently assign this
+subset to schema-less manifests. Unknown identities still fail closed.
 
 Populate both descriptions when you ship a HYBRID package. `apm pack`
 warns when `apm.yml.description` is missing so listings do not
@@ -125,9 +144,41 @@ See [MCP dependency formats](dependencies.md#mcp-dependency-formats).
 
 ## Hook files
 
+For legacy Claude plugin output (`apm pack --format plugin` or
+`--claude-plugin`), first-party hook resources travel with the bundle.
+Plugin-root command paths are rewritten to their packed locations, including
+`.apm/skills/...` to `skills/...` and `.apm/hooks/...` to `hooks/...`.
+References may resolve relative to the source hook descriptor when absent
+at the package root. Sibling assets and Node module type are preserved.
+Packing never executes scripts or translates hook semantics between hosts.
+Quoted filenames and selected directory references retain their meaning after
+relocation. Selected files must materialize each referenced directory; empty
+directories fail. Root scripts retain their Node module type without publishing
+the whole repository.
+
+With hooks present, root `plugin.json` and `.claude-plugin/plugin.json` both
+declare `"hooks": "./hooks.json"` for native Claude discovery. This is a
+Claude layout contract, not universal host compatibility. Explicit `includes`
+must select both descriptors and their resource paths; unsafe, missing,
+excluded or collision-displaced resources fail before replacing a bundle.
+Use `apm pack --dry-run --verbose` to inspect the complete file list.
+
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
 files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
 (`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
+
+Hook-only Git dependencies need neither `apm.yml` nor `SKILL.md`. Set
+`path` to the directory containing `hooks/` or `.apm/hooks/`, not the
+inner hooks directory. Discovery is non-recursive. `apm install` restores
+locked revisions; `apm update` refreshes them; `apm uninstall` removes
+managed hooks and resources. Malformed hook descriptors or invalid
+replacement packages leave the prior installation, lock, and ownership
+intact. Hook admission neither grants executable approval nor runs scripts.
+`apm update <package>` and `apm install <package> --refresh` preserve unrelated
+installed hook packages.
+For marketplace-selected versioned hook directories, use
+`apm install plugin@marketplace --refresh`; a rejected replacement also preserves
+the installed source bytes, lock, and deployment ownership.
 
 APM computes hook reach with one restriction-only intersection:
 
@@ -181,6 +232,29 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+For Claude and Codex, APM wraps flat command entries in hook groups with a
+nested `hooks` array: `{ "matcher", "hooks": [...] }` in
+`.claude/settings.json`, and the equivalent groups in `.codex/hooks.json`.
+For both targets, a flat command entry that omits `type` receives the required
+`"type": "command"`; explicit handler types are kept and other targets are
+unchanged. This default applies only to flat command entries in the source
+file, not to handlers already inside nested source groups, so supply `type`
+yourself when authoring nested groups.
+Claude, Codex, Gemini, and Antigravity preserve nested handler and
+hook-group metadata, including `env` objects and arrays, in native JSON.
+
+For Cursor, APM writes native v1 flat command or prompt handlers using only
+verified aliases. Unsupported fields, restrictions and overlapping Claude
+imports fail before writes; diagnostics name unsupported source-level,
+matcher-group and handler fields and distinguish whitespace in literal matcher
+alternatives. Choose one hook route per dependency:
+native `cursor`, or `claude` with Cursor's existing import. APM never changes
+import settings. Reinstall and target retirement preserve unrelated user hooks.
+See the
+[Cursor native hooks guide](../../../../../docs/src/content/docs/producer/author-primitives/hooks-and-commands.md#cursor-native-hooks-and-claude-import)
+for supported mappings and limitations. Test execution in each harness;
+configuration compatibility does not guarantee equivalent behavior.
+
 <!-- Keep this table synchronized with docs/src/content/docs/producer/author-primitives/hooks-and-commands.md. -->
 
 ### Session lifecycle event aliases
@@ -191,7 +265,7 @@ hook action under `.kiro/hooks/`.
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
 | `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
-Event names absent from this table are preserved unchanged. Only an unmapped
+For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
 an install warning. All-lowercase names such as `stop` pass through silently;
 `stop` is not a native Copilot or Claude event and will not fire.
@@ -229,8 +303,14 @@ merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
 sidecar, so clones, contributors, and CI runners do not see the installer's
 machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
-references to absolute paths because the user-scope config is read
-without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+references so the user-scope config resolves without a fixed cwd. Where the
+harness documents POSIX shell execution, the path is anchored to `$HOME` on
+macOS/Linux (for example `$HOME/.claude/hooks/<pkg>/run.sh`) so the file stays
+identical across machines: Claude Code shell-form `command` (not `args` exec
+form or `shell: "powershell"`), Copilot CLI `bash`, Gemini CLI `command`, and
+Kiro command actions. Cursor, Codex, and Windsurf keep absolute paths, as do
+Windows hosts, single-quoted references, and config roots outside the home
+directory such as `CLAUDE_CONFIG_DIR`. If a manifest in `hooks/` or `.apm/hooks/` uses
 `./hooks/<script>`, APM first resolves it from the hook file directory,
 then falls back to the package root to avoid deploying a doubled
 `hooks/hooks/` path. If a referenced hook script is missing at install
@@ -328,6 +408,28 @@ decoded from metadata also prevent installation by default; `--force`
 overrides only that critical finding, while warning-level findings do not
 prevent installation.
 
+## Manifest fields: `x-[a-z][a-z0-9-]*` extension keys
+
+Top-level keys matching `x-[a-z][a-z0-9-]*` are vendor extensions (OpenAPM
+`req-ext-001`, `req-ext-003`). APM keeps them on the parsed manifest and
+records a dependency's extensions on that dependency's `apm.lock.yaml` entry
+(`extensions`). Values are not validated. The lockfile field is omitted when
+the dependency declares none. Writers still preserve other unknown top-level
+keys on rewrite.
+
+Any other unknown top-level key is ignored with one warning that names the
+key. The command does not fail solely because that key is unknown; independent
+policy and security failures still apply. Install dry-runs warn once for the
+source manifest, not again for the prospective edit. Warning paths use forward
+slashes on Windows. Rename the key to match `x-[a-z][a-z0-9-]*` to keep it, or
+remove it.
+
+```yaml
+name: my-package
+version: 1.0.0
+x-team: platform
+```
+
 ## The 7 primitive types
 
 ### 1. Instruction (`*.instructions.md`)
@@ -344,15 +446,29 @@ tags: [security, validation]
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
 (`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
-way to specify multiple patterns, as it is portably expanded into target-specific
-YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
-Claude, Cursor, Windsurf, Kiro, and Antigravity.
+way to specify multiple patterns, as it is portably expanded into
+target-specific YAML arrays/lists (under `paths:` / `globs:` /
+`fileMatchPattern:`) across Claude, Windsurf, and Kiro.
+For Cursor, APM emits one comma-joined scalar rather than a YAML list
+(`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
+characters are escaped. Descriptions keep printable non-ASCII text readable
+and are quoted when needed to preserve their value. For Antigravity, APM
+emits `trigger: glob` plus one double-quoted comma-joined string
+(`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
+`trigger: always_on`.
+
+With `--global`, Cursor rules deploy to `~/.cursor/rules/<name>.mdc`, which
+local Cursor 2.1+ clients include in context. `apm uninstall -g` removes only
+package-owned rules; an existing rule with the same name as a package rule is
+replaced on install.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed
 placement and target-native installation. Use a sequence when its source
 readability matters. To match a literal comma in a filename, escape it as
-`\,`.
+`\,`. APM preserves pattern boundaries when re-joining, including the
+escape in Cursor's and Antigravity's joined strings. Neither tool documents
+literal-comma matching; verify such patterns in your tool version.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
@@ -397,6 +513,15 @@ Deployed as slash commands to targets that support them:
 - Cursor: `.cursor/commands/*.md` (Cursor 1.6+; Cursor is de-emphasizing commands in favor of rules/skills)
 - OpenCode: `.opencode/commands/*.md` (normalized to supported command frontmatter)
 - Gemini CLI: `.gemini/commands/*.toml` (converted to TOML command format)
+- Kiro CLI: `.kiro/prompts/<name>.md` or `~/.kiro/prompts/<name>.md`
+  with `--global` (body-only Markdown, qualified with CLI 2.33.0 V3).
+  APM removes `.prompt` from the filename and strips YAML frontmatter;
+  `/name` comes from the filename, not `name:`. Use native `${1}` through
+  `${10}`, `$ARGUMENTS`, or `${@}` in the body. `${input:name}` is not
+  translated and produces a warning. Tool/model and other unsupported
+  metadata also produce warnings rather than becoming Kiro execution
+  settings. Project prompts override same-name user prompts; file prompts
+  override MCP prompts. This is CLI prompt support, not an IDE parity claim.
 
 ```yaml
 ---
@@ -411,6 +536,15 @@ Review ${input:pr_url} focusing on ${input:focus_areas}.
 When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
+
+For the `copilot` target, prompts deploy to `.github/prompts/<name>.prompt.md`.
+In VS Code, only Local harness sessions load prompt files; the Copilot harness
+and Copilot CLI do not
+(https://code.visualstudio.com/docs/agent-customization/prompt-files). For
+those harnesses, ship the workflow as a skill (`.apm/skills/<name>/SKILL.md`)
+and add `disable-model-invocation: true` to its frontmatter where the host
+supports it. APM copies skill frontmatter as-is and does not convert prompts
+to skills.
 
 #### Optional workflow frontmatter (GitHub Copilot App, experimental)
 
@@ -464,6 +598,46 @@ instructions: |
   - Performance
 ---
 ```
+
+Optional `user-invocable: false` (boolean, default `true`) records that the
+agent is intended to be reachable programmatically only, for example via
+another agent's `handoffs:` or a subagent call. APM only preserves the
+metadata. Exclusion from the user-facing agent picker, and programmatic-only
+reachability, take effect only when the receiving harness supports them.
+APM does not filter the picker itself. `visibility: internal` is an accepted
+alias (the canonical field wins if both are set). Verbatim targets (Copilot,
+Claude, Cursor, OpenCode, Grok Build) carry the field through unchanged.
+Codex and Kiro cannot represent it, so APM emits an install-time warning
+naming the agent instead of silently dropping it -- the APM source stays the
+authority for the preserved metadata.
+
+#### Codex target: native model settings
+
+Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
+`description`, and the Markdown body as `developer_instructions`.
+String `model` and `model_reasoning_effort` frontmatter values are
+preserved as top-level TOML keys:
+
+```markdown
+---
+name: reviewer
+description: Reviews code
+model: gpt-5.6-sol
+model_reasoning_effort: high
+---
+Review the requested change.
+```
+
+Absent settings stay absent. APM does not translate model names, choose
+defaults, or validate model availability or supported effort values.
+Non-string values are dropped with a warning. Other frontmatter,
+including other native Codex settings and a `codex:` block, is dropped
+with a warning; APM provides no arbitrary or namespaced passthrough.
+Remove unnecessary fields or do not rely on their settings in the
+generated agent. `tools` restrictions still cannot be preserved: the
+agent may inherit all project/session MCP servers. Remove `tools` only
+if unrestricted access is intentional; otherwise do not use the generated
+agent with Codex.
 
 #### OpenCode target: frontmatter constraints
 
@@ -547,6 +721,12 @@ my-skill/
 ```
 
 ### 7. Marketplace Plugin (`plugin.json`)
+
+For loose skill deployment, a differing unmanaged destination file refuses the
+whole selected install plan before native writes. Use distinct skill directory
+names or an existing consumer skill/target selection; there is no new namespace
+or collision flag. This does not change native plugin identities or decide
+precedence between managed packages.
 
 Packaged distribution format created with `apm pack` (the default, no-flag
 Claude plugin bundle). This is the Claude-compatible `plugin.json` layout,
@@ -808,6 +988,9 @@ Schema rules:
   optional inside the block (inherited from apm.yml top level).
 - Each remote plugin needs either `version` or `ref`.
 - `ref` takes precedence over `version`.
+- A `ref` may be a tag, a branch, or a full 40-character lowercase commit
+  SHA. `apm marketplace check` confirms a SHA by fetching that commit from
+  the remote; abbreviated SHAs fail.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),
@@ -827,6 +1010,33 @@ Schema rules:
   or `per_package` (each package versions independently, gate only
   checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
+
+### Additional marketplace outputs: Codex and Copilot CLI
+
+Beyond the default `.claude-plugin/marketplace.json`, `marketplace.outputs`
+(map form, e.g. `outputs: {claude: {}, copilot: {}}`, optionally with a
+per-format `path:`) can also select:
+
+- `codex` -> `.agents/plugins/marketplace.json` (default path). Every
+  package needs a `category`. Sources compile to the object shape
+  `{source, url/path, ref?, sha?}`.
+- `copilot` -> `.github/plugin/marketplace.json`. No `category`
+  requirement. Local `plugins[].source` strings preserve real paths,
+  e.g. `"./plugins/demo"`. Remote sources use GitHub
+  `{source: "github", repo: "owner/repo"}` or Git URL
+  `{source: "url", url: "..."}` objects with optional `path`, `ref`,
+  and full 40-character commit `sha`. Annotated tags use the peeled
+  commit; raw commit pins omit `ref`. Invalid pins or unrepresentable
+  sources fail explicitly. Marketplace description/version are nested
+  under `metadata`. Existing branch restrictions stay unchanged.
+  Path precedence is CLI `--marketplace-path copilot=PATH`, then
+  `marketplace.copilot.output`, then `marketplace.outputs.copilot.path`,
+  then the default. `APM_MARKETPLACE_COPILOT_PATH` is reserved and
+  validated but not consumed; do not use it as an override.
+
+Each enabled output needs a matching `.gitignore` unignore line, e.g.
+`!.github/plugin/marketplace.json` alongside
+`!.claude-plugin/marketplace.json` and `!.agents/plugins/marketplace.json`.
 
 ### Cross-repo plugin sources on enterprise marketplaces
 
@@ -902,9 +1112,10 @@ is a hard error -- run `migrate` to consolidate.
 
 ### Full guide
 
-See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
-for the complete maintainer workflow (quickstart, version ranges, `check`,
-`doctor`, and `outdated`).
+For annotated or signed tags, `source.sha` records the checkout commit,
+while `source.ref` keeps the selected tag. See
+[Publish to a marketplace](../../../../../docs/src/content/docs/producer/publish-to-a-marketplace.md#author-the-registry)
+for repacking older indexes, signature limitations, and the maintainer workflow.
 
 ## Org-wide packages
 

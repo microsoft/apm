@@ -85,6 +85,9 @@ export default defineConfig({
 				baseUrl: 'https://github.com/microsoft/apm/edit/main/docs/',
 			},
 			lastUpdated: true,
+			components: {
+				Footer: './src/components/Footer.astro',
+			},
 			head: [
 				{
 					tag: 'meta',
@@ -173,6 +176,7 @@ export default defineConfig({
 						{ label: 'Run scripts', slug: 'consumer/run-scripts' },
 						{ label: 'Update and refresh', slug: 'consumer/update-and-refresh' },
 						{ label: 'Install MCP servers', slug: 'consumer/install-mcp-servers' },
+						{ label: 'Choosing an MCP registry', slug: 'consumer/choosing-an-mcp-registry' },
 						{ label: 'Install LSP servers', slug: 'consumer/install-lsp-servers' },
 						{ label: 'Authentication', slug: 'consumer/authentication' },
 						{ label: 'Private and org packages', slug: 'consumer/private-and-org-packages' },
@@ -186,6 +190,7 @@ export default defineConfig({
 					label: 'Author a package (Producer)',
 					items: [
 						{ label: 'Overview', slug: 'producer' },
+						{ label: 'Source vs installed', slug: 'producer/source-vs-installed' },
 						{
 							label: 'Author primitives',
 							items: [
@@ -279,6 +284,7 @@ export default defineConfig({
 						{ label: 'Lockfile spec', slug: 'reference/lockfile-spec' },
 						{ label: 'Policy schema', slug: 'reference/policy-schema' },
 						{ label: 'Targets matrix', slug: 'reference/targets-matrix' },
+						{ label: 'MCP variable compatibility', slug: 'reference/mcp-variable-compatibility' },
 						{ label: 'Primitive types', slug: 'reference/primitive-types' },
 						{ label: 'Package types', slug: 'reference/package-types' },
 						{ label: 'Baseline checks', slug: 'reference/baseline-checks' },
