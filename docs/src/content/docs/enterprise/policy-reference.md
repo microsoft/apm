@@ -140,7 +140,10 @@ dependencies:
     - "contoso/**"           # Any repo under contoso org
     - "contoso-eng/*"        # Any repo directly under contoso-eng
     - "third-party/approved" # Exact match
+    - "github.com/example-org/**" # Only example-org, only on github.com
 ```
+
+Hostless patterns match any host; host-qualified patterns match one host exactly. See [Host-qualified patterns](#host-qualified-patterns).
 
 ### `deny`
 
@@ -398,6 +401,30 @@ Allow and deny lists use glob-style patterns:
 | `exact/match` | Only `exact/match` |
 
 `*` matches any characters within a single path segment (no `/`). `**` matches across any number of segments.
+
+### Host-qualified patterns
+
+Dependency `allow` and `deny` patterns can name a host. Every dependency, direct or transitive, is checked against its effective host: the host written in the reference, or the default host (`GITHUB_HOST`, else `github.com`) when none is written.
+
+```yaml
+dependencies:
+  allow:
+    - "ghes.corp.example/**"        # any org on your GitHub Enterprise Server
+    - "contoso.ghe.com/**"          # any org on your GHE.com data-residency host
+    - "github.com/example-org/**"   # only example-org on github.com
+```
+
+With this policy, `example-org/repo` is allowed only while the default host is `github.com`; with `GITHUB_HOST=ghes.other.example` it is rejected.
+
+| Rule | Behavior |
+|------|----------|
+| Host recognition | The first segment is a host if and only if it contains a dot and does not start with one. Write dotted GitLab groups with their host: `gitlab.com/my.group/**`; an existing `my.group/**` now matches nothing, so as a `deny` it no longer blocks. Relative local-path patterns such as `./packages/**` stay hostless. |
+| Exact host | Hosts compare exactly, ignoring case, port and a trailing dot (also in `GITHUB_HOST`). `ghes.corp.example` does not match `ghes.corp.example.evil.test` or `x.ghes.corp.example`. Wildcards are not expanded in the host segment: `*.corp.example/**` matches no dependency, so list each host. |
+| Reference forms | `owner/repo`, `github.com/owner/repo`, `https://...` and `git@...:` forms of the same package give the same result. |
+| Hostless patterns | Unchanged: `contoso/**` still matches `contoso/*` repositories on **any** host. Use a host-qualified pattern to restrict the host. |
+| Local paths | Never match host-qualified patterns. |
+
+Install checks every resolved dependency; `apm audit` checks direct dependencies (including `devDependencies` and the source selected by `replace`) plus the transitive entries in `apm.lock.yaml`. Violation details show the host, e.g. `ghes.other.example/example-org/repo: not in allowed sources`.
 
 Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. A `null` allow list permits everything not denied; an empty allow list permits nothing.
 

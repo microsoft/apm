@@ -138,11 +138,18 @@ def test_malformed_dependency_identities_remain_rejected(raw: str) -> None:
         DependencyReference.parse(raw)
 
 
-def test_host_qualified_pattern_does_not_match_host_blind_policy_identity() -> None:
+def test_host_qualified_pattern_matches_effective_host_case_insensitively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
     dependency = DependencyReference.parse("DevExpGbb/Secure-Baseline")
-    policy = DependencyPolicy(allow=("github.com/DevExpGbb/**",))
 
-    assert not _check_dependency_allowlist([dependency], policy).passed
+    assert _check_dependency_allowlist(
+        [dependency], DependencyPolicy(allow=("github.com/DevExpGbb/**",))
+    ).passed
+    assert not _check_dependency_allowlist(
+        [dependency], DependencyPolicy(allow=("gitlab.com/DevExpGbb/**",))
+    ).passed
 
 
 @pytest.mark.parametrize(

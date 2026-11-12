@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - OpenCode targets write native OpenCode 2 MCP entries under `mcp.servers` when `opencode.json` already declares that map, translating `enabled` to `disabled` and keeping `codemode` and other extra fields; files without it keep the OpenCode 1 layout. -- by @RamsesJM (#3414)
+- Dependency policy `allow`/`deny` patterns can name a host, e.g. `github.com/example-org/**` or `ghes.corp.example/**`. Every direct and transitive dependency is matched exactly against its written host, or the default host (`GITHUB_HOST`, else `github.com`), at install and in `apm audit`, which now also checks dev dependencies, `replace`-selected sources and transitive entries in `apm.lock.yaml`; violations name the host. Hostless patterns still match any host. (#3606)
+- A dependency policy pattern whose first segment contains a dot (and does not start with one) is now read as a host. An existing hostless pattern for a dotted GitLab group, such as `my.group/**`, now matches nothing: an `allow` entry rejects those packages and a `deny` entry no longer blocks them. Rewrite it with its host, e.g. `gitlab.com/my.group/**`. `./` and `../` local-path patterns are unchanged. (#3606)
 
 ### Changed
 
