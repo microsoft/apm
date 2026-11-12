@@ -885,7 +885,7 @@ def test_replacement_with_opt_out_names_both_settings() -> None:
     assert selection.source.value == "replacement"
     assert selection.opt_out is True
     assert "CURL_CA_BUNDLE is set and replaces" in guidance
-    assert f"{_DISABLE_ENV_VAR} is also set" in guidance
+    assert f"If you unset CURL_CA_BUNDLE, {_DISABLE_ENV_VAR} still applies" in guidance
     assert "bundled CA set only" in guidance
     assert not any(remedy in guidance for remedy in _IGNORED_REMEDIES)
 

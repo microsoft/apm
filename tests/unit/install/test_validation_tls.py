@@ -323,7 +323,10 @@ class TestTlsFailureGuidanceThroughCli:
                     "APM_DISABLE_TRUSTSTORE": "1",
                     "APM_EXTRA_CA_BUNDLE": "/ignored/extra.pem",
                 },
-                ("REQUESTS_CA_BUNDLE is set and replaces", "APM_DISABLE_TRUSTSTORE is also set"),
+                (
+                    "REQUESTS_CA_BUNDLE is set and replaces",
+                    "If you unset REQUESTS_CA_BUNDLE, APM_DISABLE_TRUSTSTORE still applies",
+                ),
             ),
         ],
         ids=["opt-out", "requests", "curl", "replacement-opt-out-ignored-extra"],

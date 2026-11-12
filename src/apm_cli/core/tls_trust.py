@@ -169,7 +169,7 @@ def _tls_failure_guidance_for(selection: TLSTrustSelection | None) -> str:
     if source is TLSTrustSource.REPLACEMENT:
         setting = selection.replacement_setting or _EXPLICIT_CA_ENV_VARS[0]
         fallback = (
-            f" {_DISABLE_ENV_VAR} is also set, so without that replacement APM "
+            f" If you unset {setting}, {_DISABLE_ENV_VAR} still applies and APM "
             "verifies against its bundled CA set only."
             if selection.opt_out
             else ""

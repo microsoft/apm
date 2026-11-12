@@ -17,10 +17,12 @@ Typical errors APM surfaces or passes through from the underlying HTTP/git stack
 [!] TLS verification failed -- APM uses the system trust store by default.
     If you're behind a corporate proxy or firewall, make sure your
     organisation's CA is installed in the OS trust store, or set
-    APM_EXTRA_CA_BUNDLE to a readable PEM bundle and retry.
+    APM_EXTRA_CA_BUNDLE to a readable PEM bundle to add it while retaining
+    public trust. Use REQUESTS_CA_BUNDLE only to replace the complete
+    Requests trust set. See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/
 ```
 
-The first hint follows the trust mode APM selected. When `APM_DISABLE_TRUSTSTORE`, `REQUESTS_CA_BUNDLE`, or `CURL_CA_BUNDLE` is active, the hint names that setting instead of recommending the OS trust store or `APM_EXTRA_CA_BUNDLE`, which that mode does not use. Keep the setting if it is intentional; otherwise unset it and retry.
+The first hint follows the trust mode APM selected. When `APM_DISABLE_TRUSTSTORE`, `REQUESTS_CA_BUNDLE`, or `CURL_CA_BUNDLE` is active, the hint names that setting instead of recommending the OS trust store or `APM_EXTRA_CA_BUNDLE`, which that mode does not use. If the setting is unintended, unset it and retry. If it is intended, make sure the replacement bundle contains every CA you need; with `APM_DISABLE_TRUSTSTORE` alone, set `REQUESTS_CA_BUNDLE` to a complete PEM bundle.
 
 ```text
 SSLError: HTTPSConnectionPool(host='api.github.com', port=443):
