@@ -547,6 +547,45 @@ class AgentIntegrator(BaseIntegrator):
             ),
         )
 
+    # Claude Code model aliases (and claude-* ids) are not Codex models. The
+    # value is still preserved verbatim (OpenAPM req-tg-015); a shared
+    # Claude/Codex source only gets a warning (issue #3477).
+    _CLAUDE_MODEL_ALIASES = frozenset({"opus", "sonnet", "haiku", "inherit"})
+
+    @staticmethod
+    def _is_claude_model(value: str) -> bool:
+        """Whether *value* names a Claude Code model alias or id."""
+        normalized = value.strip().lower()
+        return normalized in AgentIntegrator._CLAUDE_MODEL_ALIASES or normalized.startswith(
+            "claude-"
+        )
+
+    @staticmethod
+    def _warn_codex_claude_model(
+        diagnostics: DiagnosticCollector | None,
+        source: Path,
+        package_name: str,
+    ) -> None:
+        """Warn that a preserved Codex ``model`` names a Claude model.
+
+        Names-only: the diagnostic names the agent and the field, never the
+        model value or any other frontmatter value.
+        """
+        if diagnostics is None:
+            return
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"Codex agent {printable_ascii_text(source.name)}: frontmatter field 'model' "
+                "names a Claude model alias or id; it was kept as written, but Codex does "
+                "not recognize Claude models."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                "Fix: use a Codex model in a Codex-specific agent source, or remove 'model' "
+                "so Codex uses its default; then rerun 'apm install'."
+            ),
+        )
+
     @staticmethod
     def _write_codex_agent(
         source: Path,
@@ -594,6 +633,10 @@ class AgentIntegrator(BaseIntegrator):
                             continue
                         if isinstance(fm[field], str):
                             model_settings[field] = fm[field]
+                            if field == "model" and AgentIntegrator._is_claude_model(fm[field]):
+                                AgentIntegrator._warn_codex_claude_model(
+                                    diagnostics, source, package_name
+                                )
                         elif diagnostics is not None:
                             diagnostics.lossy_agent_compilation(
                                 message=(

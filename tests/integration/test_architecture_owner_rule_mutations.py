@@ -328,6 +328,35 @@ def test_preview_cannot_bypass_offline_graph_authority(path: str, old: str, new:
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/policy/_constraint_pinning.py",
+            "name = git_semver_package_name(dep)",
+            'name = (dep.virtual_path or dep.repo_url).rstrip("/").rsplit("/", 1)[-1]',
+        ),
+        (
+            "src/apm_cli/install/helpers/ref_reuse.py",
+            "def git_semver_package_name(",
+            "def git_semver_package_label(",
+        ),
+    ],
+)
+def test_pinned_constraint_tag_name_must_use_resolver_owner(path: str, old: str, new: str) -> None:
+    """The policy recognises release tags with the resolver's package-name owner (#3224)."""
+    rule_id = "transport-platform-git-semver-preflight"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
             "src/apm_cli/integration/hook_ownership.py",
             "def canonicalize_hook_sidecar(",
             "def canonicalize_hook_sidecar_disabled(",
@@ -824,6 +853,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def resolve_effective_package_targets(",
         new="def resolve_effective_package_targets_disabled(",
         intent="Effective package-target authorization loses its single resolver.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-policy-remote-origin-owner",
+        rule_id="install-deployment-policy-remote-origin-owner",
+        path="src/apm_cli/policy/_remote.py",
+        old='[get_git_executable(), "remote", "get-url", "origin"],',
+        new=(
+            '[get_git_executable(), "remote", "get-url", "origin"],\n'
+            '            [get_git_executable(), "remote", "get-url", "origin"],'
+        ),
+        intent="A second git-remote origin read appears outside the single canonical reader.",
     ),
     MutationCase(
         guard_id="install-deployment-primitive-classification",
@@ -1920,6 +1960,68 @@ def test_orphan_selection_guard_rejects_deps_list_bypass() -> None:
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+_GIT_CHILD_ENV_RULE = "transport-platform-git-child-environment"
+_SPARSE_SYMLINK_RULE = "transport-platform-sparse-symlink-validation"
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new", "message"),
+    [
+        (
+            _GIT_CHILD_ENV_RULE,
+            "src/apm_cli/deps/bare_cache.py",
+            "pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]",
+            'pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args(), "-c", "core.eol=crlf"]',
+            "The core.eol pin must route through utils/git_env.git_line_ending_pin_*",
+        ),
+        (
+            _GIT_CHILD_ENV_RULE,
+            "src/apm_cli/cache/git_cache.py",
+            "        *git_line_ending_pin_args(),\n",
+            '        "-c",\n        "core.autocrlf=false",\n',
+            "Dependency checkouts must write link text, materialize it from Git objects",
+        ),
+        (
+            _GIT_CHILD_ENV_RULE,
+            "src/apm_cli/utils/git_env.py",
+            "    retained.extend(pinned)",
+            "    retained.append(git_symlink_pin_entry())",
+            "utils/git_env.py must own repository-state and URL rewrite safety",
+        ),
+        (
+            _SPARSE_SYMLINK_RULE,
+            "src/apm_cli/cache/git_cache.py",
+            "                            for key, value in _checkout_materialization_pins()\n",
+            "                            for key, value in (\n"
+            "                                *git_line_ending_pin_entries(),\n"
+            "                                _LINK_MATERIALIZATION_PIN,\n"
+            "                            )\n",
+            "git_cache checkouts must materialize links through the canonical owner",
+        ),
+    ],
+    ids=[
+        "eol-literal-outside-owner",
+        "cache-bypasses-line-ending-owner",
+        "snapshot-drops-pins",
+        "shard-pins-bypass-shared-list",
+    ],
+)
+def test_line_ending_pin_guard_rejects_owner_bypass(
+    rule_id: str, path: str, old: str, new: str, message: str
+) -> None:
+    """Dependency checkouts cannot drop or re-implement the materialization pins (#3270)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.message.startswith(message)
+        for violation in report.violations
+    ), [violation.message for violation in report.violations]
 
 
 @pytest.mark.parametrize(

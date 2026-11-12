@@ -105,11 +105,16 @@ def _policy_enforcement_report(fetch_result) -> dict:
     policy = fetch_result.policy if fetch_result is not None else None
     if policy is None:
         return {"enforced": False, "source": None, "enforcement": None}
-    return {
+    report = {
         "enforced": policy.enforcement != "off",
         "source": _redact_policy_ref(fetch_result.source) if fetch_result.source else None,
         "enforcement": policy.enforcement,
     }
+    chain = getattr(fetch_result, "chain_sources", None)
+    if chain:
+        # Ordered (root first), credential-redacted composed chain (#2753).
+        report["chain"] = [_redact_policy_ref(ref) for ref in chain]
+    return report
 
 
 def _scan_single_file(file_path: Path, logger) -> tuple[dict[str, list[ScanFinding]], int]:
