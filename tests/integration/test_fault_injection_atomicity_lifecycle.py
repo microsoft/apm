@@ -146,8 +146,9 @@ def test_compile_output_write_failure_keeps_every_output(
     assert (source / "nested/AGENTS.md").read_text(encoding="ascii") == "user nested notes\n"
 
 
+@pytest.mark.parametrize("interrupt", ["SIGINT", "SIGTERM"])
 def test_interrupted_fresh_install_rolls_back_manifest_lock_and_staging(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, interrupt: str
 ) -> None:
     packages = tuple(f"pkg{index:02d}" for index in range(12))
     world = build_world(tmp_path, apm_binary_path, packages=packages, skills=8, installed=False)
@@ -167,7 +168,7 @@ def test_interrupted_fresh_install_rolls_back_manifest_lock_and_staging(
         assert time.monotonic() < deadline, "install never deployed a skill"
         time.sleep(0.01)
     assert process.poll() is None, "install finished before the interrupt"
-    os.killpg(process.pid, signal.SIGINT)
+    os.killpg(process.pid, getattr(signal, interrupt))
     output, _ = process.communicate(timeout=120)
 
     assert process.returncode != 0, output

@@ -121,6 +121,9 @@ _COMPILATION_PREFIX = "src/apm_cli/compilation/"
 
 # -- Version rendering / entrypoint delegation --
 
+_CLI_ENTRY = "src/apm_cli/cli.py"
+
+
 _VERSION_RENDERER = "src/apm_cli/version_output.py"
 
 _VERSION_ENTRYPOINT = "src/apm_cli/entrypoint.py"
@@ -951,6 +954,39 @@ def _has_named_assignment(
     )
 
 
+def _check_process_interrupt_signals(provider: FactsProvider) -> Iterable[Violation]:
+    """SIGTERM handling must route through the CLI entry owner in ``cli.py``.
+
+    ``main`` installs ``_route_sigterm_to_interrupt`` so SIGTERM takes the
+    Ctrl+C rollback path; no other module installs a SIGTERM handler.
+    """
+    rule_id = "registry_delegation.process_interrupt_signals"
+    facts_by_path, failures = _read_required(provider, rule_id, (_CLI_ENTRY,))
+    if failures:
+        return failures
+    cli = facts_by_path[_CLI_ENTRY]
+    findings: list[Violation] = []
+    if _count_regex_lines(cli, r"^def _route_sigterm_to_interrupt\(") != 1:
+        findings.append(
+            violation(rule_id, _CLI_ENTRY, "_route_sigterm_to_interrupt must be defined once")
+        )
+    if _count_regex_lines(cli, r"^\s+_route_sigterm_to_interrupt\(\)") != 1:
+        findings.append(
+            violation(rule_id, _CLI_ENTRY, "main must call _route_sigterm_to_interrupt once")
+        )
+    findings.extend(
+        line_pattern_violations(
+            provider,
+            rule_id=rule_id,
+            paths=tuple(p for p in _python_paths(provider, under=_SRC) if p != _CLI_ENTRY),
+            pattern=r"signal\.signal\(\s*signal\.SIGTERM",
+            message="SIGTERM handlers must be installed only by cli.py (_route_sigterm_to_interrupt)",
+            exempt_marker=EXEMPT_MARKER,
+        )
+    )
+    return tuple(findings)
+
+
 def _check_version_rendering(provider: FactsProvider) -> Iterable[Violation]:
     """CLI version rendering must route through ``version_output.py``.
 
@@ -1136,6 +1172,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-apm-home-resolution",),
         description="APM-owned user metadata paths must share core/scope.py::get_apm_home.",
         check=_check_apm_home_resolution,
+    ),
+    Rule(
+        id="registry_delegation.process_interrupt_signals",
+        group=GROUP,
+        guard_ids=("registry-delegation-process-interrupt-signals",),
+        description="SIGTERM handling must route through the CLI entry owner in cli.py.",
+        check=_check_process_interrupt_signals,
     ),
 )
 

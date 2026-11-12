@@ -1311,6 +1311,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Doctor status icons hard-code glyphs instead of console STATUS_SYMBOLS.",
     ),
     MutationCase(
+        guard_id="registry-delegation-process-interrupt-signals",
+        rule_id="registry_delegation.process_interrupt_signals",
+        path="src/apm_cli/cli.py",
+        old="    _route_sigterm_to_interrupt()\n",
+        new="",
+        intent="The CLI entry stops routing SIGTERM to the interrupt rollback path.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-runtime-descriptors",
         rule_id="registry_delegation.runtime_descriptors",
         path="src/apm_cli/commands/runtime.py",

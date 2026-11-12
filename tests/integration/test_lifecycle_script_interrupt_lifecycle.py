@@ -1,4 +1,4 @@
-"""Installed-CLI contract: Ctrl+C stops the running lifecycle command script.
+"""Installed-CLI contract: Ctrl+C or SIGTERM stops the running lifecycle script.
 
 Lifecycle command scripts run in their own session, so a terminal Ctrl+C
 reaches only ``apm``. An interrupted ``apm compile`` must stop its
@@ -30,8 +30,9 @@ _SCRIPT = (
 )
 
 
+@pytest.mark.parametrize("interrupt", ["SIGINT", "SIGTERM"])
 def test_interrupted_compile_stops_its_pre_compile_script(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, interrupt: str
 ) -> None:
     world = build_world(tmp_path, apm_binary_path, packages=("alpha",), targets=("copilot",))
     manifest = world.project / "apm.yml"
@@ -60,7 +61,7 @@ def test_interrupted_compile_stops_its_pre_compile_script(
         assert process.poll() is None, process.communicate()[0]
         assert time.monotonic() < deadline, "pre-compile script never started"
         time.sleep(0.05)
-    os.killpg(process.pid, signal.SIGINT)
+    os.killpg(process.pid, getattr(signal, interrupt))
     output, _ = process.communicate(timeout=60)
     assert process.returncode != 0, output
 
