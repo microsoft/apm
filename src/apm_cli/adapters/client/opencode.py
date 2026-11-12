@@ -186,9 +186,9 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                     del mcp[name]
                 else:
                     _rich_warning(
-                        f"Kept the edited v1 entry 'mcp.{name}' in {config_path}; "
-                        f"OpenCode v2 uses 'mcp.servers.{name}' instead; "
-                        "remove the v1 entry when you no longer need it",
+                        f"Kept the edited OpenCode 1 entry 'mcp.{name}' in {config_path}; "
+                        f"OpenCode 2 uses 'mcp.servers.{name}' instead; "
+                        "remove the OpenCode 1 entry when you no longer need it",
                         symbol="warning",
                     )
             servers[name] = entry
@@ -345,7 +345,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         """
         if not isinstance(enabled, bool):
             raise ValueError(
-                f"OpenCode v2 needs a boolean 'enabled' value, got {json.dumps(enabled)}"
+                f"OpenCode 2 needs a boolean 'enabled' value, got {json.dumps(enabled)}"
             )
         entry = cls._to_opencode_format(copilot_entry, enabled=enabled)
         entry.pop("enabled", None)

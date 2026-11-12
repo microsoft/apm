@@ -207,10 +207,11 @@ def test_opencode_v2_global_install_and_rollback_to_v1(
     install("opencode-v2-global-reinstall")
     assert global_path.read_bytes() == installed
 
-    del rendered["mcp"]["servers"]
+    rendered["mcp"] = {"personal": PERSONAL_SERVER}
     global_path.write_text(json.dumps(rendered), encoding="utf-8")
     install("opencode-v2-global-rollback")
     mcp = json.loads(global_path.read_text(encoding="utf-8"))["mcp"]
-    assert set(mcp) == {"local"}
+    assert set(mcp) == {"personal", "local"}
+    assert mcp["personal"] == PERSONAL_SERVER
     assert mcp["local"]["enabled"] is False
     assert "disabled" not in mcp["local"]

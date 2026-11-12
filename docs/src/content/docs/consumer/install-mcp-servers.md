@@ -265,8 +265,10 @@ APM does not convert configuration it did not write. When it switches to
 entry is unchanged from what APM wrote; an edited entry stays in place with
 a warning, and OpenCode 2 uses the `mcp.servers` entry. Your own servers,
 `mcp.timeout` and other settings are preserved, and pruning removes only
-entries APM wrote. To go back to OpenCode 1, delete `mcp.servers` and run
-`apm install` again; APM rewrites its servers in the OpenCode 1 layout.
+entries APM wrote. To go back to OpenCode 1, move any servers you added
+under `mcp.servers` back into `mcp` in the OpenCode 1 format, delete
+`mcp.servers`, and rerun the original install command (with `--global` for
+user scope); APM rewrites its own servers in the OpenCode 1 layout.
 
 ## MCP servers from Claude plugins
 
