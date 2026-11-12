@@ -128,6 +128,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-shard-durations.sh shard-plan
 
+      # merge-queue.json is measured with --cov (about 1.5x the release
+      # lanes' cost); refresh it from the durations-* artifacts of a green
+      # merge-queue run.
       - name: Plan shards
         id: plan
         env:
@@ -136,8 +139,8 @@ jobs:
         run: |
           uv run --frozen python -m pytest tests/integration --collect-only -q \
             -p no:cacheprovider -p scripts.ci_sharding -m "$HERMETIC_MARK_EXPR" \
-            --shard-durations shard-plan/linux-x86_64.json --shard-plan-out shard-plan/plan.json \
-            --shard-target-seconds 420 --shard-workers 4 --shard-max 8 | tail -n 1
+            --shard-durations shard-plan/merge-queue.json --shard-plan-out shard-plan/plan.json \
+            --shard-target-seconds 420 --shard-workers 4 --shard-max 12 | tail -n 1
           cat shard-plan/plan.json
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
@@ -312,7 +315,7 @@ jobs:
           PYTEST_EXTRA_ARGS: >-
             -p scripts.ci_sharding
             --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
-            --shard-durations shard-plan/linux-x86_64.json
+            --shard-durations shard-plan/merge-queue.json
             --shard-store-durations durations-linux-x86_64-${{ matrix.shard }}.json
             -n 4 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0 --durations=15
         run: |
