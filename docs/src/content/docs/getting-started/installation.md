@@ -441,6 +441,8 @@ APM does not publish a Dev Container Feature. Install APM from `devcontainer.jso
 }
 ```
 
+`postCreateCommand` has no terminal, so the installer does not edit shell profiles: add `~/.local/bin` to `PATH` yourself, for example with `remoteEnv`. In containers that run as root, choose a destination instead, for example `curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix /usr/local` (see [root installs](#unix-install-ownership-and-migration)).
+
 Or use [pip](#pip-install) on top of the official Python feature:
 
 ```json
