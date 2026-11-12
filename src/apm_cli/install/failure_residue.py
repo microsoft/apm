@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.models.results import InstallResult
 
 
 @dataclass(frozen=True)
@@ -107,13 +108,24 @@ def failed_install_residue(ctx: InstallContext) -> FailedInstallResidue:
     return FailedInstallResidue(tuple(files), tuple(entries), user_scope)
 
 
+def record_install_outcome(
+    ctx: InstallContext, result: InstallResult | None
+) -> InstallResult | None:
+    """Mark the attempt finished unless finalize returned a ``FAILED`` result."""
+    from apm_cli.models.results import InstallDisposition
+
+    ctx.install_finished = result is None or result.disposition is not InstallDisposition.FAILED
+    return result
+
+
 def report_failed_install_residue(ctx: InstallContext) -> None:
     """Name the native target output a failed install attempt left behind.
 
-    Runs while the original failure propagates, so it never raises: a
+    Runs on every pipeline exit and returns early once the install finished.
+    It runs while the original failure propagates, so it never raises: a
     rendering error must not replace the install error.
     """
-    if ctx.logger is None or ctx.dry_run or ctx.lockfile_only:
+    if ctx.install_finished or ctx.logger is None or ctx.dry_run or ctx.lockfile_only:
         return
     with contextlib.suppress(Exception):
         residue = failed_install_residue(ctx)

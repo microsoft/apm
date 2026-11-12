@@ -24,10 +24,11 @@ from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.failure_residue import (
     FailedInstallResidue,
     failed_install_residue,
+    record_install_outcome,
     report_failed_install_residue,
     unrecorded_deployed_paths,
 )
-from apm_cli.models.results import InstallDisposition
+from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 _ROLLBACK_WORDING = ("rolled back", "roll back", "rollback", "restored", "restore", "reverted")
@@ -206,6 +207,15 @@ class TestPipelineFailureExits:
 
         logger.failed_install_residue.assert_not_called()
 
+    def test_finished_install_skips_the_residue_scan(self, tmp_path: Path, monkeypatch) -> None:
+        with patch("apm_cli.install.failure_residue.failed_install_residue") as scan:
+            result = _run_pipeline_with_integrate(
+                tmp_path, monkeypatch, _record_partial_deploy, InstallLogger()
+            )
+
+        assert result.disposition is not InstallDisposition.FAILED
+        scan.assert_not_called()
+
 
 def _ctx(tmp_path: Path, logger) -> InstallContext:
     ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path)
@@ -274,6 +284,23 @@ class TestUnrecordedDeployedPaths:
         report_failed_install_residue(ctx)
 
         logger.failed_install_residue.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("disposition", "reported"),
+        [(InstallDisposition.SUCCESS, False), (InstallDisposition.FAILED, True)],
+    )
+    def test_only_an_unfinished_install_reports(
+        self, tmp_path: Path, disposition: InstallDisposition, reported: bool
+    ) -> None:
+        logger = MagicMock()
+        ctx = _ctx(tmp_path, logger)
+        ctx.package_deployed_files = {"owner/new": [".claude/agents/new.md"]}
+        result = InstallResult(disposition=disposition)
+
+        assert record_install_outcome(ctx, result) is result
+        report_failed_install_residue(ctx)
+
+        assert logger.failed_install_residue.called is reported
 
 
 class TestResidueClassification:
