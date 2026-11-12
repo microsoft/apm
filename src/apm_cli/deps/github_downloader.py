@@ -829,7 +829,12 @@ class GitHubPackageDownloader:
         return self._refs.resolve_commit_sha_for_ref(dep_ref, ref)
 
     def download_raw_file(
-        self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Download a single file from repository (GitHub or Azure DevOps).
 
@@ -838,6 +843,10 @@ class GitHubPackageDownloader:
             file_path: Path to file within the repository (e.g., "prompts/code-review.prompt.md")
             ref: Git reference (branch, tag, or commit SHA). Defaults to "main"
             verbose_callback: Optional callable for verbose logging (receives str messages)
+            raw_only: Skip the Contents API fallback on the public-github
+                anonymous-first path and report a miss via ``RuntimeError``
+                when the raw CDN does not have the file (microsoft/apm#3283
+                virtual-package marker sweep).  Ignored everywhere else.
 
         Returns:
             bytes: File content
@@ -879,7 +888,7 @@ class GitHubPackageDownloader:
 
         # GitHub API
         return self._download_github_file(
-            dep_ref, file_path, ref, verbose_callback=verbose_callback
+            dep_ref, file_path, ref, verbose_callback=verbose_callback, raw_only=raw_only
         )
 
     def _download_ado_file(
@@ -910,6 +919,7 @@ class GitHubPackageDownloader:
         file_path: str,
         ref: str = "main",
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
@@ -929,6 +939,7 @@ class GitHubPackageDownloader:
             file_path,
             ref=ref,
             verbose_callback=verbose_callback,
+            raw_only=raw_only,
         )
 
     def validate_virtual_package_exists(
