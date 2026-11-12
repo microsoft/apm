@@ -344,6 +344,27 @@ class TestMarketplaceAddPath:
             assert result.exit_code == 0, result.output
             assert "Replacing marketplace" not in result.output
 
+    def test_bare_re_add_over_a_path_registration_warns(self, tmp_path: Path) -> None:
+        # Losing a catalog chosen with --path is never silent, even when the
+        # replacing add omits --path; plain default-path re-adds stay silent.
+        repo = _two_catalog_repo(tmp_path)
+        (repo / "marketplace.json").write_text(json.dumps(CATALOG), encoding="utf-8")
+        assert (
+            _invoke_add(
+                str(repo), "--path", "catalogs/frontend/marketplace.json", "--name", "acme"
+            ).exit_code
+            == 0
+        )
+
+        result = _invoke_add(str(repo), "--name", "acme")
+
+        assert result.exit_code == 0, result.output
+        output = " ".join(result.output.split())
+        assert "Replacing marketplace 'acme'" in output
+        assert "path 'catalogs/frontend/marketplace.json'" in output
+        [entry] = _registered()
+        assert entry.get("path", "marketplace.json") == "marketplace.json"
+
 
 class TestGithubContentsUrl:
     def test_catalog_path_is_encoded_and_ref_preserved(self) -> None:
@@ -362,5 +383,22 @@ class TestGithubContentsUrl:
 
         parts = urlsplit(url)
         assert parts.path == "/repos/acme/skills/contents/catalogs/front%20end/marketplace.json"
+        assert parse_qs(parts.query) == {"ref": ["v1.0.0"]}
+        assert parts.fragment == ""
+
+    def test_raw_contents_path_is_encoded_and_ref_preserved(self) -> None:
+        from types import SimpleNamespace
+        from urllib.parse import parse_qs, urlsplit
+
+        url = mp_client._github_raw_contents_url(
+            SimpleNamespace(api_base="https://ghe.example.com/api/v3/"),
+            "acme",
+            "skills",
+            "plugins/a?ref=evil#x/apm.yml",
+            "v1.0.0",
+        )
+
+        parts = urlsplit(url)
+        assert parts.path == "/api/v3/repos/acme/skills/contents/plugins/a%3Fref%3Devil%23x/apm.yml"
         assert parse_qs(parts.query) == {"ref": ["v1.0.0"]}
         assert parts.fragment == ""

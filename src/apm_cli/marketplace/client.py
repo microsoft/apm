@@ -1063,8 +1063,9 @@ _FETCHERS: dict[str, Callable] = {
 def _github_raw_contents_url(host_info, owner: str, repo: str, file_path: str, ref: str) -> str:
     """Build the GitHub Contents API URL for an arbitrary file."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(ref, safe="")
-    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={encoded_ref}"
+    return f"{api_base}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
 
 
 def fetch_raw(

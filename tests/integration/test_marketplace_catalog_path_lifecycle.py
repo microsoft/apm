@@ -101,8 +101,9 @@ def test_two_catalogs_from_one_repository_register_install_and_refresh(
                 "catalogs/x/marketplace.json",
             ),
             ("marketplace", "add", _REMOTE, "--ref", "main", "--name", "acme"),
+            ("marketplace", "add", _REMOTE, "--ref", "main", "--path", "catalogs/a#b.json"),
         ),
-        expected_returncodes=(1, 1, 1),
+        expected_returncodes=(1, 1, 1, 1),
         scenario_id="catalog-path-rejections",
         cwd=consumer.root,
         env=environment,
@@ -111,6 +112,7 @@ def test_two_catalogs_from_one_repository_register_install_and_refresh(
     assert "Invalid --path '../outside.json'" in outputs[0]
     assert "No marketplace catalog found at 'catalogs/x/marketplace.json'" in outputs[1]
     assert "Checked: marketplace.json, .github/plugin/marketplace.json" in outputs[2]
+    assert "Invalid --path 'catalogs/a#b.json'" in outputs[3]
     marketplaces_file = isolated.config_root / "marketplaces.json"
     assert not marketplaces_file.exists() or _registrations(isolated.config_root) == {}
 
