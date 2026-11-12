@@ -327,10 +327,12 @@ def discover_policy_with_chain(
     )
 
     # -- Chain resolution if leaf has extends: -------------------------
+    # Duck-typed results (other discovery callers, test doubles) may predate the
+    # GitLab ancestry fields, so read them defensively.
     if fetch_result.policy is not None and (
-        fetch_result.ancestry_parents is not None
         # Don't re-resolve if served from cache
-        or (fetch_result.policy.extends is not None and not fetch_result.cached)
+        (fetch_result.policy.extends is not None and not fetch_result.cached)
+        or getattr(fetch_result, "ancestry_parents", None) is not None
     ):
         _resolve_and_persist_chain(
             fetch_result,
@@ -629,6 +631,7 @@ def _resolve_and_persist_chain(
     discovered = {level.source: level for level in levels}
     # Composed (policy, source, fetch result) entries, root first.
     composed: list[tuple[ApmPolicy, str, PolicyFetchResult]] = []
+    composed_sources: set[str] = set()
 
     def _chain_error(kind: str, refs: list[str], next_ref: str) -> Exception:
         trail = " -> ".join(_redact_policy_ref(ref) for ref in [*refs, next_ref])
@@ -641,13 +644,15 @@ def _resolve_and_persist_chain(
             )
         return _inheritance_mod.PolicyInheritanceError(message)
 
-    def _segment(level: PolicyFetchResult, nearer: set[str]):
-        """Return *level* plus its ``extends:`` ancestors (leaf-first) or a failure."""
+    def _segment(
+        level: PolicyFetchResult, nearer: set[str]
+    ) -> list[tuple[ApmPolicy, str, PolicyFetchResult]] | tuple[str, int, int]:
+        """Return *level* plus its ``extends:`` ancestors (leaf-first), or the
+        ``(ref, resolved, attempted)`` incomplete-chain marker on a failure."""
         seed_ref = _strip_source_prefix(level.source) if ancestry is not None else leaf_cache_ref
         # Refs followed in this segment; seeded so a self-reference is a cycle.
         visited: list[str] = [seed_ref] if level.source else []
         segment = [(level.policy, level.source, level)]
-        composed_sources = {source for _, source, _ in composed}
         current = level.policy
         while current.extends:
             next_ref = current.extends
@@ -693,7 +698,7 @@ def _resolve_and_persist_chain(
 
     incomplete_chain = None
     for index, level in enumerate(levels):
-        if any(level.source == source for _, source, _ in composed):
+        if level.source in composed_sources:
             continue
         if len(composed) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
             raise _chain_error("depth", [src for _, src, _ in composed], level.source)
@@ -704,6 +709,7 @@ def _resolve_and_persist_chain(
             incomplete_chain = outcome
             break
         composed.extend(reversed(outcome))
+        composed_sources.update(source for _, source, _ in outcome)
 
     # Keep the nearest stale policy's refresh diagnostic. Continue merging its
     # usable cached policy, but never relabel that ancestry as fresh or replace
