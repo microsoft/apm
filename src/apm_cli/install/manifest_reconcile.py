@@ -26,8 +26,7 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from collections.abc import Set as AbstractSet
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,6 +39,7 @@ from .helpers.reconciliation_scope import (
     _scoped_known_targets_for_reconciliation,
 )
 from .presentation import surface_target_cleanup
+from .selected_cleanup import SelectedCleanupOutcome
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
         DeploymentIntent,
         DeploymentLedger,
     )
-    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -743,46 +743,6 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     if include_ledger:
         return files, hashes, ledger
     return files, hashes
-
-
-@dataclass
-class SelectedCleanupOutcome:
-    """What a selected-owner removal left on disk, for a truthful lockfile on failure.
-
-    ``claims`` maps each selected dependency to the files and hashes it still
-    owns after cleanup, including preserved rows that never entered cleanup;
-    ``retained_paths`` lists the cleaned files that no non-selected package
-    claims, which block the removal (#3656).
-    """
-
-    claims: dict[str, tuple[list[str], dict[str, str]]] = field(default_factory=dict)
-    retained_paths: set[str] = field(default_factory=set)
-
-    def record(
-        self,
-        dep_key: str,
-        dependency: LockedDependency,
-        files: list[str],
-        hashes: dict[str, str],
-        *,
-        survivors: AbstractSet[str],
-        preserved: AbstractSet[str],
-    ) -> None:
-        kept = [path for path in dependency.deployed_files if path in preserved]
-        recorded = dependency.deployed_file_hashes
-        self.claims[dep_key] = (
-            [*files, *kept],
-            {**{path: recorded[path] for path in kept if path in recorded}, **hashes},
-        )
-        self.retained_paths.update(
-            path for path in files if path not in survivors and "://" not in path
-        )
-
-    def apply_to(self, lockfile: LockFile) -> None:
-        """Make the selected dependencies claim only the files still on disk."""
-        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
-        DeploymentLedgerCodec.replace_legacy_owners(lockfile, self.claims)
 
 
 def reconcile_target_deployed_files(
