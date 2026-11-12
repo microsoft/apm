@@ -4296,3 +4296,64 @@ def test_required_deleting_all_local_content_cleans_its_deployments(
         scenario_id="tree-deleted-settle",
         targets=("claude", "copilot"),
     )
+
+
+def test_required_repo_to_subdirectory_switch_trims_superseded_checkout(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A whole-repo dependency switched to ``path:`` entries leaves no stale checkout (#2926)."""
+    scenario = _new_scenario(tmp_path / "repo-to-subdirectory", apm_binary_path)
+    name = "skill-bundle"
+    source_root = scenario.isolated.package_root / name
+    for skill in ("skills/alpha", "skills/beta", ".codex/skills/release"):
+        (source_root / skill).mkdir(parents=True)
+        (source_root / skill / "SKILL.md").write_text(
+            _skill(PurePosixPath(skill).name), encoding="ascii"
+        )
+    (source_root / "src").mkdir()
+    (source_root / "src" / "index.ts").write_text("export {};\n", encoding="ascii")
+    (source_root / "README.md").write_text("# skill bundle\n", encoding="ascii")
+    repository = scenario.repositories.create(name, source_tree=source_root)
+    commit = scenario.repositories.commit(repository, message="seed skill bundle")
+    remote_url = f"https://github.com/{_OWNER}/{name}"
+    environment = scenario.repositories.url_rewrite_subprocess_env(repository, remote_url)
+    consumer = scenario.consumers.create(
+        "repo-to-subdirectory-consumer",
+        dependencies=({"git": remote_url, "ref": commit.sha},),
+        targets=("claude",),
+    )
+    checkout = consumer.root / "apm_modules" / _OWNER / name
+
+    def run(args: tuple[str, ...], scenario_id: str) -> str:
+        result = _run_success(
+            scenario, consumer, args, environment=environment, scenario_id=scenario_id
+        )
+        return result.stdout
+
+    run(_INSTALL_ARGS, "repo-to-subdirectory-whole")
+    assert (checkout / "README.md").is_file()
+    assert "orphaned" not in run(("deps", "list"), "repo-to-subdirectory-list-whole").lower()
+
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"] = [
+        {"git": remote_url, "ref": commit.sha, "path": path}
+        for path in ("skills/alpha", "skills/beta")
+    ]
+    dump_yaml(manifest, consumer.manifest_path)
+    run(("update", "--yes", "--parallel-downloads", "0"), "repo-to-subdirectory-update")
+
+    remaining = {
+        path.relative_to(checkout).as_posix()
+        for path in checkout.rglob("*")
+        if path.is_file() and path.name != ".apm-pin"
+    }
+    assert remaining == {"skills/alpha/SKILL.md", "skills/beta/SKILL.md"}
+    listed = run(("deps", "list"), "repo-to-subdirectory-list")
+    assert "orphaned" not in listed.lower()
+    tree = run(("deps", "tree"), "repo-to-subdirectory-tree")
+    for path in ("skills/alpha", "skills/beta"):
+        assert f"{_OWNER}/{name}/{path}" in listed
+        assert f"{_OWNER}/{name}/{path}" in tree
+    pruned = run(("prune", "--dry-run"), "repo-to-subdirectory-prune")
+    assert "No orphaned packages found" in pruned

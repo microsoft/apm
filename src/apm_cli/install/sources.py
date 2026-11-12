@@ -40,11 +40,13 @@ from apm_cli.install.registry_wiring import (
     resolver_last_registry_resolution,
 )
 from apm_cli.install.source_helpers import (
-    format_package_type_label as _format_package_type_label,
-)
-from apm_cli.install.source_helpers import (
+    ensure_carried_licenses_match,
     locked_parent_identity,
     materialized_manifest_snapshot,
+    record_carried_package_hash,
+)
+from apm_cli.install.source_helpers import (
+    format_package_type_label as _format_package_type_label,
 )
 from apm_cli.install.source_helpers import (
     rebuild_cached_semver_resolution as _rebuild_cached_semver_resolution,
@@ -395,7 +397,6 @@ class CachedDependencySource(DependencySource):
             ResolvedReference,
         )
         from apm_cli.models.validation import detect_package_type, validate_apm_package
-        from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
         dep_ref = self.dep_ref
@@ -603,8 +604,7 @@ class CachedDependencySource(DependencySource):
                 extensions=extensions_from_resolved_package(cached_package_info.package),
             )
         )
-        if install_path.is_dir():
-            ctx.package_hashes[dep_key] = _compute_hash(install_path)
+        record_carried_package_hash(ctx, dep_key, install_path, locked_dep=dep_locked_chk)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
         _record_declared_license(ctx, dep_key, install_path)
@@ -659,7 +659,6 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
-        from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -861,8 +860,7 @@ class FreshDependencySource(DependencySource):
                     ),
                 )
             )
-            if install_path.is_dir():
-                ctx.package_hashes[dep_key] = _compute_hash(install_path)
+            _carried_paths = record_carried_package_hash(ctx, dep_key, install_path, package_info)
 
             # Supply-chain protection: verify content hash on fresh
             # downloads when the lockfile already records a hash.
@@ -893,6 +891,7 @@ class FreshDependencySource(DependencySource):
                         dep_key,
                         lockfile=ctx.existing_lockfile,
                         package_type=getattr(package_info, "package_type", None),
+                        exclude=_carried_paths,
                     ):
                         safe_rmtree(install_path, ctx.apm_modules_dir)
                         raise DirectDependencyError(
@@ -902,6 +901,7 @@ class FreshDependencySource(DependencySource):
                             "This may indicate a supply-chain attack. Use "
                             "'apm install --update' to accept new content and update the lockfile."
                         )
+            ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
