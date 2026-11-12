@@ -1868,35 +1868,56 @@ def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+_GIT_CHILD_ENV_RULE = "transport-platform-git-child-environment"
+_SPARSE_SYMLINK_RULE = "transport-platform-sparse-symlink-validation"
+
+
 @pytest.mark.parametrize(
-    ("path", "old", "new", "message"),
+    ("rule_id", "path", "old", "new", "message"),
     [
         (
+            _GIT_CHILD_ENV_RULE,
             "src/apm_cli/deps/bare_cache.py",
             "pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]",
             'pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args(), "-c", "core.eol=crlf"]',
             "The core.eol pin must route through utils/git_env.git_line_ending_pin_*",
         ),
         (
+            _GIT_CHILD_ENV_RULE,
             "src/apm_cli/cache/git_cache.py",
             "        *git_line_ending_pin_args(),\n",
             '        "-c",\n        "core.autocrlf=false",\n',
             "Dependency checkouts must write link text, materialize it from Git objects",
         ),
         (
+            _GIT_CHILD_ENV_RULE,
             "src/apm_cli/utils/git_env.py",
             "    retained.extend(pinned)",
             "    retained.append(git_symlink_pin_entry())",
             "utils/git_env.py must own repository-state and URL rewrite safety",
         ),
+        (
+            _SPARSE_SYMLINK_RULE,
+            "src/apm_cli/cache/git_cache.py",
+            "                            for key, value in _checkout_materialization_pins()\n",
+            "                            for key, value in (\n"
+            "                                *git_line_ending_pin_entries(),\n"
+            "                                _LINK_MATERIALIZATION_PIN,\n"
+            "                            )\n",
+            "git_cache checkouts must materialize links through the canonical owner",
+        ),
     ],
-    ids=["eol-literal-outside-owner", "cache-bypasses-line-ending-owner", "snapshot-drops-pins"],
+    ids=[
+        "eol-literal-outside-owner",
+        "cache-bypasses-line-ending-owner",
+        "snapshot-drops-pins",
+        "shard-pins-bypass-shared-list",
+    ],
 )
 def test_line_ending_pin_guard_rejects_owner_bypass(
-    path: str, old: str, new: str, message: str
+    rule_id: str, path: str, old: str, new: str, message: str
 ) -> None:
-    """Dependency checkouts cannot drop or re-implement the line-ending pins (#3270)."""
-    rule_id = "transport-platform-git-child-environment"
+    """Dependency checkouts cannot drop or re-implement the materialization pins (#3270)."""
     source = _source(path)
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)
