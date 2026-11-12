@@ -5,8 +5,8 @@ description: >-
   Use this skill to implement ONE microsoft/apm issue already
   selected by autopilot-issue-delivery-scheduler. Queue signal is
   `status/accepted` or a named bounded accept; that is not
-  permission. Requires fresh human-scope evidence from
-  scripts/governance before any mutate. May reproduce a bug,
+  permission. Requires a current record-present scope comment
+  from scripts/governance before any mutate. May reproduce a bug,
   implement the accepted change, and open a fix PR. Not a queue
   manager and not a triage scheduler. Works in the scheduler's
   session, a child session, Cloud Agent, Remote Agent, or Agentic
@@ -46,8 +46,8 @@ Rules:
 - `write: off` returns the filled template only. Do not assign,
   comment, label, edit, or open a PR.
 - `write: on` may assign `@me` (actor-session only) and implement
-  inside the accepted scope. Unattended never assigns and never
-  implements.
+  inside the accepted scope. Unattended never assigns. Unattended
+  may implement only when eligibility is `record-present`.
 - `origin` fail-closed unknown -> `unattended`.
 - One issue. Do not nest a scheduler path.
 
@@ -70,8 +70,9 @@ approved: n/a
 - `REPO_ROOT` -- required
 - `ORIGIN` -- if the parent passed it, honor it; else resolve
 - `TRUSTED_GOVERNANCE_ROOT` -- trusted default-branch copy
-- `APPROVAL_URL` -- nominated scope-comment URL
-- `HUMAN_SCOPE_RECEIPT` -- current human confirmation, not a stored grant
+- `APPROVAL_URL` -- nominated scope-comment URL; discovered when absent
+  (see Gate)
+- `HUMAN_SCOPE_RECEIPT` -- nominated scope-comment evidence, not a second grant
 
 ## ORIGIN and assignment
 
@@ -128,6 +129,26 @@ any type.
 
 Then re-check human-scope evidence. Do not create another
 parser or roster; `authority.cjs` alone interprets the record.
+If the caller did not pass `APPROVAL_URL`, discover it from the
+complete comment history. Take the latest comment (by
+`created_at`) by a `User` whose body starts with
+`<!-- apm-scope:v1 -->` (leading whitespace allowed, as the parser
+allows) and has the line `Decision: approve`. This is a locator
+only; `scripts/governance/authority.cjs` owns the record format, so
+update this filter if its marker changes:
+
+```
+gh api --paginate --slurp repos/microsoft/apm/issues/N/comments \
+  | jq -r 'add | map(select(.user.type == "User"
+      and (.body | test("^\\s*<!-- apm-scope:v1 -->"))
+      and (.body | test("(?m)^Decision: approve\\r?$"))))
+    | sort_by(.created_at, .id) | last | .html_url // empty'
+```
+
+No candidate or a failed read -- STOP (`needs-evidence`). Do not
+fall back to an older record when the latest one fails; the tool
+below judges roster, edits, and withdrawals.
+
 From `TRUSTED_GOVERNANCE_ROOT` (trusted default-branch copy,
 never the issue worktree):
 
@@ -137,16 +158,21 @@ node scripts/governance/eligibility.cjs --repo microsoft/apm --issue N --approva
 ```
 
 Require `state: record-present` with
-`authorizes_implementation: false`. That result is evidence,
-never permission; current snapshots cannot detect deleted withdrawals.
-Then require fresh explicit responsible-human
-confirmation for this issue's bounded scope. ORIGIN
-`unattended` never claims to have obtained it -- STOP and
-return `blocked`. ORIGIN `actor-session` may proceed only
-after the caller confirms in this session. Assignment,
-labels, eligibility reports, and prior receipts are not that
-confirmation. Any other state (`withdrawn`, `error`, missing
-tool) -- STOP.
+`authorizes_implementation: false` and
+`contact_confirmation_needed: false`. The report stays neutral.
+A current unedited responsible-human scope record is the worker
+grant, including for ORIGIN `unattended`. When
+`contact_confirmation_needed` is `true`, the named review contact
+has not agreed: ORIGIN `unattended` STOPs (`blocked`); ORIGIN
+`actor-session` continues only if `gh api user` is that review
+contact and confirms review capacity in this session. Do not reuse a stored
+receipt as fresh permission; re-read eligibility before mutate
+and again before the PR. Current snapshots cannot detect deleted withdrawals,
+so a record that later disappears still stops.
+ORIGIN `unattended` never claims a missing record is approval.
+Do not ask for a second in-session confirmation when eligibility
+is `record-present`. Any other state (`withdrawn`,
+`needs-evidence`, `error`, missing tool) -- STOP.
 
 ## Procedure
 

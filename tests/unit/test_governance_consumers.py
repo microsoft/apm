@@ -185,6 +185,14 @@ def test_scope_eval_inventory_is_inputs_not_fake_results() -> None:
         "bounded-human-checkpoint-and-missing-owner",
         "pipeline-wave-recheck-is-not-a-stored-receipt",
     }
+    wave = next(
+        case
+        for case in manifest["content_evals"]
+        if case["id"] == "pipeline-wave-recheck-is-not-a-stored-receipt"
+    )
+    assert "contact_confirmation_needed true" in wave["query"]
+    assert any("without a second human confirmation" in item for item in wave["must_do"])
+    assert any("review contact has not agreed" in item for item in wave["must_not_do"])
     for case in manifest["content_evals"]:
         assert case["must_do"] and case["must_not_do"]
         assert not {"response", "passed", "score", "evaluation_result"} & case.keys()
@@ -226,7 +234,8 @@ def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
     assert '--issue "$ISSUE_NUMBER" --approval-url "$APPROVAL_URL"' in gate
     assert "authority.cjs" in gate
     assert "authorizes_implementation: false" in gate
-    assert "fresh explicit responsible-human confirmation for this wave" in gate
+    assert "Do not require a fresh explicit responsible-human confirmation for this wave" in gate
+    assert "`contact_confirmation_needed: false`" in gate
     assert "deleted withdrawals" in gate
     for failure in ("withdrawn", "error", "uncertain confirmation"):
         assert failure in gate

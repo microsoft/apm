@@ -46,6 +46,7 @@ WORKER_CODE = (
 WORKER_PR = ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/worker-prompt.md"
 WORKER_PR_SKILL = ROOT / "packages/autopilot/autopilot-pr-merge-worker/SKILL.md"
 COMMENT_SKILL = ROOT / "packages/autopilot/autopilot-comment/SKILL.md"
+ACCEPT_SKILL = ROOT / "packages/autopilot/autopilot-issue-accept/SKILL.md"
 CANONICAL_AUTOPILOT_SKILLS = (
     SCHEDULER_TRIAGE,
     TRIAGE_SKILL,
@@ -57,6 +58,7 @@ CANONICAL_AUTOPILOT_SKILLS = (
     REVIEW_SKILL,
     WORKER_PR_SKILL,
     COMMENT_SKILL,
+    ACCEPT_SKILL,
 )
 
 
@@ -418,10 +420,17 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "--repo microsoft/apm --issue N --approval-url URL" in worker
     assert "authorizes_implementation: false" in worker
     assert "deleted withdrawals" in worker
-    assert "ORIGIN `unattended` never claims to have obtained it" in worker
+    assert "ORIGIN `unattended` never claims a missing record is approval" in worker
+    assert "`contact_confirmation_needed: false`" in worker
+    assert "ORIGIN `unattended` STOPs (`blocked`)" in worker
+    assert '(.body | test("^\\\\s*<!-- apm-scope:v1 -->"))' in worker
+    assert '(.body | test("(?m)^Decision: approve\\\\r?$"))' in worker
+    assert "sort_by(.created_at, .id) | last" in worker
+    assert "Do not fall back to an older record when the latest one fails" in worker
     delivery = _ascii(SCHEDULER_CODE)
     assert "Workers re-check `scripts/governance/eligibility.cjs`" in delivery
-    assert "ORIGIN `unattended` never implements" in delivery
+    assert "ORIGIN `unattended` never implements without that current record" in delivery
+    assert "Never guess a URL." in delivery
     assert "Do not skip bot-authored issues that" in delivery
     assert "Human accept is the gate; author type is not." in delivery
     assert "Do not drop a bot-authored issue that already carries" in delivery
@@ -580,3 +589,17 @@ def test_pr_review_lock_keeps_advisory_writers_only() -> None:
     assert configs
     for config in configs.values():
         assert not forbidden & set(config.keys())
+
+
+def test_issue_accept_posts_as_roster_human_and_rechecks_before_label() -> None:
+    """Issue Accept records exact-text human approval and labels only after eligibility."""
+    accept = _ascii(ACCEPT_SKILL)
+    assert "origin: actor-session" in accept
+    assert "This skill has no unattended path." in accept
+    assert "Posting without approval of that exact text is forbidden." in accept
+    assert "Do not use `autopilot-comment`." in accept
+    assert "`updated_at` equals `created_at`" in accept
+    assert "Require `state: record-present`." in accept
+    label = accept.index("--add-label status/accepted")
+    assert accept.index('--issue "$ISSUE" --approval-url "$COMMENT_URL"') < label
+    assert accept.index('gh issue comment "$ISSUE"') < label
