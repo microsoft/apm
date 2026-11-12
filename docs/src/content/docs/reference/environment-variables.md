@@ -121,7 +121,8 @@ default location.
 
 A leading `~` is expanded, and a relative `APM_HOME` resolves against the
 directory APM started in, so commands that change directory keep using the same
-root. Changing `APM_HOME` does not
+root. If that directory no longer exists, APM exits with an error; set an
+absolute `APM_HOME` instead. Changing `APM_HOME` does not
 move an existing `~/.apm`; copy the files yourself if you want to keep them.
 
 These paths are outside the contract:

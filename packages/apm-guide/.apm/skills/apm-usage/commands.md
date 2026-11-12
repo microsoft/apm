@@ -18,7 +18,7 @@ config commands honor it. Target deployments do not: target-specific home
 variables take precedence for their own destinations, with the operating-system
 home as the fallback. Runtimes (`~/.apm/runtimes/`), the `--global`
 `.apm-local/` identity in your home, and the download cache stay outside it.
-A relative `APM_HOME` resolves against the starting directory. State-changing
+A relative `APM_HOME` resolves against the starting directory (APM errors if that directory is gone). State-changing
 commands also hold `~/.apm-local/.apm-lifecycle.lock`, so different `APM_HOME`
 values serialize instead of racing on shared projects or target directories.
 APM does not migrate an existing `~/.apm`.
