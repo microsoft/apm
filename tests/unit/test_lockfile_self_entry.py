@@ -101,6 +101,22 @@ class TestSelfEntrySynthesis:
         roundtripped = LockFile.from_yaml(lock.to_yaml())
         assert _SELF_KEY not in roundtripped.dependencies
 
+    def test_project_self_entry_without_local_deployed_files(self):
+        """Audit replay builds this entry when root hooks record no files (#3369)."""
+        lock = LockFile(
+            lockfile_version="1",
+            generated_at="2025-01-01T00:00:00+00:00",
+        )
+        entry = lock.project_self_entry()
+        assert entry.repo_url == "<self>"
+        assert entry.source == "local"
+        assert entry.local_path == _SELF_KEY
+        assert entry.is_dev is True
+        assert entry.depth == 0
+        assert entry.deployed_files == []
+        assert entry.deployed_file_hashes == {}
+        assert _SELF_KEY not in lock.dependencies
+
     def test_no_self_entry_when_only_remote_deps(self):
         lock = LockFile(
             lockfile_version="1",
