@@ -21,7 +21,7 @@ Build the case and plan the rollout.
 Understand the install-time security model and the execution-trust surfaces.
 
 - [Security model](./security/) -- pre-deploy gate, content scanners, hidden-Unicode threat model, integrity, provenance, and the MCP trust boundary. Read verbatim by procurement and security reviewers.
-- [Lifecycle scripts](./lifecycle-scripts/) -- custom actions at install/update/uninstall, and the trust model that decides what runs and who authorizes it.
+- [Lifecycle scripts](./lifecycle-scripts/) -- custom actions at install/update/uninstall/compile, and the trust model that decides what runs and who authorizes it.
 
 ## Author policy
 
