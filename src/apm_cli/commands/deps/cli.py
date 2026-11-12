@@ -390,17 +390,22 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     )
     # Content bundled inside an expected install path belongs to that package,
     # exactly as prune keeps it (#2926), so the shared selector decides it. The
-    # stricter warning for a real package above a declared subdirectory stays.
+    # stricter warning for a real package above a declared subdirectory stays,
+    # at every depth (unlike the depth-capped suppression set above).
     try:
         expected_paths = _build_expected_install_paths(
-            declared_deps, lockfile_for_check, apm_modules_path
+            declared_deps, lockfile_for_check, apm_modules_path, preserve_installed_case=True
         )
         selected_orphans = set(
             _find_orphaned_packages(
                 [name for _c, name, _h, _s in scanned_candidates], expected_paths
             )
         )
-        expected_ancestors = _expand_with_ancestors(expected_paths) - expected_paths
+        expected_ancestors = {
+            "/".join(parts[:depth])
+            for parts in (path.replace("\\", "/").split("/") for path in expected_paths)
+            for depth in range(1, len(parts))
+        }
     except PathTraversalError:
         raise
     except Exception:

@@ -12,15 +12,18 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from click.testing import CliRunner
 
+from apm_cli.cli import cli
 from apm_cli.commands._helpers import _build_expected_install_paths, _find_orphaned_packages
+from apm_cli.commands.deps import cli as deps_cli
 from apm_cli.commands.deps._utils import _scan_installed_packages
 from apm_cli.commands.deps.cli import _resolve_scope_deps
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases import cleanup
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.models.apm_package import APMPackage
+from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
@@ -226,3 +229,118 @@ def test_undeclared_standalone_parent_of_declared_subdirectory_stays_orphaned(
     _installed, orphaned = _resolve_scope_deps(apm_dir, MagicMock())
 
     assert orphaned == [REPO]
+
+
+def _case_sensitive(directory: Path) -> bool:
+    probe = directory / "case-probe"
+    probe.mkdir(parents=True)
+    try:
+        return not (directory / "CASE-PROBE").exists()
+    finally:
+        probe.rmdir()
+
+
+def _cli(apm_dir: Path, *args: str) -> str:
+    try:
+        result = CliRunner().invoke(cli, list(args), catch_exceptions=False)
+    finally:
+        clear_apm_yml_cache()
+    assert result.exit_code == 0, result.output
+    return result.output
+
+
+def test_switch_trims_case_distinct_entries_on_case_sensitive_filesystem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every case-distinct sibling of superseded content is trimmed, not just one."""
+    apm_dir = _apm_dir(tmp_path, InstallScope.PROJECT, monkeypatch)
+    apm_modules = apm_dir / "apm_modules"
+    if not _case_sensitive(tmp_path):
+        pytest.skip("needs a case-sensitive filesystem")
+    _write_whole_repo_checkout(apm_modules)
+    _write(apm_modules / REPO / "readme.md")
+    _write(apm_modules / REPO / "Docs/guide.md")
+    previous = _lockfile(_whole_repo_dep())
+    current = _lockfile(*(_subdir_dep(path) for path in SUBDIRS))
+
+    cleanup.run(_ctx(apm_dir, InstallScope.PROJECT, previous, current))
+
+    assert _files_under(apm_modules) == FRESH_SUBDIR_TREE
+
+
+def test_declared_bundle_with_changed_repo_casing_lists_skills_as_bundled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """deps list reuses prune's installed-case lookup for a re-cased declaration."""
+    apm_dir = _apm_dir(tmp_path, InstallScope.PROJECT, monkeypatch)
+    _write_whole_repo_checkout(apm_dir / "apm_modules")
+    _write_manifest(apm_dir, ["    - Owner/Repo"])
+
+    _installed, orphaned = _resolve_scope_deps(apm_dir, MagicMock())
+
+    assert orphaned == []
+    assert "No orphaned packages found" in _cli(apm_dir, "prune", "--dry-run")
+
+
+def test_undeclared_parent_deeper_than_repo_root_stays_orphaned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real-orphan warning holds for a parent package at any depth."""
+    apm_dir = _apm_dir(tmp_path, InstallScope.PROJECT, monkeypatch)
+    apm_modules = apm_dir / "apm_modules"
+    _write(apm_modules / REPO / "skills/parent/SKILL.md", "---\nname: p\n---\n")
+    _write(apm_modules / REPO / "skills/parent/child/SKILL.md", "---\nname: c\n---\n")
+    _write_manifest(apm_dir, [f"    - git: {REPO}", "      path: skills/parent/child"])
+    _lockfile(_subdir_dep("skills/parent/child")).write(apm_dir / "apm.lock.yaml")
+
+    _installed, orphaned = _resolve_scope_deps(apm_dir, MagicMock())
+
+    assert orphaned == [f"{REPO}/skills/parent"]
+
+
+def test_deps_list_falls_back_to_declared_paths_when_selector_inputs_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If expected paths cannot be built, deps list keeps its conservative rule."""
+    apm_dir = _apm_dir(tmp_path, InstallScope.PROJECT, monkeypatch)
+    _write_whole_repo_checkout(apm_dir / "apm_modules")
+    _write_manifest(apm_dir, [f"    - {REPO}"])
+    _lockfile(_whole_repo_dep()).write(apm_dir / "apm.lock.yaml")
+    monkeypatch.setattr(
+        deps_cli, "_build_expected_install_paths", MagicMock(side_effect=ValueError("boom"))
+    )
+
+    installed, orphaned = _resolve_scope_deps(apm_dir, MagicMock())
+
+    assert len(installed) == len(orphaned) == 6
+    assert all(name.startswith(f"{REPO}/") for name in orphaned)
+
+
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_cli_deps_list_and_prune_agree_after_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: InstallScope
+) -> None:
+    """Through the CLI, deps list, deps tree and prune agree once the switch is cleaned."""
+    apm_dir = _apm_dir(tmp_path, scope, monkeypatch)
+    _write_whole_repo_checkout(apm_dir / "apm_modules")
+    previous = _lockfile(_whole_repo_dep())
+    current = _lockfile(*(_subdir_dep(path) for path in SUBDIRS))
+    _write_manifest(apm_dir, _subdir_manifest_lines())
+    current.write(apm_dir / "apm.lock.yaml")
+    flag = ["-g"] if scope is InstallScope.USER else []
+    assert "orphaned" in _cli(apm_dir, "deps", "list", *flag).lower()
+
+    cleanup.run(_ctx(apm_dir, scope, previous, current))
+
+    # The reporter ran prune from the metadata root, ~/.apm for user scope.
+    pruned = _cli(apm_dir, "prune", "--dry-run")
+    if scope is InstallScope.USER:
+        monkeypatch.chdir(tmp_path)
+    listed = _cli(apm_dir, "deps", "list", *flag)
+    tree = _cli(apm_dir, "deps", "tree", *flag)
+
+    assert "No orphaned packages found" in pruned
+    assert "orphaned" not in listed.lower()
+    for path in SUBDIRS:
+        assert f"{REPO}/{path}" in listed
+        assert f"{REPO}/{path}" in tree

@@ -182,8 +182,11 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
                 existing_lockfile, partial_dropped, frozenset(orphan_cleanup_retained)
             )
             ctx.partial_pinned_dep_keys = pinned
-            _remove_dropped_package_dirs(ctx, partial_dropped, pinned)
-            _trim_superseded_package_roots(ctx, partial_dropped - pinned)
+            released = partial_dropped - pinned
+            paths = _released_and_retained_install_paths(ctx, released)
+            if paths is not None:
+                _remove_dropped_package_dirs(ctx, partial_dropped, pinned, paths=paths)
+                _trim_superseded_package_roots(ctx, released, paths=paths)
         else:
             _trim_superseded_package_roots(
                 ctx,
@@ -306,24 +309,25 @@ def _remove_dropped_package_dirs(
     ctx: InstallContext,
     dropped: frozenset[str],
     pinned: frozenset[str],
+    *,
+    paths: tuple[set[str], set[str]] | None = None,
 ) -> None:
     """Remove dropped descendants' ``apm_modules`` copies that nothing retained shares.
 
     Selection routes through the declaration-aware orphan owner so a path
     still used by a resolved, retained, pinned or newly selected package
     survives. Pinned entries keep their copy alongside their lock entry for
-    the next install.
+    the next install. *paths* reuses a precomputed
+    :func:`_released_and_retained_install_paths` result.
     """
     from apm_cli.commands._helpers import _find_orphaned_packages
     from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 
-    apm_modules_dir = ctx.apm_modules_dir
-    existing_lockfile = ctx.existing_lockfile
-    if apm_modules_dir is None or existing_lockfile is None or not apm_modules_dir.is_dir():
-        return
-    paths = _released_and_retained_install_paths(ctx, apm_modules_dir, dropped - pinned)
+    if paths is None:
+        paths = _released_and_retained_install_paths(ctx, dropped - pinned)
     if paths is None:
         return
+    apm_modules_dir = ctx.apm_modules_dir
     candidates, expected = paths
     deleted: list[Path] = []
     for relative in _find_orphaned_packages(
@@ -346,17 +350,25 @@ def _remove_dropped_package_dirs(
 
 
 def _released_and_retained_install_paths(
-    ctx: InstallContext, apm_modules_dir: Path, released: frozenset[str]
+    ctx: InstallContext, released: frozenset[str]
 ) -> tuple[set[str], set[str]] | None:
     """Return ``(released, retained)`` install paths relative to ``apm_modules``.
 
     Retained paths cover resolved, newly selected and surviving lock entries.
-    ``None`` means some path could not be computed, so no removal is provable.
+    ``None`` means there is no ``apm_modules`` copy to act on or some path
+    could not be computed, so no removal is provable.
     """
     from apm_cli.commands._helpers import _build_expected_install_paths
     from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.utils.path_security import PathTraversalError
 
+    apm_modules_dir = ctx.apm_modules_dir
+    if (
+        ctx.existing_lockfile is None
+        or not isinstance(apm_modules_dir, Path)
+        or not apm_modules_dir.is_dir()
+    ):
+        return None
     dependencies = ctx.existing_lockfile.dependencies
     graph = getattr(ctx, "dependency_graph", None)
     try:
@@ -387,7 +399,12 @@ def _released_and_retained_install_paths(
     return candidates, expected
 
 
-def _trim_superseded_package_roots(ctx: InstallContext, released: frozenset[str]) -> None:
+def _trim_superseded_package_roots(
+    ctx: InstallContext,
+    released: frozenset[str],
+    *,
+    paths: tuple[set[str], set[str]] | None = None,
+) -> None:
     """Reduce a released package copy to the retained packages nested inside it.
 
     Switching ``owner/repo`` to ``path:`` dependencies on the same repository
@@ -396,6 +413,8 @@ def _trim_superseded_package_roots(ctx: InstallContext, released: frozenset[str]
     so the shared orphan selector trims it to the retained subtrees -- the
     state a fresh subdirectory install produces. A released copy that hosts
     no retained package, or that lies inside one, is left for ``apm prune``.
+    *paths* reuses a precomputed :func:`_released_and_retained_install_paths`
+    result.
     """
     from apm_cli.commands._helpers import _find_orphaned_packages
     from apm_cli.utils.path_security import (
@@ -405,17 +424,13 @@ def _trim_superseded_package_roots(ctx: InstallContext, released: frozenset[str]
         validate_path_segments,
     )
 
-    apm_modules_dir = ctx.apm_modules_dir
-    if (
-        not released
-        or ctx.existing_lockfile is None
-        or not isinstance(apm_modules_dir, Path)
-        or not apm_modules_dir.is_dir()
-    ):
+    if not released:
         return
-    paths = _released_and_retained_install_paths(ctx, apm_modules_dir, released)
+    if paths is None:
+        paths = _released_and_retained_install_paths(ctx, released)
     if paths is None:
         return
+    apm_modules_dir = ctx.apm_modules_dir
     candidates, expected = paths
     # Case-folded so a case-insensitive filesystem never loses a retained subtree.
     retained = {path.replace("\\", "/").casefold() for path in expected}
@@ -435,32 +450,39 @@ def _trim_superseded_package_roots(ctx: InstallContext, released: frozenset[str]
             continue
         entries = _entries_leading_to(root_dir, apm_modules_dir, hosted)
         for orphan in _find_orphaned_packages(entries, retained):
-            entry = entries[orphan]
-            try:
-                if entry.is_dir() and not entry.is_symlink():
-                    safe_rmtree(entry, apm_modules_dir)
-                else:
-                    ensure_path_within(entry.parent, apm_modules_dir)
-                    entry.unlink()
-            except (OSError, PathTraversalError) as exc:
-                display = entry.relative_to(apm_modules_dir).as_posix()
-                ctx.diagnostics.warn(
-                    f"Could not remove superseded content apm_modules/{display}: {exc}",
-                    detail="Run 'apm prune' to remove leftover orphaned packages.",
-                )
+            for entry in entries[orphan]:
+                try:
+                    if entry.is_dir() and not entry.is_symlink():
+                        safe_rmtree(entry, apm_modules_dir)
+                    else:
+                        ensure_path_within(entry.parent, apm_modules_dir)
+                        entry.unlink()
+                except (OSError, PathTraversalError) as exc:
+                    display = entry.relative_to(apm_modules_dir).as_posix()
+                    ctx.diagnostics.warn(
+                        f"Could not remove superseded content apm_modules/{display}: {exc}",
+                        detail="Run 'apm prune' to remove leftover orphaned packages.",
+                    )
 
 
-def _entries_leading_to(directory: Path, apm_modules_dir: Path, hosted: set[str]) -> dict:
-    """Map case-folded relative paths to entries, descending only toward *hosted*."""
-    entries: dict[str, Path] = {}
+def _entries_leading_to(
+    directory: Path, apm_modules_dir: Path, hosted: set[str]
+) -> dict[str, list[Path]]:
+    """Group entries by case-folded relative path, descending only toward *hosted*.
+
+    A case-sensitive filesystem can hold several entries per folded key
+    (``README.md`` and ``readme.md``); each group keeps all of them.
+    """
+    entries: dict[str, list[Path]] = {}
     for child in sorted(directory.iterdir()):
         relative = child.relative_to(apm_modules_dir).as_posix().casefold()
-        entries[relative] = child
+        entries.setdefault(relative, []).append(child)
         if (
             child.is_dir()
             and not child.is_symlink()
             and relative not in hosted
             and any(path.startswith(f"{relative}/") for path in hosted)
         ):
-            entries.update(_entries_leading_to(child, apm_modules_dir, hosted))
+            for key, group in _entries_leading_to(child, apm_modules_dir, hosted).items():
+                entries.setdefault(key, []).extend(group)
     return entries
