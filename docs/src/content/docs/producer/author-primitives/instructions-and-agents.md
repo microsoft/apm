@@ -242,9 +242,8 @@ offending package and field so you can fix the source.
 Agent files and model identifiers belong to each harness vendor. APM
 writes a string `model` value verbatim to every target that receives
 agent files, so a Claude alias such as `sonnet` also lands in the Codex
-TOML. A warning for Claude-specific
-values in Codex output is tracked in
-[#3477](https://github.com/microsoft/apm/issues/3477). APM does not add
+TOML, with a warning naming the agent (see the Codex paragraph above).
+APM does not add
 a per-target model map or a `codex:` override block
 ([#3324](https://github.com/microsoft/apm/issues/3324)): no other tool
 could read it. Workarounds:

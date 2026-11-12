@@ -653,8 +653,8 @@ agent with Codex.
 
 Agent files and model ids belong to each harness vendor. APM writes a
 string `model` verbatim to every agent target (a Claude `sonnet` also
-lands in the Codex TOML); a warning for Claude-specific values in Codex output is
-tracked in #3477. APM does not add a per-target model map or `codex:`
+lands in the Codex TOML, with a warning naming the agent). APM does
+not add a per-target model map or `codex:`
 override block (#3324). Workarounds:
 
 1. Omit `model` from the shared agent so each harness uses its default.
