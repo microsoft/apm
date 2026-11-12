@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
+    _GUARD_CLEANUP_RELEASE,
     _GUARD_PROVENANCE,
     _GUARD_TARGET_CONTRACTION,
     check_base_integrator,
+    check_cleanup_ownership_release,
     check_provenance_state,
     check_target_file_contraction,
 )
@@ -193,6 +195,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_BASE_INTEGRATOR,
         "File-level deploy/sync/cleanup stays owned by BaseIntegrator.",
         check_base_integrator,
+    ),
+    _rule(
+        _GUARD_CLEANUP_RELEASE,
+        "Stale cleanup releases skill directories that hold only user content.",
+        check_cleanup_ownership_release,
     ),
     _rule(
         GUARD_CODEX_AGENT_LINKS,

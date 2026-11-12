@@ -624,6 +624,7 @@ install-deployment-audit-policy-discovery
 install-deployment-audit-replay
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
+install-deployment-cleanup-ownership-release
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
 install-deployment-consumer-manifest-rewrite

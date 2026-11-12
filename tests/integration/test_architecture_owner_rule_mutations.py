@@ -822,6 +822,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-ownership-release",
+        rule_id="install-deployment-cleanup-ownership-release",
+        path="src/apm_cli/integration/cleanup.py",
+        old="(result.released if user_content_only else result.skipped_unmanaged)",
+        new="result.skipped_unmanaged",
+        intent="A skill directory left only for user content pins its removed owner again.",
+    ),
+    MutationCase(
         guard_id="install-deployment-codex-agent-link-resolution",
         rule_id="install-deployment-codex-agent-link-resolution",
         path="src/apm_cli/integration/agent_integrator.py",

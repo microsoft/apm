@@ -65,6 +65,11 @@ class CleanupResult:
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
+    released: list[str] = field(default_factory=list)
+    """Skill directories kept on disk because only user content remains in
+    them. Every APM-owned member is gone, so ownership is released rather
+    than retained: no retry could ever remove them."""
+
     deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
@@ -166,6 +171,9 @@ def _safe_remove_skill_directory(
     # matching hashes.  Recurse into subdirectories (skills can
     # contain scripts/, assets/, references/ subdirectories).
     blocking: list[str] = []
+    # True while every blocking entry is user content (untracked and never
+    # deployed); then nothing APM-owned remains and ownership is released.
+    user_content_only = True
     project_root = skill_dir
     # Walk up to reconstruct project_root from the rel_path
     rel_parts = Path(rel_path).parts
@@ -192,6 +200,7 @@ def _safe_remove_skill_directory(
             child_rel = child.relative_to(project_root).as_posix()
         except ValueError:
             blocking.append(str(child.name))
+            user_content_only = False
             continue
         expected_hash = recorded_hashes.get(child_rel)
         if expected_hash is None:
@@ -205,6 +214,7 @@ def _safe_remove_skill_directory(
             # Was in stale set but file still exists -- might have
             # been skipped (user-edit, failed unlink). Block removal.
             blocking.append(child_rel)
+            user_content_only = False
             continue
         # Verify hash matches.
         try:
@@ -213,10 +223,12 @@ def _safe_remove_skill_directory(
             actual_hash = compute_file_hash(child)
         except Exception:
             blocking.append(child_rel)
+            user_content_only = False
             continue
         _strip = _strip_sha256_prefix
         if _strip(actual_hash) != _strip(expected_hash):
             blocking.append(child_rel)
+            user_content_only = False
 
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
@@ -224,16 +236,21 @@ def _safe_remove_skill_directory(
         preview = blocking[:5]
         suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
         file_list = ", ".join(preview) + suffix
-        diagnostics.warn(
-            (
+        if user_content_only:
+            message = (
+                f"Kept skill directory {rel_path} for {len(blocking)} file(s) not "
+                f"owned by APM: {file_list}. APM no longer manages it; "
+                "remove it manually if no longer needed."
+            )
+        else:
+            message = (
                 f"Skipped removing skill directory {rel_path}: "
                 f"{len(blocking)} file(s) not owned by APM or "
                 f"modified since deployment: {file_list}. "
                 "Remove manually if no longer needed."
-            ),
-            package=dep_key,
-        )
-        result.skipped_unmanaged.append(rel_path)
+            )
+        diagnostics.warn(message, package=dep_key)
+        (result.released if user_content_only else result.skipped_unmanaged).append(rel_path)
         return
 
     # All remaining files are APM-tracked with matching hashes -- safe

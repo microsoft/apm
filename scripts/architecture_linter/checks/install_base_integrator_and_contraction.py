@@ -41,6 +41,9 @@ _GUARD_TARGET_CONTRACTION = "install-deployment-target-file-contraction"
 _GUARD_BASE_INTEGRATOR = "install-deployment-base-integrator"
 
 
+_GUARD_CLEANUP_RELEASE = "install-deployment-cleanup-ownership-release"
+
+
 def _body_has_re(body: Sequence[str], pattern: re.Pattern[str]) -> bool:
     """Return whether any captured body line matches `pattern`."""
     return any(pattern.search(line) is not None for line in body)
@@ -221,6 +224,36 @@ def _defines_function(facts: object, name: str) -> bool:
         definition.name == name and definition.kind in ("function", "async_function")
         for definition in getattr(facts, "definitions", ())
     )
+
+
+_CLEANUP_HELPER = "src/apm_cli/integration/cleanup.py"
+
+
+def check_cleanup_ownership_release(provider: FactsProvider) -> tuple[Violation, ...]:
+    """A skill directory left only for user content releases its ownership.
+
+    ``_safe_remove_skill_directory`` files it under ``CleanupResult.released``
+    and ``CleanupResult.retained`` never includes released paths, so a
+    removed dependency's row and checkout are not pinned by user files.
+    """
+    rule_id = _GUARD_CLEANUP_RELEASE
+    facts, failures = _facts_for(provider, _CLEANUP_HELPER, rule_id)
+    if failures:
+        return tuple(failures)
+    findings: list[Violation] = []
+    if not _present(facts, "(result.released if user_content_only else result.skipped_unmanaged)"):
+        findings.append(
+            _summary(
+                rule_id,
+                _CLEANUP_HELPER,
+                "Skill directories holding only user content must be filed as released",
+            )
+        )
+    if _present(facts, "*self.released"):
+        findings.append(
+            _summary(rule_id, _CLEANUP_HELPER, "CleanupResult.retained must not include released")
+        )
+    return tuple(findings)
 
 
 _CONTRACTION_MANIFEST = "src/apm_cli/install/manifest_reconcile.py"
