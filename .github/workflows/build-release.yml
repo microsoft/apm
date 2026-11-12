@@ -483,9 +483,7 @@ jobs:
 
       - name: Install Unix shell startup test runtimes
         if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fish zsh
+        run: bash scripts/ci-apt-install.sh fish zsh
 
       - name: Install test dependencies
         if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'

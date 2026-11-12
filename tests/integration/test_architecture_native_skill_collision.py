@@ -20,7 +20,7 @@ def test_native_skill_collision_guard_is_registered_and_clean() -> None:
 
 def test_native_skill_collision_guard_rejects_bypass() -> None:
     source = (ROOT / PATH).read_text()
-    mutated = source.replace("if self.check_collision(", "if self.parallel_collision_policy(")
+    mutated = source.replace("self.check_collision(", "self.parallel_collision_policy(")
     assert mutated != source
     result = run_selected_rules(ROOT, (RULE,), source_overrides={PATH: mutated})
     assert any(
