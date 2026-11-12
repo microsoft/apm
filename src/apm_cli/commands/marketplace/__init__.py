@@ -498,7 +498,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
             if discovered_manifest is None:
                 at_ref = "" if kind == "local" else f" at ref '{effective_ref}'"
                 logger.error(
-                    f"No marketplace.json found at '{explicit_path}' in "
+                    f"No marketplace catalog found at '{explicit_path}' in "
                     f"'{probe_source.display_source}'{at_ref}. Check that --path is "
                     "relative to the repository root and that the file exists.",
                     symbol="error",
@@ -576,6 +576,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose):
             ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
+        _warn_if_replacing_catalog(logger, final_source, explicit_path is not None)
         add_marketplace(final_source)
 
         logger.success(
@@ -657,6 +658,34 @@ def _local_source_points_to_file(source: MarketplaceSource) -> bool:
         return Path(source.local_path).expanduser().is_file()
     except OSError:
         return False
+
+
+def _warn_if_replacing_catalog(
+    logger: CommandLogger, source: MarketplaceSource, explicit_path: bool
+) -> None:
+    """Warn before a registration silently replaces a different catalog.
+
+    Only fires when a catalog path is involved (``--path`` now, or a custom
+    path on the existing entry), so registrations without ``--path`` keep
+    their existing replace-by-name behaviour.
+    """
+    from ...marketplace.registry import get_registered_marketplaces
+
+    for existing in get_registered_marketplaces():
+        if existing.name.lower() != source.name.lower():
+            continue
+        if (existing.url, existing.path) == (source.url, source.path):
+            return
+        if explicit_path or existing.path != source.path:
+            where = existing.display_source
+            if existing.path:
+                where += f", path '{existing.path}'"
+            logger.warning(
+                f"Replacing marketplace '{existing.name}' ({where}). "
+                "Use --name to keep both registrations.",
+                symbol="warning",
+            )
+        return
 
 
 def _display_source_kind(kind: str, is_direct_url: bool) -> str:

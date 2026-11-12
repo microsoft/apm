@@ -96,9 +96,12 @@ class TestAdmitMarketplaceCatalogPath:
             ("catalogs/frontend", "JSON file"),
             ("catalogs/frontend/", "JSON file"),
             ("catalogs/\x00/marketplace.json", "control characters"),
+            ("catalogs/marketplace.json?ref=main#catalog.json", "'\\?' or '#'"),
+            ("catalogs/a#b.json", "'\\?' or '#'"),
+            (123, "must be a string"),
         ],
     )
-    def test_rejects_escaping_or_malformed_paths(self, raw: str, reason: str) -> None:
+    def test_rejects_escaping_or_malformed_paths(self, raw: object, reason: str) -> None:
         with pytest.raises(ValueError, match=reason):
             admit_marketplace_catalog_path(raw)
 
@@ -140,6 +143,22 @@ class TestPersistedRegistrationAdmission:
                             "url": "https://github.com/acme/skills",
                             "path": "catalogs/a/marketplace.json",
                         },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert [entry["name"] for entry in _registered()] == ["good"]
+
+    def test_registry_skips_non_string_path_entry(self, tmp_path: Path) -> None:
+        registry_file = tmp_path / ".apm" / "marketplaces.json"
+        registry_file.parent.mkdir(parents=True)
+        registry_file.write_text(
+            json.dumps(
+                {
+                    "marketplaces": [
+                        {"name": "bad", "url": "https://github.com/acme/skills", "path": 123},
+                        {"name": "good", "url": "https://github.com/acme/skills"},
                     ]
                 }
             ),
@@ -241,7 +260,7 @@ class TestMarketplaceAddPath:
 
         assert result.exit_code == 1
         output = " ".join(result.output.split())
-        assert "No marketplace.json found at 'catalogs/mobile/marketplace.json'" in output
+        assert "No marketplace catalog found at 'catalogs/mobile/marketplace.json'" in output
         assert "relative to the repository root" in output
         assert _registered() == []
 
@@ -294,3 +313,54 @@ class TestMarketplaceAddPath:
         assert "frontend-skill" not in browse.output
         [entry] = _registered()
         assert entry["path"] == "catalogs/backend/marketplace.json"
+
+    def test_replacing_a_different_catalog_under_the_same_name_warns(self, tmp_path: Path) -> None:
+        repo = _two_catalog_repo(tmp_path)
+        frontend = ("--path", "catalogs/frontend/marketplace.json", "--name", "acme")
+
+        assert _invoke_add(str(repo), *frontend).exit_code == 0
+        same = _invoke_add(str(repo), *frontend)
+        assert same.exit_code == 0, same.output
+        assert "Replacing marketplace" not in same.output
+
+        result = _invoke_add(
+            str(repo), "--path", "catalogs/backend/marketplace.json", "--name", "acme"
+        )
+
+        assert result.exit_code == 0, result.output
+        output = " ".join(result.output.split())
+        assert "Replacing marketplace 'acme'" in output
+        assert "path 'catalogs/frontend/marketplace.json'" in output
+        assert "Use --name to keep both registrations." in output
+        [entry] = _registered()
+        assert entry["path"] == "catalogs/backend/marketplace.json"
+
+    def test_re_adding_without_path_keeps_silent_replace(self, tmp_path: Path) -> None:
+        for audience in ("one", "two"):
+            repo = tmp_path / audience
+            repo.mkdir()
+            (repo / "marketplace.json").write_text(json.dumps(CATALOG), encoding="utf-8")
+            result = _invoke_add(str(repo), "--name", "acme")
+            assert result.exit_code == 0, result.output
+            assert "Replacing marketplace" not in result.output
+
+
+class TestGithubContentsUrl:
+    def test_catalog_path_is_encoded_and_ref_preserved(self) -> None:
+        from types import SimpleNamespace
+        from urllib.parse import parse_qs, urlsplit
+
+        source = MarketplaceSource(
+            name="acme",
+            url="https://github.com/acme/skills",
+            ref="v1.0.0",
+            path="catalogs/front end/marketplace.json",
+        )
+        url = mp_client._github_contents_url(
+            source, source.path, SimpleNamespace(api_base="https://api.github.com")
+        )
+
+        parts = urlsplit(url)
+        assert parts.path == "/repos/acme/skills/contents/catalogs/front%20end/marketplace.json"
+        assert parse_qs(parts.query) == {"ref": ["v1.0.0"]}
+        assert parts.fragment == ""

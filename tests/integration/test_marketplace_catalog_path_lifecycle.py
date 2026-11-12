@@ -109,7 +109,7 @@ def test_two_catalogs_from_one_repository_register_install_and_refresh(
     )
     outputs = [" ".join((result.stdout + result.stderr).split()) for result in failures]
     assert "Invalid --path '../outside.json'" in outputs[0]
-    assert "No marketplace.json found at 'catalogs/x/marketplace.json'" in outputs[1]
+    assert "No marketplace catalog found at 'catalogs/x/marketplace.json'" in outputs[1]
     assert "Checked: marketplace.json, .github/plugin/marketplace.json" in outputs[2]
     marketplaces_file = isolated.config_root / "marketplaces.json"
     assert not marketplaces_file.exists() or _registrations(isolated.config_root) == {}
