@@ -626,6 +626,7 @@ install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
+install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-executable-trust-context

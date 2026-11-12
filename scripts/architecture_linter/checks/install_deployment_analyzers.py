@@ -47,9 +47,11 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     check_lock_parent_placement,
 )
 from scripts.architecture_linter.checks.install_lsp_plugin import (
+    GUARD_CONSUMER_MANIFEST_REWRITE,
     GUARD_EXECUTABLE_TRUST,
     GUARD_LSP_LIFECYCLE,
     GUARD_LSP_TARGET_CONTRACT,
+    check_consumer_manifest_rewrite,
     check_executable_trust_context,
     check_lsp_lifecycle,
     check_lsp_target_contract,
@@ -196,6 +198,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
+    ),
+    _rule(
+        GUARD_CONSUMER_MANIFEST_REWRITE,
+        "Consumer apm.yml rewrites route through the round-trip YAML pair.",
+        check_consumer_manifest_rewrite,
     ),
     _rule(
         GUARD_EXECUTABLE_TRUST,

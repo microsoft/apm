@@ -830,6 +830,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Codex agent conversion bypasses the shared link resolver again.",
     ),
     MutationCase(
+        guard_id="install-deployment-consumer-manifest-rewrite",
+        rule_id="install-deployment-consumer-manifest-rewrite",
+        path="src/apm_cli/install/mcp/writer.py",
+        old="dump_yaml_roundtrip(data, apm_yml_path)",
+        new="dump_yaml(data, apm_yml_path)",
+        intent="apm install --mcp strips user comments from apm.yml again.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",

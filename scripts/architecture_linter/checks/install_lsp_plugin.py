@@ -14,6 +14,7 @@ from scripts.architecture_linter.models import Violation
 GUARD_EXECUTABLE_TRUST = "install-deployment-executable-trust-context"
 GUARD_LSP_TARGET_CONTRACT = "install-deployment-lsp-target-contract"
 GUARD_LSP_LIFECYCLE = "install-deployment-lsp-lifecycle"
+GUARD_CONSUMER_MANIFEST_REWRITE = "install-deployment-consumer-manifest-rewrite"
 
 _EXECUTABLES = "src/apm_cli/security/executables.py"
 _APPROVE_COMMAND = "src/apm_cli/commands/approve.py"
@@ -25,6 +26,9 @@ _LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
 _INSTALL_SERVICES = "src/apm_cli/install/services.py"
 _SKILL_SUPPORT = "src/apm_cli/integration/skill_support.py"
 _EXEC_GATE = "src/apm_cli/install/exec_gate.py"
+_MCP_WRITER = "src/apm_cli/install/mcp/writer.py"
+_MANIFEST_HELPERS = "src/apm_cli/install/manifest_helpers.py"
+_UNINSTALL_COMMAND = "src/apm_cli/commands/uninstall/cli.py"
 
 
 def _missing_tokens(
@@ -60,7 +64,6 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 "def exec_trust_context_for_project(",
                 "def locked_dependency_approval_keys(",
                 "def dependency_approval_key(",
-                "data = load_yaml_roundtrip(manifest_path)",
                 "def local_bundle_approval_key(",
                 'owner = getattr(dependency, "resolved_by", None)',
                 'approval_keys = getattr(dependency, "approval_keys", ())',
@@ -83,6 +86,26 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _INSTALL_SERVICES: (
                 "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
             ),
+        },
+    )
+
+
+def check_consumer_manifest_rewrite(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every consumer apm.yml rewrite must use the comment-preserving round-trip pair."""
+    return _missing_tokens(
+        provider,
+        GUARD_CONSUMER_MANIFEST_REWRITE,
+        {
+            _MCP_WRITER: (
+                "data = load_yaml_roundtrip(apm_yml_path) or {}",
+                "dump_yaml_roundtrip(data, apm_yml_path)",
+            ),
+            _EXECUTABLES: (
+                "data = load_yaml_roundtrip(manifest_path)",
+                "dump_yaml_roundtrip(data, manifest_path)",
+            ),
+            _MANIFEST_HELPERS: ("dump_yaml_roundtrip(data, apm_yml_path)",),
+            _UNINSTALL_COMMAND: ("dump_yaml_roundtrip(data, apm_yml_path)",),
         },
     )
 

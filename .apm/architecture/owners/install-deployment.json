@@ -245,6 +245,13 @@
         "src/apm_cli/commands/uninstall/engine.py"
       ],
       "guards": ["install-deployment-skills-root-derivation"]
+    },
+    {
+      "id": "consumer-manifest-rewrite",
+      "decision": "Consumer apm.yml rewrites preserve user comments, aliases and layout",
+      "owner": "utils/yaml_io.py round-trip pair (load_yaml_roundtrip, dump_yaml_roundtrip) for install, uninstall, approve/deny and install --mcp",
+      "selectors": ["src/apm_cli/install/mcp/writer.py"],
+      "guards": ["install-deployment-consumer-manifest-rewrite"]
     }
   ]
 }
