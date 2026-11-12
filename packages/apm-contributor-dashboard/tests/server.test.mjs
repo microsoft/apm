@@ -499,7 +499,7 @@ function makeTriageGqlResponse(issues) {
 const TRIAGE_DECISION_BLOCK = `\`\`\`json triage-decision
 {
   "decision": "accept",
-  "theme": "theme/governance",
+  "theme": "pillar/govern",
   "areas": ["area/audit"],
   "type": "type/bug",
   "status": "status/accepted",
