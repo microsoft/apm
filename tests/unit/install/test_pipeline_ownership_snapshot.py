@@ -636,3 +636,50 @@ def test_install_rebinds_native_receipt_whose_device_number_drifted(
     result = _install(fixture)
     assert result.exit_code == 0
     assert json.loads(receipt.read_text(encoding="utf-8"))["root_identity"] == actual
+
+
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_refused_skill_baseline_never_reaches_native_claude_registration(
+    monkeypatch: pytest.MonkeyPatch,
+    local_install_factory: Callable[..., LocalInstall],
+    scope: InstallScope,
+) -> None:
+    """A receipt-less skill refusal fails before the lock and any native Claude change."""
+    from apm_cli.install.phases import claude_plugins
+
+    fixture = local_install_factory(scope)
+    events: list[str] = []
+    run_phase = pipeline._run_phase
+
+    def observed_phase(name: str, phase: ModuleType, ctx: InstallContext) -> Any:
+        events.append(name)
+        return run_phase(name, phase, ctx)
+
+    preflight = integrate.preflight_skill_materializations
+
+    def refuse_baseline(ctx: InstallContext, materialized: list[Any]) -> Any:
+        planned = preflight(ctx, materialized)
+        ctx.diagnostics.error("injected receipt-less skill refusal", package="shared")
+        ctx.skill_baseline_refused = True
+        return planned
+
+    resync = MagicMock(side_effect=AssertionError("native Claude resync ran after a refusal"))
+    monkeypatch.setattr(pipeline, "_run_phase", observed_phase)
+    monkeypatch.setattr(integrate, "preflight_skill_materializations", refuse_baseline)
+    monkeypatch.setattr(claude_plugins, "resync_claude_plugins", resync)
+
+    result = pipeline.run_install_pipeline(
+        fixture.package,
+        scope=fixture.scope,
+        target="claude",
+        parallel_downloads=0,
+        no_policy=True,
+        audit_override="off",
+    )
+
+    assert result.disposition is InstallDisposition.FAILED
+    assert result.exit_code == 1
+    assert "integrate" in events
+    assert "claude_plugins" not in events
+    resync.assert_not_called()
+    assert not get_lockfile_path(fixture.metadata).exists()
