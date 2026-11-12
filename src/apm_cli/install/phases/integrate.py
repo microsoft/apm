@@ -716,6 +716,8 @@ def run(ctx: InstallContext) -> None:
     preflight_agent_plugin_materializations(materialized)
     _fail_explicit_target_without_deploy(ctx)
     deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)
+    if ctx.skill_baseline_refused:
+        return
 
     if ctx.frozen and ctx.existing_lockfile is not None:
         from apm_cli.install.service import InstallService

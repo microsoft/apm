@@ -9,7 +9,8 @@
   },
   "human_metadata": ["priority/*", "help wanted", "good first issue", "milestone"],
   "classification_labels": [
-    "theme/governance", "theme/portability", "theme/security",
+    "pillar/consume", "pillar/ecosystem", "pillar/foundations", "pillar/govern",
+    "pillar/produce",
     "area/audit-policy", "area/ci-cd", "area/cli", "area/content-security",
     "area/distribution", "area/docs-site", "area/enterprise", "area/lockfile",
     "area/marketplace", "area/mcp-config", "area/mcp-trust", "area/multi-target",
@@ -47,7 +48,7 @@
     "performance": "type/performance",
     "policy": "area/audit-policy",
     "refactor": "type/refactor",
-    "security": "theme/security",
+    "security": "pillar/govern",
     "testing": "area/testing"
   },
   "legacy_manual_review": [
