@@ -39,7 +39,9 @@ resolves or helps you create a token for `HOST`.
 
 ## Token precedence chain
 
-For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
+For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`. It also inherits `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath` from user and system Git config, so a corporate CA configured there still applies.
+
+If the anonymous attempt still fails at TLS, `--auth-first` / `APM_GITHUB_AUTH_FIRST=1` / `apm config set github-auth-first true` skip it for exact-host `github.com` when a credential resolves (with no credential, APM still tries anonymously as a last resort) and print a one-time `[!]` warning. See [Authentication: TLS-inspecting proxy blocks the anonymous attempt](https://microsoft.github.io/apm/getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Ordinary credentials are cached per `(host, port, org)` for the process. A private `github.com` helper fallback adds the repository path to that scope, so later phases reuse it without applying that credential to another repository. APM never writes the credential into persistent cache keys or stored remote URLs.
 
