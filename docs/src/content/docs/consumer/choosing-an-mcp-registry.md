@@ -45,8 +45,8 @@ server lives in another registry you trust, choose it explicitly. The example
 keeps any `--mcp-version`, `--target`, and `--global` you passed. After a
 `--registry` miss, the search line says to set `MCP_REGISTRY_URL` first, since
 `apm mcp search` has no `--registry` flag. After an `MCP_REGISTRY_URL` miss,
-the last line points at that variable instead of `apm config`. Misses for `dependencies.mcp` entries in
-`apm.yml` show a shorter `apm mcp search` hint.
+the `Or ...` line points at that variable instead of `apm config`. Misses for
+`dependencies.mcp` entries in `apm.yml` show a shorter `apm mcp search` hint.
 
 ## Select a registry
 
