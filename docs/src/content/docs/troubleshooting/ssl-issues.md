@@ -20,6 +20,8 @@ Typical errors APM surfaces or passes through from the underlying HTTP/git stack
     APM_EXTRA_CA_BUNDLE to a readable PEM bundle and retry.
 ```
 
+The first hint follows the trust mode APM selected. When `APM_DISABLE_TRUSTSTORE`, `REQUESTS_CA_BUNDLE`, or `CURL_CA_BUNDLE` is active, the hint names that setting instead of recommending the OS trust store or `APM_EXTRA_CA_BUNDLE`, which that mode does not use. Keep the setting if it is intentional; otherwise unset it and retry.
+
 ```text
 SSLError: HTTPSConnectionPool(host='api.github.com', port=443):
   Max retries exceeded ... [SSL: CERTIFICATE_VERIFY_FAILED]
