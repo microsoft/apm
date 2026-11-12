@@ -192,8 +192,8 @@
     },
     {
       "id": "post-uninstall-dependency-reachability",
-      "decision": "Post-uninstall dependency reachability",
-      "owner": "deps/reachability.py (compute_forward_reachable_keys)",
+      "decision": "Dependency reachability after uninstall and the lock entries prune and deps list retain",
+      "owner": "deps/reachability.py (compute_forward_reachable_keys, retained_lock_keys)",
       "selectors": ["src/apm_cli/deps/reachability.py"],
       "guards": ["install-deployment-uninstall-reachability"]
     },

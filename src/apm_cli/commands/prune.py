@@ -14,6 +14,7 @@ from ..core.scope import InstallScope
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..deps.reachability import retained_lock_keys
 from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
@@ -131,10 +132,8 @@ def prune(ctx, dry_run):
         )
         expected_lock_keys = {dependency.get_unique_key() for dependency in declared_deps}
         if lockfile is not None:
-            expected_lock_keys.update(
-                dep_key
-                for dep_key, dependency in lockfile.dependencies.items()
-                if dependency.depth is not None and dependency.depth > 1
+            expected_lock_keys |= retained_lock_keys(
+                lockfile, project_root, apm_modules_dir, declared_deps
             )
         lock_keys_by_path = (
             _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}

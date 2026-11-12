@@ -64,7 +64,7 @@ def _make_package_dir(root: Path, org: str, repo: str) -> Path:
     """Create an installed package directory with an apm.yml marker."""
     pkg_dir = root / "apm_modules" / org / repo
     pkg_dir.mkdir(parents=True, exist_ok=True)
-    (pkg_dir / "apm.yml").write_text(f"name: {repo}\nversion: 1.0\n")
+    (pkg_dir / "apm.yml").write_text(f"name: {repo}\nversion: 1.0.0\n")
     return pkg_dir
 
 
