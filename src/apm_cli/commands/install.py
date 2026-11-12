@@ -850,7 +850,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     initial_manifest_config = None
     if is_user_scope(scope) and not mcp_manifest_path.exists():
         project_name = _resolve_bootstrap_project_name(Path.home().name)
-        initial_manifest_config = _get_default_config(project_name)
+        initial_manifest_config = _get_default_config(project_name, include_author=False)
         if target is not None or runtime is not None:
             initial_manifest_config["targets"] = supported_runtimes
     _run_mcp_install(
@@ -1519,7 +1519,7 @@ def install(  # noqa: PLR0913
                     f'Using default project name "{project_name}" because '
                     f"derived name {derived_project_name!a} is invalid"
                 )
-            config = _get_default_config(project_name)
+            config = _get_default_config(project_name, include_author=False)
             if manifest_targets := manifest_targets_from_target_option(target):
                 config["targets"] = manifest_targets
             _create_minimal_apm_yml(config, target_path=manifest_path)

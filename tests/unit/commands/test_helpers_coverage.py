@@ -440,3 +440,53 @@ class TestCreateMinimalApmYml:
         assert "targets" in content
         assert "claude" in content
         assert "copilot" in content
+
+    def test_author_omitted_when_not_provided(self, tmp_path) -> None:
+        """_create_minimal_apm_yml omits 'author' field when not in config (#3593)."""
+        import yaml
+
+        from apm_cli.commands._helpers import _create_minimal_apm_yml
+
+        cfg = {
+            "name": "test-project",
+            "version": "1.0.0",
+            "description": "desc",
+        }
+        out = tmp_path / "apm.yml"
+        _create_minimal_apm_yml(cfg, target_path=out)
+
+        content = out.read_text()
+        assert "author" not in content
+        parsed = yaml.safe_load(content)
+        assert "author" not in parsed
+
+    def test_author_included_when_provided(self, tmp_path) -> None:
+        """_create_minimal_apm_yml includes 'author' when present in config."""
+        import yaml
+
+        from apm_cli.commands._helpers import _create_minimal_apm_yml
+
+        cfg = {
+            "name": "test-project",
+            "version": "1.0.0",
+            "description": "desc",
+            "author": "Jane Example",
+        }
+        out = tmp_path / "apm.yml"
+        _create_minimal_apm_yml(cfg, target_path=out)
+
+        parsed = yaml.safe_load(out.read_text())
+        assert parsed["author"] == "Jane Example"
+
+    def test_get_default_config_include_author(self) -> None:
+        """_get_default_config conditionally includes author based on include_author (#3593)."""
+        from apm_cli.commands._helpers import _get_default_config
+
+        cfg_with = _get_default_config("my-project", include_author=True)
+        assert "author" in cfg_with
+
+        cfg_without = _get_default_config("my-project", include_author=False)
+        assert "author" not in cfg_without
+        assert cfg_without["name"] == "my-project"
+        assert cfg_without["version"] == "1.0.0"
+        assert "description" in cfg_without

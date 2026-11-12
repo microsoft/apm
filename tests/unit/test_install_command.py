@@ -103,6 +103,50 @@ class TestInstallCommandAutoBootstrap:
                 assert "apm" in config["dependencies"]
                 assert "test/package" in config["dependencies"]["apm"]
                 assert config["dependencies"]["mcp"] == []
+                assert "author" not in config
+
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_no_apm_yml_omits_author_even_with_git_user(
+        self, mock_install_apm, mock_apm_package, mock_validate, monkeypatch
+    ):
+        """Test that auto-bootstrap apm install omits author even when git user is configured (#3593)."""
+        with self._chdir_tmp():
+            mock_validate.return_value = True
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_pkg_instance.get_all_mcp_dependencies.return_value = []
+            mock_pkg_instance.get_lsp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            # Mock _auto_detect_author to return a real git user.name
+            monkeypatch.setattr(
+                "apm_cli.commands._helpers._auto_detect_author",
+                lambda: "Jane Example",
+            )
+
+            result = self.runner.invoke(cli, ["install", "test/package"])
+            assert result.exit_code == 0, (result.output, result.exception)
+            assert "Created apm.yml" in result.output
+            assert Path("apm.yml").exists()
+
+            with open("apm.yml", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+                assert "author" not in config
+                assert config["name"] != ""
+                assert config["version"] == "1.0.0"
+                assert "dependencies" in config
 
     @patch("apm_cli.commands.install._validate_package_exists")
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)

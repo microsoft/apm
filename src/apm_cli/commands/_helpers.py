@@ -610,14 +610,16 @@ def _auto_detect_description(project_name):
     return f"APM project for {project_name}"
 
 
-def _get_default_config(project_name):
+def _get_default_config(project_name, *, include_author: bool = True):
     """Get default configuration for new projects with auto-detection."""
-    return {
+    config = {
         "name": project_name,
         "version": "1.0.0",
         "description": _auto_detect_description(project_name),
-        "author": _auto_detect_author(),
     }
+    if include_author:
+        config["author"] = _auto_detect_author()
+    return config
 
 
 def _validate_plugin_name(name):
@@ -683,8 +685,9 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         "name": config["name"],
         "version": config["version"],
         "description": config["description"],
-        "author": config["author"],
     }
+    if config.get("author"):
+        apm_yml_data["author"] = config["author"]
 
     # Add targets field if present in config (plural list form -- canonical).
     # Older callers may still pass a singular CSV "target" string; honor that
