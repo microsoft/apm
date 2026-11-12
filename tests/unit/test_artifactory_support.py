@@ -1158,6 +1158,53 @@ class TestArtifactoryArchiveDownload:
         assert message.endswith(expected)
         assert "HTTP 404" not in message
 
+    @pytest.mark.parametrize(
+        ("bodies", "expected"),
+        [
+            pytest.param(
+                [None, "symlink"],
+                "Archive error: Unsafe zip archive from https://art.example.com/artifactory/"
+                "github/owner/repo/-/archive/main/repo-main.zip: Refusing to extract symlink: "
+                "repo-main/link",
+                id="404-then-rejection",
+            ),
+            pytest.param(
+                ["symlink", b"<!DOCTYPE html><html></html>"],
+                "Archive error: Unsafe zip archive from https://art.example.com/artifactory/"
+                "github/owner/repo/archive/refs/heads/main.zip: Refusing to extract symlink: "
+                "repo-main/link",
+                id="first-rejection-wins",
+            ),
+        ],
+    )
+    def test_first_archive_rejection_reported_regardless_of_order(self, bodies, expected):
+        """The first rejected archive is reported even after earlier 404s or later rejections (#3110)."""
+        responses = []
+        for body in bodies:
+            if body is None:
+                responses.append(_mock_stream_response(404))
+            elif body == "symlink":
+                responses.append(_mock_stream_response(200, self._make_symlink_zip_bytes()))
+            else:
+                responses.append(_mock_stream_response(200, body))
+        responses += [_mock_stream_response(404) for _ in range(5 - len(bodies))]
+
+        target = self.temp_dir / "pkg"
+        with patch.object(self.downloader, "_resilient_get", side_effect=responses):
+            with pytest.raises(RuntimeError) as exc_info:
+                self.downloader._download_artifactory_archive(
+                    "art.example.com",
+                    "artifactory/github",
+                    "owner",
+                    "repo",
+                    "main",
+                    target,
+                )
+
+        message = str(exc_info.value)
+        assert message.endswith(expected)
+        assert "HTTP 404" not in message
+
     def test_rejected_archive_then_valid_archive_succeeds(self):
         """A later valid archive still wins after an earlier archive is rejected."""
         responses = [
