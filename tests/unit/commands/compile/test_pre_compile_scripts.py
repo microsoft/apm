@@ -31,6 +31,8 @@ target = Path(".apm/instructions/generated.instructions.md")
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text('---\\napplyTo: "**"\\n---\\nGenerated guidance from the toolchain.\\n')
 Path("generator-ran").write_text(sys.stdin.read())
+with open("generator-runs", "a") as runs:
+    runs.write("run\\n")
 sys.exit(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
 """
 
@@ -102,6 +104,23 @@ def test_generated_instructions_reach_agents_md(isolated: Path, monkeypatch) -> 
     result = _compile(project, monkeypatch)
     assert result.exit_code == 0, result.output
     assert "Generated guidance from the toolchain." in (project / "AGENTS.md").read_text()
+
+
+def test_event_fires_once_per_compile(isolated: Path, monkeypatch) -> None:
+    project = _project(isolated)
+    result = _compile(project, monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert (project / "generator-runs").read_text() == "run\n"
+
+
+def test_audit_runs_no_scripts(isolated: Path, monkeypatch) -> None:
+    project = _project(isolated)
+    _commit_instruction(project)
+    monkeypatch.chdir(project)
+    with patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=True):
+        CliRunner().invoke(cli, ["audit"])
+        CliRunner().invoke(cli, ["audit", "--ci"])
+    assert not (project / "generator-ran").exists()
 
 
 def test_script_receives_the_event_payload(isolated: Path, monkeypatch) -> None:
