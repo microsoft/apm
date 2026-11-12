@@ -1862,8 +1862,13 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 6,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[opus]",
+        "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[sonnet]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_native_model_settings_preserved_and_dropped_metadata_bounded"
       ]
     },

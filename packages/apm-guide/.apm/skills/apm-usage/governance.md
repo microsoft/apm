@@ -437,9 +437,18 @@ may use. This section covers how that contract is enforced at `apm install` time
 APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
-`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab uses
-`<top-level-group>/apm-policy/apm-policy.yml`, derived from the first remote
-path segment; nested subgroup scopes are not searched. Configure a self-managed host with
+`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab looks for `apm-policy`
+at every namespace from the top-level group down to the project's own subgroup
+(e.g. `acme/apm-policy`, `acme/dept-a/apm-policy`, `acme/dept-a/team-x/apm-policy`)
+and combines them in that order with the tighten-only merge: a team policy can add
+restrictions but never drop an ancestor's, even without `extends:`. The nearest
+discovered policy is the leaf that `policy.hash` pins; a non-404 failure at any
+level while another level has a policy fails closed instead of applying a partial
+chain (a complete cached chain follows the stale-cache rules). A flat `<group>/<project>`
+remote probes only `<group>/apm-policy`. GitLab 404s a private project the token
+cannot read, so an unreadable `apm-policy` is left out of the chain -- grant the
+token read access to every ancestor `apm-policy`.
+Configure a self-managed host with
 `GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
 another project name. Repositories with no detectable git remote (unpacked
 bundles, temp dirs) emit an explicit "could not determine org" line and skip
@@ -689,7 +698,8 @@ as `[x]` errors and exit `1`.
 Checklist to publish a policy:
 
 1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
-   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the top-level GitLab group).
+   project and `apm-policy` repository on Azure DevOps, or an `apm-policy` project under the GitLab
+   group you want it to govern -- policies at every ancestor namespace combine).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming
