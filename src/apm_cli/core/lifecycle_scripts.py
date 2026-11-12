@@ -37,7 +37,7 @@ import os
 import platform
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
@@ -108,7 +108,7 @@ class LifecycleEvent:
             event=event,
             packages=packages or [],
             scope=scope,
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             cli_version=get_version(),
             working_directory=working_directory or str(Path.cwd()),
         )
@@ -170,7 +170,12 @@ class ScriptEntry:
         """Return timeout_sec with sensible defaults per type."""
         if self.timeout_sec is not None:
             return self.timeout_sec
-        return 10 if self.script_type == "http" else 30
+        return _default_timeout(self.script_type)
+
+
+def _default_timeout(script_type: str) -> int:
+    """Per-type default timeout in seconds (http 10, command 30)."""
+    return 10 if script_type == "http" else 30
 
 
 # -- Script file parsing ---------------------------------------------------
@@ -184,7 +189,45 @@ def _parse_allowed_env_vars(raw: object) -> list[str] | None:
     return names or None
 
 
-def _build_entry(raw: object, event_name: str, path: Path, source: str) -> ScriptEntry | None:
+_invalid_timeout_warned: set[tuple[str, str, int, str]] = set()
+
+
+def _resolve_timeout(
+    raw: dict, script_type: str, event_name: str, index: int, path: Path
+) -> object:
+    """Read timeoutSec (or its timeout alias), rejecting non-positive numbers.
+
+    A non-positive numeric timeout is invalid under either spelling: it is
+    dropped to None (the per-type default) with one warning naming the script.
+    Commands that rediscover scripts per event (update, uninstall) reparse the
+    same entry, so the warning is emitted once per process (one CLI command).
+    """
+
+    def _is_number(v: object) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    key, value = "timeoutSec", raw.get("timeoutSec")
+    if not (_is_number(value) or value):
+        key, value = "timeout", raw.get("timeout")
+    if _is_number(value) and value <= 0:
+        warn_key = (str(path), event_name, index, key)
+        if warn_key not in _invalid_timeout_warned:
+            _invalid_timeout_warned.add(warn_key)
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"Lifecycle script {event_name}[{index}] ({script_type}) in {path}: "
+                f"{key} must be positive; using the default of "
+                f"{_default_timeout(script_type)}s.",
+                symbol="warning",
+            )
+        return None
+    return value
+
+
+def _build_entry(
+    raw: object, event_name: str, path: Path, source: str, index: int = 0
+) -> ScriptEntry | None:
     """Build a single ScriptEntry from a raw mapping.
 
     Returns None if raw is not a dict or has an unknown type.
@@ -208,7 +251,7 @@ def _build_entry(raw: object, event_name: str, path: Path, source: str) -> Scrip
         command=command_val,
         url=raw.get("url"),
         headers=raw.get("headers"),
-        timeout_sec=raw.get("timeoutSec") or raw.get("timeout"),
+        timeout_sec=_resolve_timeout(raw, script_type, event_name, index, path),
         cwd=raw.get("cwd"),
         env=raw.get("env"),
         allowed_env_vars=_parse_allowed_env_vars(raw.get("allowedEnvVars")),
@@ -243,8 +286,8 @@ def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntr
             continue
         if not isinstance(script_list, list):
             continue
-        for raw in script_list:
-            entry = _build_entry(raw, event_name, path, source)
+        for index, raw in enumerate(script_list):
+            entry = _build_entry(raw, event_name, path, source, index)
             if entry is not None:
                 entries.append(entry)
     return entries
@@ -266,8 +309,8 @@ def _entries_from_lifecycle_map(lifecycle: object, path: Path, source: str) -> l
             continue
         if not isinstance(script_list, list):
             continue
-        for raw in script_list:
-            entry = _build_entry(raw, event_name, path, source)
+        for index, raw in enumerate(script_list):
+            entry = _build_entry(raw, event_name, path, source, index)
             if entry is not None:
                 entries.append(entry)
     return entries

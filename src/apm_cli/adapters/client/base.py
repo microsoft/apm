@@ -391,6 +391,21 @@ class MCPClientAdapter(ABC):
         """Compare the native connection with the adapter's rendered baseline."""
         return native == expected
 
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
+    ) -> bool:
+        """Recognize a verified write from an older formatter; never a current match.
+
+        ``recorded_write`` is ``True`` or ``False`` when the lockfile holds a
+        fingerprint of the earlier write that does or does not match *native*,
+        and ``None`` when no fingerprint was recorded.
+        """
+        return False
+
+    def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
+        """Extra target-specific guidance for a preserved conflicting entry."""
+        return None
+
     def managed_server_config(self, native: dict) -> dict:
         """Return connection data for an actual-write fingerprint."""
         return dict(native)
@@ -997,6 +1012,118 @@ class MCPClientAdapter(ABC):
         return None
 
     @classmethod
+    def _is_options_only(cls, args: list[Any]) -> bool:
+        """Return True if args contains only options and their values.
+
+        An argument list is considered options-only if every non-option token
+        is consumed as the value of a preceding option that requires an
+        argument, and no positional subcommands or operands are present.
+        """
+        if not args:
+            return True
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if not isinstance(arg, str):
+                return False
+            if arg == "--":
+                return False
+            if arg.startswith("--"):
+                option = arg.split("=", 1)[0]
+                consumes_next = "=" not in arg and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                if consumes_next:
+                    if index + 1 >= len(args):
+                        return False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            next_arg = args[index + 1] if index + 1 < len(args) else None
+            if arg.startswith("-") and arg != "-":
+                consumes_next = cls._docker_option_requires_value(arg)
+                if arg in ("-v", "--version") and next_arg == "run":
+                    consumes_next = False
+                if consumes_next:
+                    if index + 1 >= len(args):
+                        return False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            return False
+        return True
+
+    @classmethod
+    def _is_docker_package(cls, package: dict | None) -> bool:
+        """Return whether the package resolves to a Docker/container launcher."""
+        if not package:
+            return False
+        runtime_hint = package.get("runtime_hint", "")
+        registry_name = cls._infer_registry_name(package)
+        return runtime_hint == "docker" or registry_name == "docker"
+
+    @classmethod
+    def _ensure_docker_run_args(
+        cls,
+        runtime_args: list[Any] | None,
+    ) -> list[Any]:
+        """Return runtime arguments with Docker's 'run' subcommand and stdio flags.
+
+        If runtime_args is empty, defaults to ['run', '-i', '--rm'].
+        If runtime_args contains options without a leading 'run' subcommand
+        (e.g. options-only metadata from OCI registries), prepends 'run' and
+        ensures '-i' and '--rm' are present unless already specified.
+        Otherwise, returns runtime_args as is to preserve authored invocations
+        (such as ['container', 'run', ...]).
+
+        Args:
+            runtime_args: Resolved runtime arguments from the package entry.
+
+        Returns:
+            list: Arguments with leading 'run', '-i', '--rm' and any options,
+            or authored arguments preserved as is.
+        """
+        if not runtime_args:
+            return ["run", "-i", "--rm"]
+        args = list(runtime_args)
+        if not cls._is_options_only(args):
+            return args
+
+        has_interactive = False
+        has_rm = False
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if arg in ("-i", "--interactive") or (
+                isinstance(arg, str)
+                and arg.startswith("-")
+                and not arg.startswith("--")
+                and "i" in arg[1:]
+                and not cls._docker_option_requires_value(arg)
+            ):
+                has_interactive = True
+                index += 1
+            elif arg == "--rm":
+                has_rm = True
+                index += 1
+            elif isinstance(arg, str) and arg.startswith("--"):
+                option = arg.split("=", 1)[0]
+                consumes_next = "=" not in arg and option in _DOCKER_RUN_OPTIONS_WITH_VALUES
+                index += 2 if consumes_next else 1
+            elif isinstance(arg, str) and arg.startswith("-") and arg != "-":
+                consumes_next = cls._docker_option_requires_value(arg)
+                index += 2 if consumes_next else 1
+            else:
+                index += 1
+
+        prefix = ["run"]
+        if not has_interactive:
+            prefix.append("-i")
+        if not has_rm:
+            prefix.append("--rm")
+        return [*prefix, *args]
+
+    @classmethod
     def _ensure_docker_image_arg(
         cls,
         runtime_args: list[Any],
@@ -1427,23 +1554,33 @@ class MCPClientAdapter(ABC):
         return server_info
 
     @staticmethod
-    def _determine_config_key(server_url: str, server_name: str | None) -> str:
+    def _determine_config_key(
+        server_url: str,
+        server_name: str | None,
+        server_info: dict | None = None,
+    ) -> str:
         """Return the configuration key to use for *server_url*/*server_name*.
 
         The caller-supplied *server_name* takes precedence. If it is absent,
-        preserve npm-style scoped names such as ``@scope/name`` (one slash by
-        npm convention) while keeping the historical ``owner/repo -> repo``
-        fallback for registry paths.
+        preserve self-defined names and npm-style scoped names such as
+        ``@scope/name`` (one slash by npm convention) while keeping the historical
+        ``owner/repo -> repo`` fallback for registry paths.
 
         Args:
             server_url: Registry reference used as fallback source.
             server_name: Explicit caller-supplied name, if any.
+            server_info: Optional resolved or synthetic server info dict.
 
         Returns:
             Non-empty configuration key string.
         """
         if server_name:
             return server_name
+        # ``is_self_defined`` / ``_raw_stdio`` are APM-synthetic markers. Return
+        # the caller's reference, never ``server_info["name"]``, so a registry
+        # response carrying these keys cannot choose an arbitrary config key.
+        if server_info and (server_info.get("is_self_defined") or "_raw_stdio" in server_info):
+            return server_url
         if server_url.startswith("@") and server_url.count("/") == 1:
             return server_url
         if "/" in server_url:

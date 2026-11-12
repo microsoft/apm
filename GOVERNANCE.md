@@ -7,6 +7,9 @@ The contribution process lives in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Maintainers and scope
 
+See [MAINTAINERS.md](MAINTAINERS.md) for public names, GitHub IDs, and
+affiliations.
+
 <!-- apm-scope-roster:start -->
 | Maintainer | Role | Responsibility | Approval remit |
 | --- | --- | --- | --- |

@@ -33,11 +33,13 @@ from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
 from ..utils.git_env import (
+    GitSymlinkCapabilityError,
     checkout_git_worktree,
     get_git_executable,
     git_no_hooks_args,
     git_subprocess_error_text,
     git_worktree_head,
+    raise_for_symlink_capability,
     redact_git_diagnostic,
 )
 from ..utils.git_sparse import (
@@ -746,6 +748,7 @@ class GitHubPackageDownloader:
         env: dict[str, str],
         known_sha: str | None = None,
         sparse_paths: list[str] | None = None,
+        package: str | None = None,
     ) -> str:
         """Thin delegate to :func:`bare_cache.materialize_from_bare` (kept on the class so test patches still work)."""
         return materialize_from_bare(
@@ -755,6 +758,7 @@ class GitHubPackageDownloader:
             env=env,
             known_sha=known_sha,
             sparse_paths=sparse_paths,
+            package=package,
         )
 
     def _fetch_sha_into_bare(
@@ -825,7 +829,12 @@ class GitHubPackageDownloader:
         return self._refs.resolve_commit_sha_for_ref(dep_ref, ref)
 
     def download_raw_file(
-        self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Download a single file from repository (GitHub or Azure DevOps).
 
@@ -834,6 +843,10 @@ class GitHubPackageDownloader:
             file_path: Path to file within the repository (e.g., "prompts/code-review.prompt.md")
             ref: Git reference (branch, tag, or commit SHA). Defaults to "main"
             verbose_callback: Optional callable for verbose logging (receives str messages)
+            raw_only: Skip the Contents API fallback on the public-github
+                anonymous-first path and report a miss via ``RuntimeError``
+                when the raw CDN does not have the file (microsoft/apm#3283
+                virtual-package marker sweep).  Ignored everywhere else.
 
         Returns:
             bytes: File content
@@ -875,7 +888,7 @@ class GitHubPackageDownloader:
 
         # GitHub API
         return self._download_github_file(
-            dep_ref, file_path, ref, verbose_callback=verbose_callback
+            dep_ref, file_path, ref, verbose_callback=verbose_callback, raw_only=raw_only
         )
 
     def _download_ado_file(
@@ -906,6 +919,7 @@ class GitHubPackageDownloader:
         file_path: str,
         ref: str = "main",
         verbose_callback=None,
+        raw_only: bool = False,
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
@@ -925,6 +939,7 @@ class GitHubPackageDownloader:
             file_path,
             ref=ref,
             verbose_callback=verbose_callback,
+            raw_only=raw_only,
         )
 
     def validate_virtual_package_exists(
@@ -1233,6 +1248,8 @@ class GitHubPackageDownloader:
                     encoding="utf-8",
                     timeout=120,
                 )
+                # Git may report a link it could not create with exit 0 or 1.
+                raise_for_symlink_capability(checkout_result, str(dep_ref))
                 if checkout_result.returncode != 0:
                     return False
                 return _repair(setup_env)
@@ -1299,6 +1316,7 @@ class GitHubPackageDownloader:
                     encoding="utf-8",
                     timeout=120,
                 )
+                raise_for_symlink_capability(result, str(dep_ref))
                 if result.returncode != 0:
                     _debug(
                         f"Sparse-checkout {step_name} failed: "
@@ -1307,6 +1325,8 @@ class GitHubPackageDownloader:
                     return False
 
             return _repair(env)
+        except GitSymlinkCapabilityError:
+            raise
         except Exception as e:
             _debug(f"Sparse-checkout failed: {git_subprocess_error_text(e)}")
             return False
@@ -1390,6 +1410,8 @@ class GitHubPackageDownloader:
                     locked_sha=_resolved_sha_for_cache,
                     sparse_paths=[subdir_path],
                 )
+            except GitSymlinkCapabilityError:
+                raise
             except Exception:
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
@@ -1511,7 +1533,10 @@ class GitHubPackageDownloader:
                         # requesting different subdirs of the same
                         # repo+SHA still share the object DB.
                         sparse_paths=[subdir_path],
+                        package=_dep_display,
                     )
+                except GitSymlinkCapabilityError:
+                    raise
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed to prepare dependency from cached clone: {e}"
@@ -1575,12 +1600,18 @@ class GitHubPackageDownloader:
                             progress_reporter=progress_reporter,
                             **clone_kwargs,
                         )
+                    except GitSymlinkCapabilityError:
+                        raise
                     except Exception as e:
                         raise RuntimeError(f"Failed to clone repository: {e}") from e
 
                     if is_commit_sha:
                         try:
-                            checkout_git_worktree(temp_clone_path, ref, env=self.git_env)
+                            checkout_git_worktree(
+                                temp_clone_path, ref, env=self.git_env, package=_dep_display
+                            )
+                        except GitSymlinkCapabilityError:
+                            raise
                         except Exception as e:
                             detail = self._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(f"Failed to checkout commit {ref}: {detail}") from e
@@ -1899,7 +1930,7 @@ class GitHubPackageDownloader:
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
                     target_path.mkdir(parents=True, exist_ok=True)
-            except AgentPluginError:
+            except (AgentPluginError, GitSymlinkCapabilityError):
                 if target_path.exists():
                     _rmtree(target_path)
                 raise
@@ -1924,14 +1955,25 @@ class GitHubPackageDownloader:
                     if progress_task_id and progress_obj
                     else None
                 )
-                self._clone_with_fallback(
-                    dep_ref.repo_url,
+                clone_options = {
+                    "progress_reporter": progress_reporter,
+                    "dep_ref": dep_ref,
+                    "verbose_callback": verbose_callback,
+                }
+                try:
+                    self._clone_with_fallback(dep_ref.repo_url, target_path, **clone_options)
+                except GitSymlinkCapabilityError:
+                    # A link at the default-branch HEAD must not fail a pinned
+                    # commit without links; the checkout below classifies it.
+                    self._clone_with_fallback(
+                        dep_ref.repo_url, target_path, no_checkout=True, **clone_options
+                    )
+                checkout_git_worktree(
                     target_path,
-                    progress_reporter=progress_reporter,
-                    dep_ref=dep_ref,
-                    verbose_callback=verbose_callback,
+                    resolved_ref.resolved_commit,
+                    env=self.git_env,
+                    package=str(dep_ref),
                 )
-                checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
             else:
                 # For branches and tags, we can use shallow clone
                 progress_reporter = (
