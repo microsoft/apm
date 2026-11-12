@@ -283,9 +283,11 @@ The CEO lens recommends exactly ONE outcome from this rubric:
 `assets/label-contract.json` is the canonical label contract, including
 human decision states, bot processing, legacy read aliases, and safe
 rollout. Do not duplicate or expand its allowlist. Contributors need
-not supply a five-axis taxonomy. Propose only useful type/area/theme
+not supply a five-axis taxonomy. Propose only useful type/area/pillar
 classification; null or an empty list is valid when uncertain. At most
-six classification labels, with at most one type and one primary theme.
+six classification labels, with at most one type and one pillar.
+The payload key `classification.theme` is kept for schema_version 2
+compatibility; its value is the one proposed `pillar/*` label or null.
 
 Preserve existing labels, priority, invitations, milestone, and human
 approval records. A conflicting classification belongs in advice, not a
