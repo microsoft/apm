@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer. Release builds bundle uv-managed Python and fail when any bundled ELF file needs a newer glibc symbol; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
+### Fixed
+
+- Packages with in-repo symbolic links now record the same `content_hash` on Windows as on Linux and macOS, so `apm install --frozen` verifies a lockfile generated on another platform. APM pins `core.symlinks=true` on its own Git commands, re-creates older cached checkouts, and fails with a diagnostic naming the package when the host cannot create symlinks (on Windows, enable Developer Mode). (#3545)
+- `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write (after link rendering) and are claimed in `apm.lock.yaml`, and record receipts, instead of failing as in 0.35.0. Lockfile hashes are not trusted; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
 
 ## [0.35.1] - 2026-11-11
 
@@ -35,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A timed-out HTTP lifecycle hook whose response arrives during the post-abort grace window now closes that response instead of leaking its connection; the deadline error log is unchanged. (#3548)
 - `apm mcp search` and `apm mcp show` now display the server version from MCP Registry v0.1 records (top-level `server.version`) instead of `--` / `Unknown`; legacy `version_detail` records render as before. (#3549)
 - A warm-cache `apm install --frozen` keeps a Codex compatibility dependency's locked full commit as its source pin instead of the `cached` sentinel that native admission rejected; caches without a full locked commit still fail closed. -- by @abhishekacharya200 (#3407)
+- `apm deps tree` places transitive dependencies under the declaring package when sibling subdirectory packages from one repository share a parent, instead of listing them as `could not place in tree`; `apm deps why` names subdirectory parents by their full path. (#3537)
 - MCP Registry OCI packages whose `runtimeArguments` carry only Docker options now render `docker run -i --rm <options> <image> <args>` for Codex, Copilot, Gemini and VS Code instead of an argv Docker rejects or an empty VS Code entry; explicit `run` and empty arguments render unchanged. -- by @abhishekacharya200 (#3405)
 - `apm lock`, `apm install` and other lockfile writers now fail with an error naming the link and its target when `apm.lock.yaml` is a symlink, instead of silently replacing the link with a regular file; the link and target are left unchanged. (#3532)
 - Unchanged `apm install` no longer rewrites `generated_at` in a committed v2 or v3 `apm.lock.yaml` when a SHA-pinned dependency carries `resolved_tag`; changed refs still update the lock. (#3536)

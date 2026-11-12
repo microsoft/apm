@@ -1,6 +1,5 @@
 """Skill integration functionality for APM packages (Claude Code & Cursor support)."""
 
-import filecmp
 import hashlib
 import os
 import re
@@ -17,6 +16,12 @@ from typing import TYPE_CHECKING
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.skill_adoption import (
+    adoption_baselines,
+    dircmp_equal,
+    is_skill_dir_identical_to_source,
+    render_skill_markdown,
+)
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
 )
@@ -465,7 +470,7 @@ class SkillIntegrator(BaseIntegrator):
         diagnostics,
         unchanged: bool = False,
     ) -> list[Path]:
-        """Record only successfully copied source members, never surviving sibling assets."""
+        """Record copied source members, never surviving siblings; adopt identical trees (#3391)."""
         from collections import ChainMap
 
         from apm_cli.utils.content_hash import compute_file_hash
@@ -487,24 +492,41 @@ class SkillIntegrator(BaseIntegrator):
             self._skill_source_plan is None or owner is None or not targets
         ):
             raise RuntimeError("Live skill materialization requires an admitted source plan.")
+
+        def claimed(path: str) -> bool:
+            return managed_files is not None and (
+                path in managed_files or (path == anchor and directory_entry in managed_files)
+            )
+
+        def managed(path: str) -> bool:
+            return path in self._skill_session_hashes or claimed(path)
+
+        adopted = (
+            adoption_baselines(
+                source,
+                destination,
+                walk_source=self.walk_source_tree,
+                ignore=ignore,
+                resolve_links=self.resolve_links,
+                owned=lambda path: claimed(entry(path)),
+            )
+            if session is not None
+            and not force
+            and not session.has_receipt(destination / "SKILL.md")
+            else {}
+        )
+        unchanged = unchanged and not adopted
         copied = self.copy_directory_files(
             source,
             destination,
             ignore=ignore,
             path_entry=entry,
-            is_managed=lambda path: (
-                path in self._skill_session_hashes
-                or (
-                    managed_files is not None
-                    and (
-                        path in managed_files
-                        or (path == anchor and directory_entry in managed_files)
-                    )
-                )
-            ),
+            is_managed=managed,
             recorded_hashes=hashes,
             baseline_hash=(
-                (lambda path: session.baseline(path, targets)) if session is not None else None
+                (lambda path: session.baseline(path, targets) or adopted.get(path))
+                if session is not None
+                else None
             ),
             on_member_written=written.append,
             requires_write=(
@@ -663,26 +685,8 @@ class SkillIntegrator(BaseIntegrator):
 
         return context_files
 
-    @staticmethod
-    def is_skill_dir_identical_to_source(dir_a: Path, dir_b: Path) -> bool:
-        """Check if two directory trees have identical file contents."""
-        dcmp = filecmp.dircmp(str(dir_a), str(dir_b))
-        return SkillIntegrator._dircmp_equal(dcmp)
-
-    @staticmethod
-    def _dircmp_equal(dcmp) -> bool:
-        """Recursively check if dircmp shows identical contents."""
-        if dcmp.left_only or dcmp.right_only or dcmp.funny_files:
-            return False
-        _, mismatches, errors = filecmp.cmpfiles(
-            dcmp.left, dcmp.right, dcmp.common_files, shallow=False
-        )
-        if mismatches or errors:
-            return False
-        for sub_dcmp in dcmp.subdirs.values():  # noqa: SIM110
-            if not SkillIntegrator._dircmp_equal(sub_dcmp):
-                return False
-        return True
+    is_skill_dir_identical_to_source = staticmethod(is_skill_dir_identical_to_source)
+    _dircmp_equal = staticmethod(dircmp_equal)
 
     def _resolve_markdown_links_in_skill_bundle(
         self,
@@ -703,12 +707,8 @@ class SkillIntegrator(BaseIntegrator):
                         "changed during deployment. Restore regular files and retry installation."
                     )
                 continue
-            content = source_file.read_text(encoding="utf-8")
-            resolved, count = self.resolve_links(
-                content,
-                source_file,
-                target_file,
-                preserved_source_root=source_root,
+            resolved, count = render_skill_markdown(
+                self.resolve_links, source_file, target_file, source_root
             )
             if count:
                 write_text_lf(target_file, resolved)
