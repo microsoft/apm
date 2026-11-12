@@ -761,6 +761,7 @@ transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
+transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution

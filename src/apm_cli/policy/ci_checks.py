@@ -101,8 +101,7 @@ def _check_ref_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify manifest refs match the lockfile's resolved ref and commit."""
-    from ..deps.revision_pins import is_full_revision_pin
-    from ..drift import detect_ref_change, marketplace_ref_mismatch
+    from ..drift import detect_ref_change, marketplace_ref_mismatch, revision_pin_mismatch
     from ..install.plan import lockfile_satisfies_replacements
     from ..models.dependency.replacement import project_manifest_dependencies
 
@@ -130,13 +129,8 @@ def _check_ref_consistency(
                 mismatches.append(f"{display}: {reason}")
                 requires_update = True
             continue
-        if is_full_revision_pin(dep_ref.reference) and (
-            locked_dep.resolved_commit != dep_ref.reference
-        ):
-            mismatches.append(
-                f"{key}: manifest commit '{dep_ref.reference}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
-            )
+        if pin_reason := revision_pin_mismatch(dep_ref.reference, locked_dep):
+            mismatches.append(f"{key}: {pin_reason}")
             requires_update = True
             continue
         if detect_ref_change(dep_ref, locked_dep):

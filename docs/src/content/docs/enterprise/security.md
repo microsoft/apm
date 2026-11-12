@@ -83,7 +83,7 @@ dependencies:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. When `apm.yml` itself pins a full commit SHA, only a lock row with that same `resolved_commit` satisfies it: `apm install` re-resolves the pinned commit, `apm install --frozen` refuses, and `apm audit --ci` reports a `ref-consistency` failure. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../../reference/cli/update/) for the rewrite mechanics.
 
 ### GitHub API throttle containment
 

@@ -519,8 +519,7 @@ def lockfile_satisfies_manifest(
         human-readable strings explaining each mismatch, empty when
         ``satisfied`` is True.
     """
-    from apm_cli.deps.revision_pins import is_full_revision_pin
-    from apm_cli.drift import detect_ref_change
+    from apm_cli.drift import detect_ref_change, revision_pin_mismatch
 
     marketplace_index = lockfile.marketplace_index()
     reasons: list[str] = []
@@ -539,16 +538,8 @@ def lockfile_satisfies_manifest(
             ):
                 reasons.append(f"  - local dependency {key!r} has no locked content hash")
             continue
-        reference = dep.reference
-        if (
-            reference
-            and is_full_revision_pin(reference)
-            and (locked_dep.resolved_commit or "").lower() != reference.lower()
-        ):
-            reasons.append(
-                f"  - {display}: manifest commit '{dep.reference}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
-            )
+        if pin_reason := revision_pin_mismatch(dep.reference, locked_dep):
+            reasons.append(f"  - {display}: {pin_reason}")
             continue
         if detect_ref_change(dep, locked_dep):
             reasons.append(

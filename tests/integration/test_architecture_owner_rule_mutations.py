@@ -1753,6 +1753,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Release metadata recovery drops the exact public repository boundary.",
     ),
     MutationCase(
+        guard_id="transport-platform-revision-pin-lock-consistency",
+        rule_id="transport-platform-revision-pin-lock-consistency",
+        path="src/apm_cli/drift.py",
+        old="or revision_pin_mismatch(dep_ref.reference, locked_dep) is not None",
+        new="or False",
+        intent="Install drift accepts a lock row whose commit differs from a full-SHA manifest pin.",
+    ),
+    MutationCase(
         guard_id="transport-platform-revision-pin-outcome",
         rule_id="transport-platform-revision-pin-outcome",
         path="src/apm_cli/commands/update.py",

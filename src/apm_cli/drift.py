@@ -93,6 +93,30 @@ def _optional_string_attr(dep: Any, name: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def revision_pin_mismatch(reference: str | None, locked_dep: LockedDependency) -> str | None:
+    """Return why a full-SHA manifest pin disagrees with the locked commit.
+
+    A manifest ref that is a full commit SHA is immutable: the locked
+    ``resolved_commit`` must name that same commit, whatever ``resolved_ref``
+    the row records. Returns ``None`` when *reference* is not a full SHA or
+    the commits agree.
+    """
+    from apm_cli.deps.revision_pins import is_full_revision_pin
+
+    if not is_full_revision_pin(reference):
+        return None
+    locked_commit = locked_dep.resolved_commit
+    if (
+        isinstance(locked_commit, str)
+        and locked_commit.strip().lower() == reference.strip().lower()
+    ):
+        return None
+    return (
+        f"manifest commit '{reference}' != "
+        f"lockfile resolved_commit '{locked_commit or '(missing)'}'"
+    )
+
+
 def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
@@ -108,11 +132,7 @@ def marketplace_ref_mismatch(
     if not spec:
         return None
     if is_full_revision_pin(spec):
-        if locked_dep.resolved_commit.lower() != spec.lower():
-            return (
-                f"manifest commit '{spec}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit}'"
-            )
+        return revision_pin_mismatch(spec, locked_dep)
     elif is_version_constraint(spec):
         # Git semver locks already distinguish selected versions from package
         # inventory using constraint + resolved_tag. Never infer tag patterns
@@ -252,8 +272,12 @@ def detect_ref_change(
 
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
     # and value→value. No truthiness guard on locked_dep.resolved_ref —
-    # None != "v1.0.0" is True.
-    return dep_ref.reference != locked_dep.resolved_ref
+    # None != "v1.0.0" is True. A full-SHA pin is satisfied only by that exact
+    # locked commit, whatever resolved_ref the lock row records.
+    return (
+        dep_ref.reference != locked_dep.resolved_ref
+        or revision_pin_mismatch(dep_ref.reference, locked_dep) is not None
+    )
 
 
 def should_force_ref_recheck(
