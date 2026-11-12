@@ -102,6 +102,9 @@ class _SourceIndex:
 
     by_digest: dict[str, list[str]]  # sha256(normalized bytes) -> source rel paths
     unindexed: tuple[str, ...]  # rel paths excluded by size cap or read errors
+    # True when the cached tree is a Claude plugin that install normalized:
+    # its ``.apm/`` subtree mirrors upstream plugin files and is not upstream.
+    plugin_normalized: bool = False
 
 
 def _filename_segment(value: str, fallback: str) -> str:
@@ -212,7 +215,26 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
             unindexed.append(rel)
             continue
         by_digest.setdefault(digest, []).append(rel)
-    return _SourceIndex(by_digest=by_digest, unindexed=tuple(unindexed))
+    from ..deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
+
+    return _SourceIndex(
+        by_digest=by_digest,
+        unindexed=tuple(unindexed),
+        plugin_normalized=has_normalized_plugin_skill_sources_receipt(source_root),
+    )
+
+
+def _upstream_candidates(index: _SourceIndex, candidates: list[str]) -> list[str]:
+    """Drop install-generated ``.apm/`` mirrors of a normalized Claude plugin.
+
+    Plugin normalization copies ``skills/``, ``agents/`` and ``commands/``
+    into ``.apm/`` inside the cache; those copies do not exist upstream, so a
+    patch must target the original plugin file instead.
+    """
+    if not index.plugin_normalized or len(candidates) < 2:
+        return candidates
+    upstream = [rel for rel in candidates if not rel.startswith(".apm/")]
+    return upstream or candidates
 
 
 def _repository_prefix(dep: LockedDependency) -> str:
@@ -494,7 +516,7 @@ def _export_one(
         return SkippedEdit(finding.path, dep_key, f"unreadable: {exc}")
 
     digest = hashlib.sha256(scratch_bytes).hexdigest()
-    candidates = index.by_digest.get(digest, [])
+    candidates = _upstream_candidates(index, index.by_digest.get(digest, []))
     if not candidates:
         reason = (
             "deployed content does not match any source file byte-for-byte "

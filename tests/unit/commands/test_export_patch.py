@@ -449,6 +449,30 @@ def test_ambiguous_source_is_skipped(trees, monkeypatch):
     assert "ambiguous" in result.skipped[0].reason
 
 
+def test_normalized_plugin_mirror_does_not_make_source_ambiguous(trees, monkeypatch):
+    """Install mirrors a Claude plugin's skills/ into .apm/skills/ in the cache;
+    only the upstream skills/ file exists in the repository the patch targets."""
+    deployed = ".claude/skills/rx/SKILL.md"
+    _write(trees["source"] / "skills/rx/SKILL.md", _ORIGINAL)
+    _write(trees["source"] / ".apm/skills/rx/SKILL.md", _ORIGINAL)
+    _write(
+        trees["source"] / ".apm/.plugin-skill-sources.json",
+        b'{"declared": false, "sources": {"rx": "skills/rx"}, "version": 1}',
+    )
+    _write(trees["scratch"] / deployed, _ORIGINAL)
+    _write(trees["project"] / deployed, _EDITED)
+    lock = _lockfile_with_remote([deployed])
+    _patch_materialize(monkeypatch, trees["source"])
+    key = _remote_key(lock)
+    findings = [DriftFinding(path=deployed, kind="modified", package=key)]
+
+    result = build_patch_export(trees["project"], trees["scratch"], lock, findings)
+
+    assert result.skipped == []
+    assert result.exported == [ExportedEdit(deployed, "skills/rx/SKILL.md", key)]
+    assert "--- a/skills/rx/SKILL.md\n" in result.patches[key]
+
+
 def test_subdirectory_package_patch_paths_are_repository_relative(trees, monkeypatch):
     """The cache holds only the package subdirectory; the patch header says to
     apply from the repository root, so diff paths carry the subdirectory."""
