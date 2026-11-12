@@ -402,6 +402,10 @@ class MCPClientAdapter(ABC):
         """
         return False
 
+    def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
+        """Extra target-specific guidance for a preserved conflicting entry."""
+        return None
+
     def managed_server_config(self, native: dict) -> dict:
         """Return connection data for an actual-write fingerprint."""
         return dict(native)

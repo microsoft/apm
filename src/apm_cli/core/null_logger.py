@@ -51,7 +51,11 @@ class NullCommandLogger:
     def progress(self, message: str, symbol: str = "info"):
         _rich_info(message, symbol=symbol)
 
-    def info(self, message: str, symbol: str = "info"):
+    def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
+        # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
+        if soft_wrap:
+            _rich_info(message, symbol=symbol, soft_wrap=True)
+            return
         _rich_info(message, symbol=symbol)
 
     def mcp_lookup_heartbeat(self, count: int):

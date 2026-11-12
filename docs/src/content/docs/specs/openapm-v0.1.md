@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **136 normative statements (131 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **137 normative statements (132 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -689,8 +689,8 @@ placeholder syntaxes:
 
 | Syntax            | Source                | Resolution                                                              |
 |-------------------|-----------------------|-------------------------------------------------------------------------|
-| `${VAR}`          | host environment      | Normalised to `${env:VAR}` for native interpolation (`{env:VAR}` for OpenCode); resolved at install for others. |
-| `${env:VAR}`      | host environment      | Translated to `{env:VAR}` for OpenCode; passed through where natively supported; resolved at install otherwise. |
+| `${VAR}`          | host environment      | Normalised to `${env:VAR}` for native interpolation (`{env:VAR}` for OpenCode; kept as `${VAR}` in project-scoped Claude Code configuration, see [req-mf-026](#req-mf-026)); resolved at install for others. |
+| `${env:VAR}`      | host environment      | Translated to `{env:VAR}` for OpenCode and to `${VAR}` in project-scoped Claude Code configuration; passed through where natively supported; resolved at install otherwise. |
 | `${input:<id>}`   | interactive prompt    | Native where supported; otherwise the placeholder MUST NOT be silently rendered as literal text. |
 
 GitHub Actions templates (`${{ ... }}`) MUST be left untouched.
@@ -724,6 +724,24 @@ MUST NOT write a literal unresolved `{name}` template to generated VS
 Code configuration; when a required runtime-argument variable cannot
 be resolved, it MUST emit a diagnostic and MAY decline that package's
 target configuration.
+
+<a id="req-mf-026"></a>
+**[req-mf-026]** A conforming **consumer** implementation that writes
+an MCP server to a project-scoped Claude Code `.mcp.json` MUST write
+each `${VAR}` or `${env:VAR}` reference that the rendered server
+places in `command`, `args`, `env`, `url` or `headers` as the native
+`${VAR}` reference, and MUST NOT write the variable's resolved value
+there. Static values and `${VAR:-default}` references MUST be written
+as declared. When an existing entry for the same server holds values
+where the rendered server has references, the consumer MUST replace
+that entry only if it can show that it wrote it: the entry matches the
+native write hash the consumer recorded for it, or expanding the
+declared references from the current environment reproduces it
+exactly. Otherwise the consumer MUST leave the entry unchanged, MUST
+end the install with a non-zero result, and MUST emit a diagnostic
+naming the affected fields. Diagnostics about these references MUST
+name variables and fields only, never their values. User-scoped Claude
+Code configuration is outside this requirement.
 
 ### 4.6 Manifest extension surfaces
 
@@ -963,7 +981,7 @@ This section's normative statements are:
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
-  [req-mf-025](#req-mf-025),
+  [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-ext-003](#req-ext-003),
@@ -4101,7 +4119,7 @@ conformance statement identifying:
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
-[req-mf-025](#req-mf-025),
+[req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
 [req-ext-001](#req-ext-001), [req-ext-003](#req-ext-003),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -4554,6 +4572,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-mf-023](#req-mf-023)                | MUST    | 4.5     | consumer    |
 | [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
+| [req-mf-026](#req-mf-026)                | MUST    | 4.5     | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-ext-003](#req-ext-003)              | MUST    | 4.6.2   | consumer    |
@@ -4666,7 +4685,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 136** (131 MUST, 5 SHOULD).
+**Total normative statements: 137** (132 MUST, 5 SHOULD).
 
 ---
 
@@ -4729,10 +4748,12 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.54 (proposed) | 2026-10-21 | Opt-in root source-replacement proposal for #3180 / PR #3309. Added four conditional consumer requirements [req-rpl-001] through [req-rpl-004] for exact root-owned graph binding, original ownership with selected-source lifecycle/security, proposed lock version 3 evidence, and frozen full-table/content verification. Distinct candidate schema identities preserve earlier published bytes; version 1/2 semantics remain unchanged. This is a new opt-in capability and explicit versioned lock extension, not behavior-neutral errata. Section 9.3 review/public comment and first supporting release remain pending; source staging is not adoption. Statement count: 130 -> 134 (129 MUST, 5 SHOULD). |
 | 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. The revision also pins the zero-pattern boundary, the per-pattern re-encoding and the frontmatter byte layout. Under Section 9.2 this changes an already-defined emitted target representation, not a manifest, lockfile or policy field; the replaced representations were refused or discarded by the target, so no working deployment relied on them. Migration: deployed bytes, and therefore [req-lk-012] deployed_file_hashes, change for `.agents/rules/*.md` files whose `applyTo` resolves to zero patterns or to two or more patterns, and for single-pattern rules containing a literal backslash or a top-level literal comma; other single-pattern rules are byte-identical. One non-frozen `apm install` re-renders affected files and re-records their hashes; [req-lk-006] and [req-lk-017] are unchanged by this amendment. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived. |
+| 0.1.57 (proposed) | 2026-11-12 | Spec-citation fold for PR #3377 (closes the #3252 Mode-B silent-extension gate on MCP install and ownership). Added [req-mf-026](#req-mf-026) (Section 4.5, consumer MUST): a project-scoped Claude Code `.mcp.json` keeps `${VAR}` references (with `${env:VAR}` written as `${VAR}`) in `command`, `args`, `env`, `url` and `headers` instead of resolved values, and keeps static values and `${VAR:-default}` as declared. An existing entry holding values where the rendered server has references is replaced only when the consumer can show it wrote it (recorded native write hash, or exact expansion of the declared references from the current environment); otherwise it is left unchanged, the install fails, and the diagnostic names the affected fields. Diagnostics name variables and fields, never values. User scope keeps install-time resolution. The Section 4.5 dispatch matrix rows for `${VAR}` and `${env:VAR}` point to the new requirement. Under Section 9.2 this changes generated bytes for the Claude Code project target only. Sections 4.5, 4.9, 11.3.2 and Appendix C are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 136 -> 137 (132 MUST, 5 SHOULD). |
 
-The independently drafted 0.1.52, 0.1.53 and 0.1.55 proposals each add one
-MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in place and adds none. Together, this working draft contains 136 statements
-(131 MUST, 5 SHOULD). Combining the proposals does not establish
+The independently drafted 0.1.52, 0.1.53, 0.1.55 and 0.1.57 proposals each
+add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in
+place and adds none. Together, this working draft contains 137 statements
+(132 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
 Errata (none at publication).

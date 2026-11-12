@@ -4,11 +4,11 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-import tomllib
 
 RATCHET_TEST_SCOPE = "repository"
 

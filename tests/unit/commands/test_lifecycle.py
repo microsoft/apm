@@ -69,6 +69,16 @@ class TestLifecycleTest:
         assert "Dry-run" in result.output
         mock_run.assert_not_called()
 
+    def test_dry_run_accepts_pre_compile(self, cli_runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"pre-compile": [{"type": "command", "bash": "./gen.sh"}]}},
+        )
+        result = cli_runner.invoke(lifecycle, ["test", "pre-compile"])
+        assert result.exit_code == 0
+        assert "'pre-compile' would fire 1 script(s)" in result.output
+
     def test_fires_synthetic_event(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yaml(
