@@ -679,3 +679,43 @@ class TestCodexHomeUserScope:
         assert "codex" not in profiles
         assert {"claude", "hermes"} <= set(profiles)
         assert ".codex/" in get_integration_prefixes(user_scope=True)
+
+    def test_trailing_space_codex_home_matches_mcp_adapter(self, monkeypatch, tmp_path):
+        """A nonblank CODEX_HOME is used verbatim, like the MCP adapter, so roots agree."""
+        home = self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", f"{home / '.config' / 'codex'} ")
+
+        profile = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+
+        assert profile is not None
+        assert profile.root_dir == ".config/codex "
+        assert home / profile.root_dir == self._mcp_codex_dir()
+
+    def test_relative_codex_home_skips_codex_in_registry_scans(self, monkeypatch, tmp_path):
+        """Registry-wide scans tolerate an unresolvable inactive Codex root."""
+        from apm_cli.install.helpers.reconciliation_scope import (
+            _scoped_known_targets_for_reconciliation,
+        )
+        from apm_cli.integration.targets import scoped_profile_or_none, skills_root_prefixes
+
+        self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", "relative/codex")
+        claude = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+
+        assert scoped_profile_or_none(KNOWN_TARGETS["codex"], user_scope=True) is None
+        assert ".agents/skills" in skills_root_prefixes()
+        scoped = _scoped_known_targets_for_reconciliation(
+            user_scope=True, active_targets=[claude], declared_targets=None
+        )
+        assert "codex" not in scoped
+        assert scoped["claude"] is claude
+
+    def test_relative_codex_home_still_fails_codex_deploys(self, monkeypatch, tmp_path):
+        """Selecting Codex for a user-scope write keeps the clear failure."""
+        from apm_cli.integration.targets import resolve_targets
+
+        home = self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", "relative/codex")
+
+        with pytest.raises(PathTraversalError, match="CODEX_HOME is set to a non-absolute path"):
+            resolve_targets(home, user_scope=True, explicit_target="codex")

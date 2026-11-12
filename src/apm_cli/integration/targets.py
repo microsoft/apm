@@ -64,14 +64,15 @@ Each value of the variable is a separate profile of the same runtime, and
 all of them share one user lockfile.
 """
 
-_ABSOLUTE_USER_ROOT_TOOLS: dict[str, str] = {
+_TOOL_RESOLVED_USER_ROOTS: dict[str, str] = {
     "codex": "Codex CLI",
 }
-"""Targets whose user-root variable must be an absolute path, by tool label.
+"""Targets whose user-root variable follows the tool's own resolver, by tool label.
 
-A relative value is rejected with :class:`PathTraversalError` instead of being
-resolved against the working directory; the Codex MCP adapter rejects a
-relative ``CODEX_HOME`` the same way.
+A nonblank value is used verbatim (not trimmed) and must be absolute; a
+relative value raises :class:`PathTraversalError` instead of resolving
+against the working directory. The Codex MCP adapter reads ``CODEX_HOME``
+the same way, so compiled files and MCP config share one root.
 """
 
 
@@ -564,10 +565,10 @@ class TargetProfile:
             import os
 
             env_var = USER_ROOT_ENV_VARS[self.name]
-            env = os.environ.get(env_var, "").strip()
-            if env:
-                expanded = Path(env).expanduser()
-                tool_label = _ABSOLUTE_USER_ROOT_TOOLS.get(self.name)
+            raw = os.environ.get(env_var, "")
+            tool_label = _TOOL_RESOLVED_USER_ROOTS.get(self.name)
+            if raw.strip():
+                expanded = Path(raw if tool_label else raw.strip()).expanduser()
                 if tool_label and not expanded.is_absolute():
                     raise PathTraversalError(
                         f"{env_var} is set to a non-absolute path; cannot locate the "
@@ -1225,7 +1226,7 @@ def skills_root_prefixes() -> frozenset[str]:
         if not profile.supports("skills") or profile.user_root_resolver is not None:
             continue
         roots.add(profile.skills_rel_root)
-        user_profile = profile.for_scope(user_scope=True)
+        user_profile = scoped_profile_or_none(profile, user_scope=True)
         if user_profile is not None and user_profile.supports("skills"):
             roots.add(user_profile.skills_rel_root)
     return frozenset(roots)
@@ -1408,13 +1409,28 @@ def selected_user_profiles() -> dict[str, TargetProfile]:
     profiles: dict[str, TargetProfile] = {}
     for name in USER_ROOT_ENV_VARS:
         base = KNOWN_TARGETS.get(name)
-        try:
-            scoped = base.for_scope(user_scope=True) if base is not None else None
-        except PathTraversalError:
-            continue
+        scoped = scoped_profile_or_none(base, user_scope=True) if base is not None else None
         if scoped is not None:
             profiles[name] = scoped
     return profiles
+
+
+def scoped_profile_or_none(profile: TargetProfile, *, user_scope: bool) -> TargetProfile | None:
+    """Return ``profile.for_scope()`` for a scan that may include inactive targets.
+
+    A tool-resolved user-root variable that cannot select a root (a relative
+    ``CODEX_HOME``) makes only that target unresolvable: scans over
+    :data:`KNOWN_TARGETS` or lockfile rows skip it, so Claude-only installs,
+    uninstalls and skill cleanup keep working. Paths that deploy to the target
+    (``resolve_targets``, ``apm compile --global``) call ``for_scope``
+    directly and still fail clearly.
+    """
+    try:
+        return profile.for_scope(user_scope=user_scope)
+    except PathTraversalError:
+        if profile.name not in _TOOL_RESOLVED_USER_ROOTS:
+            raise
+        return None
 
 
 def is_other_profile_path(profile: TargetProfile, value: str) -> bool:

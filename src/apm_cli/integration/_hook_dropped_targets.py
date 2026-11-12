@@ -52,7 +52,7 @@ def reconcile_dropped_targets(
     user_scope: bool = False,
 ) -> dict[str, int]:
     """Clean merge-hook JSON entries/sidecars for targets no longer declared."""
-    from .targets import KNOWN_TARGETS
+    from .targets import KNOWN_TARGETS, scoped_profile_or_none
 
     stats: dict[str, int] = {"files_removed": 0, "errors": 0}
     for name in dropped_target_names:
@@ -62,7 +62,7 @@ def reconcile_dropped_targets(
         profile = KNOWN_TARGETS.get(name)
         if profile is None:
             continue
-        scoped = profile.for_scope(user_scope=user_scope)
+        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
         if scoped is None:
             continue
         target_dir = scoped.deploy_path(project_root)

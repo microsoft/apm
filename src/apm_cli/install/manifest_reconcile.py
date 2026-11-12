@@ -398,7 +398,7 @@ def declared_target_profiles(
     from apm_cli.core.apm_yml import parse_targets_field
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.core.target_catalog import normalize_target_name
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
@@ -435,7 +435,7 @@ def declared_target_profiles(
             else:
                 profiles.append(active_profile)
             continue
-        scoped = profile.for_scope(user_scope=user_scope)
+        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
         profiles.append(scoped if scoped is not None else profile)
     return profiles or None
 

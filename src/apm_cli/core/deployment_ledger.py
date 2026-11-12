@@ -257,7 +257,7 @@ class DeploymentMaterializationSession:
         record = self._records.get(key)
         if record is None:
             return None
-        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
         recorded_target = next(
             (target for target in targets if target.name == record.locator.target), None
@@ -265,7 +265,9 @@ class DeploymentMaterializationSession:
         if recorded_target is None:
             profile = KNOWN_TARGETS.get(record.locator.target)
             recorded_target = (
-                profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                scoped_profile_or_none(profile, user_scope=self.scope.value == "user")
+                if profile
+                else None
             )
         if recorded_target is None or self._locator(path, [recorded_target]) != record.locator:
             return None
