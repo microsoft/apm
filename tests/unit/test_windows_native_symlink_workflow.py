@@ -20,7 +20,8 @@ def test_native_job_is_unconditional_bounded_and_read_only() -> None:
     job = workflow_job(load_workflow(WORKFLOW), JOB)
     assert job["runs-on"] == "windows-latest"
     assert job["permissions"] == {"contents": "read"}
-    assert 0 < job["timeout-minutes"] <= 15
+    # Bounded for the real-binary --frozen lifecycle in the baseline (#3457).
+    assert 0 < job["timeout-minutes"] <= 30
     assert "if" not in job
     assert not job.get("continue-on-error", False)
     checkout = job["steps"][0]
@@ -36,11 +37,11 @@ def test_native_job_is_unconditional_bounded_and_read_only() -> None:
 
 def test_native_cleanup_and_evidence_survive_subject_failure() -> None:
     job = workflow_job(load_workflow(WORKFLOW), JOB)
-    subject = workflow_step(job, "Prove native standard-user fallback")
+    subject = workflow_step(job, "Prove native standard-user link materialization")
     assert subject["env"] == {"APM_NATIVE_EXPECTED_HEAD": EXACT_HEAD}
     assert subject["run"] == f"{SCRIPT} -ExpectedHead $env:APM_NATIVE_EXPECTED_HEAD"
     assert subject["shell"] == "pwsh"
-    assert 0 < subject["timeout-minutes"] <= 10
+    assert 0 < subject["timeout-minutes"] <= 25
     assert not subject.get("continue-on-error", False)
     cleanup = workflow_step(job, "Restore owned native fixture")
     assert cleanup["if"] == "always()"
