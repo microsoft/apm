@@ -2148,7 +2148,9 @@ def test_existing_install_cannot_fall_back_to_pip(
     assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
 
 
-@pytest.mark.parametrize("glibc_version", ["2.31", "2.35", "2.36", "2.37", "2.38", "2.39", "2.41"])
+@pytest.mark.parametrize(
+    "glibc_version", ["2.17", "2.24", "2.27", "2.28", "2.31", "2.35", "2.38", "2.39"]
+)
 def test_glibc_floor_routes_to_pip_before_binary_download(
     installation: tuple[Path, dict[str, str]], glibc_version: str
 ) -> None:
@@ -2167,10 +2169,10 @@ def test_glibc_floor_routes_to_pip_before_binary_download(
         PIP_LOG=str(log),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    if glibc_version in {"2.31", "2.35", "2.36", "2.37"}:
+    if glibc_version in {"2.17", "2.24", "2.27"}:
         assert log.read_text(encoding="ascii").splitlines() == ["install", "--user", "apm-cli"]
         assert f"Your glibc version: {glibc_version}" in result.stdout
-        assert "Required version: glibc 2.38+" in result.stdout
+        assert "Required version: glibc 2.28+" in result.stdout
         assert "Reached binary download phase" not in result.stdout
     else:
         assert not log.exists()
@@ -2184,7 +2186,7 @@ def test_glibc_recovery_guidance_reports_prebuilt_floor(
 ) -> None:
     """Both the early rejection and later loader diagnostic must report the same floor."""
     root, _ = installation
-    version = "2.38" if binary_glibc_failure else "2.37"
+    version = "2.28" if binary_glibc_failure else "2.27"
     ldd = root / "tools/ldd"
     ldd.write_text(f"#!/bin/sh\nprintf 'ldd fixture {version}\\n'\n", encoding="ascii")
     ldd.chmod(0o755)
@@ -2192,12 +2194,13 @@ def test_glibc_recovery_guidance_reports_prebuilt_floor(
     assert result.returncode == 1, result.stdout + result.stderr
     if binary_glibc_failure:
         assert (
-            f"Your system has glibc {version} but the binary requires glibc 2.38+" in result.stdout
+            f"Your system has glibc {version} but the binary requires glibc 2.28+" in result.stdout
         )
     else:
-        assert "Use a system with glibc 2.38+ for the prebuilt binary" in result.stdout
+        assert "Use a system with glibc 2.28+ for the prebuilt binary" in result.stdout
     assert "Install Python 3.11+ first" in result.stdout
     assert "glibc 2.35+" not in result.stdout
+    assert "glibc 2.38+" not in result.stdout
 
 
 @pytest.mark.parametrize("python_name", ["python3", "python"])

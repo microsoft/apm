@@ -557,10 +557,15 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+    # Build the way build-release.yml builds Linux release binaries: uv-managed
+    # Python plus the glibc 2.28 check in build-binary.sh.
+    - name: Use uv-managed Python
+      run: |
+        {
+          echo "UV_PYTHON_PREFERENCE=only-managed"
+          echo "UV_PYTHON=${PYTHON_VERSION}"
+          echo "APM_MAX_GLIBC=2.28"
+        } >> "$GITHUB_ENV"
 
     - name: Install uv
       uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1

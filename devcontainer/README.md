@@ -95,7 +95,7 @@ When a devcontainer is built, the CLI injects each option as an uppercased envir
 > route from the [installation guide](https://microsoft.github.io/apm/getting-started/installation/):
 >
 > - `postCreateCommand`: `curl -sSL https://aka.ms/apm-unix | sh` (prebuilt
->   Linux binaries currently need glibc 2.38+; see [#3399](https://github.com/microsoft/apm/issues/3399)), or
+>   Linux binaries need glibc 2.28+), or
 > - add `ghcr.io/devcontainers/features/python:1` and run `pip install apm-cli`, or
 > - the community-maintained `ghcr.io/postfinance/devcontainer-features/apm`
 >   (maintained outside this project).
