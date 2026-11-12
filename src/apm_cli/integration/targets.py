@@ -779,9 +779,9 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     ),
     # Cursor -- at user scope, ~/.cursor/ supports instructions, skills,
     # agents, commands, hooks, and MCP.  Rules are file-backed at user
-    # scope: Cursor loads ~/.cursor/rules/*.mdc in addition to the
-    # Settings UI "User Rules" surface.  The same cursor_rules transform
-    # applies at both project and user scope.
+    # scope: Cursor 2.1+ includes ~/.cursor/rules/*.mdc in context; the
+    # Settings UI "User Rules" surface is separate and not managed here.
+    # The same cursor_rules transform applies at both project and user scope.
     # Ref: https://cursor.com/docs/rules
     # Ref: https://cursor.com/changelog/2-1
     "cursor": TargetProfile(

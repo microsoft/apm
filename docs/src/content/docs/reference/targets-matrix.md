@@ -169,11 +169,13 @@ Cursor.
   - skills: `.agents/skills/<name>/SKILL.md` (project) or
     `~/.agents/skills/<name>/SKILL.md` (user)
   - hooks: `.cursor/hooks.json`
-- **User scope.** Fully supported. Instructions deploy to
+- **User scope.** Supported. Instructions deploy to
   `~/.cursor/rules/<name>.mdc` (same `cursor_rules` transform as project
-  scope). Cursor 2.1+ includes `~/.cursor/rules` in context
-  ([changelog](https://cursor.com/changelog/2-1)), in addition to the
-  Settings UI "User Rules" surface.
+  scope), and `apm uninstall -g` removes only package-owned rules. Local
+  Cursor 2.1+ clients include `~/.cursor/rules` in context
+  ([changelog](https://cursor.com/changelog/2-1)). APM manages the files;
+  other Cursor surfaces, such as cloud agents or remote workspaces, are not
+  qualified. Settings UI "User Rules" are separate and not managed by APM.
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.cursor/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 - **Caveat.** Command files use the shared `claude_command` transformer today; Cursor-specific frontmatter keys (`author`, `mcp`, `parameters`, ...) are dropped at install time and surfaced via diagnostics.
