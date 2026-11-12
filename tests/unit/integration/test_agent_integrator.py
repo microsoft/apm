@@ -1651,6 +1651,32 @@ class TestCodexAgentIntegration:
         assert instructions.startswith("Updated: read [guide](")
         self._assert_guide_link_reaches(target, instructions, skill)
 
+    def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self) -> None:
+        """A managed TOML written before #2966 is repaired by the next install."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir, skill = self._linked_package()
+        target = self.root / ".codex" / "agents" / "reviewer.toml"
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            'name = "reviewer"\ndescription = "Review code"\n'
+            'developer_instructions = "Use the [guide skill](../skills/guide/SKILL.md#usage)."\n',
+            encoding="utf-8",
+        )
+        assert not (target.parent / "../skills/guide/SKILL.md").exists()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            managed_files={".codex/agents/reviewer.toml"},
+        )
+
+        assert result.files_integrated == 1
+        assert result.links_resolved == 1
+        instructions = tomllib.loads(target.read_text(encoding="utf-8"))["developer_instructions"]
+        self._assert_guide_link_reaches(target, instructions, skill)
+
     def test_codex_agent_tools_scope_emits_lossy_compilation_warning(self, capsys):
         """Codex installs must not silently discard agent tool restrictions."""
         from apm_cli.integration.targets import KNOWN_TARGETS
