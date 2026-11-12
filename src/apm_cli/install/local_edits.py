@@ -78,13 +78,14 @@ def count_local_edits(
 
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.utils.content_hash import compute_file_hash
-    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within_resolved
 
     remote_keys = [key for key in dependency_keys if key and is_upstream_package(key, lockfile)]
     if not remote_keys:
         return 0
 
     snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, remote_keys)
+    resolved_root = project_root.resolve()
     count = 0
     for rel_path, recorded in snapshot.hashes.items():
         if rel_path.endswith("/"):
@@ -93,7 +94,7 @@ def count_local_edits(
         try:
             if path.is_symlink() or not path.is_file():
                 continue
-            ensure_path_within(path, project_root)
+            ensure_path_within_resolved(path, resolved_root)
             if compute_file_hash(path) != recorded:
                 count += 1
         except (OSError, PathTraversalError):
