@@ -86,6 +86,8 @@ _apm_yml_cache: dict[tuple[Path, Path | None, bool], "APMPackage"] = {}
 # changed size during iteration`` and fail the install intermittently.
 # Lock-free ``dict.get`` reads stay safe: the lookup executes as one
 # GIL-held C-level dict operation, so it cannot observe a torn mutation.
+# This read path (and the generation snapshot below) assumes the GIL;
+# revisit both before supporting free-threaded CPython (PEP 703).
 _apm_yml_cache_lock = threading.Lock()
 
 # Bumped under the lock by every invalidation/clear. ``from_apm_yml``
@@ -93,9 +95,11 @@ _apm_yml_cache_lock = threading.Lock()
 # returning the parsed result) when the generation moved: an in-flight
 # parse that read PRE-rewrite bytes must not re-poison the cache AFTER
 # the rewrite's invalidation ran. Global (not per-path) on purpose --
-# the cost of over-invalidation is one extra parse on the next load,
-# and a per-path map would reintroduce the iteration/mutation problem
-# the lock exists to solve.
+# the cost of over-invalidation is one extra parse on the next load for
+# each parse in flight when an invalidation lands (invalidations only
+# fire on apm.yml rewrites during materialization, so keep them off hot
+# read paths), and a per-path map would reintroduce the
+# iteration/mutation problem the lock exists to solve.
 _apm_yml_cache_generation = 0
 
 
