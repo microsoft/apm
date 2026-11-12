@@ -288,14 +288,15 @@ apm marketplace add acme-tools/agents \
   --ref main
 ```
 
-The entry is stored in `~/.apm/marketplaces.json`. Auth uses the same
+The entry is stored in `$APM_HOME/marketplaces.json` (default
+`~/.apm/marketplaces.json`). Auth uses the same
 PAT as private dependency installs (`GITHUB_APM_PAT`,
 `GITHUB_APM_PAT_<ORG>`, or the GitLab equivalent). See
 [Private and org packages](../../consumer/private-and-org-packages/).
 
 ## Cache behavior
 
-APM keeps a local cache at `~/.apm/cache/`:
+APM keeps a local cache at `$APM_HOME/cache/` (default `~/.apm/cache/`):
 
 - Git checkouts (full repository clones, reused across resolves).
 - HTTP cache (proxy responses, `marketplace.json` snapshots).

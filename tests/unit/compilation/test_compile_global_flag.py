@@ -486,7 +486,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert sorted(names) == ["claude", "codex"]
         logger.verbose_detail.assert_called_once_with(
-            "Global targets from ~/.apm/apm.yml: claude, codex"
+            f"Global targets from {source_root / 'apm.yml'}: claude, codex"
         )
 
     def test_declared_target_without_root_output_has_accurate_message(self, tmp_path):
@@ -561,7 +561,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert names == ["copilot"]
         logger.verbose_detail.assert_called_once_with(
-            "Global targets from ~/.apm/apm.yml: vscode -> copilot"
+            f"Global targets from {source_root / 'apm.yml'}: vscode -> copilot"
         )
 
     def test_alias_and_canonical_name_collapse_to_one_profile(self, tmp_path):
