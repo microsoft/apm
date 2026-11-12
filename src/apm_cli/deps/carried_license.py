@@ -28,7 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from apm_cli.utils.content_hash import compute_file_hash, verify_package_hash
+from apm_cli.utils import content_hash as _content_hash
+from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -222,7 +223,7 @@ def verify_locked_package(
 ) -> bool:
     """Verify a cached package against its locked hash and carried licence copies."""
     records = tuple(records)
-    return carried_copies_intact(package_root, records) and verify_package_hash(
+    return carried_copies_intact(package_root, records) and _content_hash.verify_package_hash(
         package_root, expected_hash, exclude=carried_license_paths(records)
     )
 
