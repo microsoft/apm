@@ -113,10 +113,13 @@
     },
     {
       "id": "user-root-scoped-instruction-eligibility",
-      "decision": "User-root scoped instruction eligibility",
-      "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context)",
+      "decision": "User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
+      "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context, TargetProfile.user_hook_home_reference, UserHookHomeReference.reference_for)",
       "selectors": ["src/apm_cli/integration/targets.py"],
-      "guards": ["hooks-integrations-user-root-scope"]
+      "guards": [
+        "hooks-integrations-user-hook-home-reference",
+        "hooks-integrations-user-root-scope"
+      ]
     }
   ]
 }
