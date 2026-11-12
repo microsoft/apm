@@ -20,6 +20,7 @@ from apm_cli.install.locking import acquire_lifecycle_lock, lifecycle_lock
 from apm_cli.install.transaction import InstallTransaction, resolution_for_context
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
+from tests.utils.filelock_retention import retain_native_lock_unlink
 
 pytestmark = pytest.mark.windows_compat
 
@@ -270,7 +271,9 @@ def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> N
     assert "permission denied" in transaction._logger.warning.call_args.args[0]
 
 
-def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -> None:
+def test_current_lock_cleanup_failure_is_reported_after_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A retained current-session lock gets the same actionable diagnostic."""
     transaction = _transaction(tmp_path)
     package = transaction.apm_modules_dir / "package"
@@ -278,6 +281,7 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
     transaction.resolution.prepare_path(package)
     package.mkdir()
     lock_path = transaction.resolution._staging_lock_path
+    retain_native_lock_unlink(monkeypatch, lock_path)
     original_unlink = Path.unlink
 
     def fail_lock_unlink(path: Path, missing_ok: bool = False) -> None:

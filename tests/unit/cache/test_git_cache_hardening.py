@@ -81,7 +81,11 @@ class TestCacheHitDiagnostics:
         checkout = cache._checkouts_root / shard / sha / "full"
         checkout.mkdir(parents=True)
         (checkout / ".git").mkdir()
-        (checkout / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (checkout / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects\n",
+            encoding="ascii",
+        )
 
         with (
             patch.object(cache, "_resolve_sha", return_value=sha),

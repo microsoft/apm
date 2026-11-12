@@ -13,12 +13,17 @@ how to install it:
 | `hooks/*.json` or `.apm/hooks/*.json` only | Harness hook package | Add hook commands to each target's configuration and copy referenced files |
 | `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
-| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0, user scope only; initially disabled, no loose projection or other-target translation |
+| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0 or later, user scope only; initially disabled, no loose projection or other-target translation |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
 An `apm.yml` is eligible when the root also has `.apm/` or the manifest
 declares APM or MCP dependencies. To intentionally select a plugin layout,
 omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
+
+Claude plugin MCP files (`.mcp.json`, `mcp.json`, `.github/.mcp.json`, or JSON
+files named by `plugin.json` `mcpServers`) may use `{"mcpServers": {...}}` or a
+flat top-level server map whose values are all server objects. A file with no
+usable server is skipped with a warning naming the file and plugin.
 
 Root `plugin.json` and `.claude-plugin/plugin.json` also precede the Codex
 compatibility overlay. The Codex route requires a native-discoverable skill
@@ -227,13 +232,14 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
-For Claude, APM wraps flat command entries in `{ "matcher", "hooks": [...] }`
-groups in `.claude/settings.json` and adds the required `"type": "command"`
-when a flat command entry omits `type`. Explicit handler types are kept.
-Handlers already inside nested Claude groups and other targets are unchanged.
-
-For Codex, APM wraps flat command entries in hook groups containing a
-nested `hooks` array in `.codex/hooks.json`.
+For Claude and Codex, APM wraps flat command entries in hook groups with a
+nested `hooks` array: `{ "matcher", "hooks": [...] }` in
+`.claude/settings.json`, and the equivalent groups in `.codex/hooks.json`.
+For both targets, a flat command entry that omits `type` receives the required
+`"type": "command"`; explicit handler types are kept and other targets are
+unchanged. This default applies only to flat command entries in the source
+file, not to handlers already inside nested source groups, so supply `type`
+yourself when authoring nested groups.
 Claude, Codex, Gemini, and Antigravity preserve nested handler and
 hook-group metadata, including `env` objects and arrays, in native JSON.
 
@@ -297,8 +303,14 @@ merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
 sidecar, so clones, contributors, and CI runners do not see the installer's
 machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
-references to absolute paths because the user-scope config is read
-without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+references so the user-scope config resolves without a fixed cwd. Where the
+harness documents POSIX shell execution, the path is anchored to `$HOME` on
+macOS/Linux (for example `$HOME/.claude/hooks/<pkg>/run.sh`) so the file stays
+identical across machines: Claude Code shell-form `command` (not `args` exec
+form or `shell: "powershell"`), Copilot CLI `bash`, Gemini CLI `command`, and
+Kiro command actions. Cursor, Codex, and Windsurf keep absolute paths, as do
+Windows hosts, single-quoted references, and config roots outside the home
+directory such as `CLAUDE_CONFIG_DIR`. If a manifest in `hooks/` or `.apm/hooks/` uses
 `./hooks/<script>`, APM first resolves it from the hook file directory,
 then falls back to the package root to avoid deploying a doubled
 `hooks/hooks/` path. If a referenced hook script is missing at install
@@ -436,19 +448,27 @@ tags: [security, validation]
 (`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
 way to specify multiple patterns, as it is portably expanded into
 target-specific YAML arrays/lists (under `paths:` / `globs:` /
-`fileMatchPattern:`) across Claude, Windsurf, Kiro, and Antigravity.
+`fileMatchPattern:`) across Claude, Windsurf, and Kiro.
 For Cursor, APM emits one comma-joined scalar rather than a YAML list
 (`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
 characters are escaped. Descriptions keep printable non-ASCII text readable
-and are quoted when needed to preserve their value.
+and are quoted when needed to preserve their value. For Antigravity, APM
+emits `trigger: glob` plus one double-quoted comma-joined string
+(`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
+`trigger: always_on`.
+
+With `--global`, Cursor rules deploy to `~/.cursor/rules/<name>.mdc`, which
+local Cursor 2.1+ clients include in context. `apm uninstall -g` removes only
+package-owned rules; an existing rule with the same name as a package rule is
+replaced on install.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed
 placement and target-native installation. Use a sequence when its source
 readability matters. To match a literal comma in a filename, escape it as
 `\,`. APM preserves pattern boundaries when re-joining, including the
-escape in Cursor's scalar. Cursor's documentation does not specify
-literal-comma matching; verify such patterns in your Cursor version.
+escape in Cursor's and Antigravity's joined strings. Neither tool documents
+literal-comma matching; verify such patterns in your tool version.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
@@ -516,6 +536,15 @@ Review ${input:pr_url} focusing on ${input:focus_areas}.
 When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
+
+For the `copilot` target, prompts deploy to `.github/prompts/<name>.prompt.md`.
+In VS Code, only Local harness sessions load prompt files; the Copilot harness
+and Copilot CLI do not
+(https://code.visualstudio.com/docs/agent-customization/prompt-files). For
+those harnesses, ship the workflow as a skill (`.apm/skills/<name>/SKILL.md`)
+and add `disable-model-invocation: true` to its frontmatter where the host
+supports it. APM copies skill frontmatter as-is and does not convert prompts
+to skills.
 
 #### Optional workflow frontmatter (GitHub Copilot App, experimental)
 
@@ -959,6 +988,9 @@ Schema rules:
   optional inside the block (inherited from apm.yml top level).
 - Each remote plugin needs either `version` or `ref`.
 - `ref` takes precedence over `version`.
+- A `ref` may be a tag, a branch, or a full 40-character lowercase commit
+  SHA. `apm marketplace check` confirms a SHA by fetching that commit from
+  the remote; abbreviated SHAs fail.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
 - `source` accepts three remote forms: `owner/repo` (default host),

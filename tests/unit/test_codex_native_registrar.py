@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sys
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -16,6 +17,7 @@ from apm_cli.codex_plugins.registrar import (
     _preflight,
     _Record,
     _write_records,
+    is_codex_source_pin,
     marketplace_name,
     synchronize_codex_plugins,
     verify_codex_source_identity,
@@ -73,6 +75,28 @@ def test_foreign_marketplace_collision_fails_before_native_or_snapshot_write(tmp
     client.write_config.assert_not_called()
     client.upgrade.assert_not_called()
     assert not list(tmp_path.glob(".codex-native/snapshots/*"))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-in executable")
+def test_malformed_app_server_on_newer_client_fails_closed_without_writes(tmp_path, monkeypatch):
+    """Admitting a newer Codex never relaxes protocol checks before native writes."""
+    from tests.unit.test_codex_native_client import _stand_in_codex
+
+    deployment = _deployment(tmp_path)
+    modules = tmp_path / "apm_modules"
+    script = _stand_in_codex(tmp_path / "bin", "codex-cli 0.164.0", "not-json")
+    monkeypatch.setenv("PATH", str(script.parent))
+    with pytest.raises(CodexNativeError, match="initialize"):
+        synchronize_codex_plugins(
+            [deployment],
+            modules_dir=modules,
+            cwd=tmp_path,
+            scope=InstallScope.USER,
+            retained_keys={"owner/example"},
+        )
+    requests = (script.parent / "requests.log").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["method"] for line in requests] == ["initialize"]
+    assert not (tmp_path / ".codex-native").exists()
 
 
 def test_no_native_work_does_not_probe_user_configuration(tmp_path, monkeypatch):
@@ -332,3 +356,29 @@ def test_source_identity_records_are_cached_only_for_one_operation(tmp_path, mon
     )
     assert deployment.plugin.dependency_key in verify_codex_source_identity(modules, **identity)
     assert reader.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("a" * 40, True),
+        ("a" * 64, True),
+        ("a" * 7, False),
+        ("A" * 40, False),
+        ("main", False),
+        ("cached", False),
+        (None, False),
+    ],
+)
+def test_source_pin_predicate_is_shared_by_ledger_and_identity_checks(
+    tmp_path: Path, value: object, expected: bool
+) -> None:
+    assert is_codex_source_pin(value) is expected
+    if isinstance(value, str) and not expected:
+        with pytest.raises(CodexNativeError, match="Invalid original Codex source pin"):
+            verify_codex_source_identity(
+                tmp_path / "modules",
+                dependency_key="owner/repo",
+                source_hash="sha256:" + "0" * 64,
+                source_commit=value,
+            )

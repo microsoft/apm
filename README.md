@@ -131,7 +131,7 @@ You do not need Homebrew to use APM.
 #### Linux / macOS
 
 ```bash
-# pip (Python 3.10+)
+# pip (Python 3.11+)
 pip install apm-cli
 ```
 
@@ -144,7 +144,6 @@ winget install --id Microsoft.APM --exact --source winget
 
 ```powershell
 # Scoop
-scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 # pip
 pip install apm-cli

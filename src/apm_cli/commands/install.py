@@ -161,7 +161,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 )
 from ._helpers import (
     _create_minimal_apm_yml,
-    _get_default_config,
+    _get_bootstrap_config,
 )
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
@@ -229,7 +229,12 @@ APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
     from ..deps.apm_resolver import APMDependencyResolver
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import (
+        LockFile,
+        LockfileSymlinkError,
+        get_lockfile_path,
+        migrate_lockfile_if_needed,
+    )
     from ..integration.mcp_integrator import (
         MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
     )
@@ -845,9 +850,19 @@ def _handle_mcp_install(  # noqa: PLR0913
     initial_manifest_config = None
     if is_user_scope(scope) and not mcp_manifest_path.exists():
         project_name = _resolve_bootstrap_project_name(Path.home().name)
-        initial_manifest_config = _get_default_config(project_name)
+        initial_manifest_config = _get_bootstrap_config(project_name)
         if target is not None or runtime is not None:
             initial_manifest_config["targets"] = supported_runtimes
+    retry_args = []
+    if mcp_version:
+        retry_args.extend(("--mcp-version", mcp_version))
+    retry_target = target or runtime
+    if retry_target is not None:
+        retry_args.extend(
+            ("--target", retry_target if isinstance(retry_target, str) else ",".join(retry_target))
+        )
+    if is_user_scope(scope):
+        retry_args.append("--global")
     _run_mcp_install(
         mcp_name=mcp_name,
         transport=transport,
@@ -869,6 +884,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         registry_allow_http=registry_source == "flag",
         registry_source=registry_source,
         initial_manifest_config=initial_manifest_config,
+        retry_args=builtins.tuple(retry_args),
     )
 
 
@@ -989,6 +1005,13 @@ def _handle_mcp_install(  # noqa: PLR0913
     is_flag=True,
     default=False,
     help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1). Caveat: fallback reuses the same port across schemes; on servers that use different SSH and HTTPS ports, omit this flag and pin the dependency with an explicit ssh:// or https:// URL.",
+)
+@click.option(
+    "--auth-first",
+    "auth_first",
+    is_flag=True,
+    default=False,
+    help="Skip the anonymous-first HTTPS attempt for github.com and use your resolved credentials immediately (also: APM_GITHUB_AUTH_FIRST=1, apm config set github-auth-first true). Escape hatch for TLS-inspecting proxies the isolated anonymous attempt cannot pass. Trade-off: forwards credentials on the first attempt.",
 )
 @click.option(
     "--mcp",
@@ -1156,6 +1179,7 @@ def install(  # noqa: PLR0913
     use_ssh,
     use_https,
     allow_protocol_fallback,
+    auth_first,
     mcp_name,
     transport,
     url,
@@ -1304,6 +1328,7 @@ def install(  # noqa: PLR0913
                         "--ssh": use_ssh,
                         "--https": use_https,
                         "--allow-protocol-fallback": allow_protocol_fallback,
+                        "--auth-first": auth_first,
                         "--mcp": mcp_name,
                         "--registry": registry_url,
                         "--skill": bool(skill_names),
@@ -1477,7 +1502,9 @@ def install(  # noqa: PLR0913
 
         # Create shared auth resolver for all downloads in this CLI invocation
         # to ensure credentials are cached and reused (prevents duplicate auth popups)
-        auth_resolver = AuthResolver()
+        # issue #2545: --auth-first is CLI-scoped here; AuthResolver falls back to
+        # APM_GITHUB_AUTH_FIRST / apm config github-auth-first when not passed.
+        auth_resolver = AuthResolver(github_auth_first=auth_first)
         # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
         # auth-source line and the deferred stale-PAT [!] warning route through
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
@@ -1503,7 +1530,7 @@ def install(  # noqa: PLR0913
                     f'Using default project name "{project_name}" because '
                     f"derived name {derived_project_name!a} is invalid"
                 )
-            config = _get_default_config(project_name)
+            config = _get_bootstrap_config(project_name)
             if manifest_targets := manifest_targets_from_target_option(target):
                 config["targets"] = manifest_targets
             _create_minimal_apm_yml(config, target_path=manifest_path)
@@ -1852,6 +1879,8 @@ def _install_apm_packages(ctx, outcome):
     old_mcp_target_servers: builtins.dict = {}
     old_mcp_target_servers_present = True
     _lock_path = get_lockfile_path(ctx.apm_dir)
+    if _lock_path.is_symlink() and not _lock_path.exists():
+        raise LockfileSymlinkError(_lock_path)
     _existing_lock = LockFile.read(_lock_path)
     if _existing_lock:
         old_mcp_servers = builtins.set(_existing_lock.mcp_servers)

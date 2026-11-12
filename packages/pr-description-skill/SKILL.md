@@ -200,7 +200,7 @@ in these inputs.
 | Actual diff | `git diff <base>...HEAD` | yes |
 | Commit messages on the branch | `git log --no-merges <base>..HEAD --oneline` | yes |
 | CHANGELOG entry, if any | inspect `CHANGELOG.md` Unreleased section | yes |
-| Linked issue / motivation | user-provided or referenced in commits | yes |
+| Linked issue / motivation | user-provided or referenced in commits, plus whether this PR fully delivers the issue | yes |
 | Validation evidence | output of `apm audit --ci`, `uv run pytest`, or equivalent | yes |
 | Scenario-test mapping | author-supplied or derived from diff: per user-promise scenario the PR touches, the test path proving it, plus the APM principle the scenario serves (taxonomy in `assets/scenario-evidence-rubric.md`) | conditional (required for any behavior-change PR; may be skipped for docs-only / asset-bump / pure-refactor per the rubric's skip clause, with the skip case stated in trade-offs) |
 | Mirror parity check, if applicable | `apm install --target copilot` output | conditional |
@@ -297,6 +297,10 @@ of` closing rules, round brackets in node labels, inline
   `mmdc` package and renders without error.
 - The cite-or-omit rule applies absolutely.
 - The TL;DR is at most four sentences.
+- The body has an issue line directly under the TL;DR: `Fixes #N` or
+  `Closes #N` when the PR fully delivers issue N (GitHub closes it on
+  merge), `Refs #N` when it is partial or related. Never use a closing
+  keyword for partial work.
 - The body ends with the trailer:
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
 

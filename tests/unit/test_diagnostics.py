@@ -298,6 +298,23 @@ class TestDiagnosticCollectorRendering:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
+    def test_error_group_counts_each_attributed_package_once(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector()
+        dc.error("refused a.md", package="pkg-x")
+        dc.error("refused b.md", package="pkg-x")
+        dc.error("refused c.md", package="pkg-y")
+        dc.error("unattributed failure")
+        dc.render_summary()
+        echo_texts = [c.args[0] for c in mock_echo.call_args_list]
+        assert "  [x] 3 packages failed:" in echo_texts
+        assert "    +- pkg-x -- refused b.md" in echo_texts
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
     def test_warning_group_shows_individual_warnings(
         self, mock_info, mock_warning, mock_echo, mock_console
     ):

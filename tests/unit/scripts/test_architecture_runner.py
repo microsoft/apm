@@ -635,6 +635,7 @@ install-deployment-incomplete-chain-routing
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-lock-parent-placement
 install-deployment-skill-preflight
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-lifecycle
@@ -704,6 +705,7 @@ mutation_writes.mcp_passthrough_denylist
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.opencode_enabled_intent
+mutation_writes.user_hook_home_reference
 mutation_writes.user_root_scope
 onboarding-metadata-only
 contracts-tooling-root-context-write-eligibility

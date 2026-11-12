@@ -27,7 +27,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Ruff lint
       run: >-
@@ -129,15 +129,16 @@ jobs:
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
+        packages/apm-contributor-dashboard/tests/markdown.test.mjs
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -173,7 +174,7 @@ jobs:
   windows-native-standard-user-symlink-gate:
     name: Windows Native Symlink Acceptance
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -188,19 +189,19 @@ jobs:
         persist-credentials: false
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
-    - name: Prove native standard-user fallback
+    - name: Prove native standard-user link materialization
       shell: pwsh
-      timeout-minutes: 10
+      timeout-minutes: 25
       env:
         APM_NATIVE_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       run: >-
@@ -233,7 +234,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11']
+        python-version: ['3.11']
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -241,12 +242,12 @@ jobs:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
@@ -312,12 +313,12 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -347,12 +348,12 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -428,15 +429,16 @@ jobs:
       run: >-
         node --test
         packages/apm-contributor-dashboard/tests/logic.test.mjs
+        packages/apm-contributor-dashboard/tests/markdown.test.mjs
         packages/apm-contributor-dashboard/tests/server.test.mjs
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -503,7 +505,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -557,13 +559,18 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+    # Build the way build-release.yml builds Linux release binaries: uv-managed
+    # Python plus the glibc 2.28 check in build-binary.sh.
+    - name: Use uv-managed Python
+      run: |
+        {
+          echo "UV_PYTHON_PREFERENCE=only-managed"
+          echo "UV_PYTHON=${PYTHON_VERSION}"
+          echo "APM_MAX_GLIBC=2.28"
+        } >> "$GITHUB_ENV"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -618,7 +625,7 @@ jobs:
       # committed managed files are preserved: content-integrity detects
       # tampered file hashes and the drift replay compares the committed tree
       # (including .agents/skills/) against a fresh cache-free replay.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -716,7 +723,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
@@ -726,14 +733,12 @@ jobs:
         node-version: '24'
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
     - name: Install Unix shell startup test runtimes
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y fish zsh
+      run: bash scripts/ci-apt-install.sh fish zsh
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev

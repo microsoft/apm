@@ -730,6 +730,24 @@ class TestRegistryPackageResolverPickVersion:
         chosen = resolver._pick_version(dep_ref, versions)
         assert chosen.version == "1.2.5"
 
+    def test_best_version_skips_prerelease(self) -> None:
+        """A stable range never picks a published pre-release (OpenAPM 7.3.1, #3466)."""
+        dep_ref = DependencyReference(
+            repo_url="acme/tool",
+            source="registry",
+            registry_name="myregistry",
+            reference="^1.0.0",
+        )
+        versions = [
+            VersionEntry(version="1.2.5", digest="sha256:a", published_at="2024-02-01T00:00:00Z"),
+            VersionEntry(
+                version="1.3.0-rc.1", digest="sha256:b", published_at="2024-03-01T00:00:00Z"
+            ),
+        ]
+        resolver = self._make_resolver()
+        chosen = resolver._pick_version(dep_ref, versions)
+        assert chosen.version == "1.2.5"
+
     def test_missing_registry_raises(self) -> None:
         """Dep that references an unconfigured registry raises RegistryResolutionError."""
         from apm_cli.deps.registry.resolver import RegistryPackageResolver

@@ -37,6 +37,7 @@ try:
     from ...deps.lockfile import (
         LockFile,
         LockfileConflictError,
+        LockfileSymlinkError,
         get_lockfile_path,
         migrate_lockfile_if_needed,
     )
@@ -110,6 +111,7 @@ def run_mcp_install(  # noqa: PLR0913
     registry_allow_http: bool = True,
     registry_source: str | None = None,
     initial_manifest_config: dict | None = None,
+    retry_args: tuple[str, ...] = (),
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
@@ -172,6 +174,7 @@ def run_mcp_install(  # noqa: PLR0913
                     registry_source=registry_source,
                     verbose=verbose,
                     logger=logger,
+                    retry_args=retry_args,
                 )
             except Exception as exc:
                 detail = str(exc)
@@ -370,6 +373,11 @@ def run_mcp_install(  # noqa: PLR0913
                 logger.error("MCP server written to apm.yml but tool integration failed.")
                 raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
             except Exception as exc:
+                symlink_error = exc if isinstance(exc, LockfileSymlinkError) else exc.__cause__
+                if isinstance(symlink_error, LockfileSymlinkError):
+                    logger.error(str(symlink_error))
+                    logger.error("MCP server written to apm.yml but tool integration failed.")
+                    raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
                 # Keep the raw exception (which may contain internal paths,
                 # credentials, or stack-trace fragments) at verbose level
                 # only; surface a fixed actionable string to the user, then

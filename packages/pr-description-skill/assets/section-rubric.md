@@ -161,5 +161,7 @@ validation block.
       at least 3).
 - [ ] **Every mermaid block validated by `mmdc`.**
 - [ ] TL;DR sentence count is 4 or fewer.
+- [ ] Issue line present: `Fixes #N` / `Closes #N` only if the PR fully
+      delivers the issue, otherwise `Refs #N`.
 - [ ] Long evidence is inside `<details>`, not flat in the body.
 - [ ] Trailer line `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>` is the last non-empty line.

@@ -33,14 +33,15 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
 
-## Transport and protocol
+## Transport and credential order
 
-Controls how APM clones packages and enumerates refs on Git hosts. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
+Controls how APM clones packages and enumerates refs on Git hosts: `APM_GIT_PROTOCOL` and `APM_ALLOW_PROTOCOL_FALLBACK` select the transport scheme, while `APM_GITHUB_AUTH_FIRST` changes credential order for exact-host `github.com` without affecting transport. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
 | `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
+| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github-auth-first` in `~/.apm/config.json`, then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 
 ## TLS trust
 
@@ -55,7 +56,7 @@ APM verifies package-management HTTPS against the operating-system trust store b
 
 Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
 
-The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage).
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated `github.com` Git attempts, APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 ## Registry (MCP and proxy)
 
@@ -135,6 +136,6 @@ These variables exist in the codebase but are not part of the documented contrac
 | `APM_RESOLVE_PARALLEL` | Tunes parallelism in the dependency resolver. | implementation default | Subject to change. |
 | `APM_TIERED_RESOLVER` | Set to `0`/`false`/`no`/`off` to disable the tiered git-ref resolver (per-run cache + commits API + bare `rev-parse` + legacy clone) and force every `install`/`update`/`outdated` ref resolution through the legacy shallow-clone path. Emergency rollback for #1369. | `1` (on) | Subject to change. Removal expected once the tiered stack has soaked through a release. |
 | `APM_LEGACY_SKILL_PATHS` | Toggles legacy skill-path layout in integration targets. | unset | Compatibility shim; will be removed. |
-| `APM_NO_SCRIPTS` | Disables package lifecycle script execution. | unset | Internal safety/test switch; prefer executable trust policy in production. |
+| `APM_NO_SCRIPTS` | Disables all lifecycle scripts (install, update, uninstall, and compile). | unset | Internal safety/test switch; prefer executable trust policy in production. |
 | `APM_NON_INTERACTIVE` | Forces non-interactive behavior. | unset | Used by automation and tests. |
 | `APM_E2E_TESTS` | Marks the process as an end-to-end test run; relaxes some interactive guards. | unset | Test harness only. Do not set in normal use. |

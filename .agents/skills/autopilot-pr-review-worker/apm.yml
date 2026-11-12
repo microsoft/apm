@@ -2,7 +2,7 @@ name: autopilot-pr-review-worker
 version: 0.1.0
 description: Multi-persona advisory review panel for a labelled pull request -- fans out to specialist personas + a CEO synthesizer, posts one recommendation comment, never gates merge.
 author: Microsoft
-license: MIT
+license: Apache-2.0
 type: skill
 
 # Stand-alone primitive: no transitive APM deps. Specialist roles are

@@ -148,6 +148,84 @@ def test_unknown_or_malformed_recognized_content_never_claims_success(
     assert settings.read_text() == payload
 
 
+_COPILOT_HOOK = ".github/hooks/manual.json"
+
+
+def _copilot_hooks(root: Path, events: dict[str, object]) -> Path:
+    (root / "apm.yml").write_text("name: audit-contract\nversion: 1.0.0\ntarget: copilot\n")
+    return _write(root, _COPILOT_HOOK, json.dumps({"version": 1, "hooks": events}))
+
+
+def _ci_audit() -> tuple[int, dict]:
+    args = ["audit", "--ci", "--no-policy", "--no-fail-fast", "--no-drift", "--format", "json"]
+    result = CliRunner().invoke(cli, args)
+    return result.exit_code, json.loads(result.output)
+
+
+@pytest.mark.parametrize("prompt", ["Answer concisely.", "/review"])
+def test_copilot_session_start_prompt_hook_has_full_coverage(project: Path, prompt: str) -> None:
+    _copilot_hooks(project, {"sessionStart": [{"type": "prompt", "prompt": prompt}]})
+    result = scan_project_result(project, targets=(KNOWN_TARGETS["copilot"],))
+    assert result.incomplete == ()
+    assert result.findings_by_file == {}
+    assert result.scanned_files == frozenset({_COPILOT_HOOK})
+    assert [entry.status for entry in result.inventory] == ["checked"]
+    exit_code, report = _ci_audit()
+    check = next(c for c in report["checks"] if c["name"] == "content-integrity")
+    assert exit_code == 0, report
+    assert check["passed"] is True, check
+
+
+def test_copilot_session_start_prompt_text_is_scanned(project: Path) -> None:
+    _copilot_hooks(
+        project,
+        {
+            "sessionStart": [
+                {"type": "command", "bash": "echo start"},
+                {"type": "prompt", "prompt": f"Answer {_BIDI}"},
+            ]
+        },
+    )
+    result = scan_project_result(project, targets=(KNOWN_TARGETS["copilot"],))
+    assert result.incomplete == ()
+    findings = result.findings_by_file[_COPILOT_HOOK]
+    assert findings
+    assert {finding.pointer for finding in findings} == {"/hooks/sessionStart/1/prompt"}
+    exit_code, report = _ci_audit()
+    check = next(c for c in report["checks"] if c["name"] == "content-integrity")
+    assert exit_code == 1
+    assert check["passed"] is False
+    assert not any("incomplete-coverage:" in detail for detail in check["details"])
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        {"agentStop": [{"type": "prompt", "prompt": "Answer concisely."}]},
+        {"preToolUse": [{"type": "prompt", "prompt": "Answer concisely."}]},
+        {"sessionStart": [{"type": "future", "prompt": "Answer concisely."}]},
+        {"sessionStart": [{"type": "agent", "prompt": "Answer concisely."}]},
+        {"sessionStart": [{"type": "prompt", "prompt": 12}]},
+        {"sessionStart": [{"type": "prompt"}]},
+        {"sessionStart": [{"hooks": [{"type": "prompt", "prompt": "Answer concisely."}]}]},
+    ],
+)
+def test_copilot_prompt_hooks_outside_contract_stay_incomplete(
+    project: Path, events: dict[str, object]
+) -> None:
+    hooks = _copilot_hooks(project, events)
+    before = hooks.read_bytes()
+    result = scan_project_result(project, targets=(KNOWN_TARGETS["copilot"],))
+    assert len(result.incomplete) == 1
+    assert result.findings_by_file == {}
+    exit_code, report = _ci_audit()
+    check = next(c for c in report["checks"] if c["name"] == "content-integrity")
+    assert exit_code == 1
+    assert check["passed"] is False
+    assert any("incomplete-coverage:" in detail for detail in check["details"])
+    assert hooks.read_bytes() == before
+
+
 def test_unreadable_recognized_file_is_reported(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

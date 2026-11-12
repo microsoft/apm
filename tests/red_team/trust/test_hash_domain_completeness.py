@@ -104,3 +104,43 @@ def test_adding_new_event_revokes_trust(apm_home: Path, tmp_path: Path) -> None:
     injected["lifecycle"]["pre-install"] = [{"type": "command", "bash": "echo evil"}]
     _write(apm_yml, injected)
     assert not is_project_scripts_trusted(apm_yml)
+
+
+def _plain_fingerprint(lifecycle: dict) -> str:
+    """The fingerprint an APM release that predates pre-compile computed."""
+    import hashlib
+    import json
+
+    canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_record_from_before_pre_compile_does_not_cover_it(apm_home: Path, tmp_path: Path) -> None:
+    """A block trusted while pre-compile was an inert key needs fresh trust."""
+    import json
+
+    from apm_cli.core.script_trust import fingerprint_lifecycle_subtree
+
+    lifecycle = {"pre-compile": [{"type": "command", "run": "gen"}]}
+    path = tmp_path / "apm.yml"
+    _write(path, {"name": "pkg", "lifecycle": lifecycle})
+    store = apm_home / "scripts-trust.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(
+        json.dumps({"version": 1, "projects": {str(path.resolve()): _plain_fingerprint(lifecycle)}})
+    )
+
+    assert fingerprint_lifecycle_subtree(lifecycle) != _plain_fingerprint(lifecycle)
+    assert not is_project_scripts_trusted(path), "old record silently covers pre-compile"
+
+    trust_project_scripts(path)
+    assert is_project_scripts_trusted(path), "fresh trust must cover pre-compile"
+
+
+def test_blocks_without_new_events_keep_their_fingerprint() -> None:
+    """Existing trust for blocks without pre-compile survives the upgrade."""
+    from apm_cli.core.script_trust import fingerprint_lifecycle_subtree
+
+    assert fingerprint_lifecycle_subtree(BASELINE["lifecycle"]) == _plain_fingerprint(
+        BASELINE["lifecycle"]
+    )
