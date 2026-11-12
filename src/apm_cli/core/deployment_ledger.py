@@ -239,6 +239,10 @@ class DeploymentMaterializationSession:
             )
         return None
 
+    def has_receipt(self, path: Path) -> bool:
+        """Return whether any receipt, trusted or not, exists for this physical path."""
+        return path.resolve().as_posix() in self._physical_keys
+
     def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
         """Return a prior rendered hash only for a currently authorized physical member."""
         from apm_cli.install.deployed_paths import deployed_path_entry

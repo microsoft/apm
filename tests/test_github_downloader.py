@@ -319,6 +319,7 @@ class TestGitHubPackageDownloader:
                 target_path,
                 "abc123def456",
                 env=self.downloader.git_env,
+                package="github.com/user/repo#abc123",
             )
             assert result.package.name == "test-package"
 

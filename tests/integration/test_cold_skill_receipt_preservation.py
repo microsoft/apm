@@ -36,7 +36,10 @@ def test_cold_overlapping_skill_replay_preserves_files_and_lock(
     edited: bool,
     fresh_identity: bool,
 ) -> None:
-    """Replay duplicate skill delivery without modules or per-user receipts."""
+    """Replay duplicate skill delivery without modules or per-user receipts.
+
+    Unchanged output is adopted (#3391); an edited member still fails closed (#3372).
+    """
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
     project.mkdir()
@@ -82,17 +85,23 @@ def test_cold_overlapping_skill_replay_preserves_files_and_lock(
     replay = (*install, *(("--frozen",) if frozen else ()))
     for _ in range(2):
         result = runner.run(replay, cwd=project, env=env)
-        assert result.returncode != 0, result.stdout + result.stderr
         output = " ".join((result.stdout + result.stderr).split())
-        assert "no trustworthy local deployment baseline" in output
-        assert (
-            "Move the conflicting file aside and retry; "
-            "use --force only to intentionally overwrite it." in output
-        ), output
+        if edited:
+            assert result.returncode != 0, output
+            assert "no trustworthy local deployment baseline" in output
+            assert (
+                "Move the conflicting file aside and retry; "
+                "use --force only to intentionally overwrite it." in output
+            ), output
+        else:
+            assert result.returncode == 0, output
+            assert "no trustworthy local deployment baseline" not in output
         assert "stale files cleaned" not in result.stdout
         assert lock_path.read_bytes() == lock_before
         for snapshot, root in zip(before, roots, strict=True):
             assert_unchanged(snapshot, ArtifactSnapshot.capture(root))
+    if not edited:
+        assert list((isolated.home / ".apm").glob("deployment-receipts*/*.json"))
 
 
 @pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
