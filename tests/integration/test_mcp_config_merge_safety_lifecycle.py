@@ -3,8 +3,8 @@
 A user's Copilot ``.github/mcp.json`` with a trailing comma or VS Code
 ``.vscode/mcp.json`` with a JSONC comment is never rewritten: install keeps
 the bytes, reports the server as failed with guidance, and converges once
-the user fixes the file. A linked Claude ``.mcp.json`` is replaced by the
-shared atomic writer rather than followed.
+the user fixes the file. Claude's ``.mcp.json`` follows the same rule, and
+project MCP configs that are symbolic links are refused like user-scope ones.
 """
 
 from __future__ import annotations
@@ -62,21 +62,39 @@ def test_unparsable_user_mcp_configs_are_kept_until_fixed(
         assert {"user-srv", "alpha-srv"} <= servers.keys(), (path, servers)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
-def test_linked_claude_project_config_is_not_followed(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
+def test_unparsable_claude_project_config_is_kept(tmp_path: Path, apm_binary_path: Path) -> None:
     world = build_world(
         tmp_path, apm_binary_path, targets=("claude",), mcp_package="alpha", installed=False
     )
-    linked = world.isolated.work_root / "linked.txt"
-    linked.write_text("unrelated content\n", encoding="ascii")
+    config = world.project / ".mcp.json"
+    config.write_text(_COPILOT, encoding="ascii")
+
+    result = world.install()
+
+    assert result.returncode != 0, evidence(result)
+    assert "fix the file" in " ".join((result.stdout + result.stderr).split()), evidence(result)
+    assert config.read_text(encoding="ascii") == _COPILOT
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_linked_claude_project_config_is_refused(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = build_world(
+        tmp_path, apm_binary_path, targets=("claude",), mcp_package="alpha", installed=False
+    )
+    linked = world.isolated.work_root / "linked.json"
+    linked.write_text('{"mcpServers": {}}\n', encoding="ascii")
     config = world.project / ".mcp.json"
     config.symlink_to(linked)
 
     result = world.install()
 
-    assert result.returncode == 0, evidence(result)
-    assert linked.read_text(encoding="ascii") == "unrelated content\n"
-    assert not config.is_symlink()
+    assert result.returncode != 0, evidence(result)
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "does not write MCP config through symlinks" in output, output
+    assert config.is_symlink()
+    assert linked.read_text(encoding="ascii") == '{"mcpServers": {}}\n'
+
+    config.unlink()
+    fixed = world.install()
+    assert fixed.returncode == 0, evidence(fixed)
     assert "alpha-srv" in json.loads(config.read_text(encoding="utf-8"))["mcpServers"]

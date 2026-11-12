@@ -147,6 +147,9 @@ APM keeps managing both copies until the old entry is removed.
 Unsafe user configs fail even on reinstall: fix unreadable or non-object JSON,
 JSONC, or symlinks below the home directory, then rerun the original command
 with `--global` and the same `--target` selection.
+Project MCP configs follow the same rule: an unparsable file (JSONC, trailing
+comma) or a config that is a symbolic link is left untouched and the target
+fails; replace it with a regular JSON file and rerun.
 For Cursor credential repair, edit `.cursor/mcp.json` at project scope or
 `~/.cursor/mcp.json` with `--global`; replace only the affected values with
 native `${env:NAME}` references and preserve other fields and servers.

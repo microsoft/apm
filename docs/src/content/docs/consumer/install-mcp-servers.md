@@ -401,9 +401,13 @@ user manifest, lockfile, or runtime configuration. The direct command creates
 or updates `~/.apm/apm.yml`; it does not fall back to the current project's
 manifest. With `--dry-run`, it previews the user-scope entry and runtime
 targets without creating that manifest, lockfile, or runtime configuration.
-APM leaves an existing Cursor or OpenCode config untouched and reports that
-target as failed when it cannot parse the file as JSON (for example, OpenCode
-JSONC comments) or when its user-scope path runs through a symlink.
+APM leaves an existing JSON MCP config (Copilot, VS Code, Claude Code,
+Cursor, OpenCode, Gemini, Kiro) untouched and reports that target as failed
+when it cannot parse the file as JSON (for example, JSONC comments or a
+trailing comma). It also refuses a project MCP config that is a symbolic link,
+or is reached through one, just as it refuses a user-scope path that runs
+through a symlink below the home directory; replace the link with a regular
+file and rerun the install.
 
 ## stdio vs HTTP servers
 

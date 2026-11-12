@@ -529,16 +529,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             return False
         path = self._project_mcp_path()
         try:
-            if path.is_file():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    _rich_warning(f"Existing {path} is not valid JSON; rewriting from scratch")
-                    data = {}
-                if not isinstance(data, dict):
-                    data = {}
-            else:
-                data = {}
+            data = self._parse_json_config_for_update(path)
+            if data is None:
+                return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
             self._write_json_config(path, data, shared=True)
             return True
@@ -548,16 +541,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _merge_user_mcp(self, config_updates, *, managed_fields: set[str] | None = None) -> bool:
         path = self._user_claude_json_path()
         try:
-            if path.is_file():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    _rich_warning(f"Existing {path} is not valid JSON; rewriting from scratch")
-                    data = {}
-                if not isinstance(data, dict):
-                    data = {}
-            else:
-                data = {}
+            data = self._parse_json_config_for_update(path)
+            if data is None:
+                return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
             payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)

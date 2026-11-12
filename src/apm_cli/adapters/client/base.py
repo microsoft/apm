@@ -264,6 +264,16 @@ def _stringify_env_literal(value):
     return str(value)
 
 
+_SYMLINKED_MCP_CONFIG = (
+    "Skipped {path}: APM does not write MCP config through symlinks. "
+    "Replace the symlink or configure this server manually."
+)
+
+
+def _warn_symlinked_mcp_config(config_path: Path) -> None:
+    _rich_warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
+
+
 class MCPClientAdapter(ABC):
     """Base adapter for MCP clients."""
 
@@ -445,27 +455,28 @@ class MCPClientAdapter(ABC):
         A missing or blank file yields ``{}``.  Returns ``None`` after a
         warning when rewriting the file could lose data, so the caller skips
         the write: the existing content is not a JSON object (for example
-        JSONC comments), or a user-scope path runs through a symlink, which
-        stale cleanup refuses to rewrite later.
+        JSONC comments), or the path runs through a symlink (under ``$HOME``
+        at user scope), which stale cleanup refuses to rewrite later.
         """
         if self.user_scope and has_symlink_component(Path.home(), config_path):
-            _rich_warning(
-                f"Skipped {config_path}: APM does not write MCP config through "
-                "symlinks. Replace the symlink or configure this server manually.",
-                symbol="warning",
-            )
+            _warn_symlinked_mcp_config(config_path)
             return None
         return self._parse_json_config_for_update(config_path)
 
     def _parse_json_config_for_update(self, config_path: Path) -> dict | None:
-        """Parse *config_path* for a merge-and-write without the symlink policy.
+        """Parse *config_path* for a merge-and-write.
 
         Adapters whose user-scope file may live outside ``$HOME`` (for
         example ``CLAUDE_CONFIG_DIR`` or ``COPILOT_HOME``) use this half of
-        :meth:`_read_json_config_for_update`. Same contract: ``{}`` for a
-        missing or blank file, ``None`` after a warning when a rewrite could
-        lose data.
+        :meth:`_read_json_config_for_update`, which skips only the
+        ``$HOME`` symlink policy. Project-scope configs that are, or are
+        reached through, a symbolic link are refused here, so every entry
+        point applies it. Same contract: ``{}`` for a missing or blank file,
+        ``None`` after a warning when a rewrite could lose data.
         """
+        if self._is_linked_project_config(config_path):
+            _warn_symlinked_mcp_config(config_path)
+            return None
         try:
             raw = config_path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -501,14 +512,30 @@ class MCPClientAdapter(ABC):
             return None
         return config
 
-    @staticmethod
-    def _write_json_config(config_path: Path, config: dict, *, shared: bool = False) -> None:
+    def _is_linked_project_config(self, config_path: Path) -> bool:
+        """Return whether a project-scope config path is or crosses a symlink.
+
+        Components below the project root are checked; a path outside it
+        (an adapter-specific location) is checked for its final component.
+        """
+        if self.user_scope:
+            return False
+        try:
+            config_path.relative_to(self.project_root)
+        except ValueError:
+            return config_path.is_symlink()
+        return has_symlink_component(self.project_root, config_path)
+
+    def _write_json_config(self, config_path: Path, config: dict, *, shared: bool = False) -> None:
         """Atomically write *config* as JSON and keep the file owner-only.
 
         Entries can carry env values resolved at install time. ``shared``
         marks a committed project config file: it keeps its existing or
-        umask mode instead.
+        umask mode instead. A project-scope path that is, or is reached
+        through, a symbolic link is refused with ``OSError``.
         """
+        if self._is_linked_project_config(config_path):
+            raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(config, indent=2)
         if shared:

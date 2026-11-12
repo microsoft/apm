@@ -93,9 +93,12 @@ class VSCodeClientAdapter(MCPClientAdapter):
             new_config (dict): Complete configuration object to write.
 
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if successful, False otherwise. ``False`` without
+            writing when the existing file cannot be rewritten safely.
         """
         config_path = self.get_config_path(logger=logger)
+        if self._parse_json_config_for_update(Path(config_path)) is None:
+            return False
 
         try:
             self._write_json_config(Path(config_path), new_config, shared=True)

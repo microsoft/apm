@@ -786,8 +786,9 @@ def _check_mcp_json_config_write(provider: FactsProvider) -> Iterable[Violation]
     """MCP JSON config merge-writes must route through the base adapter owner.
 
     ``MCPClientAdapter`` owns parse-for-update (refuse to rewrite a file it
-    cannot parse) and the atomic writer; no other adapter may serialize JSON
-    straight into a config file handle.
+    cannot parse, or a project-scope config that is a symbolic link) and the
+    atomic writer; no other adapter may serialize JSON straight into a config
+    file handle or rewrite an unparsable config from scratch.
     """
     rule_id = "mutation_writes.mcp_json_config_write"
     facts, failures = checked_facts(provider, _MCP_ADAPTER_BASE, rule_id, require_python=True)
@@ -802,6 +803,16 @@ def _check_mcp_json_config_write(provider: FactsProvider) -> Iterable[Violation]
                     f"{owner} must be defined exactly once on MCPClientAdapter",
                 )
             )
+            span = _function_span(facts, owner, top_level=False)
+            findings.extend(
+                _require(
+                    span is not None
+                    and _span_has_fixed(facts, span, "self._is_linked_project_config("),
+                    rule_id,
+                    _MCP_ADAPTER_BASE,
+                    f"{owner} must refuse project-scope MCP configs that are symlinks",
+                )
+            )
     findings.extend(
         _duplicate_scan(
             provider,
@@ -809,6 +820,16 @@ def _check_mcp_json_config_write(provider: FactsProvider) -> Iterable[Violation]
             paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
             pattern=r"json\.dump\(|write_text\(\s*json\.dumps|open\([^)]*[\"']w[\"']",
             message="MCP JSON config writes must use MCPClientAdapter._write_json_config",
+            exempt=True,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=r"rewriting from scratch",
+            message="Unparsable MCP configs must fail closed via _parse_json_config_for_update",
             exempt=True,
         )
     )
