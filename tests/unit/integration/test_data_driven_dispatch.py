@@ -13,13 +13,10 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from apm_cli.commands.install import _integrate_package_primitives
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.integration.dispatch import get_dispatch_table
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -291,24 +288,19 @@ class TestTargetGatingRegression:
 class TestExhaustivenessChecks:
     """Structural checks ensuring no target x primitive pair is orphaned."""
 
-    @pytest.mark.parametrize(
-        ("target_name", "prim_name"),
-        [
-            (target_name, prim_name)
-            for target_name, profile in KNOWN_TARGETS.items()
-            for prim_name in profile.primitives
-        ],
-    )
-    def test_every_target_primitive_has_dispatch_path(self, target_name, prim_name):
+    def test_every_target_primitive_has_dispatch_path(self):
         """For each (target, primitive) in KNOWN_TARGETS, verify the dispatch
         table has a corresponding entry."""
         from apm_cli.integration.dispatch import get_dispatch_table
 
         dispatch = get_dispatch_table()
 
-        assert prim_name in dispatch, (
-            f"Primitive '{prim_name}' in target '{target_name}' has no entry in the dispatch table."
-        )
+        for target_name, profile in KNOWN_TARGETS.items():
+            for prim_name in profile.primitives:
+                assert prim_name in dispatch, (
+                    f"Primitive '{prim_name}' in target '{target_name}' has no "
+                    f"entry in the dispatch table."
+                )
 
     def test_partition_parity_with_old_buckets(self):
         """Verify partition_managed_files produces the expected bucket keys
@@ -959,24 +951,21 @@ class TestDispatchTable:
 
         dispatch = get_dispatch_table()
         assert dispatch["skills"].multi_target is True
+        for name in ("prompts", "agents", "commands", "instructions", "hooks"):
+            assert dispatch[name].multi_target is False
 
-    @pytest.mark.parametrize("name", ["prompts", "agents", "commands", "instructions", "hooks"])
-    def test_other_primitives_are_single_target(self, name):
+    def test_dispatch_entries_have_valid_methods(self):
         from apm_cli.integration.dispatch import get_dispatch_table
 
         dispatch = get_dispatch_table()
-        assert dispatch[name].multi_target is False
-
-    @pytest.mark.parametrize("name", sorted(get_dispatch_table()))
-    def test_dispatch_entries_have_valid_methods(self, name):
-        entry = get_dispatch_table()[name]
-        integrator = entry.integrator_class()
-        assert hasattr(integrator, entry.integrate_method), (
-            f"{entry.integrator_class.__name__} missing {entry.integrate_method}"
-        )
-        assert hasattr(integrator, entry.sync_method), (
-            f"{entry.integrator_class.__name__} missing {entry.sync_method}"
-        )
+        for name, entry in dispatch.items():  # noqa: B007
+            integrator = entry.integrator_class()
+            assert hasattr(integrator, entry.integrate_method), (
+                f"{entry.integrator_class.__name__} missing {entry.integrate_method}"
+            )
+            assert hasattr(integrator, entry.sync_method), (
+                f"{entry.integrator_class.__name__} missing {entry.sync_method}"
+            )
 
     def test_dispatch_counter_keys_match_result_dict(self):
         """Counter keys in dispatch match the keys used in install result."""

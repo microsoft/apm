@@ -345,83 +345,119 @@ class TestPromptCompilerDependencyDiscovery:
         """Set up test fixtures."""
         self.compiler = PromptCompiler()
 
-    def test_resolve_prompt_file_local_exists(self, tmp_path, monkeypatch):
+    def test_resolve_prompt_file_local_exists(self):
         """Test resolving prompt file when it exists locally."""
-        monkeypatch.chdir(tmp_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Change to temp directory for test
+            original_cwd = Path.cwd()
+            try:
+                import os
 
-        # Create local prompt file
-        prompt_file = Path("hello-world.prompt.md")
-        prompt_file.write_text("Hello World!")
+                os.chdir(tmpdir)
 
-        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-        assert result == prompt_file
+                # Create local prompt file
+                prompt_file = Path("hello-world.prompt.md")
+                prompt_file.write_text("Hello World!")
 
-    def test_resolve_prompt_file_dependency_root(self, tmp_path, monkeypatch):
+                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+                assert result == prompt_file
+            finally:
+                os.chdir(original_cwd)
+
+    def test_resolve_prompt_file_dependency_root(self):
         """Test resolving prompt file from dependency root directory."""
-        monkeypatch.chdir(tmp_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            try:
+                import os
 
-        # Create apm_modules structure with org/repo hierarchy
-        dep_dir = Path("apm_modules/microsoft/apm-sample-package")
-        dep_dir.mkdir(parents=True)
+                os.chdir(tmpdir)
 
-        # Create prompt file in dependency root
-        dep_prompt = dep_dir / "hello-world.prompt.md"
-        dep_prompt.write_text("Hello from dependency!")
+                # Create apm_modules structure with org/repo hierarchy
+                dep_dir = Path("apm_modules/microsoft/apm-sample-package")
+                dep_dir.mkdir(parents=True)
 
-        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-        assert result == dep_prompt
+                # Create prompt file in dependency root
+                dep_prompt = dep_dir / "hello-world.prompt.md"
+                dep_prompt.write_text("Hello from dependency!")
 
-    def test_resolve_prompt_file_dependency_subdirectory(self, tmp_path, monkeypatch):
+                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+                assert result == dep_prompt
+            finally:
+                os.chdir(original_cwd)
+
+    def test_resolve_prompt_file_dependency_subdirectory(self):
         """Test resolving prompt file from dependency subdirectory."""
-        monkeypatch.chdir(tmp_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            try:
+                import os
 
-        # Create apm_modules structure
-        dep_dir = Path("apm_modules/design-guidelines")
-        dep_dir.mkdir(parents=True)
+                os.chdir(tmpdir)
 
-        # Create prompt file in prompts subdirectory
-        prompts_dir = dep_dir / "prompts"
-        prompts_dir.mkdir()
-        dep_prompt = prompts_dir / "hello-world.prompt.md"
-        dep_prompt.write_text("Hello from dependency prompts!")
+                # Create apm_modules structure
+                dep_dir = Path("apm_modules/design-guidelines")
+                dep_dir.mkdir(parents=True)
 
-        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-        assert result == dep_prompt
+                # Create prompt file in prompts subdirectory
+                prompts_dir = dep_dir / "prompts"
+                prompts_dir.mkdir()
+                dep_prompt = prompts_dir / "hello-world.prompt.md"
+                dep_prompt.write_text("Hello from dependency prompts!")
 
-    def test_resolve_prompt_file_multiple_dependencies(self, tmp_path, monkeypatch):
+                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+                assert result == dep_prompt
+            finally:
+                os.chdir(original_cwd)
+
+    def test_resolve_prompt_file_multiple_dependencies(self):
         """Test resolving prompt file with multiple dependencies (first match wins)."""
-        monkeypatch.chdir(tmp_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            try:
+                import os
 
-        # Create multiple dependency directories with org/repo structure
-        compliance_dir = Path("apm_modules/acme/compliance-rules")
-        compliance_dir.mkdir(parents=True)
-        design_dir = Path("apm_modules/microsoft/apm-sample-package")
-        design_dir.mkdir(parents=True)
+                os.chdir(tmpdir)
 
-        # Create prompt files in both (first one found should win)
-        compliance_prompt = compliance_dir / "hello-world.prompt.md"
-        compliance_prompt.write_text("Hello from compliance!")
-        design_prompt = design_dir / "hello-world.prompt.md"
-        design_prompt.write_text("Hello from design!")
+                # Create multiple dependency directories with org/repo structure
+                compliance_dir = Path("apm_modules/acme/compliance-rules")
+                compliance_dir.mkdir(parents=True)
+                design_dir = Path("apm_modules/microsoft/apm-sample-package")
+                design_dir.mkdir(parents=True)
 
-        result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
-        # Should return one of the matches (doesn't matter which since both exist)
-        assert result in [compliance_prompt, design_prompt]
-        assert result.exists()
-        assert result.read_text().startswith("Hello from")
+                # Create prompt files in both (first one found should win)
+                compliance_prompt = compliance_dir / "hello-world.prompt.md"
+                compliance_prompt.write_text("Hello from compliance!")
+                design_prompt = design_dir / "hello-world.prompt.md"
+                design_prompt.write_text("Hello from design!")
 
-    def test_resolve_prompt_file_no_apm_modules(self, tmp_path, monkeypatch):
+                result = self.compiler._resolve_prompt_file("hello-world.prompt.md")
+                # Should return one of the matches (doesn't matter which since both exist)
+                assert result in [compliance_prompt, design_prompt]
+                assert result.exists()
+                assert result.read_text().startswith("Hello from")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_resolve_prompt_file_no_apm_modules(self):
         """Test resolving prompt file when apm_modules directory doesn't exist."""
-        monkeypatch.chdir(tmp_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            try:
+                import os
 
-        # No apm_modules directory exists
-        with pytest.raises(FileNotFoundError) as exc_info:
-            self.compiler._resolve_prompt_file("hello-world.prompt.md")
+                os.chdir(tmpdir)
 
-        error_msg = str(exc_info.value)
-        assert "Prompt file 'hello-world.prompt.md' not found" in error_msg
-        assert "Local: hello-world.prompt.md" in error_msg
-        assert "Run 'apm install'" in error_msg
+                # No apm_modules directory exists
+                with pytest.raises(FileNotFoundError) as exc_info:
+                    self.compiler._resolve_prompt_file("hello-world.prompt.md")
+
+                error_msg = str(exc_info.value)
+                assert "Prompt file 'hello-world.prompt.md' not found" in error_msg
+                assert "Local: hello-world.prompt.md" in error_msg
+                assert "Run 'apm install'" in error_msg
+            finally:
+                os.chdir(original_cwd)
 
     def test_resolve_prompt_file_not_found_anywhere(self):
         """Test resolving prompt file when it's not found anywhere."""

@@ -37,7 +37,7 @@ def _call(**overrides) -> None:
         registry_url=None,
     )
     defaults.update(overrides)
-    return validate_mcp_conflicts(**defaults)
+    validate_mcp_conflicts(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -48,15 +48,15 @@ def _call(**overrides) -> None:
 class TestValidCallNoErrors:
     def test_all_defaults_no_error(self) -> None:
         """A call with all defaults should succeed without raising."""
-        assert _call() is None
+        _call()
 
     def test_mcp_name_with_transport_stdio_no_url(self) -> None:
         """stdio transport without --url is valid."""
-        assert _call(transport="stdio") is None
+        _call(transport="stdio")
 
     def test_mcp_name_with_command_argv(self) -> None:
         """A stdio command alongside mcp_name (no url) is valid."""
-        assert _call(command_argv=["npx", "my-server"]) is None
+        _call(command_argv=["npx", "my-server"])
 
     def test_remote_transport_with_url(self) -> None:
         """Remote transport with url (no command_argv) is valid."""
@@ -64,7 +64,7 @@ class TestValidCallNoErrors:
 
     def test_headers_with_url(self) -> None:
         """--header with --url is valid."""
-        assert _call(url="https://example.com/mcp", headers={"X-Key": "value"}) is None
+        _call(url="https://example.com/mcp", headers={"X-Key": "value"})
 
     def test_registry_url_alone(self) -> None:
         """--registry without url or command_argv is valid."""

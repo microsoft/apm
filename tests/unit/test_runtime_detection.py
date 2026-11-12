@@ -194,8 +194,11 @@ class TestRuntimeDetectionIntegration(unittest.TestCase):
 
         for runtime in available:
             with self.subTest(runtime=runtime):
-                client = ClientFactory.create_client(runtime)
-                self.assertIsNotNone(client)
+                try:
+                    client = ClientFactory.create_client(runtime)
+                    self.assertIsNotNone(client)
+                except ValueError:
+                    self.fail(f"Runtime {runtime} reported as available but not creatable")
 
 
 class TestVSCodeRuntimeDetection(unittest.TestCase):

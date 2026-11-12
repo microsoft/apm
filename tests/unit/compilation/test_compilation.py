@@ -421,7 +421,10 @@ class TestCLIIntegration(unittest.TestCase):
         errors = ["test.md: Missing 'description' in frontmatter", "other.md: Empty content"]
 
         # This should not raise an exception
-        _display_validation_errors(errors)
+        try:
+            _display_validation_errors(errors)
+        except Exception as e:
+            self.fail(f"_display_validation_errors raised an exception: {e}")
 
     def test_compilation_config_from_apm_yml(self):
         """Test CompilationConfig loading from apm.yml."""

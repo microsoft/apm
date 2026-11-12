@@ -1431,10 +1431,13 @@ class TestNativeSkillIntegration:
             package_type=package_type,
         )
 
-    def _create_complete_skill_package(self) -> Path:
-        """Create a skill package with SKILL.md plus scripts/, references/ and assets/."""
+    def test_native_skill_preserves_complete_structure(self):
+        """Test that native skill integration preserves complete directory structure."""
+        # Create a complete skill package
         package_dir = self.project_root / "complete-skill"
         package_dir.mkdir()
+
+        # Create SKILL.md
         (package_dir / "SKILL.md").write_text("""---
 name: complete-skill
 description: A complete skill with all subdirectories
@@ -1443,17 +1446,18 @@ description: A complete skill with all subdirectories
 
 Use this skill for comprehensive guidance.
 """)
+
+        # Create scripts/
         (package_dir / "scripts").mkdir()
         (package_dir / "scripts" / "validate.sh").write_text("#!/bin/bash\necho 'validating'")
+
+        # Create references/
         (package_dir / "references").mkdir()
         (package_dir / "references" / "api.md").write_text("# API Reference")
+
+        # Create assets/
         (package_dir / "assets").mkdir()
         (package_dir / "assets" / "template.json").write_text('{"key": "value"}')
-        return package_dir
-
-    def test_native_skill_preserves_complete_structure(self):
-        """Test that native skill integration preserves complete directory structure."""
-        package_dir = self._create_complete_skill_package()
 
         package_info = self._create_package_info(name="complete-skill", install_path=package_dir)
 
@@ -4311,26 +4315,6 @@ class TestPluginBinDeploy:
         mock_info.dependency_ref = None
         return mock_info
 
-    def _make_preinstalled_plugin(self, tmp_path: Path):
-        """Create a plugin with bin/myplugin and an identical copy already deployed."""
-        import shutil
-
-        project_root = tmp_path / "home"
-        project_root.mkdir()
-        (project_root / ".claude").mkdir()
-
-        pkg_dir = tmp_path / "apm_modules" / "myplugin"
-        pkg_dir.mkdir(parents=True)
-        bin_dir = pkg_dir / "bin"
-        bin_dir.mkdir()
-        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
-        pkg_info = self._make_plugin_package(pkg_dir)
-
-        dest_bin = project_root / ".claude" / "skills" / "myplugin" / "bin"
-        dest_bin.mkdir(parents=True)
-        shutil.copy2(bin_dir / "myplugin", dest_bin / "myplugin")
-        return project_root, pkg_info, dest_bin
-
     def test_deploys_bin_and_manifest_for_marketplace_plugin(self, tmp_path: Path) -> None:
         """bin/ executables and plugin.json are deployed to ~/.claude/skills/<name>/."""
         from apm_cli.core.scope import InstallScope
@@ -4599,7 +4583,24 @@ class TestPluginBinDeploy:
         """force=True copies bin/ executables even when src and dest hashes match."""
         from apm_cli.core.scope import InstallScope
 
-        project_root, pkg_info, dest_bin = self._make_preinstalled_plugin(tmp_path)
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        # Pre-seed an identical copy so hash-check would normally skip it.
+        dest_bin = project_root / ".claude" / "skills" / "myplugin" / "bin"
+        dest_bin.mkdir(parents=True)
+        import shutil
+
+        shutil.copy2(bin_dir / "myplugin", dest_bin / "myplugin")
 
         integrator = SkillIntegrator()
         # Without force: the file is skipped (hash matches).

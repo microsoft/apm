@@ -83,23 +83,6 @@ def _make_target(
     return target
 
 
-def _make_colliding_skill(tmp_path: Path):
-    """Create a package skill plus an existing target skill owned by another package."""
-    pkg_dir = tmp_path / "my-skill"
-    pkg_dir.mkdir()
-    skill_md = pkg_dir / "SKILL.md"
-    skill_md.write_text("# skill", encoding="utf-8")
-
-    target_skill_dir = tmp_path / ".github" / "skills" / "my-skill"
-    target_skill_dir.mkdir(parents=True)
-    (target_skill_dir / "SKILL.md").write_text("# old", encoding="utf-8")
-
-    dep_ref = MagicMock()
-    dep_ref.get_unique_key.return_value = "other/repo"
-    pi = _make_package_info(pkg_dir, dep_ref=dep_ref)
-    return pi, skill_md, target_skill_dir
-
-
 # ---------------------------------------------------------------------------
 # validate_skill_name -- line 129 fallthrough
 # ---------------------------------------------------------------------------
@@ -638,16 +621,39 @@ class TestIntegrateNativeSkillCollision:
     """Cross-package collision emits warning via logger."""
 
     def test_collision_warning_with_logger(self, tmp_path: Path) -> None:
-        pi, skill_md, target_skill_dir = _make_colliding_skill(tmp_path)
+        pkg_dir = tmp_path / "my-skill"
+        pkg_dir.mkdir()
+        skill_md = pkg_dir / "SKILL.md"
+        skill_md.write_text("# skill", encoding="utf-8")
+
         target = _make_target(name="copilot", root_dir=".github", auto_create=True)
+        # Pre-create the target skill dir
+        target_skill_dir = tmp_path / ".github" / "skills" / "my-skill"
+        target_skill_dir.mkdir(parents=True)
+        (target_skill_dir / "SKILL.md").write_text("# old", encoding="utf-8")
+
         logger = MagicMock()
-        previous_owners = {target_skill_dir.relative_to(tmp_path).as_posix(): "prev-owner/pkg"}
+        dep_ref = MagicMock()
+        dep_ref.get_unique_key = MagicMock(return_value="other/repo")
+        pi = _make_package_info(pkg_dir)
+        pi.dependency_ref = dep_ref
+
+        integrator = SkillIntegrator()
 
         with patch.object(
-            SkillIntegrator, "_build_ownership_maps", return_value=({}, previous_owners)
+            SkillIntegrator,
+            "_build_ownership_maps",
+            return_value=(
+                {},
+                {target_skill_dir.relative_to(tmp_path).as_posix(): "prev-owner/pkg"},
+            ),
         ):
-            result = SkillIntegrator()._integrate_native_skill(
-                pi, tmp_path, skill_md, logger=logger, targets=[target]
+            result = integrator._integrate_native_skill(
+                pi,
+                tmp_path,
+                skill_md,
+                logger=logger,
+                targets=[target],
             )
         logger.warning.assert_called_once_with(
             "Skill 'my-skill' from 'other/repo' replaced overlapping files "
