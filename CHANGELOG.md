@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
+- A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
 - `github.com` installs behind TLS-inspecting proxies: isolated Git attempts now inherit your Git TLS backend and CA settings (credential helpers stay off), and `--auth-first` / `APM_GITHUB_AUTH_FIRST` / `apm config set github-auth-first true` skip the initial anonymous attempt when a credential resolves. -- by @rgarciapariente (#2999)
 
@@ -34,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write (after link rendering) and are claimed in `apm.lock.yaml`, and record receipts, instead of failing as in 0.35.0. Lockfile hashes are not trusted; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
 - `apm install` and `apm update` now write untyped flat command hooks as Codex `"type": "command"` handlers in `.codex/hooks.json`, as Codex's hook schema requires, including alongside Codex-shaped hook files. Reinstalling replaces older APM-owned untyped entries; explicit types, already-nested source handlers, manual hooks and other targets are unchanged. -- by @Parth-Vasave (#3385)
 - `apm install -g` and `apm update -g` for Cursor now deploy package instructions as `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context, instead of skipping them; `apm uninstall -g` removes only package-owned rules. As at project scope, an existing rule with the same name as a package rule is replaced on install. -- by @yahavi (#2506)
+
+### Security
+
+- A `lifecycle:` block that names `pre-compile` asks for fresh `apm lifecycle trust` after upgrading, because a trust record given while the key had no meaning would otherwise start running it. Trust for other blocks is unchanged. -- by @Ryangr0 (#3596)
+- Org policy `executables.deny_all: true` now suppresses lifecycle scripts on `apm install`, `apm update`, `apm uninstall` and `apm compile` as documented; the policy lookup for lifecycle scripts failed silently before, so they ran. (#3596)
 
 ## [0.35.1] - 2026-11-11
 
