@@ -228,10 +228,16 @@ def has_conflict_markers(text: str) -> bool:
 
 
 def require_supported_lockfile_version(data: object) -> str:
-    """Return a supported declared version or fail closed."""
+    """Return a supported declared version or fail closed.
+
+    An unquoted integer (``lockfile_version: 1``, as left by hand edits or
+    YAML tools that drop quotes) denotes the same version as its string form.
+    """
     if not isinstance(data, dict):
         raise LockfileFormatError("Lockfile root must be a mapping")
     version = data.get("lockfile_version", "1")
+    if type(version) is int:
+        version = str(version)
     if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
         supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
         raise UnsupportedLockfileVersionError(
@@ -246,8 +252,8 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         raise LockfileFormatError("Lockfile root must be a mapping")
     data = dict(data)
     # Pre-versioned lockfiles are a supported legacy v1 migration input.
-    # Explicit unknown/newer versions still fail closed below.
-    require_supported_lockfile_version(data)
+    # Explicit unknown/newer versions still fail closed here.
+    data["lockfile_version"] = require_supported_lockfile_version(data)
     list_fields = (
         "dependencies",
         "deployments",
