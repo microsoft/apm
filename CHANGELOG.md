@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so user configs kept in dotfiles repos stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses, exec form, Windows, single-quoted references, and custom config roots keep absolute paths. -- by @Bronyal-lzx (#2944)
 - `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
 - When a registry proxy serves an archive that APM rejects (an unsafe member such as a symlink, or a body that is not a zip), `apm install` now reports that rejection instead of a later fallback URL's HTTP 404. Symlinks are still refused. (#3375)
 - `apm install --target claude` keeps `${VAR}` and `${VAR:-default}` references in the project `.mcp.json` instead of prompting for and writing the values, names missing variables, and on reinstall replaces values APM can confirm it wrote earlier; user scope (`~/.claude.json`) is unchanged. -- by @Aaryan-Dadu (#3377)
@@ -243,10 +244,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exact registry version selectors now prefer the matching published build, preventing selection of a different build with the same semantic version but different build metadata. (by @nadav-y, #2894)
 - `apm install` again accepts `skills:` subsets from Git collections with nested `skills/<name>/SKILL.md` files but no root manifest or skill, without a `path:` workaround. (#2891)
 - Registry `apm outdated` now separates installed `Current`, constraint-bound `Wanted`, and published `Latest`, so exact pins no longer hide newer releases. It leaves legacy lockfiles unchanged, while `apm update` continues respecting manifest constraints. (#2874)
-
-### Fixed
-
-- User-scope hook commands now anchor to `$HOME` on POSIX hosts instead of the installing host's home prefix, so a `~/.claude/settings.json` kept in a dotfiles repo stops churning between machines; Windows targets, single-quoted references, and dynamic config roots outside the home directory keep absolute paths. (closes #2821) (#2944)
 
 ### Security
 

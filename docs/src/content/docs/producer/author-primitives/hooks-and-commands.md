@@ -377,18 +377,27 @@ agent a procedure" fits a skill -- and reaches every harness.
   alias) for scripts that ship inside the package, using the quoting forms
   described above. Plain absolute paths break on consumers' machines.
 - **Hook script path resolution.** `apm install -g` (user-scope)
-  rewrites `${PLUGIN_ROOT}` and relative `./` references so Claude Code
-  and Copilot CLI can execute scripts regardless of the working
-  directory. On POSIX hosts the rewritten path is anchored to `$HOME`
-  (for example `$HOME/.claude/hooks/<pkg>/run.sh`), which the shell
-  expands at invocation time, so a user-scope config kept in a dotfiles
-  repo stays valid on a host with a different home directory. Because the
-  anchor resolves late, the hook runs the script under whatever `HOME` the
-  launching shell provides -- keep `HOME` pointing at the installing user's
-  home when a wrapper script, service, or CI job invokes the harness.
-  Windows keeps the absolute form, and so do single-quoted references (a
-  shell does not expand `$HOME` inside single quotes) and a dynamic target
+  rewrites `${PLUGIN_ROOT}` and relative `./` references so harnesses
+  can execute scripts regardless of the working directory. Where a
+  harness documents that it runs the hook command through a POSIX shell,
+  the path is anchored to `$HOME` on macOS and Linux (for example
+  `$HOME/.claude/hooks/<pkg>/run.sh`), so a user config kept in a dotfiles
+  repo stays identical across machines:
+
+  | Harness | `$HOME` anchor applies to |
+  |---------|---------------------------|
+  | Claude Code | `command` in shell form (`sh -c`); not exec form (`args`) or `shell: "powershell"` |
+  | Copilot CLI | `bash` (not `command`, which Copilot also runs in PowerShell) |
+  | Gemini CLI | `command` |
+  | Kiro | command actions from `command` or `bash` |
+  | Cursor, Codex, Windsurf | none -- absolute paths (no documented shell execution) |
+
+  Absolute paths are also kept on Windows, for single-quoted references (a
+  shell does not expand `$HOME` inside single quotes), and for a config
   root outside the home directory (for example `CLAUDE_CONFIG_DIR`).
+  Because the anchor resolves at run time, keep `HOME` pointing at the
+  installing user's home when a wrapper, service, or CI job launches the
+  harness. Reinstalling replaces older absolute entries in place.
   Project-scope `apm install` (no `-g`) keeps
   non-Claude command paths repo-relative. Claude project hooks use
   `CLAUDE_PROJECT_DIR` (or `$env:CLAUDE_PROJECT_DIR` for PowerShell) so
