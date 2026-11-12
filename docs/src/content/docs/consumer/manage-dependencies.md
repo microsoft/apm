@@ -140,6 +140,19 @@ host/repo/ref and downloads the sibling from the same origin. Absolute paths,
 paths that escape the repo root, and cross-repo local paths are rejected.
 This is for same-repo monorepo siblings, not general workspace semantics.
 
+**Licence files travel with the package.** For a subdirectory dependency, APM
+copies the nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` file found
+from that subdirectory up to the repository root into the package in
+`apm_modules/`. Each deployed skill without its own licence file gets the
+nearest one too, including skills below the root of a whole-repo dependency.
+Copies are byte-for-byte; APM does not read or interpret them. The lockfile
+records each copy under
+[`carried_licenses`](../../reference/lockfile-spec/#per-entry-fields),
+`apm uninstall` removes the deployed copies, and `apm audit` reports a missing
+or edited one. Packages with no such file install as before. An existing
+`apm_modules/` cache gets the copies the next time the package is downloaded;
+delete the package directory there to force it.
+
 Local single-file entries also work as strings, for example
 `- ./ai/agents/xyz.agent.md`. The file is copied, not linked; sibling assets
 and dependencies mentioned in prose are not collected. Use a directory package

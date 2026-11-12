@@ -16,6 +16,9 @@ Resolution flow:
 On every cache HIT:
 - Run integrity check (verify HEAD == expected SHA)
 - Mismatch -> evict shard, fall through to fresh fetch, log warning
+- Sparse (promisor) shards with tracked files missing from the worktree
+  are rebuilt; a fresh promisor checkout that leaves files missing raises
+  ``IncompleteCheckoutError`` so the auth fallback can retry (#3071)
 - Refresh the SHA directory's access timestamp after successful validation
 
 Concurrency:
@@ -59,6 +62,19 @@ class CachePruneError(OSError):
         self.pruned = pruned
         self.failures = tuple(failures)
         super().__init__(f"Pruned {pruned} SHA group(s); {len(failures)} failed.")
+
+
+class IncompleteCheckoutError(RuntimeError):
+    """A checkout exited 0 but left tracked files unmaterialized (#3071).
+
+    Git before 2.36 ignores a failed promisor blob fetch during a non-forced
+    checkout. ``stderr`` keeps Git's diagnostics so the anonymous-first auth
+    fallback can classify the rejection and retry with credentials.
+    """
+
+    def __init__(self, message: str, *, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
 
 
 def _safe_git_args() -> list[str]:
@@ -105,6 +121,10 @@ def _safe_git_args() -> list[str]:
 # Shards whose tracked links hold their Git-object content carry this local
 # key. Older shards hold OS symlinks or Git link text instead (#3457).
 _LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects")
+
+# Sparse (promisor) shards verified to hold every tracked file carry this
+# local key, so cache hits skip the ``ls-files`` probe (#3071).
+_SPARSE_COMPLETENESS_PIN = ("apm.sparseMaterialization", "complete")
 
 
 def _checkout_config_values(checkout_dir: Path) -> dict[str, str] | None:
@@ -153,6 +173,77 @@ def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     return all(
         values.get(key.lower()) == value.lower() for key, value in _checkout_materialization_pins()
     )
+
+
+def _unmaterialized_paths(
+    git_exe: str, checkout_dir: Path, *, env: dict[str, str], timeout: int = 60
+) -> list[str]:
+    """Return tracked paths the working tree is missing (skip-worktree excluded)."""
+    result = subprocess.run(
+        [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "ls-files", "--deleted", "-z"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    return [path for path in result.stdout.split("\0") if path]
+
+
+def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str, str]) -> None:
+    """Record that a sparse shard was verified complete (#3071).
+
+    The pin only lets later cache hits skip the probe, so a failed write is
+    logged and ignored rather than discarding a verified checkout.
+    """
+    key, value = _SPARSE_COMPLETENESS_PIN
+    try:
+        subprocess.run(
+            [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        _log.debug("Could not pin sparse completeness for %s", checkout_dir)
+
+
+def _sparse_checkout_is_complete(
+    checkout_dir: Path,
+    sparse_paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+) -> bool:
+    """Return whether a cached sparse shard materialized every tracked file.
+
+    Only promisor-backed sparse shards can lose blobs silently, so full
+    shards skip the probe, and so do shards already pinned as verified.
+    Unpinned shards (possibly poisoned by 0.29.1+) are probed once and
+    pinned when complete. Probe failures count as incomplete so the shard
+    is rebuilt rather than trusted. Callers hold the shard lock.
+    """
+    if not sparse_paths:
+        return True
+    key, value = _SPARSE_COMPLETENESS_PIN
+    if (_checkout_config_values(checkout_dir) or {}).get(key.lower()) == value:
+        return True
+    from ..utils.git_env import get_git_executable, git_subprocess_env
+
+    git_exe = get_git_executable()
+    subprocess_env = git_subprocess_env(env)
+    try:
+        # Local index scan only; a short bound limits shard-lock hold time.
+        missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return False
+    if missing:
+        return False
+    _pin_sparse_completeness(git_exe, checkout_dir, env=subprocess_env)
+    return True
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -276,9 +367,12 @@ class GitCache:
         if not self._refresh and checkout_dir.is_dir():
             sha_ok = verify_checkout_sha(checkout_dir, sha)
             if sha_ok and _checkout_has_materialization_pins(checkout_dir):
-                _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
-                    return self._record_checkout_access(checkout_dir)
+                    # An incomplete shard falls through to _create_checkout,
+                    # which rebuilds it under the same lock (#3071).
+                    if _sparse_checkout_is_complete(checkout_dir, sparse_paths, env=env):
+                        _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
+                        return self._record_checkout_access(checkout_dir)
             elif not sha_ok:
                 # Integrity failure -- evict
                 _log.warning(
@@ -679,7 +773,11 @@ class GitCache:
             # rule out a poisoned half-write (atomic_land guards
             # against that, but we re-check defensively).
             existing_ok = final_dir.is_dir() and verify_checkout_sha(final_dir, sha)
-            if existing_ok and _checkout_has_materialization_pins(final_dir):
+            if (
+                existing_ok
+                and _checkout_has_materialization_pins(final_dir)
+                and _sparse_checkout_is_complete(final_dir, sparse_paths, env=env)
+            ):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
                     _sanitize_url(url),
@@ -691,7 +789,7 @@ class GitCache:
             if existing_ok:
                 remat_started = time.monotonic()
                 _log.info(
-                    "[*] Rematerializing git checkout missing materialization pins: %s @ %s [%s]",
+                    "[*] Rematerializing incomplete or unpinned git checkout: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
                     variant,
@@ -795,7 +893,7 @@ class GitCache:
                         extra_git_args=_safe_git_args(),
                     )
                 # Checkout the specific SHA.
-                subprocess.run(
+                checkout = subprocess.run(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -811,6 +909,23 @@ class GitCache:
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
+                # Old Git exits 0 when a promisor blob fetch fails, leaving
+                # an empty tree that would be cached as valid (#3071).
+                missing = (
+                    _unmaterialized_paths(git_exe, staged, env=subprocess_env)
+                    if promisor_url
+                    else []
+                )
+                if missing:
+                    raise IncompleteCheckoutError(
+                        f"Incomplete checkout for {_sanitize_url(url)} @ {sha[:12]}: "
+                        f"{len(missing)} tracked file(s) not materialized "
+                        f"(first: {missing[0]}). Git could not fetch file contents; "
+                        "the repository may require credentials.",
+                        stderr=checkout.stderr or "",
+                    )
+                if promisor_url:
+                    _pin_sparse_completeness(git_exe, staged, env=subprocess_env)
                 # Replace link text with Git-object content before landing
                 # (#3457). Lenient: this shard may serve any package path or
                 # a marketplace read, so an unresolvable link stays link

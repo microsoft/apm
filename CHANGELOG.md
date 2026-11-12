@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Licence files now travel with subdirectory installs: APM copies the repository's nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` byte-for-byte into the package in `apm_modules/` and next to each deployed skill without one (also for skills below a whole-repo package root), and records each copy under `carried_licenses` in `apm.lock.yaml`. `apm uninstall` removes the copies and `apm audit` reports a missing or edited one; existing lockfiles keep verifying. (#3646)
 - `apm marketplace package add` and `apm marketplace package set` accept `--category` to set a package's marketplace category, which Codex output requires, without hand-editing `apm.yml`. -- by @WilliamK112 (#2637)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
 - `apm init --yes` accepts `--name`, `--description`, `--version` and `--author`, so one command writes a finished `apm.yml` with no prompts or hand-editing; without `--yes` the flags seed the prompt defaults. -- by @atulya-singh (#2231)
@@ -41,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` again resolves transitive `git:` + `path:` dependencies from private GitHub monorepos on Git older than 2.36: a sparse checkout whose anonymous file fetch was rejected is no longer cached as an empty package (which failed `Not a valid APM package`). APM now retries it with credentials and rebuilds incomplete cached checkouts left by 0.29.1 and later, so `APM_NO_CACHE=1` is no longer needed. -- with credit to @jiteshjadav-rogers (#3602)
 - `apm install DIR` with a single argument now installs an APM source package that has `apm.yml` and a root `plugin.json` as a local dependency, recording it in `apm.yml` and `apm.lock.yaml` exactly like `apm install DIR DIR`, instead of copying its source tree as a legacy bundle; real `apm pack` output, archives and legacy manifestless bundles still install as bundles. Approach from #3447 by @xubenqiang. (#3604)
 - `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
 - `apm pack` writes the `apm.yml` version into every `plugin.json` in the bundle (root and `.claude-plugin/`), so `build/<pkg>-1.0.3/` no longer ships a manifest that still says `1.0.2` from a stale authored `plugin.json`; source manifests are not edited, and a warning names the authored file to update. -- by @abhishekacharya200 (#3408)
