@@ -19,6 +19,14 @@ import pytest
 
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 
+
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked Git subprocesses carry no objects; real-git tests cover links."""
+    with patch("apm_cli.deps.bare_cache.materialize_tracked_symlinks"):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # SharedCloneCache unit tests
 # ---------------------------------------------------------------------------

@@ -259,9 +259,33 @@ class TestCommandExecutor:
         patcher, _ = _patch_popen()
         with patcher, _spy_capture(raise_exc=subprocess.TimeoutExpired("slow", 30)):
             _execute_command(script, _make_event(), logger=logger, verbose=True)
-        # Timeout warning always emits (not verbose-gated); uses logger.warning.
+        # Timeout warning always emits (not verbose-gated); uses logger.warning,
+        # which adds the [!] symbol itself, so the message must not repeat it.
         logger.warning.assert_called_once()
-        assert "[!]" in logger.warning.call_args[0][0]
+        message = logger.warning.call_args[0][0]
+        assert not message.startswith("[!]")
+        assert "post-install command script timed out after 30s" in message
+        assert "slow" not in message
+
+    def test_warns_on_nonzero_exit(self) -> None:
+        script = ScriptEntry(script_type="command", event="pre-compile", bash="false")
+        logger = MagicMock()
+        patcher, _ = _patch_popen(returncode=2)
+        with patcher, _spy_capture():
+            _execute_command(script, _make_event("pre-compile"), logger=logger)
+        logger.warning.assert_called_once()
+        message = logger.warning.call_args[0][0]
+        assert "pre-compile command script exited with code 2; continuing" in message
+        assert "scripts.log" in message
+
+    def test_capped_output_warns_once_not_also_for_exit_code(self) -> None:
+        script = ScriptEntry(script_type="command", event="pre-compile", bash="noisy")
+        logger = MagicMock()
+        patcher, _ = _patch_popen(returncode=-9)
+        with patcher, _spy_capture(capped=True):
+            _execute_command(script, _make_event("pre-compile"), logger=logger)
+        logger.warning.assert_called_once()
+        assert "exceeded the capture limit" in logger.warning.call_args[0][0]
 
     def test_merges_script_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EXISTING_VAR", "original")

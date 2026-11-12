@@ -111,7 +111,9 @@ def test_write_marker_is_idempotent(tmp_path: Path) -> None:
 
 def test_write_marker_silently_skips_missing_dir(tmp_path: Path) -> None:
     # Should not raise even if the install dir does not exist (cache wiped).
-    write_marker(tmp_path / "does-not-exist", "deadbeef" * 5)
+    missing = tmp_path / "does-not-exist"
+    write_marker(missing, "deadbeef" * 5)
+    assert not missing.exists()
 
 
 def test_sync_markers_writes_for_remote_deps_with_commits(tmp_path: Path) -> None:
