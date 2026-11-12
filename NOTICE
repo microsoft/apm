@@ -1328,7 +1328,7 @@ _Copyright (c) 2014-2026 Anthon van der Neut, Ruamel bvba_
 - Version requirement: `>=3.12`
 - Upstream: https://github.com/tox-dev/filelock
 - SPDX: `MIT`
-- Notes: Used for cross-process file-based locks in the persistent install cache. Attribution verified against the locked 3.29.0 release; this does not assert that every release admitted by filelock>=3.12 uses MIT.
+- Notes: Used for cross-process file-based locks in the persistent install cache. Attribution verified against the locked 3.29.0 release (Python 3.10) and the locked 4.2.10 release (Python 3.11+); this does not assert that every release admitted by filelock>=3.12 uses MIT.
 
 ### Open Source License/Copyright Notice.
 

@@ -15,6 +15,7 @@ import pytest
 from apm_cli.cache.git_cache import GitCache, _variant_key
 from apm_cli.cache.locking import shard_lock
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.filelock_retention import retain_native_lock_unlink
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
@@ -95,6 +96,7 @@ def test_successful_checkout_reuse_survives_prune(
         original_unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", retain_lock)
+    retain_native_lock_unlink(monkeypatch, lock_path)
     for checkout in (used, stale):
         os.utime(checkout.parent, ns=(_STALE_NS, _STALE_NS))
     os.utime(fresh.parent, ns=(_FRESH_NS, _FRESH_NS))
