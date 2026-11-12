@@ -296,3 +296,25 @@ def test_legacy_shard_without_eol_pin_is_rematerialized(
     _assert_repository_bytes(healed)
     assert _checkout_has_materialization_pins(healed)
     assert _git("rev-parse", "HEAD", cwd=healed, env=_neutral_env()) == sha
+
+
+def test_bare_materialization_pins_line_endings_without_extra_spawns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-consumer path records the pins on the clone, not via ``git config``."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("apm_cli.deps.bare_cache.subprocess.run", fake_run)
+    materialize_from_bare(
+        tmp_path / "bare.git", tmp_path / "consumer", ref=None, env={}, known_sha="a" * 40
+    )
+
+    clone = next(argv for argv in calls if "clone" in argv)
+    clone_config = [clone[i + 1] for i, arg in enumerate(clone) if arg == "--config"]
+    assert clone_config == ["core.autocrlf=false", "core.eol=lf"]
+    config_keys = {argv[argv.index("config") + 1] for argv in calls if "config" in argv}
+    assert not config_keys & {"core.autocrlf", "core.eol"}
