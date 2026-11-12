@@ -475,6 +475,36 @@ def _mpl_container(
             "container consumer must route image arguments through MCPClientAdapter",
         )
     )
+    # #3404: the `docker run -i --rm` default and options-only normalization
+    # have one owner; consumers must not re-grow an inline default.
+    findings.extend(
+        _require(
+            _sum_regex_lines(provider, rule_id, adapter_paths, r"^\s*def _ensure_docker_run_args\(")
+            == 1,
+            rule_id,
+            _MCP_ADAPTER_BASE,
+            "_ensure_docker_run_args must be defined exactly once across client adapters",
+        )
+    )
+    findings.extend(
+        _missing_consumers(
+            provider,
+            rule_id,
+            _MCP_CONTAINER_CONSUMERS,
+            "_ensure_docker_run_args(",
+            "container consumer must route docker run arguments through MCPClientAdapter",
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_MCP_CONTAINER_CONSUMERS,
+            pattern=r"\bor\s+\[\s*[\"']run[\"']",
+            message="inline docker run default bypasses MCPClientAdapter._ensure_docker_run_args",
+            exempt=False,
+        )
+    )
     return tuple(findings)
 
 

@@ -86,6 +86,8 @@ _PROJECT_WRITE_PATHS = frozenset(
 )
 _USER_WRITE_PATHS = frozenset(
     {
+        # filelock >= 4 keeps the released OS-user lifecycle lock file on disk.
+        ".apm/.apm-lifecycle.lock",
         ".apm/config.json",
         ".local",
         ".local/state",

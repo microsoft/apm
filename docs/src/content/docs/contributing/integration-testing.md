@@ -130,7 +130,7 @@ what the test family you want actually requires.
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
 | `requires_ado_bearer` | Azure CLI signed in + opt-in flag | `az login` and `export APM_TEST_ADO_BEARER=1` |
 | `requires_apm_binary` | A built `apm` binary on disk or `PATH` | `scripts/build-binary.sh` (or set `APM_BINARY_PATH`) |
-| `requires_runtime_codex` | The `codex` runtime on `PATH` or under `~/.apm/runtimes/`; optional `version="0.163.0"` requires that exact version on `PATH` | `apm runtime setup codex` |
+| `requires_runtime_codex` | The `codex` runtime on `PATH` or under `~/.apm/runtimes/`; optional `min_version="0.163.0"` requires a stable release at or above that version on `PATH` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
 | `live` | Tests that hit real third-party repositories; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
@@ -488,15 +488,15 @@ collection alone do not.
 The **Windows Native Symlink Acceptance** job checks out the exact PR head and
 uses a temporary standard account on a disposable hosted runner. It requires
 successful ordinary file I/O, no administrator or symlink privilege, and actual
-Windows error 1314 before running the Git/APM fallback regression. The test keeps
-inherited global `core.symlinks=true` while honoring Git's native local `false`;
-explicit command-scope intent remains covered separately.
+Windows error 1314 before running the Git/APM symlink regression. Native Git
+still writes link text there, while APM must fail with its symlink capability
+diagnostic because it pins `core.symlinks=true`.
 
-The job requires a passing native case, failure after removing the local
-precedence guard in memory, and a restored pass. Empty or skipped runs fail.
+The job requires a passing native case, failure after inverting the pin in
+memory, and a restored pass. Empty or skipped runs fail.
 Account, profile, scratch and any changed Developer Mode value are cleaned up
 independently, with an `always()` cleanup fallback. A restoration failure fails
-the job. This is link-text checkout evidence, not archive-symlink support, and
+the job. This is symlink-capability evidence, not archive-symlink support, and
 the job does not change repository protection or replace required SDL scanning.
 
 Plugin sequential-install coverage checks deployed-file removal and lockfile

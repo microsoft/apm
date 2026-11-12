@@ -181,13 +181,21 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
 
     findings: list[Violation] = []
     resolver = owner_index.function("resolve_lockfile_path_for_read")
-    if not all(
-        _present(owner, fragment)
-        for fragment in (
-            "and not new_path.is_symlink()",
-            "legacy_path.exists() or legacy_path.is_symlink()",
-            "not path.exists() and not path.is_symlink()",
+    # Scope resolver fragments to its body: other owner functions repeat them.
+    resolver_lines = (
+        _lines(owner)[resolver.lineno - 1 : resolver.end_lineno or resolver.lineno]
+        if isinstance(resolver, ast.FunctionDef)
+        else ()
+    )
+    if not (
+        all(
+            any(fragment in line for line in resolver_lines)
+            for fragment in (
+                "and not new_path.is_symlink()",
+                "legacy_path.exists() or legacy_path.is_symlink()",
+            )
         )
+        and _present(owner, "not path.exists() and not path.is_symlink()")
     ):
         findings.append(
             _summary(

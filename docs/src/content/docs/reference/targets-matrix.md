@@ -131,6 +131,12 @@ GitHub Copilot (CLI and IDE).
   CLI can invoke them from any working directory.
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
+- **Prompt harness limitation.** In VS Code, only Local harness sessions load
+  `.github/prompts/` files; the Copilot harness and Copilot CLI do not. See
+  [VS Code prompt files](https://code.visualstudio.com/docs/agent-customization/prompt-files).
+  For those harnesses, ship the workflow as a skill, with
+  `disable-model-invocation: true` where the host supports it. See
+  [Author a prompt](../../producer/author-primitives/prompts/#copilot-harness-limitation).
 
 ## claude
 
