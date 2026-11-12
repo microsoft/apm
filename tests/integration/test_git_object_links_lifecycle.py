@@ -28,20 +28,35 @@ _SOURCE = "https://github.com/acme/linked-pkg.git"
 _INSTALL = ("install", "--target", "copilot", "--no-policy", "--parallel-downloads", "0")
 _SKILL = b"---\nname: linked\ndescription: Skill whose reference is a package link\n---\n# Linked\n"
 _REFERENCE = b"Shared reference used through a link\n"
-_FILES = {
+_PACKAGE_FILES = {
     "apm.yml": b"name: linked-pkg\nversion: 1.0.0\ndescription: Package with links\n",
     ".apm/skills/linked/SKILL.md": _SKILL,
+}
+_SHARED_FILES = {
     "shared/reference.md": _REFERENCE,
     "shared/notes/usage.md": b"Usage notes\n",
 }
+# Package-relative links; ``{root}`` climbs from the package to the
+# repository root, where ``shared/`` lives.
 _LINKS = {
-    ".apm/skills/linked/reference.md": "../../../shared/reference.md",
-    ".apm/skills/linked/assets": "../../../shared/notes",
-    "AGENTS.md": "shared/reference.md",
+    ".apm/skills/linked/reference.md": "../../../{root}shared/reference.md",
+    ".apm/skills/linked/assets": "../../../{root}shared/notes",
+    "AGENTS.md": "{root}shared/reference.md",
 }
 # Hash of the tree a POSIX install records when it follows these links; every
 # platform must reproduce it so a lockfile from any host replays anywhere.
-_GOLDEN_CONTENT_HASH = "sha256:5dc1b14f6eee2410d3f84e28ebcea1f0ed163c4d7b00e4849403612c8862d63f"
+# ``subdirectory`` installs ``packages/linked`` of a monorepo whose links
+# leave the package path (and its sparse cone) for the repository root.
+_LAYOUTS = {
+    "whole-repo": (
+        "",
+        "sha256:5dc1b14f6eee2410d3f84e28ebcea1f0ed163c4d7b00e4849403612c8862d63f",
+    ),
+    "subdirectory": (
+        "packages/linked",
+        "sha256:53a8b0e13ce1bed0f3aca44c710a35ce9935fd48c6fe2726ec96a56e4b4d3a4c",
+    ),
+}
 
 
 def _git(env: dict[str, str], *args: str, input: str | None = None) -> str:
@@ -56,17 +71,24 @@ def _git(env: dict[str, str], *args: str, input: str | None = None) -> str:
     ).stdout.strip()
 
 
-def _publish(isolated: IsolatedApmEnvironment, env: dict[str, str], links: dict[str, str]) -> str:
+def _publish(
+    isolated: IsolatedApmEnvironment, env: dict[str, str], links: dict[str, str], prefix: str
+) -> str:
     """Commit the package with links as index entries; rewrite the URL to it."""
     work = isolated.repository_root / "linked-pkg-worktree"
     bare = isolated.repository_root / "linked-pkg.git"
     _git(env, "init", "-q", "--initial-branch=main", str(work))
-    for relative, content in _FILES.items():
+    lead = f"{prefix}/" if prefix else ""
+    files = {**{f"{lead}{path}": data for path, data in _PACKAGE_FILES.items()}, **_SHARED_FILES}
+    for relative, content in files.items():
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-    _git(env, "-C", str(work), "add", *_FILES)
-    for relative, target in links.items():
+    _git(env, "-C", str(work), "add", *files)
+    climb = "../" * len(prefix.split("/")) if prefix else ""
+    for name, link_target in links.items():
+        relative = f"{lead}{name}"
+        target = link_target.format(root=climb)
         oid = _git(env, "-C", str(work), "hash-object", "-w", "--stdin", input=target)
         _git(
             env, "-C", str(work), "update-index", "--add", "--cacheinfo", f"120000,{oid},{relative}"
@@ -85,10 +107,13 @@ def short_root() -> Iterator[Path]:
     shutil.rmtree(root, ignore_errors=True)
 
 
-def _scenario(root: Path, links: dict[str, str]) -> tuple[Path, dict[str, str], str]:
+def _scenario(
+    root: Path, links: dict[str, str], prefix: str = ""
+) -> tuple[Path, dict[str, str], str]:
     isolated = IsolatedApmEnvironment.create(root / "e", base_env=dict(os.environ))
     env = isolated.subprocess_env()
-    sha = _publish(isolated, env, links)
+    sha = _publish(isolated, env, links, prefix)
+    dependency = {"git": _SOURCE, "ref": sha, **({"path": prefix} if prefix else {})}
     project = isolated.work_root / "consumer"
     project.mkdir(parents=True)
     dump_yaml(
@@ -96,7 +121,7 @@ def _scenario(root: Path, links: dict[str, str]) -> tuple[Path, dict[str, str], 
             "name": "consumer",
             "version": "0.1.0",
             "target": "copilot",
-            "dependencies": {"apm": [{"git": _SOURCE, "ref": sha}]},
+            "dependencies": {"apm": [dependency]},
         },
         project / "apm.yml",
     )
@@ -126,17 +151,20 @@ def _regular_tree(root: Path) -> dict[str, bytes]:
     return found
 
 
+@pytest.mark.parametrize("layout", sorted(_LAYOUTS))
 def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
-    short_root: Path, apm_binary_path: Path
+    short_root: Path, apm_binary_path: Path, layout: str
 ) -> None:
-    project, env, sha = _scenario(short_root, _LINKS)
+    prefix, golden = _LAYOUTS[layout]
+    project, env, sha = _scenario(short_root, _LINKS, prefix)
+    install_root = project / "apm_modules" / "acme" / "linked-pkg" / prefix
 
     _ok(_run(apm_binary_path, _INSTALL, project, env))
 
     locked = _locked(project)
     assert locked["resolved_commit"] == sha
-    assert locked["content_hash"] == _GOLDEN_CONTENT_HASH
-    installed = _regular_tree(project / "apm_modules" / "acme" / "linked-pkg")
+    assert locked["content_hash"] == golden
+    installed = _regular_tree(install_root)
     assert installed["AGENTS.md"] == _REFERENCE
     assert installed[".apm/skills/linked/reference.md"] == _REFERENCE
     assert installed[".apm/skills/linked/assets/usage.md"] == b"Usage notes\n"
@@ -151,22 +179,25 @@ def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
     _ok(_run(apm_binary_path, (*_INSTALL, "--frozen"), project, env))
 
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
-    assert _regular_tree(project / "apm_modules" / "acme" / "linked-pkg") == installed
+    assert _regular_tree(install_root) == installed
 
 
 @pytest.mark.parametrize(
     ("target", "message"),
     [
-        ("../../../../outside.md", "resolves outside the repository"),
-        ("../../../missing.md", "is not a tracked file or directory"),
+        ("../../../{root}../outside.md", "resolves outside the repository"),
+        ("../../../{root}missing.md", "is not a tracked file or directory"),
         ("..", "forms a cycle"),
     ],
     ids=["escaping", "broken", "cyclic"],
 )
+@pytest.mark.parametrize("layout", sorted(_LAYOUTS))
 def test_unresolvable_link_fails_before_hashing(
-    short_root: Path, apm_binary_path: Path, target: str, message: str
+    short_root: Path, apm_binary_path: Path, target: str, message: str, layout: str
 ) -> None:
-    project, env, _ = _scenario(short_root, {**_LINKS, ".apm/skills/linked/bad.md": target})
+    prefix, _ = _LAYOUTS[layout]
+    links = {**_LINKS, ".apm/skills/linked/bad.md": target}
+    project, env, _ = _scenario(short_root, links, prefix)
 
     result = _run(apm_binary_path, _INSTALL, project, env)
 

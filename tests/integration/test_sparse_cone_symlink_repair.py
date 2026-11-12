@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -241,3 +241,45 @@ def test_downloader_treats_colon_prefixed_package_path_literally(tmp_path: Path)
 
     with pytest.raises(PathTraversalError, match="resolves outside the repository"):
         downloader.download_subdirectory_package(dep, tmp_path / "installed")
+
+
+def test_full_clone_fallback_materializes_out_of_cone_links(tmp_path: Path) -> None:
+    """When sparse checkout fails, the full-clone fallback still installs link content."""
+    from apm_cli.utils.git_env import clone_git_worktree
+    from tests.utils.git_link_fixture import (
+        EXPECTED_PKG,
+        bare_clone,
+        build_link_origin,
+        neutral_git_env,
+        tree_bytes,
+    )
+
+    origin, sha = build_link_origin(tmp_path)
+    bare = bare_clone(origin, tmp_path / "origin.git")
+    env = neutral_git_env()
+    downloader = object.__new__(GitHubPackageDownloader)
+    downloader.install_logger = None
+    downloader.shared_clone_cache = None
+    downloader.persistent_git_cache = None
+    downloader.git_env = env
+    downloader._git_env_dict = lambda: env
+    downloader._try_sparse_checkout = MagicMock(return_value=False)
+    downloader._clone_with_fallback = lambda _url, target, **_kwargs: clone_git_worktree(
+        str(bare), target, env=env
+    )
+    dep = DependencyReference(
+        repo_url="owner/repo", reference=sha, is_virtual=True, virtual_path="pkg"
+    )
+    target = tmp_path / "installed"
+
+    # The fixture is a link fixture, not a complete APM package; this test
+    # asserts the materialized copy, not primitive validation.
+    with (
+        patch("apm_cli.deps.github_downloader.validate_apm_package"),
+        patch("apm_cli.deps._shared._validate_and_load_package"),
+        patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+    ):
+        downloader.download_subdirectory_package(dep, target)
+
+    downloader._try_sparse_checkout.assert_called_once()
+    assert tree_bytes(target) == EXPECTED_PKG
