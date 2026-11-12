@@ -161,6 +161,54 @@ class TestSsrfGate:
 
 
 # ---------------------------------------------------------------------------
+# Proxy-egress classification
+# ---------------------------------------------------------------------------
+
+
+class TestEnvironProxies:
+    """``_environ_proxies_for`` must mean "a proxy would actually be used".
+
+    ``NO_PROXY`` exported without any proxy variable makes
+    ``requests.utils.get_environ_proxies`` return a bare ``{'no': ...}``
+    mapping. That mapping selects no proxy for any URL, so classifying it as
+    corporate egress silently diverts dispatch off the resolve-and-pin
+    guarded session (and used to go red in this very module's
+    ``TestHttpExecutor`` on such hosts).
+    """
+
+    def test_no_proxy_only_mapping_is_direct_egress(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("requests.utils.getproxies", lambda: {"no": "127.0.0.1,localhost,::1"})
+        assert se._environ_proxies_for("https://example.com/hook") == {}
+
+    def test_scheme_proxy_mapping_is_corporate_egress(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mapping = {"https": "http://corp-proxy:8080", "no": "127.0.0.1,localhost,::1"}
+        monkeypatch.setattr("requests.utils.getproxies", lambda: mapping)
+        assert se._environ_proxies_for("https://example.com/hook") == mapping
+
+    def test_resolution_error_fails_closed_to_direct(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def boom(url: str, no_proxy: str | None = None) -> dict:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("requests.utils.get_environ_proxies", boom)
+        assert se._environ_proxies_for("https://example.com/hook") == {}
+
+    def test_no_proxy_only_env_still_uses_guarded_session(
+        self, apm_log_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end: NO_PROXY-only env must not drop the DNS-pinned session."""
+        monkeypatch.setattr("requests.utils.getproxies", lambda: {"no": "127.0.0.1,localhost,::1"})
+        fake_session = MagicMock()
+        fake_session.post.return_value = MagicMock(status_code=200, ok=True)
+        with patch.object(se, "_get_guarded_session", return_value=fake_session):
+            thread = se.execute_script(_https("https://example.com/hook"), _event())
+            assert isinstance(thread, threading.Thread)
+            thread.join(timeout=5)
+        assert fake_session.post.called
+
+
+# ---------------------------------------------------------------------------
 # HTTP executor (mocked transport -- no real network)
 # ---------------------------------------------------------------------------
 

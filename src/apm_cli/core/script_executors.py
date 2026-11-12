@@ -968,16 +968,28 @@ def _build_guarded_session():
 def _environ_proxies_for(url: str) -> dict:
     """Return the operator's env-configured proxies for *url*, or ``{}``.
 
-    A non-empty result is the corporate-egress case: the environment mandates
-    an outbound proxy for this destination (honoring ``NO_PROXY``), exactly as
-    curl / pip / npm / git resolve proxies. Returns ``{}`` (direct egress) when
-    no proxy applies or on any resolution error -- fail-closed to the DNS-pinned
+    A non-empty result is the corporate-egress case: a proxy would actually be
+    selected for this destination (honoring ``NO_PROXY``), exactly as curl /
+    pip / npm / git resolve proxies. Returns ``{}`` (direct egress) when no
+    proxy applies or on any resolution error -- fail-closed to the DNS-pinned
     direct path rather than guessing a proxy.
+
+    ``get_environ_proxies`` alone is not a sufficient decision: with
+    ``NO_PROXY`` exported but no proxy variables set (common in containers,
+    CI runners and macOS shells), it returns a bare ``{'no': ...}`` mapping,
+    and ``requests``' own ``select_proxy`` picks no proxy for any URL from
+    such a mapping. Classifying that as corporate egress would route the
+    dispatch onto the unpinned capturing session and silently drop the
+    resolve-and-pin DNS defense, so the decision re-uses requests' proxy
+    selection for the URL instead of truthiness.
     """
     try:
         import requests
 
-        return requests.utils.get_environ_proxies(url, no_proxy=None) or {}
+        raw = requests.utils.get_environ_proxies(url, no_proxy=None) or {}
+        if requests.utils.select_proxy(url, raw) is None:
+            return {}
+        return raw
     except Exception:
         return {}
 
