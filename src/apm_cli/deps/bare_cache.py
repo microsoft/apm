@@ -594,8 +594,10 @@ def materialize_from_bare(
         blocks downstream rmtree.
 
     CRLF + LFS pinning before checkout:
-      - ``core.autocrlf=false`` guarantees byte-identical content
-        across consumers regardless of the user's global git config.
+      - ``git_line_ending_pin_args`` (``core.autocrlf=false`` and
+        ``core.eol`` set to ``lf``) guarantees byte-identical ``text`` /
+        ``text=auto`` content across consumers regardless of host Git
+        config or platform default (apm#3270).
       - ``git_symlink_pin_args`` writes in-repo links as link text, so
         checkout never needs OS symlink capability; they are then
         replaced with their Git-object content (#3457).
@@ -621,6 +623,8 @@ def materialize_from_bare(
     """
     from ..utils.git_env import (
         get_git_executable,
+        git_line_ending_pin_args,
+        git_line_ending_pin_entries,
         git_no_hooks_args,
         git_no_templates_args,
         git_subprocess_env,
@@ -629,7 +633,7 @@ def materialize_from_bare(
 
     git_exe = get_git_executable()
     env = git_subprocess_env(env)
-    pin_args = list(git_symlink_pin_args())
+    pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]
 
     if known_sha:
         resolved_sha = known_sha
@@ -645,14 +649,22 @@ def materialize_from_bare(
         resolved_sha = sha_result.stdout.strip()
 
     consumer_dir.parent.mkdir(parents=True, exist_ok=True)
-    # --no-checkout because we want to set core.autocrlf and disable
-    # LFS smudge BEFORE checkout writes any file content.
+    # --no-checkout because we want to pin line endings and disable
+    # LFS smudge BEFORE checkout writes any file content. ``--config``
+    # persists the line-ending pins in the clone itself (no extra spawn);
+    # the checkout also carries the ``-c`` pins, which outrank env
+    # snapshots. The symlink pin travels only as ``-c``: this consumer is
+    # not a reusable shard validated by ``_checkout_has_materialization_pins``.
+    line_ending_config = [
+        arg for key, val in git_line_ending_pin_entries() for arg in ("--config", f"{key}={val}")
+    ]
     subprocess.run(
         [
             git_exe,
             *git_no_hooks_args(),
             "clone",
             *git_no_templates_args(),
+            *line_ending_config,
             "--local",
             "--shared",
             "--no-checkout",
@@ -662,15 +674,6 @@ def materialize_from_bare(
         capture_output=True,
         text=True,
         timeout=60,
-        env=env,
-        check=True,
-    )
-    # CRLF determinism (panel: byte-identical across users).
-    subprocess.run(
-        [git_exe, "-C", str(consumer_dir), "config", "core.autocrlf", "false"],
-        capture_output=True,
-        text=True,
-        timeout=10,
         env=env,
         check=True,
     )
