@@ -5,8 +5,8 @@ sidebar:
   order: 22
 ---
 
-Discover, inspect, and install MCP servers from the public MCP registry
-(or an enterprise mirror).
+Discover, inspect, and install MCP servers from an MCP registry: the curated
+GitHub MCP Registry by default, or another registry such as an enterprise mirror.
 
 ## Synopsis
 
@@ -113,7 +113,7 @@ list):
 
 | Variable | Effect |
 |---|---|
-| `MCP_REGISTRY_URL` | Override the registry endpoint used by `list`, `search`, `show`, and `install`. Read-only commands print `Registry: <url> (from MCP_REGISTRY_URL)`; installs print `Using MCP registry: <url> (from MCP_REGISTRY_URL)`. Unset: the public default registry is used silently. |
+| `MCP_REGISTRY_URL` | Override the registry endpoint used by `list`, `search`, `show`, and `install`. Read-only commands print `Registry: <url> (from MCP_REGISTRY_URL)`; installs print `Using MCP registry: <url> (from MCP_REGISTRY_URL)`. Unset: the default GitHub MCP Registry is used silently. |
 
 Network failures against an overridden registry name the setting that supplied
 the URL so misconfigurations are easy to spot in CI logs. Direct
@@ -121,7 +121,8 @@ the URL so misconfigurations are easy to spot in CI logs. Direct
 
 See [`apm config`](../config/#resolution-order) for the canonical resolution
 order. The same chain resolves `dependencies.mcp`; a per-dependency
-`registry:` URL overrides it for that entry only.
+`registry:` URL overrides it for that entry only. To compare curated and open
+registries, see [Choosing an MCP registry](../../../consumer/choosing-an-mcp-registry/).
 Whenever a non-default endpoint is in effect, `apm install` names it once with
 `Using MCP registry: <url> (<source>)` before the lookup.
 
