@@ -122,8 +122,13 @@ def resolve_dep_auth(
         return None, "basic", None
 
 
-def _git_semver_package_name(dep_ref: DependencyReference) -> str:
-    """Return the package name used for git tag ``{name}`` matching."""
+def git_semver_package_name(dep_ref: DependencyReference) -> str:
+    """Return the package name used for git tag ``{name}`` matching.
+
+    Single owner of this rule: the resolver selects tags with it and the
+    ``require_pinned_constraint`` policy recognises a dependency's own
+    release tags with it.
+    """
     if dep_ref.is_virtual_subdirectory() and dep_ref.virtual_path:
         return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
     return dep_ref.repo_url.rsplit("/", 1)[-1]
@@ -207,7 +212,7 @@ def maybe_resolve_git_semver(
 
     constraint = dep_ref.reference
     owner_repo = dep_ref.repo_url
-    package_name = _git_semver_package_name(dep_ref)
+    package_name = git_semver_package_name(dep_ref)
     if not update_refs:
         locked_resolution = replay_locked_git_semver(dep_ref, existing_lockfile)
         if locked_resolution is not None:
