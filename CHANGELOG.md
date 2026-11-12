@@ -38,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- When `apm install` fails after deploying files to harness directories such as `.claude/agents/`, the failure output now lists each file `apm.lock.yaml` does not track and says to remove them or re-run `apm install` (with `--force` if they are skipped as not managed by APM), instead of reporting that no changes were committed; the files are not removed. (#3641)
 - `apm install DIR` with a single argument now installs an APM source package that has `apm.yml` and a root `plugin.json` as a local dependency, recording it in `apm.yml` and `apm.lock.yaml` exactly like `apm install DIR DIR`, instead of copying its source tree as a legacy bundle; real `apm pack` output, archives and legacy manifestless bundles still install as bundles. Approach from #3447 by @xubenqiang. (#3604)
 - `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
 - Contributor dashboard: rendered markdown shows links only for `http`, `https`, `mailto` and relative URLs, and images only for `http`, `https` and relative URLs; other URLs appear as plain text, and links open with `rel="noopener noreferrer"`. (#3637)
@@ -57,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` and `apm update` now write untyped flat command hooks as Codex `"type": "command"` handlers in `.codex/hooks.json`, as Codex's hook schema requires, including alongside Codex-shaped hook files. Reinstalling replaces older APM-owned untyped entries; explicit types, already-nested source handlers, manual hooks and other targets are unchanged. -- by @Parth-Vasave (#3385)
 - `apm install -g` and `apm update -g` for Cursor now deploy package instructions as `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context, instead of skipping them; `apm uninstall -g` removes only package-owned rules. As at project scope, an existing rule with the same name as a package rule is replaced on install. -- by @yahavi (#2506)
 - `apm install --update` and other same-process re-downloads of a Claude marketplace plugin (no `apm.yml` of its own) now stamp the re-materialized tree with the short commit SHA, as the first download does, so the `content_hash` recorded in `apm.lock.yaml` matches the installed files and a later fresh install passes the integrity check. If a lockfile already recorded an unstamped hash, run `apm install --update` once to re-record it. -- by @McNultyyy (#2627)
+- When `apm install` fails after deploying files to harness directories such as `.claude/agents/`, the failure output now lists each file `apm.lock.yaml` does not track and says to remove them or re-run `apm install` (with `--force` if they are skipped as not managed by APM), instead of reporting that no changes were committed; the files are not removed. (#3641)
 
 ### Security
 
