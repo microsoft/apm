@@ -43,6 +43,22 @@ def test_partition_keeps_groups_whole_and_every_node_once() -> None:
         assert list(shard) == [item for item in items if item in shard]
 
 
+def test_modules_stay_whole_unless_too_heavy_for_one_shard() -> None:
+    light = [_item(f"tests/test_light_{m}.py::t{i}") for m in range(6) for i in range(5)]
+    heavy = [_item(f"tests/test_heavy.py::t{i}") for i in range(40)]
+
+    result = ci_sharding.partition(light + heavy, 2)
+
+    for module in range(6):
+        prefix = f"tests/test_light_{module}.py::"
+        owners = [
+            shard for shard in result.shards if any(i.nodeid.startswith(prefix) for i in shard)
+        ]
+        assert len(owners) == 1, prefix
+    assert all(any(i.nodeid.startswith("tests/test_heavy.py") for i in s) for s in result.shards)
+    assert sorted(len(shard) for shard in result.shards) == [35, 35]
+
+
 def test_durations_balance_shards_within_target_ratio() -> None:
     items = [_item(f"t{index:03}") for index in range(200)]
     durations = {f"t{index:03}": float(1 + (index * 37) % 23) for index in range(200)}

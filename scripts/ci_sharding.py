@@ -2,8 +2,10 @@
 
 Every CI lane that splits one pytest selection across runners loads this
 plugin. It keeps each ``xdist_group`` together (``--dist loadgroup`` needs
-the whole group on one runner) and balances groups and single tests by
-measured duration, using pytest-split's LeastDuration algorithm.
+the whole group on one runner) and each test module together (so files run
+next to their usual neighbours), splits only modules too heavy for one
+shard, and balances the resulting units by measured duration with
+pytest-split's LeastDuration algorithm.
 
 Durations come from a JSON file ``{node_id: seconds}``. The nightly release
 run publishes a fresh one as an artifact, and a committed seed keeps the lanes
@@ -66,24 +68,44 @@ def load_durations(path: str | Path | None) -> dict[str, float]:
     }
 
 
-def _unit_key(item: pytest.Item) -> tuple[str, str]:
+def _group_key(item: pytest.Item) -> str | None:
     names = {
         str(mark.args[0] if mark.args else mark.kwargs.get("name", "default"))
         for mark in item.iter_markers("xdist_group")
     }
     # Match the composite labels used by xdist's loadgroup scheduler.
-    return ("group", "_".join(sorted(names))) if names else ("node", item.nodeid)
+    return "_".join(sorted(names)) if names else None
 
 
-def affinity_units(items: Sequence[pytest.Item]) -> list[list[pytest.Item]]:
-    """Group items that xdist must keep on one worker; fail on duplicates."""
+def affinity_units(
+    items: Sequence[pytest.Item],
+    weights: Mapping[str, float] | None = None,
+    split_over: float | None = None,
+) -> list[list[pytest.Item]]:
+    """Keep each xdist group, and each module, together; fail on duplicates.
+
+    Modules stay whole so a shard runs files in their usual order next to
+    their usual neighbours. A module heavier than ``split_over`` is split
+    into single tests so one large file cannot become the long pole.
+    """
     node_ids = {item.nodeid for item in items}
     if len(node_ids) != len(items):
         raise pytest.UsageError("Duplicate node IDs; remove duplicate collection inputs.")
     units: dict[tuple[str, str], list[pytest.Item]] = defaultdict(list)
     for item in items:
-        units[_unit_key(item)].append(item)
-    return list(units.values())
+        group = _group_key(item)
+        key = ("group", group) if group else ("module", item.nodeid.split("::", 1)[0])
+        units[key].append(item)
+    result: list[list[pytest.Item]] = []
+    for (kind, _name), unit in units.items():
+        too_heavy = (
+            kind == "module"
+            and weights is not None
+            and split_over is not None
+            and sum(weights[item.nodeid] for item in unit) > split_over
+        )
+        result.extend([[item] for item in unit] if too_heavy else [unit])
+    return result
 
 
 def item_weights(items: Sequence[pytest.Item], durations: Mapping[str, float]) -> dict[str, float]:
@@ -101,8 +123,10 @@ def partition(
     """Split items into shard_count nonempty shards without breaking groups."""
     if shard_count < 1:
         raise pytest.UsageError("Shard count must be at least 1.")
-    units = affinity_units(items)
     weights = item_weights(items, durations or {})
+    # A module bigger than half of one shard's share is split per test.
+    split_over = sum(weights.values()) / (shard_count * 2)
+    units = affinity_units(items, weights, split_over)
     representatives = [unit[0] for unit in units]
     members = {unit[0].nodeid: unit for unit in units}
     unit_weights = {
@@ -145,7 +169,7 @@ def plan_shard_count(
     if not items:
         raise pytest.UsageError("Cannot plan shards for an empty selection.")
     weights = item_weights(items, durations)
-    units = affinity_units(items)
+    units = affinity_units(items, weights, sum(weights.values()) / (max_shards * 2))
     largest = max(sum(weights[item.nodeid] for item in unit) for unit in units)
     total = sum(weights.values())
     upper = max(1, min(max_shards, len(units)))
