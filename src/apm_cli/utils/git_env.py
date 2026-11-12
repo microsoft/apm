@@ -29,7 +29,7 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, overload
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from apm_cli.utils.subprocess_env import external_process_env
@@ -1426,6 +1426,101 @@ def git_clone_env(
                     target.rmdir()
 
 
+GIT_OUTPUT_ENCODING = "utf-8"
+_GIT_OPTIONS_WITH_VALUE = frozenset(
+    {"-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace"}
+)
+
+
+def _git_command_label(command: Sequence[object]) -> str:
+    """Return ``git <subcommand>`` for diagnostics without echoing URLs or paths."""
+    args = [str(part) for part in command]
+    if not args:
+        return "git"
+    label = re.split(r"[\\/]", args[0])[-1].removesuffix(".exe") or "git"
+    skip_value = False
+    for arg in args[1:]:
+        if skip_value:
+            skip_value = False
+        elif arg in _GIT_OPTIONS_WITH_VALUE:
+            skip_value = True
+        elif not arg.startswith("-"):
+            return f"{label} {arg}"
+    return label
+
+
+class GitOutputDecodeError(subprocess.SubprocessError):
+    """A successful Git child wrote stdout that is not valid UTF-8."""
+
+    def __init__(self, command: Sequence[object], error: UnicodeDecodeError) -> None:
+        self.cmd = list(command)
+        bad_byte = error.object[error.start : error.start + 1].hex()
+        super().__init__(
+            f"'{_git_command_label(command)}' wrote output that is not valid UTF-8 "
+            f"(byte 0x{bad_byte} at offset {error.start}); "
+            "APM will not use corrupted Git output"
+        )
+
+
+@overload
+def _escaped_git_text(value: str | bytes) -> str: ...
+@overload
+def _escaped_git_text(value: None) -> None: ...
+def _escaped_git_text(value: object) -> object:
+    """Render undecodable bytes in diagnostic output as visible backslash escapes."""
+    if isinstance(value, bytes):
+        return value.decode(GIT_OUTPUT_ENCODING, "backslashreplace")
+    if isinstance(value, str) and value:
+        raw = value.encode(GIT_OUTPUT_ENCODING, "surrogateescape")
+        return raw.decode(GIT_OUTPUT_ENCODING, "backslashreplace")
+    return value
+
+
+@overload
+def _strict_git_text(command: Sequence[object], value: str) -> str: ...
+@overload
+def _strict_git_text(command: Sequence[object], value: None) -> None: ...
+def _strict_git_text(command: Sequence[object], value: object) -> object:
+    if not isinstance(value, str) or not value:
+        return value
+    raw = value.encode(GIT_OUTPUT_ENCODING, "surrogateescape")
+    try:
+        return raw.decode(GIT_OUTPUT_ENCODING)
+    except UnicodeDecodeError as exc:
+        raise GitOutputDecodeError(command, exc) from exc
+
+
+def run_git_text(command: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """Run a Git child in text mode with locale-independent UTF-8 decoding.
+
+    The default text codec follows the OS locale (cp936/GBK on Simplified
+    Chinese Windows), and on Windows ``subprocess`` decodes in reader threads
+    where a decode error is swallowed and the output lost (#3056). Decoding
+    with ``surrogateescape`` never fails mid-stream; afterwards stdout of a
+    successful command must be valid UTF-8 or :class:`GitOutputDecodeError`
+    is raised, while stderr and failed-command output keep undecodable bytes
+    as visible backslash escapes so existing failure handling still applies.
+    """
+    try:
+        result = subprocess.run(
+            command,
+            text=True,
+            encoding=GIT_OUTPUT_ENCODING,
+            errors="surrogateescape",
+            **kwargs,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        exc.output = _escaped_git_text(exc.output)
+        exc.stderr = _escaped_git_text(exc.stderr)
+        raise
+    result.stderr = _escaped_git_text(result.stderr)
+    if result.returncode == 0:
+        result.stdout = _strict_git_text(command, result.stdout)
+    else:
+        result.stdout = _escaped_git_text(result.stdout)
+    return result
+
+
 def git_remote_refs(
     remote_url: str,
     *patterns: str,
@@ -1441,11 +1536,10 @@ def git_remote_refs(
     git_executable = get_git_executable()
     command = [git_executable, *git_args, "ls-remote", *options, remote_url, *patterns]
     try:
-        result = subprocess.run(
+        result = run_git_text(
             command,
             capture_output=True,
             cwd=str(Path(git_executable).resolve().parent),
-            text=True,
             timeout=timeout,
             env=child_env,
             stdin=subprocess.DEVNULL,
@@ -1545,11 +1639,10 @@ def clone_git_worktree(
     clone_env = git_clone_env(url, env, target)
     if progress is None:
         try:
-            subprocess.run(
+            run_git_text(
                 args,
                 check=True,
                 capture_output=True,
-                text=True,
                 timeout=300,
                 env=clone_env,
             )
@@ -1564,6 +1657,8 @@ def clone_git_worktree(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding=GIT_OUTPUT_ENCODING,
+        errors="backslashreplace",
         env=clone_env,
     )
     stdout: list[str] = []
@@ -1603,7 +1698,7 @@ def checkout_git_worktree(
     env: dict[str, object] | None = None,
 ) -> None:
     """Check out a ref in an explicitly located worktree, links as link text."""
-    subprocess.run(
+    run_git_text(
         [
             get_git_executable(),
             *git_no_hooks_args(),
@@ -1616,7 +1711,6 @@ def checkout_git_worktree(
         ],
         check=True,
         capture_output=True,
-        text=True,
         timeout=120,
         env=git_subprocess_env(env),
     )
@@ -1639,7 +1733,7 @@ def git_resolve_commit(
     bare: bool = False,
 ) -> str:
     """Resolve a ref in a worktree or an explicitly selected bare repository."""
-    result = subprocess.run(
+    result = run_git_text(
         [
             get_git_executable(),
             "--git-dir" if bare else "-C",
@@ -1650,7 +1744,6 @@ def git_resolve_commit(
         ],
         check=True,
         capture_output=True,
-        text=True,
         timeout=30,
         env=git_subprocess_env(env),
     )
@@ -1663,11 +1756,10 @@ def git_current_branch(
     env: dict[str, object] | None = None,
 ) -> str:
     """Return the current branch name for an explicitly located worktree."""
-    result = subprocess.run(
+    result = run_git_text(
         [get_git_executable(), "-C", str(worktree), "symbolic-ref", "--short", "HEAD"],
         check=True,
         capture_output=True,
-        text=True,
         timeout=30,
         env=git_subprocess_env(env),
     )

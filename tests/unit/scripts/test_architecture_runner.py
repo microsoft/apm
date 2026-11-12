@@ -671,6 +671,7 @@ install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
+marketplace-integrations-authoring-source
 marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-manifest
 marketplace-integrations-codex-native-lifecycle
@@ -713,6 +714,7 @@ onboarding-metadata-only
 contracts-tooling-root-context-write-eligibility
 hooks-integrations-native-instruction-projection
 registry_delegation.agents_source_attribution
+registry_delegation.apm_home_resolution
 registry_delegation.audit_target_selection
 registry_delegation.bootstrap_project_name
 registry_delegation.build_id_verification

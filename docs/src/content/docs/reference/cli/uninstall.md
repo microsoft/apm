@@ -33,7 +33,7 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 |---|---|
 | `--dry-run` | Show the removal plan without writes from the uninstall engine. `pre-uninstall` lifecycle scripts still run and may have side effects. Registry fallback and shared-slot survivor staging are skipped. |
 | `-v, --verbose` | Show detailed removal information. |
-| `-g, --global` | Remove from the user scope (`~/.apm/`) instead of the current project. |
+| `-g, --global` | Remove from the user scope under `$APM_HOME` (default `~/.apm`) instead of the current project. Target deployment cleanup still uses target-specific home variables or the operating-system home. |
 
 ## Examples
 
@@ -179,7 +179,8 @@ ownership conflict. Run `apm install` to reconcile project state, or
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an
 absolute path. If two declared local dependencies have the same portable key,
 selection is ambiguous and exits nonzero without changes. Use one exact path
-already declared in the relevant manifest (`apm.yml` or `~/.apm/apm.yml`); APM
+already declared in the relevant manifest (`apm.yml` or `$APM_HOME/apm.yml`,
+default `~/.apm/apm.yml`); APM
 never removes both or guesses, and diagnostics do not print declared paths.
 When an exact path removes one declaration from a shared local install slot, APM
 validates and stages the survivor before changing the manifest, then activates

@@ -1,6 +1,6 @@
 ---
 title: apm experimental
-description: Manage opt-in experimental feature flags stored in ~/.apm/config.json
+description: Manage opt-in experimental feature flags stored in the APM user configuration
 sidebar:
   order: 24
 ---
@@ -23,7 +23,11 @@ apm experimental reset [NAME] [--yes]
 
 ## Description
 
-Experimental flags live under the `experimental` key of `~/.apm/config.json` and default to disabled. Toggling a flag persists the override; `reset` removes it. Flag names are case-insensitive and accept either kebab-case (`verbose-version`) or snake_case (`verbose_version`) on the command line.
+Experimental flags live under the `experimental` key of `$APM_HOME/config.json`
+(default `~/.apm/config.json`) and default to disabled. Toggling a flag persists
+the override; `reset` removes it. Flag names are case-insensitive and accept
+either kebab-case (`verbose-version`) or snake_case (`verbose_version`) on the
+command line.
 
 Flags never gate security-critical behaviour (content scanning, lockfile integrity, token handling, MCP trust checks). Those are always on. See [`apm audit`](../audit/) for the security model.
 
@@ -50,7 +54,7 @@ Disable a flag and persist the override.
 
 ### `apm experimental reset [NAME]`
 
-Reset one flag (when `NAME` is given) or all flags (when omitted) to registry defaults. Bulk reset prompts for confirmation and also removes unknown or malformed entries from `~/.apm/config.json`.
+Reset one flag (when `NAME` is given) or all flags (when omitted) to registry defaults. Bulk reset prompts for confirmation and also removes unknown or malformed entries from `$APM_HOME/config.json`.
 
 | Option | Description |
 | --- | --- |
@@ -71,7 +75,7 @@ Reset one flag (when `NAME` is given) or all flags (when omitted) to registry de
 | `copilot-cowork` | Enables Microsoft 365 Copilot Cowork skill deployment via OneDrive. | `apm install --target copilot-cowork --global` |
 | `copilot-app` | Deploys prompts as workflows into the GitHub Copilot desktop App. Workflows arrive disabled; enable them from the Copilot app's Workflows tab. | `apm install --target copilot-app` |
 | `marketplace-authoring` | Enables marketplace authoring commands (`init`, `build`, `publish`). | `apm marketplace --help` |
-| `registries` | Enables REST-based APM package registries in `apm.yml` and `~/.apm/config.json`. | `apm install` (with `registries:` configured) |
+| `registries` | Enables REST-based APM package registries in `apm.yml` and `$APM_HOME/config.json`. | `apm install` (with `registries:` configured) |
 | `canvas` | Ships Copilot CLI canvas extensions from `.apm/extensions/` bundles. | `apm install` |
 | `external-scanners` | Enables third-party SARIF scanner ingestion in `apm audit` (`--external`, `--external-llm`, `--external-args`), the `external.<name>.{llm,args}` config keys, and `security.audit.scanners` policy governance. | `apm audit --external skillspector` |
 | `openclaw` | Deploys skills to OpenClaw runtime directories. | `apm install --target openclaw` |
