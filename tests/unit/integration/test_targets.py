@@ -652,3 +652,30 @@ class TestCodexHomeUserScope:
         assert profile is not None
         assert profile.skills_rel_root == ".agents/skills"
         assert BaseIntegrator.validate_deploy_path(".codex/agents/a.toml", tmp_path)
+
+    def test_selected_user_profiles_follow_codex_home(self, monkeypatch, tmp_path):
+        """A CODEX_HOME root is the selected Codex profile, so other roots are not stale."""
+        from apm_cli.integration.targets import is_other_profile_path, selected_user_profiles
+
+        home = self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", str(home / ".config" / "codex"))
+
+        profile = selected_user_profiles()["codex"]
+
+        assert profile.root_dir == ".config/codex"
+        assert not is_other_profile_path(profile, ".config/codex/agents/a.toml")
+        assert not is_other_profile_path(profile, ".agents/skills/demo/SKILL.md")
+        assert is_other_profile_path(profile, ".codex/agents/a.toml")
+
+    def test_relative_codex_home_does_not_break_other_profiles(self, monkeypatch, tmp_path):
+        """Cleanup for Claude/Hermes keeps working; only Codex deploys fail on a relative value."""
+        from apm_cli.integration.targets import get_integration_prefixes, selected_user_profiles
+
+        self._home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CODEX_HOME", "relative/codex")
+
+        profiles = selected_user_profiles()
+
+        assert "codex" not in profiles
+        assert {"claude", "hermes"} <= set(profiles)
+        assert ".codex/" in get_integration_prefixes(user_scope=True)

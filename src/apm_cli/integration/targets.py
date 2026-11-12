@@ -1401,12 +1401,17 @@ def selected_user_profiles() -> dict[str, TargetProfile]:
     """Return the user-scope profile each :data:`USER_ROOT_ENV_VARS` target selects.
 
     Without the variable the default root (``~/.claude``, ``~/.hermes``,
-    ``~/.codex``) is the selected profile.
+    ``~/.codex``) is the selected profile. A target whose variable cannot
+    select a root (a relative ``CODEX_HOME``) is omitted so other targets'
+    cleanup keeps working; commands that deploy to it still fail clearly.
     """
     profiles: dict[str, TargetProfile] = {}
     for name in USER_ROOT_ENV_VARS:
         base = KNOWN_TARGETS.get(name)
-        scoped = base.for_scope(user_scope=True) if base is not None else None
+        try:
+            scoped = base.for_scope(user_scope=True) if base is not None else None
+        except PathTraversalError:
+            continue
         if scoped is not None:
             profiles[name] = scoped
     return profiles
