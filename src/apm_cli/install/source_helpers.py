@@ -99,6 +99,73 @@ def record_declared_license(ctx: Any, dep_key: str, install_path: Path) -> None:
         ctx.package_declared_licenses[dep_key] = declared
 
 
+def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
+    """Return this run's carried licence records for *dep_key*, else the lock's (#3556)."""
+    if dep_key in ctx.package_carried_licenses:
+        return ctx.package_carried_licenses[dep_key]
+    return tuple(getattr(locked_dep, "carried_licenses", ()) or ())
+
+
+def record_carried_package_hash(
+    ctx: Any,
+    dep_key: str,
+    install_path: Path,
+    package_info: Any = None,
+    *,
+    locked_dep: Any = None,
+) -> frozenset[str]:
+    """Record carried licences (#3556) and the content hash that excludes them.
+
+    A fresh download passes *package_info*; a cached package reuses this run's
+    records or, when its copies are still intact, the lock entry's records.
+    Returns the excluded package-relative paths.
+    """
+    from apm_cli.deps.carried_license import carried_copies_intact, carried_license_paths
+    from apm_cli.utils import content_hash
+
+    if package_info is not None:
+        carried = tuple(getattr(package_info, "carried_licenses", ()) or ())
+    else:
+        carried = carried_licenses_for(ctx, dep_key, locked_dep)
+        if carried and not carried_copies_intact(install_path, carried):
+            carried = ()
+    ctx.package_carried_licenses[dep_key] = carried
+    excluded = carried_license_paths(carried)
+    if install_path.is_dir():
+        ctx.package_hashes[dep_key] = content_hash.compute_package_hash(
+            install_path, exclude=excluded
+        )
+    return excluded
+
+
+def ensure_carried_licenses_match(
+    ctx: Any, dep_key: str, install_path: Path, locked_dep: Any
+) -> None:
+    """Fail closed when fresh carried licences differ from the lock record (#3556).
+
+    The copies are excluded from content_hash, so the lock's carried records
+    are their integrity baseline, as content_hash is for the package.
+    """
+    locked = getattr(locked_dep, "carried_licenses", ()) if locked_dep else ()
+    if (
+        ctx.update_refs
+        or dep_key in ctx.expected_hash_change_deps
+        or not locked
+        or frozenset(locked) == frozenset(ctx.package_carried_licenses.get(dep_key, ()))
+    ):
+        return
+    from apm_cli.install.errors import DirectDependencyError
+    from apm_cli.utils.path_security import safe_rmtree
+
+    safe_rmtree(install_path, ctx.apm_modules_dir)
+    raise DirectDependencyError(
+        f"Licence file mismatch for {dep_key}: the licence files carried "
+        "from the repository differ from the lockfile record. "
+        "This may indicate a supply-chain attack. Use "
+        "'apm install --update' to accept new content and update the lockfile."
+    )
+
+
 def rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
     """Rebuild a complete ``GitSemverResolution`` from a cached lockfile entry."""
     if dep_locked_chk is None:

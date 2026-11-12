@@ -393,7 +393,8 @@ def _finish_selected_profile_uninstall(
 
 
 @click.command(
-    help="Remove packages using manifest entries or direct locked keys from 'apm deps list'"
+    help="Remove packages using manifest entries or direct locked keys from 'apm deps list'",
+    short_help="Remove packages by manifest entry or locked key",
 )
 @click.argument("packages", nargs=-1, required=True)
 @click.option(

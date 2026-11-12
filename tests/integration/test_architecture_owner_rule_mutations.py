@@ -706,6 +706,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-codex-agent-link-resolution",
+        rule_id="install-deployment-codex-agent-link-resolution",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="resolve_links=self.resolve_links,",
+        new="resolve_links=None,",
+        intent="Codex agent conversion bypasses the shared link resolver again.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
@@ -1887,6 +1895,34 @@ def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
     old = "for relative in _find_orphaned_packages("
     assert source.count(old) == 1
     mutated = source.replace(old, "for relative in sorted(", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_orphan_selection_guard_rejects_superseded_root_trim_bypass() -> None:
+    """Trimming a superseded whole-repo checkout cannot bypass the shared selector (#2926)."""
+    path = "src/apm_cli/install/phases/cleanup.py"
+    source = _source(path)
+    old = "for orphan in _find_orphaned_packages(entries, retained):"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "for orphan in sorted(set(entries) - retained):", 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "install-deployment-orphan-selection"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+def test_orphan_selection_guard_rejects_deps_list_bypass() -> None:
+    """deps list cannot classify bundled content apart from prune's selector (#2926)."""
+    path = "src/apm_cli/commands/deps/cli.py"
+    source = _source(path)
+    old = "_find_orphaned_packages(\n"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "sorted(\n", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-orphan-selection"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
