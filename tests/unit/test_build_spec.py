@@ -43,6 +43,20 @@ _REPO_ROOT = _find_repo_root()
 _SPEC_FILE = _REPO_ROOT / "build" / "apm.spec"
 
 
+def _collect_submodule_packages(source: str) -> list[str]:
+    """Return package names passed to collect_submodules() in the spec."""
+    tree = ast.parse(source)
+    return [
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "collect_submodules"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+    ]
+
+
 def _extract_spec_helpers() -> str:
     """Return a self-contained Python source snippet with only the helper
     function definitions extracted from the spec file.
@@ -155,18 +169,15 @@ class TestSpecFileSyntax:
     def test_collects_rich_unicode_data_submodules(self):
         """Rich cell-width tables dynamically import versioned Unicode modules."""
         source = _SPEC_FILE.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(_SPEC_FILE))
-        collected_packages = [
-            node.args[0].value
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "collect_submodules"
-            and len(node.args) == 1
-            and isinstance(node.args[0], ast.Constant)
-        ]
+        collected_packages = _collect_submodule_packages(source)
 
         assert collected_packages.count("rich._unicode_data") == 1
+
+    def test_collects_command_submodules_for_lazy_dispatch(self):
+        """Lazy verbs are importlib string paths; freeze the commands package."""
+        source = _SPEC_FILE.read_text(encoding="utf-8")
+        collected_packages = _collect_submodule_packages(source)
+        assert collected_packages.count("apm_cli.commands") == 1
 
 
 # ---------------------------------------------------------------------------

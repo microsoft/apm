@@ -22,11 +22,24 @@
 # by every worker before any test in any test directory runs, so this is
 # the earliest hook we have without writing a pytest plugin.
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture
+def valid_hook_package(tmp_path: Path) -> Path:
+    """Materialize the minimum valid manifestless hook package."""
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    (hooks / "lint.json").write_text(
+        '{"hooks":{"preToolUse":[{"bash":"echo fixture"}]}}', encoding="utf-8"
+    )
+    return tmp_path
+
 
 _TMP_HOME = Path(tempfile.mkdtemp(prefix="apm-test-home-"))
 
@@ -125,25 +138,21 @@ def _isolate_discovery_state():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_ssl_state():
-    """Restore process-global truststore injection between tests."""
-    import contextlib
+def _hermetic_copilot_plugin_capability():
+    """Reset native Agent Plugin registration state between tests.
 
+    Admission is a pure function of resolved target names -- it never reads
+    the host (no binary probe, no version, no environment override), so
+    there is nothing to pin here. This fixture only resets the published
+    capability contextvar so one test's ``activate_native_registration``
+    call can never leak into the next.
+    """
+    from apm_cli.copilot_plugins.capability import _ACTIVE as _capability_var
+    from apm_cli.copilot_plugins.capability import reset_native_registration
+
+    token = _capability_var.set(None)
     try:
-        import truststore
-    except Exception:
-        truststore = None
-
-    if truststore is not None:
-        with contextlib.suppress(Exception):
-            truststore.extract_from_ssl()
-
-    from apm_cli.core.tls_trust import configure_process_tls_trust
-
-    configure_process_tls_trust.cache_clear()
-    yield
-    configure_process_tls_trust.cache_clear()
-
-    if truststore is not None:
-        with contextlib.suppress(Exception):
-            truststore.extract_from_ssl()
+        yield
+    finally:
+        with contextlib.suppress(ValueError):
+            reset_native_registration(token)

@@ -261,7 +261,7 @@ def _run_matrix(root: Path, binary: Path) -> _MatrixReceipt:
         lifecycle_actions=(
             LifecycleAction(("install", "--target", "copilot")),
             LifecycleAction(("compile", "--target", "copilot", "--force-instructions")),
-            LifecycleAction(("pack", "--format", "plugin", "--offline")),
+            LifecycleAction(("pack", "--format", "claude-plugin", "--offline")),
         ),
     )
     runner = ApmLifecycleRunner((str(binary),), scenario_timeout_seconds=240)
@@ -484,7 +484,7 @@ def test_tampered_genuine_bundle_fails_closed_before_deployment(
     )
 
     assert result.returncode == 1
-    assert "Hash mismatch for agents/shared.agent.md" in result.stderr
+    assert "Hash mismatch for agents/shared.agent.md" in result.stdout + result.stderr
     negative_snapshot = ArtifactSnapshot.capture(negative_consumer.root)
     assert_paths_absent(
         negative_snapshot,

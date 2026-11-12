@@ -13,11 +13,13 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apm_cli.core.deployment_state import MaterializationStatus
+from apm_cli.hook_contract import HookContractError
+from apm_cli.integration.hook_command_paths import normalize_quoted_plugin_root
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,
@@ -1281,18 +1283,18 @@ class TestCursorIntegration:
         config = json.loads(hooks_path.read_text())
         assert "hooks" in config
         assert config["version"] == 1
-        assert "PreToolUse" in config["hooks"]
-        assert "PostToolUse" in config["hooks"]
-        assert "Stop" in config["hooks"]
-        assert "UserPromptSubmit" in config["hooks"]
+        assert "preToolUse" in config["hooks"]
+        assert "postToolUse" in config["hooks"]
+        assert "stop" in config["hooks"]
+        assert "beforeSubmitPrompt" in config["hooks"]
 
         # Ownership stays in the external APM sidecar, not the native schema.
-        assert "_apm_source" not in config["hooks"]["PreToolUse"][0]
+        assert "_apm_source" not in config["hooks"]["preToolUse"][0]
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
-        assert sidecar["PreToolUse"][0]["_apm_source"] == "hookify"
+        assert sidecar["preToolUse"][0]["_apm_source"] == "hookify"
 
         # Verify rewritten paths point to .cursor/hooks/ (normalize separators)
-        cmd = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        cmd = config["hooks"]["preToolUse"][0]["command"]
         assert ".cursor/hooks/hookify/hooks/pretooluse.py" in cmd.replace("\\", "/")
 
     def test_skips_when_no_cursor_dir(self, temp_project):
@@ -1332,10 +1334,10 @@ class TestCursorIntegration:
         assert len(config["hooks"]["afterFileEdit"]) == 1
         assert config["hooks"]["afterFileEdit"][0]["command"] == "echo user-hook"
         # New hook added
-        assert "Stop" in config["hooks"]
-        assert "_apm_source" not in config["hooks"]["Stop"][0]
+        assert "stop" in config["hooks"]
+        assert "_apm_source" not in config["hooks"]["stop"][0]
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
-        assert sidecar["Stop"][0]["_apm_source"] == "pkg"
+        assert sidecar["stop"][0]["_apm_source"] == "pkg"
 
     def test_additive_merge_same_event(self, temp_project):
         """Test that multiple packages can add hooks to the same event."""
@@ -1369,11 +1371,11 @@ class TestCursorIntegration:
         integrator.integrate_package_hooks_cursor(pkg2_info, temp_project)
 
         config = json.loads((temp_project / ".cursor" / "hooks.json").read_text())
-        # Both entries present under Stop
-        assert len(config["hooks"]["Stop"]) == 2
-        assert all("_apm_source" not in entry for entry in config["hooks"]["Stop"])
+        # Both entries present under native stop.
+        assert len(config["hooks"]["stop"]) == 2
+        assert all("_apm_source" not in entry for entry in config["hooks"]["stop"])
         sidecar = json.loads((temp_project / ".cursor" / "apm-hooks.json").read_text())
-        assert [entry["_apm_source"] for entry in sidecar["Stop"]] == [
+        assert [entry["_apm_source"] for entry in sidecar["stop"]] == [
             "ralph-loop",
             "other-pkg",
         ]
@@ -1468,17 +1470,104 @@ class TestCursorIntegration:
         assert config.get("version") == 1
 
     def test_cursor_existing_version_preserved(self, temp_project):
-        """A pre-existing "version" value in hooks.json must not be overwritten."""
+        """Unsupported existing versions are rejected, not overwritten."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
         hooks_path.write_text(json.dumps({"version": 2, "hooks": {}}))
 
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
 
-        integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+        with pytest.raises(HookContractError, match="requires version 1"):
+            integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
 
         config = json.loads(hooks_path.read_text())
         assert config.get("version") == 2
+
+    def test_cursor_existing_unknown_top_level_key_rejected(self, temp_project):
+        """Unsupported top-level keys Cursor would not load are rejected, not silently kept."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(json.dumps({"version": 1, "hooks": {}, "unsupportedKey": True}))
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        with pytest.raises(HookContractError, match="unsupported top-level keys"):
+            integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+
+        config = json.loads(hooks_path.read_text())
+        assert config.get("unsupportedKey") is True
+
+    def test_fallback_preflight_forwards_retiring_targets(self, temp_project):
+        """``_integrate_merged_hooks`` always re-checks Cursor/import sources
+        at its own write boundary, unconditionally, even when an up-front
+        ``preflight_hooks_for_targets`` call already ran for this plan
+        (#3129). That check must still honor ``retiring_targets`` or a
+        target slated for safe retirement this run can be misflagged as an
+        import-coexistence conflict. Verified at the exact plumbing
+        boundary (the forwarded kwarg), not by re-deriving the full
+        overlap-detection algorithm.
+        """
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+        from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+        # hook_source_selection=None means the up-front
+        # preflight_hooks_for_targets() gate is a no-op for this plan, so
+        # the unconditional check inside _integrate_merged_hooks is the
+        # ONLY preflight that runs for this single invocation.
+        source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
+        expected_retiring = frozenset({"claude"})
+
+        with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
+            integrator._integrate_merged_hooks(
+                _MERGE_HOOK_TARGETS["cursor"],
+                pkg_info,
+                temp_project,
+                source_plan=source_plan,
+                retiring_targets=expected_retiring,
+            )
+
+        mock_preflight.assert_called_once()
+        assert mock_preflight.call_args.kwargs["retiring_targets"] == expected_retiring
+
+    def test_integrate_merged_hooks_rechecks_preflight_after_upfront_run(self, temp_project):
+        """Mutation-break proof for the #3129 cached-plan bypass.
+
+        The up-front ``preflight_hooks_for_targets`` call and the per-target
+        write boundary inside ``_integrate_merged_hooks`` must each call
+        ``preflight_cursor_hooks`` independently. If a "run once per plan"
+        cache bit is reintroduced (the removed ``cursor_preflight_done``
+        field), the per-target call below would be skipped and the mock's
+        total call count would stay at 1 instead of reaching 2.
+        """
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+        from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+        source_plan = DeployableSourcePlan.create(
+            pkg_info,
+            [KNOWN_TARGETS["cursor"]],
+            skill_subset=None,
+            hooks_approved=True,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        assert source_plan.hook_source_selection is not None
+
+        with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
+            integrator.preflight_hooks_for_targets(pkg_info, temp_project, source_plan)
+            assert mock_preflight.call_count == 1
+
+            integrator._integrate_merged_hooks(
+                _MERGE_HOOK_TARGETS["cursor"],
+                pkg_info,
+                temp_project,
+                source_plan=source_plan,
+            )
+            assert mock_preflight.call_count == 2
 
 
 # ─── Sync/cleanup tests ──────────────────────────────────────────────────────
@@ -1672,6 +1761,255 @@ class TestScriptPathRewriting:
 
         assert ".claude/hooks/my-pkg/hooks/run.sh" in cmd
         assert len(scripts) == 1
+
+    def test_rewrite_plugin_root_with_quote_before_separator(self, temp_project):
+        """A quote between the variable and the separator must not defeat the matcher."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert ".github/hooks/scripts/my-pkg/hooks/probe.py" in cmd
+        assert len(scripts) == 1
+        assert cmd.count('"') % 2 == 0
+
+    def test_rewrite_plugin_root_with_single_quote_before_separator(self, temp_project):
+        """Single quotes normalize to an expandable, balanced command."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "python3 '${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert ".github/hooks/scripts/my-pkg/hooks/probe.py" in cmd
+        assert len(scripts) == 1
+        assert "'" not in cmd
+        assert cmd.count('"') == 2
+
+    def test_quote_before_separator_matches_fully_quoted_spelling(self, temp_project):
+        """Both spellings must produce the same rewritten command."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "run.sh").write_text("#!/bin/bash", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        split_quote, split_scripts = integrator._rewrite_command_for_target(
+            'bash "${CLAUDE_PLUGIN_ROOT}"/hooks/run.sh',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+        wrapped_quote, wrapped_scripts = integrator._rewrite_command_for_target(
+            'bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh"',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert split_quote == wrapped_quote
+        assert len(split_scripts) == len(wrapped_scripts) == 1
+
+    @pytest.mark.parametrize("operator", ("&&", ";", "|"))
+    def test_quote_before_separator_stops_before_shell_operator(self, temp_project, operator):
+        """Adjacent shell operators must remain outside the rewritten path."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            f'python3 "${{CLAUDE_PLUGIN_ROOT}}"/hooks/probe.py{operator}echo done',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert f"{operator}echo done" in cmd
+        assert cmd.count('"') == 2
+        assert len(scripts) == 1
+
+    def test_quote_before_separator_preserves_escaped_space(self, temp_project):
+        """An escaped space remains part of the balanced quoted script path."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "my script.py").write_text("print('ok')", encoding="utf-8")
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            r'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/my\ script.py',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert ".claude/hooks/my-pkg/hooks/my script.py" in cmd
+        assert cmd.count('"') == 2
+        assert len(scripts) == 1
+
+    def test_quote_normalization_handles_long_escaped_input(self):
+        """Long escaped input must normalize without pathological matching."""
+        escaped_path = r"\ " * 5000
+
+        normalized = normalize_quoted_plugin_root(
+            f'python3 "${{CLAUDE_PLUGIN_ROOT}}"/hooks/{escaped_path}probe.py'
+        )
+
+        assert normalized.startswith('python3 "${CLAUDE_PLUGIN_ROOT}/hooks/')
+        assert normalized.endswith('probe.py"')
+
+    def test_missing_script_with_quote_before_separator_warns(self, temp_project, capsys):
+        """An unresolvable plugin-root reference must not be silently dropped."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        _, scripts = integrator._rewrite_command_for_target(
+            'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/absent.py',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert len(scripts) == 0
+        assert "Hook script not found" in capsys.readouterr().out
+
+    def test_unparseable_plugin_root_reference_warns(self, temp_project, capsys):
+        """A reference the matcher cannot parse must still produce a diagnostic."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            'echo "${CLAUDE_PLUGIN_ROOT}"',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert len(scripts) == 0
+        assert cmd == 'echo "${CLAUDE_PLUGIN_ROOT}"'
+        output = capsys.readouterr().out
+        assert "Plugin-root reference has no path" in output
+        assert "Add a package-relative path after the token" in output
+
+    def test_unparseable_plugin_root_warning_escapes_control_characters(self, temp_project, capsys):
+        """A package-controlled residual cannot inject terminal controls."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        HookIntegrator()._rewrite_command_for_target(
+            'echo "${CLAUDE_PLUGIN_ROOT}\x1b[31m"',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        out = capsys.readouterr().out
+        assert "\x1b[31m" not in out
+        assert "${CLAUDE_PLUGIN_ROOT}?[31m" in out
+
+    def test_missing_plugin_root_path_warning_escapes_control_characters(
+        self, temp_project, capsys
+    ):
+        """A matched missing path cannot inject terminal controls."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        HookIntegrator()._rewrite_command_for_target(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/missing\x1b[31m.py",
+            pkg_dir,
+            "unsafe-package",
+            "vscode",
+        )
+
+        out = capsys.readouterr().out
+        assert "\x1b[31m" not in out
+        assert "unsafe-package" in out
+        assert "missing?[31m.py" in "".join(out.split())
+
+    def test_mismatched_quotes_around_plugin_root_warns(self, temp_project, capsys):
+        """Mismatched quotes are not normalized, so the residual scan must report them."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        _, scripts = integrator._rewrite_command_for_target(
+            "python3 \"${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert len(scripts) == 0
+        output = capsys.readouterr().out
+        assert "Unresolved plugin-root reference" in output
+        assert "Ensure the quote marks match" in output
+
+    def test_plugin_root_path_traversal_warns(self, temp_project, capsys):
+        """A rejected traversal must remain visible to the package author."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        _, scripts = HookIntegrator()._rewrite_command_for_target(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/../outside.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert scripts == []
+        output = capsys.readouterr().out
+        assert "Hook path escapes package 'my-pkg'" in output
+        assert "Keepthepathinsidethepackage" in "".join(output.split())
+        assert "Hook script not found" not in output
+
+    def test_resolved_plugin_root_emits_no_residual_warning(self, temp_project, capsys):
+        """The residual scan must stay quiet when every reference was rewritten."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        for command in (
+            "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/probe.py",
+            'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"',
+            'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+        ):
+            integrator._rewrite_command_for_target(command, pkg_dir, "my-pkg", "vscode")
+            assert "Unresolved plugin-root reference" not in capsys.readouterr().out
+
+    def test_missing_script_warns_once_not_twice(self, temp_project, capsys):
+        """A matched-but-missing script must not also trip the residual scan."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        integrator._rewrite_command_for_target(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/absent.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        out = capsys.readouterr().out
+        assert "Hook script not found" in out
+        assert "Unresolved plugin-root reference" not in out
 
     def test_rewrite_claude_project_powershell_path_is_cwd_independent(self, temp_project):
         """Claude project PowerShell hooks must use Claude's project-root variable."""
@@ -2610,6 +2948,7 @@ class TestCodexHookIntegration:
         assert "SessionStart" in data["hooks"]
         entries = data["hooks"]["SessionStart"]
         assert all("_apm_source" not in entry for entry in entries)
+        assert entries == [{"hooks": [{"type": "command", "command": "echo hello"}]}]
         sidecar = json.loads((self.root / ".codex" / "apm-hooks.json").read_text())
         assert sidecar["SessionStart"][0]["_apm_source"] == "test-pkg"
 
@@ -2619,7 +2958,13 @@ class TestCodexHookIntegration:
         hooks_json = self.root / ".codex" / "hooks.json"
         hooks_json.write_text(
             json.dumps(
-                {"hooks": {"PreToolUse": [{"type": "command", "command": "echo user-hook"}]}}
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"hooks": [{"type": "command", "command": "echo user-hook"}]}
+                        ]
+                    }
+                }
             )
         )
 
@@ -2632,7 +2977,7 @@ class TestCodexHookIntegration:
         assert "PreToolUse" in data["hooks"]
         user_entries = [e for e in data["hooks"]["PreToolUse"] if "_apm_source" not in e]
         assert len(user_entries) == 1
-        assert user_entries[0]["command"] == "echo user-hook"
+        assert user_entries[0]["hooks"][0]["command"] == "echo user-hook"
         # APM hook added
         assert "SessionStart" in data["hooks"]
 
@@ -2670,7 +3015,7 @@ class TestCodexHookIntegration:
         integrator.integrate_package_hooks_codex(pi, self.root)
 
         data = json.loads((self.root / ".codex" / "hooks.json").read_text())
-        cmd = data["hooks"]["SessionStart"][0]["command"]
+        cmd = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         assert cmd == ".codex/hooks/test-pkg/hooks/run.sh", (
             f"Project-scope Codex command must be repo-relative; got {cmd!r}"
         )
@@ -2978,6 +3323,8 @@ class TestScopeResolvedHookDeployment:
         t = MagicMock()
         t.name = name
         t.root_dir = root_dir
+        t.prefix = f"{root_dir}/"
+        t.user_root_resolver = None
         t.supports = lambda prim: prim in (primitives or {"hooks"})
         if primitives is None:
             primitives = {"hooks"}
@@ -3876,8 +4223,8 @@ class TestIssue1007Fixes:
         assert "PostToolUse" in hooks, "PascalCase key must be preserved"
         assert "postToolUse" not in hooks, "No duplicate camelCase key should appear"
 
-    def test_cursor_no_normalisation(self, temp_project_with_cursor: Path) -> None:
-        """Cursor target has no event-name mapping; PostToolUse passes through as-is."""
+    def test_cursor_native_normalisation(self, temp_project_with_cursor: Path) -> None:
+        """Cursor maps the documented PostToolUse alias to its native event."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         project = temp_project_with_cursor
@@ -3895,7 +4242,8 @@ class TestIssue1007Fixes:
         HookIntegrator().integrate_hooks_for_target(target, pkg_info, project)
 
         hooks = self._read_cursor_hooks(project).get("hooks", {})
-        assert "PostToolUse" in hooks, "PostToolUse must survive cursor integration unchanged"
+        assert "postToolUse" in hooks
+        assert "PostToolUse" not in hooks
 
     # ------------------------------------------------------------------
     # Group D: Deduplication

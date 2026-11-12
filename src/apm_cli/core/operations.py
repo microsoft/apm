@@ -48,6 +48,7 @@ def install_package(
     project_root: Path | str | None = None,
     user_scope: bool = False,
     replace_existing: bool = False,
+    managed_fields: set[str] | None = None,
 ):
     """Install an MCP package for a specific client type.
 
@@ -88,11 +89,13 @@ def install_package(
                 server_info_cache=server_info_cache,
                 runtime_vars=shared_runtime_vars,
                 replace_existing=replace_existing,
+                managed_fields=managed_fields,
             )
         else:
             summary = safe_installer.install_servers(
                 [package_name],
                 replace_existing=replace_existing,
+                managed_fields=managed_fields,
             )
 
         return {
@@ -100,6 +103,7 @@ def install_package(
             "installed": len(summary.installed) > 0,
             "skipped": len(summary.skipped) > 0,
             "failed": len(summary.failed) > 0,
+            "native_hashes": summary.native_hashes,
         }
 
     except Exception as e:

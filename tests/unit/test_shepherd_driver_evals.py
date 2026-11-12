@@ -1,4 +1,4 @@
-"""Contract checks for shepherd-driver functional-evidence eval fixtures."""
+"""Contract checks for merge-worker functional-evidence eval fixtures."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).parents[2]
-EVALS = ROOT / "tests/fixtures/shepherd_driver/functional_evidence_evals.json"
-PROMPT = ROOT / "packages/shepherd-driver/assets/shepherd-driver-prompt.md"
-GATE = ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py"
+EVALS = ROOT / "tests/fixtures/autopilot_pr_merge_worker/functional_evidence_evals.json"
+PROMPT = ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/worker-prompt.md"
+GATE = ROOT / "packages/autopilot/autopilot-pr-merge-worker/scripts/owner_touch_gate.py"
 REQUIRED_SCENARIOS = {
     "positive-owner-touch",
     "missing-functional-evidence",
@@ -25,8 +25,9 @@ def _manifest() -> dict[str, Any]:
 
 
 def test_content_evals_cover_required_fail_closed_scenarios() -> None:
-    """The eval inventory must retain all Shepherd evidence scenarios."""
+    """The eval inventory must retain all merge-worker evidence scenarios."""
     manifest = _manifest()
+    assert manifest["skill"] == "autopilot-pr-merge-worker"
     scenarios = {item["id"]: item for item in manifest["content_evals"]}
 
     assert set(scenarios) == REQUIRED_SCENARIOS

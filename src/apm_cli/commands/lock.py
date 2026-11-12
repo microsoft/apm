@@ -43,6 +43,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.install.locking import serialized_lifecycle
+
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
 from ..export.formats import FORMAT_CYCLONEDX, SUPPORTED_FORMATS
@@ -168,6 +170,7 @@ def lock(
     )
 
 
+@serialized_lifecycle
 def _run_lock(
     *,
     verbose: bool,
@@ -222,7 +225,7 @@ def _run_lock(
     try:
         from apm_cli.commands.install import _install_apm_dependencies
 
-        _install_apm_dependencies(
+        result = _install_apm_dependencies(
             apm_package,
             update_refs=update_refs,
             verbose=verbose,
@@ -238,12 +241,15 @@ def _run_lock(
     except Exception as e:
         _handle_lock_error(e, verbose)
 
-    _rich_success("Lockfile written to apm.lock.yaml", symbol="check")
+    from apm_cli.install.summary import exit_unless_install_result_allows_success
+
+    exit_unless_install_result_allows_success(logger=logger, result=result)
+    logger.success("Lockfile written to apm.lock.yaml", symbol="check")
 
 
 @lock.command(
     name="export",
-    help="Export an SBOM/inventory from the existing lockfile (reads apm.lock.yaml only)",
+    help="Export an SBOM/inventory from apm.lock.yaml, or legacy apm.lock without migration",
 )
 @click.option(
     "--format",
@@ -275,9 +281,9 @@ def _run_lock(
     "timestamp",
     default=None,
     help=(
-        "Pin the SBOM timestamp (ISO 8601, e.g. 2024-06-01T00:00:00+00:00) for "
-        "reproducible output. Defaults to SOURCE_DATE_EPOCH, then the lockfile's "
-        "generated_at."
+        "Pin the SBOM timestamp (ISO 8601 with timezone required, e.g. "
+        "2024-06-01T00:00:00+00:00) for reproducible output. Defaults to "
+        "SOURCE_DATE_EPOCH, then the lockfile's legacy generated_at, then the Unix epoch."
     ),
 )
 def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
@@ -288,7 +294,7 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     re-resolves, re-hashes, or touches the network.
     """
     from apm_cli.core.scope import InstallScope, get_apm_dir
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from apm_cli.export.sbom import export_sbom
 
     if global_:
@@ -297,12 +303,12 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
         manifest_path = _find_apm_yml()
         project_root = manifest_path.parent if manifest_path else Path.cwd().resolve()
 
-    lockfile_path = get_lockfile_path(project_root)
-    if not lockfile_path.is_file():
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
         _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
         sys.exit(1)
 
-    lockfile = LockFile.from_yaml(lockfile_path.read_text(encoding="utf-8"))
     resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)
 
     document = export_sbom(lockfile, fmt, timestamp=resolved_timestamp)
@@ -321,20 +327,24 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     the lockfile's ``generated_at`` > a fixed epoch. Pinning keeps export
     byte-deterministic across runs.
     """
-    import os
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    if explicit:
-        return explicit
-    epoch = os.environ.get("SOURCE_DATE_EPOCH")
-    if epoch:
+    from apm_cli.deps.lockfile import resolve_reproducible_timestamp
+
+    if explicit is not None:
         try:
-            return datetime.fromtimestamp(int(epoch), tz=timezone.utc).isoformat()
-        except (ValueError, OverflowError, OSError):
-            pass
-    if lockfile_generated_at:
-        return lockfile_generated_at
-    return "1970-01-01T00:00:00+00:00"
+            dt = datetime.fromisoformat(explicit)
+        except (ValueError, TypeError):
+            dt = None
+        if dt is None or dt.tzinfo is None:
+            display_value = explicit.strip()
+            raise click.BadParameter(
+                f"Invalid timestamp {display_value!r}. Expected timezone-aware ISO "
+                "8601 format, e.g. 2024-06-01T00:00:00+00:00.",
+                param_hint="'--timestamp'",
+            )
+        return dt.isoformat()
+    return resolve_reproducible_timestamp(None, lockfile_generated_at)
 
 
 __all__ = ["lock"]

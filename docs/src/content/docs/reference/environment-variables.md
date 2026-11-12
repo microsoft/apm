@@ -26,37 +26,43 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GITLAB_TOKEN` | GitLab fallback token. | unset | |
 | `GITLAB_HOST` | Single self-managed GitLab hostname (e.g. `gitlab.example.com`). | unset | Recognised as GitLab-class for transport / auth. |
 | `APM_GITLAB_HOSTS` | Comma-separated list of additional GitLab hostnames to classify as GitLab-class. | unset | Use when you operate multiple GitLab instances. |
-| `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`; Azure DevOps Server is PAT-only. |
+| `ADO_APM_PAT` | Azure DevOps PAT for `ado_modules`. | unset | Azure DevOps Services falls back to AAD bearer via `az`, then path-scoped `git credential fill`. Azure DevOps Server uses the PAT then fill; it does not use `az`. |
 | `ADO_HOST` | Single on-prem Azure DevOps Server FQDN (e.g. `ado.company.com`). Registers the host as ADO-class for auth and API routing. | unset | Hostname only: no scheme, port, or path. Takes precedence over an overlapping `GITHUB_HOST`. |
 | `APM_ADO_HOSTS` | Comma-separated list of on-prem ADO Server FQDNs, all classified as ADO-class. | unset | Entries are trimmed and matched case-insensitively; use for multiple Server instances. |
 | `ARTIFACTORY_APM_TOKEN` | JFrog Artifactory token for `artifactory_modules`. | unset | Also used by the registry-proxy resolver. |
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
 
-## Transport and protocol
+## Transport and credential order
 
-Controls how APM clones packages and enumerates refs on Git hosts. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
+Controls how APM clones packages and enumerates refs on Git hosts: `APM_GIT_PROTOCOL` and `APM_ALLOW_PROTOCOL_FALLBACK` select the transport scheme, while `APM_GITHUB_AUTH_FIRST` changes credential order for exact-host `github.com` without affecting transport. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
 | `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
+| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the initial anonymous HTTPS attempt for exact-host `github.com` when a credential resolves. | unset | Equivalent to `--auth-first`. Resolution: CLI flag, then env var, then `github-auth-first` in `~/.apm/config.json`, then `false`. See [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 
 ## TLS trust
 
-APM verifies HTTPS against the operating-system trust store by default. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
+APM verifies package-management HTTPS against the operating-system trust store by default, with bundled `certifi` as the Requests fallback. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for the full troubleshooting flow.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `REQUESTS_CA_BUNDLE` | PEM bundle for APM's Python HTTP requests. | unset | Explicit override; wins over OS trust-store injection. Use for a per-shell corporate CA bundle. |
-| `CURL_CA_BUNDLE` | PEM bundle fallback honoured by `requests`. | unset | Explicit override; wins over OS trust-store injection when `REQUESTS_CA_BUNDLE` is unset. |
-| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS trust-store injection. | unset | Escape hatch that restores the legacy bundled-`certifi` verification path. |
+| `REQUESTS_CA_BUNDLE` | PEM bundle replacing APM's normal Requests trust. | unset | Wins over `CURL_CA_BUNDLE`, additive trust, and OS injection. |
+| `CURL_CA_BUNDLE` | Replacement PEM bundle honored by Requests. | unset | Used when `REQUESTS_CA_BUNDLE` is unset; suppresses additive trust and OS injection. |
+| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS/additive trust. | unset | Restores bundled `certifi` unless an explicit Requests/curl replacement is set. |
+| `APM_EXTRA_CA_BUNDLE` | Certificate-only PEM bundle added to APM package-management HTTPS. | unset | Retains OS roots, or `certifi` roots on Requests fallback. Invalid selected input fails closed: it must be a readable, non-empty regular file, no larger than 8 MiB, containing ASCII PEM certificates and no private keys. |
+
+Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, then the normal OS/`certifi` defaults. Higher-precedence controls suppress additive-bundle validation. Unset or blank `APM_EXTRA_CA_BUNDLE` preserves existing behavior.
+
+The additive setting does not derive trust settings for `apm run` children or configure Git, Node, or Rust. Those retain their existing settings; see [runtime coverage](../../troubleshooting/ssl-issues/#runtime-coverage). For isolated `github.com` Git attempts, APM inherits your Git `http.sslBackend`, `http.sslCAInfo`, and `http.sslCAPath`; see [Authentication](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 ## Registry (MCP and proxy)
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp` and `apm install --mcp NAME`. Must be `https://`. | public registry | When set, every `apm mcp` command prints `Registry: <url>`. See [`apm mcp`](../cli/mcp/). |
+| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp`, `apm install --mcp NAME`, and manifest-driven `dependencies.mcp` installs. HTTPS by default; HTTP requires `MCP_REGISTRY_ALLOW_HTTP=1`. | public registry | When set, registry commands print `Registry: <url> (from MCP_REGISTRY_URL)` and installs print `Using MCP registry: <url> (from MCP_REGISTRY_URL)`. See [`apm mcp`](../cli/mcp/). |
 | `MCP_REGISTRY_ALLOW_HTTP` | Set to `1` to permit a plaintext `http://` `MCP_REGISTRY_URL` (development only). | unset | Required to opt in to HTTP; production should always use HTTPS. |
 | `MCP_REGISTRY_CONNECT_TIMEOUT` | Connect timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
@@ -83,17 +89,18 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
 | `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
 | `CODEX_HOME` | Override the Codex home used by Codex target detection and user-scope writes. | platform auto-detect | Read by the Codex integration target. |
-| `HERMES_HOME` | Override the Hermes home used by Hermes target detection and user-scope writes. | platform auto-detect | Requires the `hermes` experimental flag for Hermes deployment. |
+| `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | Used by the explicit `hermes` target; it does not enable auto-detection. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
-| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are written to `$CLAUDE_CONFIG_DIR/.claude.json`; when unset or blank, APM uses `~/.claude.json`. |
+| `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
 
 ## Policy
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_POLICY_DISABLE` | Set to `1` to skip policy discovery and enforcement for **the entire shell session**. Loudly logged. | unset | Equivalent to the per-invocation `--no-policy` on commands that expose it. The only escape hatch for `apm deps update`. See [`apm policy`](../cli/policy/). |
+| `APM_GITLAB_POLICY_REPO` | Override the org policy project name auto-discovered on GitLab (gitlab.com and self-managed). | `apm-policy` | A single project-name segment only; no slash or leading `.` / `_`. GitLab rejects the GitHub-family candidate cascade (`.github-private`, `.github`, `.apm`, `_apm`). See [Policy Files](../../enterprise/apm-policy/#where-it-lives). |
 
 ## External scanners
 
@@ -129,6 +136,6 @@ These variables exist in the codebase but are not part of the documented contrac
 | `APM_RESOLVE_PARALLEL` | Tunes parallelism in the dependency resolver. | implementation default | Subject to change. |
 | `APM_TIERED_RESOLVER` | Set to `0`/`false`/`no`/`off` to disable the tiered git-ref resolver (per-run cache + commits API + bare `rev-parse` + legacy clone) and force every `install`/`update`/`outdated` ref resolution through the legacy shallow-clone path. Emergency rollback for #1369. | `1` (on) | Subject to change. Removal expected once the tiered stack has soaked through a release. |
 | `APM_LEGACY_SKILL_PATHS` | Toggles legacy skill-path layout in integration targets. | unset | Compatibility shim; will be removed. |
-| `APM_NO_SCRIPTS` | Disables package lifecycle script execution. | unset | Internal safety/test switch; prefer executable trust policy in production. |
+| `APM_NO_SCRIPTS` | Disables all lifecycle scripts (install, update, uninstall, and compile). | unset | Internal safety/test switch; prefer executable trust policy in production. |
 | `APM_NON_INTERACTIVE` | Forces non-interactive behavior. | unset | Used by automation and tests. |
 | `APM_E2E_TESTS` | Marks the process as an end-to-end test run; relaxes some interactive guards. | unset | Test harness only. Do not set in normal use. |

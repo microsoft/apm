@@ -21,11 +21,11 @@ to remember the flag matrix.
 | See what is installed | `apm deps list` | Project scope. Add `--global` for `~/.apm/`. |
 | Inspect the dependency tree | `apm deps tree` | Hierarchical view of direct + transitive deps. |
 | Find out why a package is installed | `apm deps why <package>` | Reverse lookup -- "who pulled this in?". Add `--json` for scripts. |
-| See what is outdated | `apm outdated` | Locked refs vs latest matching upstream. |
+| See what is outdated | [`apm outdated`](../../reference/cli/outdated/) | Read-only upstream check. Registry rows separate Current, constraint-bound Wanted, and published Latest. |
 | Diagnose a broken environment | [`apm doctor`](../../reference/cli/doctor/) | Aggregated pass/fail table: Git, network, authentication, and marketplace configuration when present. |
 | Inspect the cache | `apm cache info` | Disk usage and location. `apm cache clean` removes everything; `apm cache prune --days N` is incremental. |
 | Inspect resolved runtimes | `apm runtime status` | Active runtime and preference order. |
-| Inspect resolved targets | `apm targets` | Which harnesses APM will deploy to. Add `--json --all` to include meta-targets (e.g. `agent-skills`). |
+| Inspect resolved targets | `apm targets` | Which harnesses APM will deploy to. Add `--json --all` to include explicit-only targets (e.g. `agent-skills`, `grok-bot`). |
 | Show package metadata | `apm view <package>` | Versions, refs, owner, declared scripts. |
 
 ## Recommended CI block

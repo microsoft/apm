@@ -16,12 +16,13 @@ Files are ONLY written when:
 3. Global instructions exist in the module tree
 4. The existing file either does not exist OR carries the generated marker
 
-Hand-authored files (no marker) are left untouched.
+Hand-authored files (no marker) are left untouched. Claude omits individually
+verified native rules and protects edited generated roots. Explicit cleanup
+removes only an unchanged, fully redundant generated Claude root.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -72,22 +73,18 @@ def _finalize_build_id(content: str) -> str:
     The hash is computed over all lines EXCEPT the placeholder line so the
     result is deterministic (not self-referential).
     """
-    from .constants import BUILD_ID_PLACEHOLDER
+    from .build_id import stabilize_build_id
 
-    lines = content.splitlines()
-    try:
-        idx = lines.index(BUILD_ID_PLACEHOLDER)
-    except ValueError:
-        return content
-
-    hash_input_lines = [line for i, line in enumerate(lines) if i != idx]
-    build_id = hashlib.sha256("\n".join(hash_input_lines).encode("utf-8")).hexdigest()[:12]
-    lines[idx] = f"<!-- Build ID: {build_id} -->"
-    return "\n".join(lines) + "\n"
+    return stabilize_build_id(content)
 
 
-def _generate_content(instructions: list[Instruction]) -> str:
-    """Generate the root context file content from a list of global instructions.
+def _generate_content(
+    instructions: list[Instruction],
+    *,
+    preserve_scoped_sections: bool = False,
+    base_dir: Path | None = None,
+) -> str:
+    """Generate root context content, retaining scoped sections when supported.
 
     Embeds the APM-generated marker and a deterministic Build ID so that
     subsequent runs can detect APM-owned files and apply overwrite protection.
@@ -95,18 +92,31 @@ def _generate_content(instructions: list[Instruction]) -> str:
     ASCII-only: no Unicode in the generated skeleton; instruction *content*
     is passed through as-is (callers are responsible for encoding checks).
     """
-    from .agents_compiler import _COPILOT_ROOT_GENERATED_MARKER
-    from .constants import BUILD_ID_PLACEHOLDER
+    from .constants import AGENTS_MD_GENERATED_MARKER, BUILD_ID_PLACEHOLDER
 
     sections: list[str] = [
-        _COPILOT_ROOT_GENERATED_MARKER,
+        AGENTS_MD_GENERATED_MARKER,
         BUILD_ID_PLACEHOLDER,
         "",
     ]
 
-    for instruction in instructions:
-        sections.append(instruction.content.strip())
-        sections.append("")
+    if preserve_scoped_sections:
+        from .template_builder import render_instructions_block
+
+        def emit(instruction: Instruction) -> list[str]:
+            return [instruction.content.strip(), ""]
+
+        sections.extend(
+            render_instructions_block(
+                instructions,
+                base_dir=base_dir or Path.cwd(),
+                emit_instruction=emit,
+            )
+        )
+    else:
+        for instruction in instructions:
+            sections.append(instruction.content.strip())
+            sections.append("")
 
     return _finalize_build_id("\n".join(sections))
 
@@ -115,11 +125,12 @@ def discover_global_instructions(
     source_root: Path,
     *,
     logger: _logging_module.Logger | None = None,
+    include_scoped: bool = False,
 ) -> list[Instruction]:
-    """Return global (apply_to-less) instructions under ``source_root/apm_modules``.
+    """Return global instructions and optionally scoped ones from ``apm_modules``.
 
     Returns an empty list when the ``apm_modules`` tree is absent or carries no
-    global instructions.  Results are sorted by file path for determinism so
+    matching instructions. Results are sorted by file path for determinism so
     callers (the compile engine and the install-time hint) agree on ordering.
     """
     from ..primitives.discovery import discover_primitives
@@ -136,7 +147,7 @@ def discover_global_instructions(
 
     primitives = discover_primitives(str(apm_modules))
     return sorted(
-        [instr for instr in primitives.instructions if not instr.apply_to],
+        [instr for instr in primitives.instructions if include_scoped or not instr.apply_to],
         key=lambda instr: str(instr.file_path),
     )
 
@@ -146,6 +157,7 @@ def compile_user_root_contexts(
     source_root: Path,
     *,
     dry_run: bool = False,
+    clean: bool = False,
     logger: _logging_module.Logger | None = None,
 ) -> list[UserRootCompileResult]:
     """Compile user-scope root context files from global (apply_to-less) instructions.
@@ -164,6 +176,7 @@ def compile_user_root_contexts(
             e.g. ``Path.home() / ".apm"``.
         dry_run: When True, no files are written or directories created.
             The returned status values reflect what *would* happen.
+        clean: Remove a redundant, unchanged generated Claude user root.
         logger: Optional logger.  Falls back to ``logging.getLogger(__name__)``.
 
     Returns:
@@ -176,10 +189,19 @@ def compile_user_root_contexts(
         * ``"would-write"``          -- dry_run; file would have been written
         * ``"skipped-no-instructions"`` -- no global instructions found
         * ``"skipped-hand-authored"`` -- existing file has no APM marker
+        * ``"skipped-native-rules"`` -- equivalent native rules cover all instructions
+        * ``"skipped-redundant"`` -- existing redundant root requires explicit clean
+        * ``"skipped-modified"`` / ``"skipped-symlink"`` -- protected existing root
+        * ``"removed"`` / ``"would-remove"`` -- explicit redundant-root cleanup
         * ``"error:<msg>"``          -- OS error during read or write
     """
+    import yaml
+
+    from ..integration.instruction_integrator import InstructionIntegrator
     from ..utils.path_security import PathTraversalError, ensure_path_within
-    from .agents_compiler import _COPILOT_ROOT_GENERATED_MARKER
+    from .constants import AGENTS_MD_GENERATED_MARKER
+    from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
+    from .root_context_protection import clean_redundant_user_root, protected_user_root_status
 
     log = logger or logging.getLogger(__name__)
 
@@ -194,7 +216,9 @@ def compile_user_root_contexts(
         )
         return results
 
-    global_instructions = discover_global_instructions(source_root, logger=log)
+    all_instructions = discover_global_instructions(source_root, logger=log, include_scoped=True)
+    global_instructions = [instr for instr in all_instructions if not instr.apply_to]
+    integrator = InstructionIntegrator()
 
     for target in targets:
         # Resolve to user scope; None == target does not support user scope
@@ -212,9 +236,11 @@ def compile_user_root_contexts(
             )
             continue
 
-        if not global_instructions:
+        preserve_scoped_sections = scoped.include_scoped_in_user_root_context
+        target_instructions = all_instructions if preserve_scoped_sections else global_instructions
+        if not target_instructions:
             log.debug(
-                "user_root_context: no global instructions found in %s -- skipping %s",
+                "user_root_context: no applicable instructions found in %s -- skipping %s",
                 apm_modules,
                 scoped.name,
             )
@@ -223,27 +249,92 @@ def compile_user_root_contexts(
 
         deploy_root = _resolve_deploy_root(scoped)
         root_filename = _ROOT_FILENAME[family]
+        output_path = deploy_root / root_filename
         try:
-            output_path = ensure_path_within(deploy_root / root_filename, deploy_root)
+            resolved_output_path = ensure_path_within(output_path, deploy_root)
         except PathTraversalError as exc:
             log.warning("user_root_context: unsafe output path for %s: %s", scoped.name, exc)
             results.append(
                 UserRootCompileResult(scoped.name, deploy_root / root_filename, f"error:{exc}")
             )
             continue
+        if family == "claude" and output_path.is_symlink():
+            results.append(UserRootCompileResult(scoped.name, output_path, "skipped-symlink"))
+            continue
+        output_path = resolved_output_path
 
-        content = _generate_content(global_instructions)
+        unfiltered_instructions = target_instructions
+        if family == "claude":
+            try:
+                _, coverage_verdict = CompiledOutputWriter().prepare(
+                    {output_path: _generate_content(unfiltered_instructions)}
+                )
+            except CompiledOutputPolicyError:
+                results.append(
+                    UserRootCompileResult(
+                        scoped.name,
+                        output_path,
+                        "error:critical hidden characters in compiled output",
+                        has_critical_security=True,
+                    )
+                )
+                continue
+            if coverage_verdict.has_findings:
+                log.warning(
+                    "user_root_context: selected Claude instructions contain hidden "
+                    "characters -- run 'apm audit' to inspect"
+                )
+            target_instructions = []
+            for instruction in unfiltered_instructions:
+                try:
+                    matched = integrator.deployed_rule_matches(
+                        instruction.file_path, scoped, deploy_root
+                    )
+                except (OSError, UnicodeError, PathTraversalError, yaml.YAMLError) as exc:
+                    log.warning(
+                        "Cannot verify native rule for %s; retaining compiled fallback. "
+                        "Check rule access, content and containment, then rerun: %s",
+                        instruction.file_path,
+                        exc,
+                    )
+                    matched = False
+                if not matched:
+                    target_instructions.append(instruction)
+
+        if not target_instructions:
+            status = "skipped-native-rules"
+            if output_path.exists():
+                try:
+                    status = clean_redundant_user_root(
+                        output_path,
+                        deploy_root,
+                        _generate_content(unfiltered_instructions),
+                        dry_run=dry_run or not clean,
+                    )
+                    if not clean and status == "would-remove":
+                        status = "skipped-redundant"
+                except (OSError, UnicodeError, PathTraversalError) as exc:
+                    log.warning("Cannot verify or clean %s: %s", output_path, exc)
+                    status = f"error:{exc}"
+            results.append(UserRootCompileResult(scoped.name, output_path, status))
+            continue
+
+        content = _generate_content(
+            target_instructions,
+            preserve_scoped_sections=preserve_scoped_sections,
+            base_dir=source_root,
+        )
 
         # -- overwrite protection --
         if output_path.exists():
             try:
                 existing = output_path.read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeError) as exc:
                 log.warning("user_root_context: cannot read %s: %s", output_path, exc)
                 results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
                 continue
 
-            if not existing.lstrip().startswith(_COPILOT_ROOT_GENERATED_MARKER):
+            if not existing.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):
                 log.info(
                     "user_root_context: %s is hand-authored (no APM marker) -- not overwriting",
                     output_path,
@@ -252,6 +343,12 @@ def compile_user_root_contexts(
                     UserRootCompileResult(scoped.name, output_path, "skipped-hand-authored")
                 )
                 continue
+
+            if family == "claude":
+                protected = protected_user_root_status(output_path, existing)
+                if protected is not None:
+                    results.append(UserRootCompileResult(scoped.name, output_path, protected))
+                    continue
 
             if existing == content:
                 log.debug("user_root_context: %s is unchanged", output_path)
@@ -268,8 +365,6 @@ def compile_user_root_contexts(
         pending.append((index, scoped.name, output_path, content))
 
     if pending:
-        from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
-
         try:
             verdict = CompiledOutputWriter().write_many(
                 {path: content for _, _, path, content in pending}

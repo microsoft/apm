@@ -124,12 +124,19 @@ class LocalGitRepositoryFactory:
         repository: LocalGitRepository,
         name: str,
         target: GitCommit,
+        *,
+        annotated: bool = False,
     ) -> None:
         """Create and publish a tag at the target commit."""
         repository = self._owned_repository(repository)
         target = self._owned_commit(target)
+        command = (
+            ("git", "tag", "-a", name, target.sha, "-m", f"Release {name}")
+            if annotated
+            else ("git", "tag", name, target.sha)
+        )
         self._run(
-            ("git", "tag", name, target.sha),
+            command,
             cwd=repository.worktree,
         )
         self._run(

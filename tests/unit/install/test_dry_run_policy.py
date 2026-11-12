@@ -13,10 +13,9 @@ Covers:
   apm.yml is NOT mutated (dry-run never persists).
 - ``apm install --mcp <denied> --dry-run`` -> same UX (preview block message).
 
-Design choice: dry-run checks run against **direct manifest deps** only, not
-resolved/transitive deps.  The resolver does not run in ``--dry-run`` mode;
-evaluating transitives would require a full resolve which defeats the purpose
-of a lightweight preview.  This is a documented limitation.
+Dry-run checks include dependencies discoverable through the read-only
+resolver. Unavailable metadata leaves the preview explicitly incomplete;
+previewing never fetches dependencies just to expand that graph.
 """
 
 from __future__ import annotations
@@ -66,12 +65,13 @@ def _make_fetch_result(
 def _make_dep(repo_url: str, reference: str = "main"):
     """Build a minimal DependencyReference-like object for policy checks.
 
-    The mock provides ``get_canonical_dependency_string()`` and
-    ``get_unique_key()`` which are the two methods policy checks inspect.
+    The mock provides the canonical identity methods and case-prefix metadata
+    consumed by policy checks.
     """
     dep = MagicMock()
     dep.repo_url = repo_url
     dep.reference = reference
+    dep.case_insensitive_identity_prefix_segments = 2
     dep.get_unique_key.return_value = repo_url
     dep.get_canonical_dependency_string.return_value = repo_url
     return dep

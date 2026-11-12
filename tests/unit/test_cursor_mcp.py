@@ -1,7 +1,7 @@
 """Unit tests for CursorClientAdapter and its MCP integrator wiring."""
 
 import json
-import os  # noqa: F401
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -189,6 +189,7 @@ class TestCursorFormatServerConfig(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.cursor_dir = Path(self.tmp.name) / ".cursor"
         self.cursor_dir.mkdir()
+        self.mcp_json = self.cursor_dir / "mcp.json"
 
         self.adapter = CursorClientAdapter()
         self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
@@ -276,6 +277,7 @@ class TestCursorTokenInjection(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.cursor_dir = Path(self.tmp.name) / ".cursor"
         self.cursor_dir.mkdir()
+        self.mcp_json = self.cursor_dir / "mcp.json"
 
         self.adapter = CursorClientAdapter()
         self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
@@ -285,18 +287,31 @@ class TestCursorTokenInjection(unittest.TestCase):
         self._cwd_patcher.stop()
         self.tmp.cleanup()
 
-    def test_github_remote_injects_token(self):
-        """Legitimate GitHub remote must get Authorization header."""
+    def test_github_remote_does_not_persist_automatically_resolved_token(self):
+        """Cursor config must not contain a resolved GitHub token."""
         server_info = {
             "name": "github-mcp-server",
             "remotes": [
                 {"url": "https://api.github.com/v1", "transport_type": "http"},
             ],
         }
-        with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
-            mock_tm.return_value.get_token_for_purpose.return_value = "test-tok"
+        with (
+            patch.dict(os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": "env-secret"}, clear=True),
+            patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm,
+        ):
+            mock_tm.return_value.get_token_for_purpose.return_value = "manager-secret"
+            mock_tm.return_value.get_token_env_var_for_purpose.return_value = None
             config = self.adapter._format_server_config(server_info)
-        self.assertEqual(config.get("headers", {}).get("Authorization"), "Bearer test-tok")
+        expected = "Bearer ${env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+        self.assertEqual(config["headers"]["Authorization"], expected)
+        mock_tm.return_value.get_token_env_var_for_purpose.assert_called_once_with("copilot")
+        mock_tm.return_value.get_token_for_purpose.assert_not_called()
+        self.adapter.update_config({"github-mcp-server": config})
+        stored = self.mcp_json.read_text(encoding="utf-8")
+        self.assertNotIn("env-secret", stored)
+        self.assertNotIn("manager-secret", stored)
+        stored_server = json.loads(stored)["mcpServers"]["github-mcp-server"]
+        self.assertEqual(stored_server["headers"]["Authorization"], expected)
 
     def test_non_github_remote_no_token(self):
         """Non-GitHub remote must NOT get Authorization header."""
@@ -309,8 +324,10 @@ class TestCursorTokenInjection(unittest.TestCase):
         config = self.adapter._format_server_config(server_info)
         self.assertNotIn("Authorization", config.get("headers", {}))
 
-    def test_registry_header_cannot_override_github_token(self):
-        """Registry-supplied Authorization must not clobber injected GitHub token."""
+    def test_github_runtime_authorization_header_stays_a_reference(self):
+        """Explicit env-backed auth remains a Cursor runtime reference."""
+        from apm_cli.models.dependency.mcp import ManifestHeaderValue
+
         server_info = {
             "name": "github-mcp-server",
             "remotes": [
@@ -318,15 +335,51 @@ class TestCursorTokenInjection(unittest.TestCase):
                     "url": "https://api.github.com/v1",
                     "transport_type": "http",
                     "headers": [
-                        {"name": "Authorization", "value": "Bearer evil-token"},
+                        {"name": "Authorization", "value": "Bearer ${GITHUB_TOKEN}"},
+                    ],
+                },
+            ],
+        }
+        header = server_info["remotes"][0]["headers"][0]
+        header["value"] = ManifestHeaderValue(header["value"])
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "env-secret"}, clear=True),
+            patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm,
+        ):
+            mock_tm.return_value.get_token_for_purpose.return_value = "manager-secret"
+            config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["headers"]["Authorization"], "Bearer ${env:GITHUB_TOKEN}")
+        self.assertNotIn("env-secret", json.dumps(config))
+        self.assertNotIn("manager-secret", json.dumps(config))
+        mock_tm.assert_not_called()
+        self.adapter.update_config({"github-mcp-server": config})
+        stored = self.mcp_json.read_text(encoding="utf-8")
+        self.assertIn("Bearer ${env:GITHUB_TOKEN}", stored)
+        self.assertNotIn("env-secret", stored)
+        self.assertNotIn("manager-secret", stored)
+
+    def test_explicit_manifest_authorization_wins_over_github_token(self):
+        """Only a manifest-authored Authorization header overrides auto auth."""
+        from apm_cli.models.dependency.mcp import ManifestHeaderValue
+
+        authorization = "Bearer author-supplied-static-value"
+        server_info = {
+            "name": "github-mcp-server",
+            "remotes": [
+                {
+                    "url": "https://api.github.com/v1",
+                    "transport_type": "http",
+                    "headers": [
+                        {"name": "Authorization", "value": ManifestHeaderValue(authorization)},
                     ],
                 },
             ],
         }
         with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
-            mock_tm.return_value.get_token_for_purpose.return_value = "legit-tok"
+            mock_tm.return_value.get_token_for_purpose.return_value = "unexpected-token"
             config = self.adapter._format_server_config(server_info)
-        self.assertEqual(config["headers"]["Authorization"], "Bearer legit-tok")
+        self.assertEqual(config["headers"]["Authorization"], authorization)
+        mock_tm.assert_not_called()
 
     def test_unsupported_packages_raises_valueerror(self):
         """When _select_best_package returns None, raise ValueError instead of silent {}."""
@@ -343,15 +396,13 @@ class TestCursorTokenInjection(unittest.TestCase):
 
 
 class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
-    """Regression coverage for a latent partner-bug of issue #1266.
+    """Regression coverage for Cursor-native runtime env references.
 
     Before #1266 the Cursor adapter routed `raw["env"]` (a dict) through
-    `_resolve_environment_variables`, but the legacy-mode branch of that
-    method only handled the registry list-of-dict shape -- the dict shape
-    was silently iterated as KEYS, every key failed the `isinstance(..., dict)`
-    check, and the env block came out empty. The fix adds a dedicated
-    dict-shape legacy branch to the resolver so the same call site now
-    correctly resolves all three placeholder syntaxes.
+    `_resolve_environment_variables`, but the resolver only handled the
+    registry list-of-dict shape, silently dropping every entry. The dict-shape
+    branch now preserves Cursor's native runtime references and authored
+    literal values instead of resolving references during installation.
     """
 
     def setUp(self):
@@ -391,11 +442,11 @@ class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
         env_block = json.loads(self.mcp_json.read_text(encoding="utf-8"))["mcpServers"][
             "bitbucket"
         ]["env"]
-        # The pre-fix latent bug returned {}; the fix returns the resolved
-        # literal values for every placeholder syntax.
-        self.assertEqual(env_block["TOKEN_DOLLAR"], "real-secret-xyz123")
-        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "real-secret-xyz123")
-        self.assertEqual(env_block["TOKEN_ANGLE"], "real-secret-xyz123")
+        # Cursor resolves these references at runtime; installation must not
+        # write the supplied secret value into project-local config.
+        self.assertEqual(env_block["TOKEN_DOLLAR"], "${env:ATLASSIAN_API_TOKEN}")
+        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "${env:ATLASSIAN_API_TOKEN}")
+        self.assertEqual(env_block["TOKEN_ANGLE"], "${env:ATLASSIAN_API_TOKEN}")
         self.assertEqual(env_block["LITERAL_EMAIL"], "user@example.com")
 
 

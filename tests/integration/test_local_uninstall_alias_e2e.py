@@ -259,7 +259,7 @@ def test_global_absolute_list_key_drives_update_and_uninstall(
         / "instructions"
         / "alias-probe.instructions.md"
     )
-    integrated = isolated.home / ".copilot" / "copilot-instructions.md"
+    integrated = isolated.home / ".copilot" / "instructions" / "alias-probe.instructions.md"
     assert _UPDATED_SENTINEL in materialized.read_text(encoding="utf-8")
     assert _UPDATED_SENTINEL in integrated.read_text(encoding="utf-8")
     listed = _run(
@@ -481,7 +481,7 @@ def test_global_duplicate_alias_preserves_exact_path_survivor(
     materialized = isolated.config_root / "apm_modules" / "_local" / first.name
     assert (materialized / ".apm/instructions/first.instructions.md").is_file()
     assert not (materialized / ".apm/instructions/second.instructions.md").exists()
-    integrated = isolated.home / ".copilot/copilot-instructions.md"
-    integrated_text = integrated.read_text(encoding="utf-8")
-    assert "First global package." in integrated_text
-    assert "Second global package." not in integrated_text
+    first_integrated = isolated.home / ".copilot" / "instructions" / "first.instructions.md"
+    second_integrated = isolated.home / ".copilot" / "instructions" / "second.instructions.md"
+    assert "First global package." in first_integrated.read_text(encoding="utf-8")
+    assert not second_integrated.exists()

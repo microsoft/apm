@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.bundle.formats import BundleFormat
 from apm_cli.commands.pack import (
     _emit_json_error_or_raise,
     _log_bundle_meta,
@@ -196,7 +197,7 @@ class TestRenderBundleResult:
         """Live mode with no files calls _warn_empty."""
         logger = _RecordingLogger()
         result = _pack_result(files=[])
-        _render_bundle_result(logger, result, "plugin", None, False)
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
         assert any("empty" in w.lower() for w in logger.warnings)
 
     def test_live_with_files_emits_success(self) -> None:
@@ -207,11 +208,11 @@ class TestRenderBundleResult:
         assert any("3 file(s)" in s for s in logger.successes)
 
     def test_live_plugin_format_progress_message(self) -> None:
-        """Plugin format emits the 'Plugin bundle ready' progress message."""
+        """Plugin format emits the Agent Plugin ready progress message."""
         logger = _RecordingLogger()
         result = _pack_result(files=["plugin.json"])
-        _render_bundle_result(logger, result, "plugin", None, False)
-        assert any("Plugin bundle ready" in p for p in logger.progresses)
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        assert any("Agent Plugin bundle ready" in p for p in logger.progresses)
 
     def test_live_apm_format_no_plugin_message(self) -> None:
         """'apm' format does NOT emit the plugin-ready progress message."""

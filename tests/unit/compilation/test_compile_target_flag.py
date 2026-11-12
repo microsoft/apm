@@ -311,6 +311,254 @@ Use type hints in Python code.
         assert "Run focused tests first." in content
         assert result.stats["copilot_root_instructions_generated"] == 1
 
+    def test_copilot_root_deduplicates_only_deployed_global_instruction_files(self, temp_project):
+        """Installed global Copilot rules should not be repeated in the root aggregate."""
+        rules_dir = temp_project / ".github" / "instructions"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "contributing.instructions.md").write_text(
+            "# Contributing\n\nRun focused tests first.\n",
+            encoding="utf-8",
+        )
+
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="contributing",
+                file_path=temp_project / ".apm/instructions/contributing.instructions.md",
+                description="General contributing guidance",
+                apply_to="",
+                content="# Contributing\n\nRun focused tests first.",
+                author="test",
+                source="local",
+            )
+        )
+        primitives.add_primitive(
+            Instruction(
+                name="review",
+                file_path=temp_project / ".apm/instructions/review.instructions.md",
+                description="Review guidance not yet installed for Copilot",
+                apply_to="",
+                content="# Review\n\nCheck the changed behavior.",
+                author="test",
+                source="local",
+            )
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+
+        assert result.success
+        content = (temp_project / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
+        assert "Run focused tests first." not in content
+        assert "Check the changed behavior." in content
+        assert result.stats["copilot_root_instructions_generated"] == 1
+
+    def test_copilot_force_instructions_keeps_installed_global_rules_in_root(self, temp_project):
+        """--force-instructions / --no-dedup must bypass Copilot root deduplication."""
+        rules_dir = temp_project / ".github" / "instructions"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "contributing.instructions.md").write_text(
+            "# Contributing\n\nRun focused tests first.\n",
+            encoding="utf-8",
+        )
+
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="contributing",
+                file_path=temp_project / ".apm/instructions/contributing.instructions.md",
+                description="General contributing guidance",
+                apply_to="",
+                content="# Contributing\n\nRun focused tests first.",
+                author="test",
+                source="local",
+            )
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(
+            CompilationConfig(
+                target="vscode",
+                dry_run=False,
+                single_agents=True,
+                no_dedup=True,
+            ),
+            primitives,
+        )
+
+        assert result.success
+        content = (temp_project / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
+        assert "Run focused tests first." in content
+
+    def test_copilot_dedup_removes_unmodified_generated_root_file(self, temp_project):
+        """Dedup may remove a generated root file while its marker and Build ID match."""
+        instruction_path = temp_project / ".apm/instructions/contributing.instructions.md"
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="contributing",
+                file_path=instruction_path,
+                description="General contributing guidance",
+                apply_to="",
+                content="# Contributing\n\nRun focused tests first.",
+                author="test",
+                source="local",
+            )
+        )
+        compiler = AgentsCompiler(str(temp_project))
+        first = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+        assert first.success
+
+        rules_dir = temp_project / ".github" / "instructions"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "contributing.instructions.md").write_text(
+            "# Contributing\n\nRun focused tests first.\n",
+            encoding="utf-8",
+        )
+        second = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+
+        root_file = temp_project / ".github" / "copilot-instructions.md"
+        assert second.success
+        assert not root_file.exists()
+        assert second.stats["copilot_root_instructions_removed"] == 1
+
+    @pytest.mark.parametrize("build_id_state", ["edited", "missing", "malformed", "duplicate"])
+    def test_copilot_dedup_preserves_edited_generated_root_file(self, temp_project, build_id_state):
+        """Dedup retains any generated root whose Build ID cannot verify its content."""
+        instruction_path = temp_project / ".apm/instructions/contributing.instructions.md"
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="contributing",
+                file_path=instruction_path,
+                description="General contributing guidance",
+                apply_to="",
+                content="# Contributing\n\nRun focused tests first.",
+                author="test",
+                source="local",
+            )
+        )
+        compiler = AgentsCompiler(str(temp_project))
+        first = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+        assert first.success
+
+        root_file = temp_project / ".github" / "copilot-instructions.md"
+        original = root_file.read_text(encoding="utf-8")
+        build_id_line = next(line for line in original.splitlines() if "<!-- Build ID:" in line)
+        if build_id_state == "missing":
+            original = original.replace(build_id_line, "")
+        elif build_id_state == "malformed":
+            original = original.replace(build_id_line, "<!-- Build ID: invalid -->")
+        elif build_id_state == "duplicate":
+            original += build_id_line + "\n"
+        retained = original + "\n# User addition\n"
+        root_file.write_text(retained, encoding="utf-8")
+        rules_dir = temp_project / ".github" / "instructions"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "contributing.instructions.md").write_text(
+            "# Contributing\n\nRun focused tests first.\n",
+            encoding="utf-8",
+        )
+
+        second = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+
+        assert second.success
+        assert root_file.exists()
+        assert root_file.read_text(encoding="utf-8") == retained
+        assert second.stats["copilot_root_instructions_removed"] == 0
+        assert any("Build ID does not match" in warning for warning in second.warnings)
+
+    def test_copilot_dedup_preserves_symbolic_link_and_target(self, temp_project):
+        """Cleanup must retain a symlink instead of unlinking its target entry."""
+        instruction_path = temp_project / ".apm/instructions/contributing.instructions.md"
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="contributing",
+                file_path=instruction_path,
+                description="General contributing guidance",
+                apply_to="",
+                content="# Contributing\n\nRun focused tests first.",
+                author="test",
+                source="local",
+            )
+        )
+        compiler = AgentsCompiler(str(temp_project))
+        first = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+        assert first.success
+
+        root_file = temp_project / ".github" / "copilot-instructions.md"
+        target = temp_project / "preserved-user-file.md"
+        retained = root_file.read_text(encoding="utf-8")
+        target.write_text(retained, encoding="utf-8")
+        root_file.unlink()
+        try:
+            root_file.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"file symlinks are unavailable: {exc}")
+
+        rules_dir = temp_project / ".github" / "instructions"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "contributing.instructions.md").write_text(
+            "# Contributing\n\nRun focused tests first.\n",
+            encoding="utf-8",
+        )
+        second = compiler.compile(
+            CompilationConfig(target="minimal", dry_run=False, single_agents=True),
+            primitives,
+        )
+
+        assert second.success
+        assert root_file.is_symlink()
+        assert target.read_text(encoding="utf-8") == retained
+        assert second.stats["copilot_root_instructions_removed"] == 0
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_copilot_cleanup_refuses_linked_parent(self, tmp_path, dry_run):
+        """A linked .github directory cannot authorize deleting an external file."""
+        from apm_cli.compilation.build_id import stabilize_build_id
+        from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER, BUILD_ID_PLACEHOLDER
+
+        project = tmp_path / "project"
+        project.mkdir()
+        external = tmp_path / "external"
+        external.mkdir()
+        root = external / "copilot-instructions.md"
+        retained = stabilize_build_id(f"{AGENTS_MD_GENERATED_MARKER}\n{BUILD_ID_PLACEHOLDER}\n")
+        root.write_text(retained, encoding="utf-8")
+        try:
+            (project / ".github").symlink_to(external, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks are unavailable: {exc}")
+        compiler = AgentsCompiler(str(project))
+        result = CompilationResult(
+            success=True, output_path="", content="", warnings=[], errors=[], stats={}
+        )
+        compiler._cleanup_copilot_root_instructions(
+            project / ".github/copilot-instructions.md", result, dry_run=dry_run
+        )
+        assert not result.success
+        assert result.stats["copilot_root_instructions_removed"] == 0
+        assert root.read_text(encoding="utf-8") == retained
+
     def test_target_minimal_does_not_write_copilot_root_instructions(self, temp_project):
         """Minimal target must stay AGENTS-only even when global instructions exist."""
         primitives = PrimitiveCollection()
@@ -366,6 +614,42 @@ Use type hints in Python code.
         assert second.success
         assert not root_file.exists()
         assert second.stats["copilot_root_instructions_removed"] == 1
+
+    def test_target_minimal_dry_run_previews_stale_copilot_root_removal(self, temp_project):
+        """A dry run previews generated Copilot cleanup without deleting the file."""
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="contributing",
+                file_path=temp_project / ".apm/instructions/contributing.instructions.md",
+                description="General contributing guidance",
+                apply_to="",
+                content="Always run lint.",
+                author="test",
+                source="local",
+            )
+        )
+        compiler = AgentsCompiler(str(temp_project))
+        first = compiler.compile(
+            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            primitives,
+        )
+        assert first.success
+        root_file = temp_project / ".github" / "copilot-instructions.md"
+        assert root_file.exists()
+
+        preview = compiler.compile(
+            CompilationConfig(target="minimal", dry_run=True, single_agents=True),
+            primitives,
+        )
+
+        assert preview.success
+        assert root_file.exists()
+        assert preview.stats["copilot_root_instructions_removed"] == 0
+        assert any(
+            "[dry-run] would remove stale .github/copilot-instructions.md" in warning
+            for warning in preview.warnings
+        )
 
     def test_scoped_only_rules_remove_stale_generated_copilot_root_instructions(self, temp_project):
         """Scoped-only compile should clean stale generated root Copilot instructions."""
@@ -1616,8 +1900,8 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["codex"]) == "codex"
         assert _resolve_compile_target(["windsurf"]) == "windsurf"
         # Multi-element AGENTS.md-only list collapses to a representative bare
-        # target according to deterministic catalog ordering.
-        assert _resolve_compile_target(["opencode", "codex"]) == "opencode"
+        # target according to deterministic catalog ordering (alphabetical).
+        assert _resolve_compile_target(["opencode", "codex"]) == "codex"
         assert _resolve_compile_target(["codex", "windsurf"]) == "codex"
 
     @pytest.mark.parametrize(

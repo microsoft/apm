@@ -70,6 +70,20 @@ def _load_raw_apm_yml(project_root: Path) -> dict | None:
 # -- Individual policy checks --------------------------------------
 
 
+def _required_policy_index(
+    deps: list[DependencyReference],
+    dep_names: set[str] | DependencyPolicyIndex | None,
+) -> DependencyPolicyIndex:
+    """Reuse a rich snapshot or honor the legacy supplied-name contract."""
+    from .matcher import DependencyPolicyIndex
+
+    if isinstance(dep_names, DependencyPolicyIndex):
+        return dep_names
+    if dep_names is not None:
+        return DependencyPolicyIndex.from_names(dep_names)
+    return DependencyPolicyIndex.from_dependencies(deps)
+
+
 def _check_dependency_allowlist(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
@@ -87,7 +101,7 @@ def _check_dependency_allowlist(
     violations: list[str] = []
     for dep in deps:
         ref = dep.get_canonical_dependency_string()
-        allowed, reason = check_dependency_allowed(ref, policy)
+        allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "not in allowed" in reason:
             violations.append(f"{ref}: {reason}")
 
@@ -122,7 +136,7 @@ def _check_dependency_denylist(
     violations: list[str] = []
     for dep in deps:
         ref = dep.get_canonical_dependency_string()
-        allowed, reason = check_dependency_allowed(ref, policy)
+        allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
             violations.append(f"{ref}: {reason}")
 
@@ -143,6 +157,8 @@ def _check_dependency_denylist(
 def _check_required_packages(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
+    *,
+    dep_names: set[str] | DependencyPolicyIndex | None = None,
 ) -> CheckResult:
     """Check 3: every required package is in manifest deps."""
     if not policy.effective_require:
@@ -152,11 +168,11 @@ def _check_required_packages(
             message="No required packages configured",
         )
 
-    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    index = _required_policy_index(deps, dep_names)
     missing: list[str] = []
     for req in policy.effective_require:
-        pkg_name = req.split("#")[0]
-        if pkg_name not in dep_names:
+        pkg_name = req.split("#", 1)[0]
+        if index.find_name(pkg_name) is None:
             missing.append(pkg_name)
 
     if not missing:
@@ -177,6 +193,8 @@ def _check_required_packages_deployed(
     deps: list[DependencyReference],
     lock: LockFile | None,
     policy: DependencyPolicy,
+    *,
+    dep_names: set[str] | DependencyPolicyIndex | None = None,
 ) -> CheckResult:
     """Check 4: required packages are PRESENT in the lockfile (issue #1873, Gap B).
 
@@ -195,16 +213,17 @@ def _check_required_packages_deployed(
             message="No required packages to verify deployment",
         )
 
-    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    index = _required_policy_index(deps, dep_names)
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     not_present: list[str] = []
     for req in policy.effective_require:
-        pkg_name = req.split("#")[0]
-        if pkg_name not in dep_names:
+        pkg_name = req.split("#", 1)[0]
+        lock_name = index.find_name(pkg_name)
+        if lock_name is None:
             continue  # not in manifest -- check 3 handles this
 
         # PRESENCE, not deployment: the package must appear in the lockfile.
-        if lock_by_name.get(pkg_name) is None:
+        if lock_by_name.get(lock_name) is None:
             not_present.append(pkg_name)
 
     if not not_present:
@@ -229,6 +248,8 @@ def _check_required_executable_untrusted(
     deps: list[DependencyReference],
     lock: LockFile | None,
     exec_policy: ExecutablesPolicy,
+    *,
+    dep_names: set[str] | DependencyPolicyIndex | None = None,
 ) -> CheckResult:
     """Check 4b: required-executable packages must be TRUSTED, not parked.
 
@@ -248,14 +269,15 @@ def _check_required_executable_untrusted(
 
     from ..security.executables import TRUST_DEPLOYED
 
-    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    index = _required_policy_index(deps, dep_names)
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     untrusted: list[str] = []
     for req in required:
-        pkg_name = req.split("#")[0]
-        if pkg_name not in dep_names:
+        pkg_name = req.split("#", 1)[0]
+        lock_name = index.find_name(pkg_name)
+        if lock_name is None:
             continue  # presence is audited by required-packages / -deployed
-        locked = lock_by_name.get(pkg_name)
+        locked = lock_by_name.get(lock_name)
         # Trusted when exec_status is absent (no executables declared) or when
         # the executable gate recorded a deployed state. Gated or denied
         # required executables are untrusted.
@@ -287,6 +309,8 @@ def _check_required_package_version(
     deps: list[DependencyReference],
     lock: LockFile | None,
     policy: DependencyPolicy,
+    *,
+    dep_names: set[str] | DependencyPolicyIndex | None = None,
 ) -> CheckResult:
     """Check 5: required packages with version pins match per resolution strategy."""
     pinned = [(r, r.split("#", 1)) for r in policy.effective_require if "#" in r]
@@ -301,12 +325,18 @@ def _check_required_package_version(
     violations: list[str] = []
     warnings: list[str] = []
 
+    index = _required_policy_index(deps, dep_names)
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
 
     for _req, parts in pinned:
         pkg_name, expected_ref = parts[0], parts[1]
 
-        locked = lock_by_name.get(pkg_name)
+        match = index.find_name(pkg_name)
+        # Without a manifest dependency there is no host/source authority from
+        # which to derive casing. Preserve the legacy raw lock lookup; check 3
+        # reports the required package as absent.
+        lock_name = match if match is not None else pkg_name
+        locked = lock_by_name.get(lock_name)
         if locked is not None:
             actual_ref = locked.resolved_ref or ""
             if actual_ref != expected_ref:
@@ -1240,13 +1270,30 @@ def run_dependency_policy_checks(
         return result
     if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
         return result
-    if _run(_check_required_packages(deps_list, policy.dependencies)):
+    dep_names = None
+    if policy.dependencies.effective_require or (
+        policy.executables.require and lockfile is not None
+    ):
+        dep_names = _required_policy_index(deps_list, None)
+    if _run(_check_required_packages(deps_list, policy.dependencies, dep_names=dep_names)):
         return result
-    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
+    if _run(
+        _check_required_packages_deployed(
+            deps_list, lockfile, policy.dependencies, dep_names=dep_names
+        )
+    ):
         return result
-    if _run(_check_required_executable_untrusted(deps_list, lockfile, policy.executables)):
+    if _run(
+        _check_required_executable_untrusted(
+            deps_list, lockfile, policy.executables, dep_names=dep_names
+        )
+    ):
         return result
-    if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
+    if _run(
+        _check_required_package_version(
+            deps_list, lockfile, policy.dependencies, dep_names=dep_names
+        )
+    ):
         return result
     if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result

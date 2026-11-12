@@ -9,7 +9,7 @@ yet reached by test_sources_classification.py:
   - USER-scope + absolute path → allowed
   - _copy_local_package failure → return None
   - success path with apm.yml present
-  - success path without apm.yml (bare APMPackage)
+  - fail-closed path without a supported manifest
   - relative local_path resolution
   - package_type detection (MARKETPLACE_PLUGIN branch)
 * CachedDependencySource._resolve_cached_commit
@@ -21,7 +21,7 @@ yet reached by test_sources_classification.py:
   - no targets → package_info=None materialization
   - with targets + apm.yml present
   - with targets + no apm.yml (bare APMPackage)
-  - resolved_ref=None branch (ResolvedReference created)
+  - resolved_ref=None branch (fallback carries only a vouched full-SHA source pin)
 * FreshDependencySource.acquire
   - success path (no progress, no tui, no logger)
   - success path with logger
@@ -39,6 +39,7 @@ yet reached by test_sources_classification.py:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -222,8 +223,10 @@ class TestLocalDependencySourceAcquire:
         assert result is None
         ctx.diagnostics.error.assert_called_once()
 
-    def test_success_without_apm_yml(self, tmp_path: Path) -> None:
-        """Success path: no apm.yml in install_path → bare APMPackage."""
+    def test_without_supported_manifest_fails_closed(self, tmp_path: Path) -> None:
+        """A copied local directory without a package contract is rejected."""
+        from apm_cli.install.errors import DirectDependencyError
+
         ctx = _make_ctx(project_root=tmp_path)
         dep_ref = _make_dep_ref(is_local=True, local_path=str(tmp_path), reference=None)
         install_path = tmp_path / "install"
@@ -235,10 +238,6 @@ class TestLocalDependencySourceAcquire:
                 return_value=install_path,
             ),
             patch(
-                "apm_cli.models.validation.detect_package_type",
-                return_value=(None, None),
-            ),
-            patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="abc123",
             ),
@@ -246,11 +245,30 @@ class TestLocalDependencySourceAcquire:
             from apm_cli.install.sources import LocalDependencySource
 
             source = LocalDependencySource(ctx, dep_ref, install_path, "owner/pkg")
-            result = source.acquire()
+            with pytest.raises(DirectDependencyError, match="Local package is invalid"):
+                source.acquire()
 
-        assert result is not None
-        assert result.dep_key == "owner/pkg"
-        assert result.install_path == install_path
+        assert not (install_path / "apm.yml").exists()
+
+    def test_invalid_apm_path_does_not_enter_legacy_fallback(self, tmp_path: Path) -> None:
+        """A malformed .apm path remains invalid despite a root apm.yml."""
+        from apm_cli.install.errors import DirectDependencyError
+        from apm_cli.install.sources import LocalDependencySource
+
+        ctx = _make_ctx(project_root=tmp_path)
+        dep_ref = _make_dep_ref(is_local=True, local_path=str(tmp_path), reference=None)
+        install_path = tmp_path / "install"
+        install_path.mkdir()
+        (install_path / "apm.yml").write_text("name: invalid\nversion: 1.0.0\n")
+        (install_path / ".apm").write_text("not a directory\n")
+
+        with patch(
+            "apm_cli.install.phases.local_content._copy_local_package",
+            return_value=install_path,
+        ):
+            source = LocalDependencySource(ctx, dep_ref, install_path, "owner/pkg")
+            with pytest.raises(DirectDependencyError, match=r"\.apm must be a directory"):
+                source.acquire()
 
     def test_success_with_apm_yml(self, tmp_path: Path) -> None:
         """Success path: apm.yml present → APMPackage.from_apm_yml called."""
@@ -262,7 +280,9 @@ class TestLocalDependencySourceAcquire:
         install_path.mkdir()
 
         # Create a minimal apm.yml in the install path
-        (install_path / "apm.yml").write_text("name: mypkg\nversion: 0.1.0\n")
+        (install_path / "apm.yml").write_text(
+            "name: mypkg\nversion: 0.1.0\ndependencies:\n  apm:\n    - owner/repo\n"
+        )
 
         mock_pkg = MagicMock()
         mock_pkg.source = None
@@ -283,7 +303,7 @@ class TestLocalDependencySourceAcquire:
             patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="deadbeef",
-            ),
+            ) as hash_package,
         ):
             from apm_cli.install.sources import LocalDependencySource
 
@@ -291,6 +311,8 @@ class TestLocalDependencySourceAcquire:
             result = source.acquire()
 
         assert result is not None
+        assert ctx.package_hashes["owner/pkg"] == "deadbeef"
+        hash_package.assert_called_once_with(install_path)
 
     def test_logger_download_complete_called_on_success(self, tmp_path: Path) -> None:
         """logger.download_complete should be called on the happy path."""
@@ -299,6 +321,9 @@ class TestLocalDependencySourceAcquire:
         dep_ref = _make_dep_ref(is_local=True, local_path=str(tmp_path), reference=None)
         install_path = tmp_path / "install"
         install_path.mkdir()
+        (install_path / "apm.yml").write_text(
+            "name: mypkg\nversion: 0.1.0\ndependencies:\n  apm:\n    - owner/repo\n"
+        )
 
         with (
             patch(
@@ -321,8 +346,8 @@ class TestLocalDependencySourceAcquire:
 
         mock_logger.download_complete.assert_called_once()
 
-    def test_marketplace_plugin_normalise_called(self, tmp_path: Path) -> None:
-        """MARKETPLACE_PLUGIN package type triggers normalize_plugin_directory."""
+    def test_marketplace_plugin_normalizes_through_validation(self, tmp_path: Path) -> None:
+        """Legacy marketplace plugins retain their explicit normalization path."""
         from apm_cli.models.apm_package import PackageType
 
         ctx = _make_ctx(project_root=tmp_path)
@@ -330,6 +355,7 @@ class TestLocalDependencySourceAcquire:
         install_path = tmp_path / "install"
         install_path.mkdir()
         fake_plugin_json = install_path / "plugin.json"
+        fake_plugin_json.write_text('{"name": "legacy-plugin"}', encoding="utf-8")
 
         with (
             patch(
@@ -337,22 +363,19 @@ class TestLocalDependencySourceAcquire:
                 return_value=install_path,
             ),
             patch(
-                "apm_cli.models.validation.detect_package_type",
-                return_value=(PackageType.MARKETPLACE_PLUGIN, fake_plugin_json),
-            ),
-            patch(
                 "apm_cli.utils.content_hash.compute_package_hash",
                 return_value="abc",
             ),
-            patch("apm_cli.deps.plugin_parser.normalize_plugin_directory") as mock_normalise,
         ):
             from apm_cli.install.sources import LocalDependencySource
 
             source = LocalDependencySource(ctx, dep_ref, install_path, "owner/plugin")
             result = source.acquire()
 
-        mock_normalise.assert_called_once_with(install_path, fake_plugin_json)
         assert result is not None
+        assert result.package_info is not None
+        assert result.package_info.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert (install_path / "apm.yml").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +494,9 @@ class TestResolveCachedCommit:
 # ---------------------------------------------------------------------------
 
 
+_LOCKED_SHA = "f1b2ba49d18a3de11f87d8e6dc672dfdaadbff85"
+
+
 class TestCachedDependencySourceAcquire:
     """Tests for CachedDependencySource.acquire()."""
 
@@ -516,6 +542,38 @@ class TestCachedDependencySourceAcquire:
 
         assert result is not None
         assert result.package_info is None
+
+    def test_no_targets_preserves_native_package_info_for_boundary(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType
+
+        ctx = _make_ctx(targets=[])
+        ctx.lockfile_only = False
+        ctx.git_semver_resolutions = {}
+        dep_ref = _make_dep_ref(is_virtual=False, reference="main")
+        dep_ref.source = "git"
+        install_path = tmp_path / "native"
+        install_path.mkdir()
+        (install_path / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch(
+            "apm_cli.install.sources.CachedDependencySource._resolve_cached_commit",
+            return_value="abc",
+        ):
+            result = self._make_source(ctx, dep_ref, install_path).acquire()
+
+        assert result is not None
+        assert result.package_info is not None
+        assert result.package_info.package_type is PackageType.AGENT_PLUGIN
 
     def test_with_targets_and_apm_yml(self, tmp_path: Path) -> None:
         """Happy path: apm.yml present → full Materialization returned."""
@@ -565,13 +623,39 @@ class TestCachedDependencySourceAcquire:
 
         assert result is not None
 
-    def test_resolved_ref_none_creates_fallback_resolved_reference(self, tmp_path: Path) -> None:
-        """resolved_ref=None → a synthetic ResolvedReference is built."""
+    @pytest.mark.parametrize(
+        ("cached_commit", "marker_commit", "fetched_this_run", "expected"),
+        [
+            pytest.param(_LOCKED_SHA, _LOCKED_SHA, False, _LOCKED_SHA, id="locked-sha-and-pin"),
+            pytest.param(_LOCKED_SHA, None, True, _LOCKED_SHA, id="fetched-this-run"),
+            pytest.param(_LOCKED_SHA, None, False, "cached", id="missing-pin"),
+            pytest.param(_LOCKED_SHA, "a" * 40, False, "cached", id="inconsistent-pin"),
+            pytest.param("f1b2ba4", "f1b2ba4", False, "cached", id="short-sha"),
+            pytest.param("main", "main", False, "cached", id="branch-name"),
+            pytest.param(None, None, False, "cached", id="no-commit"),
+        ],
+    )
+    def test_resolved_ref_none_fallback_carries_only_a_vouched_source_pin(
+        self,
+        tmp_path: Path,
+        cached_commit: str | None,
+        marker_commit: str | None,
+        fetched_this_run: bool,
+        expected: str,
+    ) -> None:
+        """Only a full commit the cache vouches for replaces the sentinel (#3388).
+
+        Lockfile bookkeeping keeps the resolved cached commit in every case.
+        """
+        from apm_cli.install.cache_pin import write_marker
+
         ctx = _make_ctx(targets=["copilot"])
         dep_ref = _make_dep_ref(is_virtual=False, reference="feature-branch")
         install_path = tmp_path / "pkg"
         install_path.mkdir()
         (install_path / "apm.yml").write_text("name: test\nversion: 0.0.1\n")
+        if marker_commit is not None:
+            write_marker(install_path, marker_commit)
 
         mock_pkg = MagicMock()
         mock_pkg.source = "owner/repo"
@@ -582,14 +666,22 @@ class TestCachedDependencySourceAcquire:
             patch("apm_cli.utils.content_hash.compute_package_hash", return_value="h"),
             patch(
                 "apm_cli.install.sources.CachedDependencySource._resolve_cached_commit",
-                return_value="c",
+                return_value=cached_commit,
             ),
         ):
-            source = self._make_source(ctx, dep_ref, install_path, resolved_ref=None)
+            source = self._make_source(
+                ctx,
+                dep_ref,
+                install_path,
+                resolved_ref=None,
+                fetched_this_run=fetched_this_run,
+            )
             result = source.acquire()
 
         assert result is not None
-        # resolved_ref was None; the code builds a fallback - we just confirm no crash
+        assert result.package_info is not None
+        assert result.package_info.resolved_reference.resolved_commit == expected
+        assert ctx.installed_packages[-1].resolved_commit == cached_commit
 
     def test_unpinned_dep_sets_delta(self, tmp_path: Path) -> None:
         """dep_ref.reference=None → deltas['unpinned']=1."""
@@ -697,6 +789,29 @@ class TestFreshDependencySourceAcquire:
 
         assert result is not None
         assert result.dep_key == "owner/repo"
+
+    def test_no_targets_preserves_native_package_info_for_boundary(self, tmp_path: Path) -> None:
+        from apm_cli.models.validation import PackageType
+
+        ctx = _make_ctx(targets=[], logger=None, tui=None)
+        dep_ref = _make_dep_ref(is_virtual=False, reference="main")
+        dep_ref.source = "git"
+        install_path = tmp_path / "native"
+        install_path.mkdir()
+        pkg_info = self._mock_download_success(install_path)
+        pkg_info.package_type = PackageType.AGENT_PLUGIN
+        pkg_info.package = MagicMock(name="native.plugin", version="1.0.0")
+
+        with (
+            patch("apm_cli.drift.build_download_ref", return_value=MagicMock()),
+            patch.object(ctx.downloader, "download_package", return_value=pkg_info),
+            patch("apm_cli.utils.content_hash.compute_package_hash", return_value="hash"),
+            patch("apm_cli.utils.console._rich_success"),
+        ):
+            result = self._make_source(ctx, dep_ref, install_path).acquire()
+
+        assert result is not None
+        assert result.package_info is pkg_info
 
     def test_happy_path_with_logger(self, tmp_path: Path) -> None:
         """Fresh download with logger → download_complete called."""

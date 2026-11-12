@@ -33,6 +33,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
 pytestmark = pytest.mark.integration
 
@@ -194,6 +195,27 @@ def test_s05c_apm_yml_both_target_and_targets_error(tmp_path):
         "target" in result.output.lower() and "targets" in result.output.lower()
     )
     _assert_error_three_sections(result.output)
+
+
+def test_repository_manifest_pin_overrides_second_harness_signal(tmp_path):
+    """The repository target pin must override contributor-local harness signals."""
+    project = _setup(tmp_path, "s02b_copilot_instructions")
+    repository_manifest = load_yaml(Path(__file__).parents[2] / "apm.yml") or {}
+    assert repository_manifest.get("targets") == ["copilot"]
+
+    fixture_manifest = load_yaml(project / "apm.yml") or {}
+    fixture_manifest["targets"] = repository_manifest["targets"]
+    dump_yaml(fixture_manifest, project / "apm.yml")
+
+    claude_settings = project / ".claude" / "settings.local.json"
+    claude_settings.parent.mkdir()
+    claude_settings.write_text("{}\n", encoding="utf-8")
+
+    result = _invoke(["install"], project)
+
+    assert result.exit_code == 0, result.output
+    assert_provenance(result.output, targets=["copilot"], source="apm.yml")
+    assert list((project / ".claude").rglob("*")) == [claude_settings]
 
 
 def test_s06_dry_run_no_disk_writes(tmp_path):

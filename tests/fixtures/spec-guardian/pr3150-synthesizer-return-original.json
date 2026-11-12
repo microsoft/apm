@@ -1,0 +1,145 @@
+{
+  "round": 1,
+  "shocked_meter_avg": 8.0,
+  "convergence_table": [
+    {
+      "panel": "spec-swagger-editor",
+      "verdict": "ship_with_followups",
+      "shocked_meter": 8,
+      "new_blockers": 0,
+      "new_recommended": 2,
+      "new_nits": 2
+    },
+    {
+      "panel": "spec-oci-editor",
+      "verdict": "ship_with_followups",
+      "shocked_meter": 8,
+      "new_blockers": 0,
+      "new_recommended": 2,
+      "new_nits": 2
+    },
+    {
+      "panel": "spec-pkgmgr-editor",
+      "verdict": "ship_with_followups",
+      "shocked_meter": 8,
+      "new_blockers": 0,
+      "new_recommended": 1,
+      "new_nits": 1
+    },
+    {
+      "panel": "spec-tag-architect",
+      "verdict": "ship_with_followups",
+      "shocked_meter": 8,
+      "new_blockers": 0,
+      "new_recommended": 2,
+      "new_nits": 2
+    }
+  ],
+  "convergent_themes": [
+    {
+      "id": "T1",
+      "label": "Non-string source-value fall-through for model/model_reasoning_effort is unspecified",
+      "supporting_finding_ids": [
+        "sw-rec-r1-2",
+        "oci-nit-r1-1"
+      ]
+    },
+    {
+      "id": "T2",
+      "label": "Appendix C section-number ordering disrupted by id-ordered req-tg-015 placement",
+      "supporting_finding_ids": [
+        "sw-nit-r1-2",
+        "oci-nit-r1-2",
+        "pkg-nit-r1-1",
+        "tag-nit-r1-1"
+      ]
+    },
+    {
+      "id": "T3",
+      "label": "Diagnostic field names are attacker-controlled and need sanitization/redaction guarantees",
+      "supporting_finding_ids": [
+        "oci-rec-r1-1",
+        "oci-rec-r1-2"
+      ]
+    }
+  ],
+  "fold_now": [
+    {
+      "id": "F1",
+      "theme": "T1",
+      "spec_section": "req-tg-015",
+      "patch_instruction": "After the sentence ending '...in its native top-level placement in the generated Codex agent file.' append a new non-normative sentence: 'A source-declared model or model_reasoning_effort value that is not a YAML string scalar is not subject to preservation under this clause and is handled as any other non-capability-restriction frontmatter field.'",
+      "success_criterion": "grep the req-tg-015 block for the phrase 'not a YAML string scalar'; expect exactly one match."
+    },
+    {
+      "id": "F2",
+      "theme": "T3",
+      "spec_section": "req-tg-015",
+      "patch_instruction": "In the bounded-diagnostic paragraph, after 'each to a finite, implementation-documented limit' insert: '; field names rendered in the diagnostic MUST be sanitized to printable ASCII (U+0020 through U+007E), replacing or escaping any byte outside that range before display'. This codifies behavior already implemented by the reference CLI's printable_ascii_text utility.",
+      "success_criterion": "grep req-tg-015 block for 'printable ASCII (U+0020 through U+007E)'; expect exactly one match. Statement count increments by 1 MUST (126->127 total, 122 MUST + 5 SHOULD); update Section 1.3, Appendix C footer, and Appendix D 0.1.43 row accordingly."
+    },
+    {
+      "id": "F3",
+      "theme": "standalone",
+      "spec_section": "Appendix D, row 0.1.43",
+      "patch_instruction": "Append to the end of the 0.1.43 Appendix D revision entry, after '...does not define behavior for any other conversion target.': ' Implementations not providing Codex-native agent conversion acquire no new required feature.' This mirrors the negative-scope framing established in the 0.1.42 entry.",
+      "success_criterion": "grep the 0.1.43 Appendix D row for 'acquire no new required feature'; expect exactly one match."
+    },
+    {
+      "id": "F4",
+      "theme": "standalone",
+      "spec_section": "req-tg-015",
+      "patch_instruction": "After 'a finite, implementation-documented limit' (in the count-bounding clause for dropped field names), insert a parenthetical: '(which MUST be at least one when at least one field was dropped)' to establish a non-vacuous floor. This codifies the reference CLI's _MAX_DROPPED_FIELDS_SHOWN = 5, which already satisfies this floor.",
+      "success_criterion": "grep req-tg-015 for 'at least one when at least one field was dropped'; expect exactly one match. If F2 also lands, total statement count is 127->128 (123 MUST + 5 SHOULD); reconcile Section 1.3, Appendix C footer, and Appendix D accordingly."
+    }
+  ],
+  "defer_v0_1_1": [
+    {
+      "id": "F5",
+      "theme": "T3",
+      "spec_section": "req-tg-015",
+      "patch_instruction": "Add a non-normative editorial note after the diagnostic paragraph: 'Implementations SHOULD treat rendered field names as potentially attacker-controlled and apply the same redaction or sanitization policy they apply to other user-supplied identifiers in diagnostic output.' This is a SHOULD-level guidance note building on the MUST sanitization from F2.",
+      "success_criterion": "grep req-tg-015 editorial notes for 'attacker-controlled'; expect exactly one match."
+    },
+    {
+      "id": "F6",
+      "theme": "T2",
+      "spec_section": "Appendix C table",
+      "patch_instruction": "Re-sort the Appendix C table rows so that req-tg-015 (Section 8.5.1) sits between req-tg-006 (8.5.1) and req-tg-007 (8.5.2), restoring section-number ordering within the table while preserving the existing id-ordering convention for ties.",
+      "success_criterion": "Verify Appendix C rows are sorted by section number, with ties broken by req-id."
+    },
+    {
+      "id": "F7",
+      "theme": "standalone",
+      "spec_section": "req-tg-015",
+      "patch_instruction": "Refine 'native top-level placement' to 'in its native top-level placement (top-level TOML key) in the generated Codex agent file' for readers unfamiliar with config.toml schema.",
+      "success_criterion": "grep req-tg-015 for 'top-level TOML key'; expect exactly one match."
+    },
+    {
+      "id": "F8",
+      "theme": "standalone",
+      "spec_section": "Appendix D, row 0.1.43",
+      "patch_instruction": "Align Appendix D wording from 'opt-in conformance capability' to 'consumers providing the accepted Codex-native agent conversion capability' to match the normative clause phrasing.",
+      "success_criterion": "grep Appendix D 0.1.43 row for 'accepted Codex-native agent conversion capability'; expect exactly one match."
+    }
+  ],
+  "defer_v0_2": [
+    {
+      "id": "F9",
+      "theme": "standalone",
+      "spec_section": "openapm-v0.1.requirements.yml schema",
+      "patch_instruction": "Add an optional 'applicability' key to the requirements manifest schema so conformance tooling can filter conditional requirements structurally without NLP over the 'notes' field. This is an additive schema change affecting all req-tg-* entries.",
+      "success_criterion": "requirements manifest schema includes an 'applicability' key with type string or object; existing entries validate with the key absent.",
+      "reserved_slot_anchor": "Section 9.2 (breaking-vs-non-breaking-change-definition) -- additive optional key is non-breaking per 9.2 criteria, but schema-wide manifest changes belong in a coordinated v0.2 revision cycle."
+    }
+  ],
+  "reject": [
+    {
+      "finding_id": "tag-rec-r1-1",
+      "rationale": "The observation that a target-specific MUST lives inside a target-agnostic section heading is architecturally accurate but the finding itself acknowledges 'the editorial note scope disclaimer is sufficient' for this fold. Refactoring section topology is out of scope for a single-requirement editorial-patch fold; the existing editorial note provides adequate defensive fencing. No action needed in any release track."
+    }
+  ],
+  "ship_decision": "fold_and_ship",
+  "ship_prose": "All four panels converge on ship_with_followups at a unanimous shocked_meter of 8. Zero blocking findings. The fold-now list (F1-F4) is bounded to four surgical prose additions within the req-tg-015 block and Appendix D -- all codify behavior the reference CLI already implements (printable_ascii_text sanitization, _MAX_DROPPED_FIELDS_SHOWN >= 1, string-only preservation). The drafter can apply these in one mechanical pass. Statement-count arithmetic must be reconciled after F2 and F4 land (each adds one MUST); the linter should re-verify all four enumeration surfaces.\n\nThe defer-v0.1.1 queue (F5-F8) collects SHOULD-level guidance, cosmetic re-sorting, and minor terminology alignment that improve polish but carry no normative risk if deferred. The single defer-v0.2 item (F9: manifest applicability key) is an architectural schema change that would affect every requirement entry and belongs in a coordinated revision cycle, not a single-requirement fold. Recommend fold_and_ship after the drafter lands F1-F4 and the linter confirms count consistency.",
+  "linter_handoff_notes": "After F1-F4 land: (1) re-grep MUST count -- expect 123 MUST if both F2 and F4 add one MUST each (baseline 121 + req-tg-015 original 1 + F2 + F4 = 123 MUST, total 128 statements with 5 SHOULD); reconcile Section 1.3 opening paragraph, Appendix C footer count, and Appendix D 0.1.43 row. (2) Verify req-tg-015 anchor uniqueness preserved. (3) The orchestrator's prior Wave-5 run recorded checks 1-10 clean and check 11 (no .py files modified, advisory) as a pre-existing advisory note from the broader PR's prior separately-reviewed code work unit -- not a new deviation from this spec-only fold. Re-run the 11-check linter after folds land to confirm no regressions."
+}

@@ -13,7 +13,10 @@ Covers missing lines/branches identified in coverage-unit.json:
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,6 +31,7 @@ def _make_logger():
 
 def _make_lockfile(deps=None):
     lf = MagicMock()
+    lf.replacements = None
     lf.dependencies = deps or {}
     lf.get_package_dependencies.return_value = list((deps or {}).values())
     return lf
@@ -38,6 +42,7 @@ def _make_locked_dep(key, repo_url=None, resolved_by=None):
     dep.get_unique_key.return_value = key
     dep.repo_url = repo_url or key.split("/")[-1]
     dep.resolved_by = resolved_by
+    dep.parent_keys = (resolved_by,)
     return dep
 
 
@@ -221,7 +226,7 @@ class TestRemovePackagesFromDisk:
         assert result == 0
         logger.warning.assert_called()
 
-    def test_path_traversal_error_skips(self, tmp_path):
+    def test_path_traversal_error_propagates(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
         from apm_cli.utils.path_security import PathTraversalError
 
@@ -229,12 +234,14 @@ class TestRemovePackagesFromDisk:
         apm_modules = tmp_path / "apm_modules"
         apm_modules.mkdir()
 
-        with patch(
-            "apm_cli.models.apm_package.DependencyReference.parse",
-            side_effect=PathTraversalError("traversal"),
+        with (
+            patch(
+                "apm_cli.models.apm_package.DependencyReference.parse",
+                side_effect=PathTraversalError("traversal"),
+            ),
+            pytest.raises(PathTraversalError, match="traversal"),
         ):
-            result = _remove_packages_from_disk(["../evil"], apm_modules, logger)
-        assert result == 0
+            _remove_packages_from_disk(["../evil"], apm_modules, logger)
         logger.error.assert_called()
 
     def test_removes_existing_package(self, tmp_path):
@@ -313,8 +320,11 @@ class TestCleanupTransitiveOrphans:
         assert removed == 0
         assert len(orphans) == 0
 
-    def test_orphan_removed(self, tmp_path):
+    @pytest.mark.windows_compat
+    def test_orphan_removed(self, tmp_path: Path) -> None:
+        """An orphan's real install directory is removed on every platform."""
         from apm_cli.commands.uninstall.engine import _cleanup_transitive_orphans
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
 
         logger = _make_logger()
         apm_modules = tmp_path / "apm_modules"
@@ -324,9 +334,8 @@ class TestCleanupTransitiveOrphans:
         child_dir = org_dir / "child"
         child_dir.mkdir()
 
-        orphan = _make_locked_dep("org/child", "child", resolved_by="org/parent")
-        lf = _make_lockfile({"org/child": orphan})
-        lf.get_dependency.return_value = orphan
+        orphan = LockedDependency(repo_url="org/child", resolved_by="org/parent")
+        lf = LockFile(dependencies={orphan.get_unique_key(): orphan})
 
         (tmp_path / "apm.yml").write_text("name: test\n")
 
@@ -334,10 +343,13 @@ class TestCleanupTransitiveOrphans:
             patch("apm_cli.utils.yaml_io.load_yaml", return_value={}),
             patch("apm_cli.integration.base_integrator.BaseIntegrator.cleanup_empty_parents"),
         ):
-            removed, _orphans = _cleanup_transitive_orphans(
+            removed, orphans = _cleanup_transitive_orphans(
                 lf, ["org/parent"], apm_modules, tmp_path / "apm.yml", logger
             )
-        assert removed >= 0  # May or may not remove depending on remaining deps
+        assert removed == 1
+        assert orphans == {"org/child"}
+        assert not child_dir.exists()
+        logger.error.assert_not_called()
 
     def test_orphan_removal_error_logged(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _cleanup_transitive_orphans
@@ -363,8 +375,9 @@ class TestCleanupTransitiveOrphans:
                 side_effect=OSError("permission denied"),
             ),
             patch("apm_cli.integration.base_integrator.BaseIntegrator.cleanup_empty_parents"),
+            pytest.raises(OSError, match="permission denied"),
         ):
-            _removed, _orphans = _cleanup_transitive_orphans(
+            _cleanup_transitive_orphans(
                 lf, ["org/parent"], apm_modules, tmp_path / "apm.yml", logger
             )
         # Error logged

@@ -1,12 +1,12 @@
 ---
 title: apm lifecycle
-description: Inspect, test, and scaffold lifecycle scripts for install/update/uninstall events.
+description: Inspect, test, and scaffold lifecycle scripts for install/update/uninstall/compile events.
 sidebar:
   order: 22
 ---
 
 Lifecycle scripts fire custom actions (shell commands, HTTPS webhooks) at key
-moments during `apm install`, `apm update`, and `apm uninstall`. This command
+moments during `apm install`, `apm update`, `apm uninstall`, and `apm compile`. This command
 group provides all tooling to discover, validate, test, scaffold, and manage
 trust for lifecycle script files.
 
@@ -56,6 +56,10 @@ apm lifecycle init --force    # overwrite an existing lifecycle: block
 |---|---|
 | `--force` | Overwrite an existing `lifecycle:` block. |
 
+`lifecycle init` and other state-mutating APM commands share one per-user
+cross-process lock. A concurrent command waits up to 120 seconds, then reports
+which lock is busy and asks you to retry after the active operation finishes.
+
 ### `apm lifecycle validate`
 
 Validate all discovered script files (project/user `apm.yml`, admin `*.json`) for schema errors.
@@ -95,7 +99,7 @@ apm lifecycle test pre-install -v         # verbose dry-run
 | `--verbose`, `-v` | Show detailed output per script. |
 
 Supported events: `pre-install`, `post-install`, `pre-update`, `post-update`,
-`pre-uninstall`, `post-uninstall`. Default: `post-install`.
+`pre-uninstall`, `post-uninstall`, `pre-compile`. Default: `post-install`.
 
 Note: `apm lifecycle test` bypasses the project-script trust gate -- it is an
 explicit developer inspection tool for their own repository.
@@ -105,7 +109,7 @@ Script output is written to `~/.apm/logs/scripts.log`.
 ### `apm lifecycle trust`
 
 Trust the project `apm.yml` `lifecycle:` block so its scripts run during
-`apm install`, `apm update`, and `apm uninstall`.
+`apm install`, `apm update`, `apm uninstall`, and `apm compile`.
 
 ```bash
 apm lifecycle trust
@@ -121,7 +125,7 @@ delete that file.
 ### `apm lifecycle untrust`
 
 Revoke trust for the `apm.yml` `lifecycle:` block. Project scripts will stop
-running on the next install/update/uninstall.
+running on the next install, update, uninstall, or compile.
 
 ```bash
 apm lifecycle untrust

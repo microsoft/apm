@@ -155,7 +155,7 @@ class TestADOMarketplaceAuthoringToConsume:
 
         resolved = builder._resolve_entry(config.packages[0])
 
-        assert resolved.source_repo == "contoso/platform/_git/agent-skills"
+        assert resolved.source_repo == "contoso/platform/agent-skills"
         assert resolved.host == _ADO_HOST
         # Every auth resolution targeted the ADO host + org; github.com never seen.
         assert auth.calls == [(_ADO_HOST, _ADO_ORG)]

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import time
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...install.locking import lifecycle_operation
 from ...primitives.discovery import PRIMITIVE_SUFFIXES, clear_discovery_cache
 from ...utils import perf_stats
 
@@ -56,6 +58,61 @@ def _format_target_label(
     if effective_target is None:
         return None
     return f"Compiling for {get_target_description(effective_target)}"
+
+
+def _report_retained_watch_outputs(
+    logger: CommandLogger,
+    result: Any,
+    *,
+    dry_run: bool,
+) -> bool:
+    """Render protected root outcomes and returned warnings in watch mode."""
+    for warning in getattr(result, "warnings", ()):
+        logger.warning(warning)
+    if not result.success:
+        return False
+    stats = getattr(result, "stats", {}) or {}
+    protected_count = int(stats.get("root_context_files_protected", 0) or 0)
+    if not protected_count:
+        return False
+    noun = "file" if protected_count == 1 else "files"
+    agents_generated = int(
+        stats.get(
+            "agents_files_generated",
+            stats.get("agents_files_written", 0),
+        )
+        or 0
+    )
+    generated_count = agents_generated + sum(
+        int(stats.get(key, 0) or 0)
+        for key in (
+            "claude_files_written",
+            "gemini_files_written",
+            "copilot_root_instructions_written",
+        )
+    )
+    output_noun = "file" if generated_count == 1 else "files"
+    if dry_run:
+        generated_note = (
+            f"Would generate {generated_count} other output {output_noun} and "
+            if generated_count
+            else "Would "
+        )
+        logger.progress(
+            f"{generated_note}retain {protected_count} hand-authored root {noun}; "
+            "no files written.",
+            symbol="info",
+        )
+        return True
+    generated_note = (
+        f" generated {generated_count} other output {output_noun};" if generated_count else ""
+    )
+    logger.progress(
+        f"Compilation completed;{generated_note} retained {protected_count} "
+        f"hand-authored root {noun}.",
+        symbol="info",
+    )
+    return True
 
 
 class APMFileHandler:
@@ -120,56 +177,51 @@ class APMFileHandler:
     def _recompile(self, changed_file: str) -> None:
         """Recompile after a file change, honoring the resolved target."""
         try:
-            self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
-            self.logger.progress("Recompiling...", symbol="gear")
-
-            # The process-scoped discovery cache (populated by the previous
-            # compile pass) MUST be cleared before re-walking, otherwise
-            # subsequent recompiles serve the stale primitive set from
-            # before the edit. See #1533 follow-up. perf_stats counters
-            # are NOT reset here -- they accumulate across the watch
-            # session and are rendered once at teardown.
-            clear_discovery_cache()
-
-            # When apm.yml itself was the trigger, re-resolve so a
-            # mid-session edit to ``target:`` / ``targets:`` takes
-            # effect on this recompile, then persist the fresh value
-            # so subsequent instruction-file edits do not silently
-            # revert to the startup snapshot.  Match on basename
-            # rather than ``endswith`` so a stray ``backup_apm.yml``
-            # cannot masquerade as the project root manifest.
-            effective_target = self.effective_target
-            if os.path.basename(changed_file) == APM_YML_FILENAME:
-                from .cli import _resolve_effective_target
-
-                effective_target, _reason, _config_target = _resolve_effective_target(
-                    self.cli_target
-                )
-                self.effective_target = effective_target
-
-            config = CompilationConfig.from_apm_yml(
-                output_path=self.output if self.output != AGENTS_MD_FILENAME else None,
-                chatmode=self.chatmode,
-                resolve_links=not self.no_links if self.no_links else None,
-                dry_run=self.dry_run,
-                target=effective_target,
-            )
-
-            compiler = AgentsCompiler(".")
-            result = compiler.compile(config, logger=self.logger)
-
-            if result.success:
-                if self.dry_run:
-                    self.logger.success("Recompilation successful (dry run)", symbol="sparkles")
-                else:
-                    self.logger.success(f"Recompiled to {result.output_path}", symbol="sparkles")
-            else:
-                self.logger.error("Recompilation failed")
-                for error in result.errors:
-                    self.logger.error(f"  {error}")
+            operation = nullcontext() if self.dry_run else lifecycle_operation()
+            with operation:
+                self._recompile_locked(changed_file)
 
         except Exception as e:
             self.logger.error(f"Error during recompilation: {e}")
+
+    def _recompile_locked(self, changed_file: str) -> None:
+        """Run one watch recompilation while holding the lifecycle lock."""
+        self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
+        self.logger.progress("Recompiling...", symbol="gear")
+        clear_discovery_cache()
+
+        effective_target = self.effective_target
+        if os.path.basename(changed_file) == APM_YML_FILENAME:
+            from .cli import _resolve_effective_target
+
+            effective_target, _reason, _config_target = _resolve_effective_target(self.cli_target)
+            self.effective_target = effective_target
+
+        config = CompilationConfig.from_apm_yml(
+            output_path=self.output if self.output != AGENTS_MD_FILENAME else None,
+            chatmode=self.chatmode,
+            resolve_links=not self.no_links if self.no_links else None,
+            dry_run=self.dry_run,
+            target=effective_target,
+        )
+        result = AgentsCompiler(".").compile(config, logger=self.logger)
+        retained_outputs = _report_retained_watch_outputs(
+            self.logger,
+            result,
+            dry_run=self.dry_run,
+        )
+
+        if result.success:
+            if retained_outputs:
+                pass
+            elif self.dry_run:
+                self.logger.success("Recompilation successful (dry run)", symbol="sparkles")
+            else:
+                self.logger.success(f"Recompiled to {result.output_path}", symbol="sparkles")
+            return
+        self.logger.error("Recompilation failed")
+        for error in result.errors:
+            self.logger.error(f"  {error}")
 
 
 def _watch_mode(
@@ -262,23 +314,26 @@ def _watch_mode(
         clear_discovery_cache()
         perf_stats.reset()
 
-        config = CompilationConfig.from_apm_yml(
-            output_path=output if output != AGENTS_MD_FILENAME else None,
-            chatmode=chatmode,
-            resolve_links=not no_links if no_links else None,
-            dry_run=dry_run,
-            target=effective_target,
-        )
-
-        compiler = AgentsCompiler(".")
-        result = compiler.compile(config)
+        operation = nullcontext() if dry_run else lifecycle_operation()
+        with operation:
+            config = CompilationConfig.from_apm_yml(
+                output_path=output if output != AGENTS_MD_FILENAME else None,
+                chatmode=chatmode,
+                resolve_links=not no_links if no_links else None,
+                dry_run=dry_run,
+                target=effective_target,
+            )
+            result = AgentsCompiler(".").compile(config)
+        retained_outputs = _report_retained_watch_outputs(logger, result, dry_run=dry_run)
 
         # NOTE: render_summary moved to the Ctrl+C teardown below so the
         # watch session emits ONE aggregate perf block at exit instead of
         # spamming a 5-6 line block after every recompile.
 
         if result.success:
-            if dry_run:
+            if retained_outputs:
+                pass
+            elif dry_run:
                 logger.success("Initial compilation successful (dry run)", symbol="sparkles")
             else:
                 logger.success(

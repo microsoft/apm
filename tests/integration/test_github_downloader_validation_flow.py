@@ -12,6 +12,7 @@ import contextlib
 from unittest.mock import MagicMock, patch
 
 import pytest
+from git import Actor, Repo
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
@@ -46,6 +47,18 @@ def _make_downloader() -> GitHubPackageDownloader:
     dl.persistent_git_cache = None
     dl._tiered_resolver = None
     return dl
+
+
+def _configure_http_remote_env(downloader: GitHubPackageDownloader) -> None:
+    """Make the resolver mock return the canonical plaintext-HTTP fence."""
+    downloader.auth_resolver.git_env_for_remote.return_value = (
+        AuthResolver.build_noninteractive_git_env(
+            base_env=downloader.git_env,
+            host_kind="gitlab",
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -280,48 +293,22 @@ class TestDownloadVirtualFilePackage:
         return dep_ref
 
     def test_frontmatter_description_extracted(self, tmp_path):
-        """Lines 902-912: description extracted from YAML frontmatter."""
-        self._make_dep_ref(
-            virtual_path="owner/repo/.instructions.md",
-            repo_url="owner/repo",
-        )
+        """Remote file download uses the real metadata materializer."""
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.models.dependency import DependencyReference
 
+        dep_ref = DependencyReference.parse("owner/repo/.instructions.md")
         file_content = b"---\ndescription: 'My custom description'\n---\n# Instructions\n"
-        tmp_path / "pkg"
-
-        # Mock the HTTP download of the file
         dl = _make_downloader()
-        dl._strategies.download_file = MagicMock(return_value=file_content)
-
-        with (
-            patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
-            patch("apm_cli.deps.github_downloader.APMPackage") as mock_pkg_cls,
-            patch(
-                "apm_cli.deps.github_downloader.yaml_to_str",
-                return_value="name: owner-repo\n",
-            ),
-        ):
-            mock_result = MagicMock()
-            mock_result.is_valid = True
-            mock_result.package = MagicMock()
-            mock_result.package_type = MagicMock()
-            mock_validate.return_value = mock_result
-            mock_pkg_cls.return_value = MagicMock()
-
-            # Just test the parsing logic directly
-            content_str = file_content.decode("utf-8")
-            description = "Virtual package containing .instructions.md"
-
-            if content_str.startswith("---\n"):
-                end_idx = content_str.find("\n---\n", 4)
-                if end_idx > 0:
-                    front = content_str[4:end_idx]
-                    for line in front.split("\n"):
-                        if line.startswith("description:"):
-                            description = line.split(":", 1)[1].strip().strip("\"'")
-                            break
-
-            assert description == "My custom description"
+        dl.download_raw_file = MagicMock(return_value=file_content)
+        dl._resolve_commit_sha_for_ref = MagicMock(return_value="a" * 40)
+        target = tmp_path / "pkg"
+        result = dl.download_virtual_file_package(dep_ref, target)
+        assert result.package.description == "My custom description"
+        assert APMPackage.from_apm_yml(target / "apm.yml").description == result.package.description
+        assert (target / ".apm/instructions/.instructions.md").read_bytes() == file_content
+        dl.download_raw_file.assert_called_once_with(dep_ref, ".instructions.md", "main")
+        assert result.resolved_reference.resolved_commit == "a" * 40
 
     def test_frontmatter_parse_failure_uses_default(self, tmp_path):
         """Line 913-915: binary/invalid content falls back to default description."""
@@ -366,7 +353,15 @@ class TestDownloadSubdirectoryPersistentCache:
         # Put a valid subdirectory in the cache
         pkg_dir = cached_checkout / "packages" / "my-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text("name: my-pkg\nversion: 1.0.0\n")
+        (pkg_dir / "apm.yml").write_bytes(b"name: my-pkg\nversion: 1.0.0\n")
+        actor = Actor("APM Test", "apm-test@example.invalid")
+        cached_repo = Repo.init(cached_checkout)
+        cached_repo.index.add(["packages/my-pkg/apm.yml"])
+        cached_repo.index.commit(
+            "seed cache",
+            author=actor,
+            committer=actor,
+        )
 
         target_path = tmp_path / "target"
 
@@ -384,6 +379,7 @@ class TestDownloadSubdirectoryPersistentCache:
                 "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
             }
         )
+        _configure_http_remote_env(dl)
 
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
@@ -487,6 +483,7 @@ class TestDownloadWholeRepositoryPersistentCache:
                 "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
             }
         )
+        _configure_http_remote_env(dl)
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
         dl.persistent_git_cache = persistent_cache
@@ -525,6 +522,54 @@ class TestDownloadWholeRepositoryPersistentCache:
         assert "GIT_CONFIG_VALUE_1" not in cache_env
         assert "GIT_CONFIG_PARAMETERS" not in cache_env
         assert "GIT_HTTP_EXTRAHEADER" not in cache_env
+
+
+class TestDownloadWholeRepositoryPersistentCacheAgentPluginRejection:
+    """Regression test: a rejected Agent Plugin on the cache fast path must not
+    leave a partially-populated target_path on disk.
+
+    Covers the gap where `except AgentPluginError: raise` skipped the cleanup
+    performed by the sibling `except Exception` branch a few lines below.
+    """
+
+    def test_rejected_agent_plugin_cleans_up_target_path(self, tmp_path):
+        from apm_cli.agent_plugins.errors import AgentPluginManifestError
+        from apm_cli.models.apm_package import DependencyReference
+
+        dep_ref = DependencyReference.parse("http://gitlab.com/owner/native-plugin.git#main")
+        cached_checkout = tmp_path / "cached"
+        cached_checkout.mkdir()
+        (cached_checkout / "plugin.json").write_text("{}", encoding="utf-8")
+
+        dl = _make_downloader()
+        persistent_cache = MagicMock()
+        persistent_cache.get_checkout.return_value = cached_checkout
+        dl.persistent_git_cache = persistent_cache
+
+        resolved_ref = MagicMock()
+        resolved_ref.resolved_commit = "a" * 40
+        resolved_ref.ref_name = "main"
+
+        target_path = tmp_path / "target"
+
+        with (
+            patch.object(dl, "_parse_artifactory_base_url", return_value=None),
+            patch.object(dl, "_is_artifactory_only", return_value=False),
+            patch.object(dl, "resolve_git_reference", return_value=resolved_ref),
+            patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch("apm_cli.utils.file_ops.robust_copytree"),
+            patch(
+                "apm_cli.bundle.local_bundle.route_agent_plugin_package",
+                side_effect=AgentPluginManifestError("unsupported schema"),
+            ),
+            patch("apm_cli.deps.github_downloader._rmtree") as mock_rmtree,
+        ):
+            with pytest.raises(AgentPluginManifestError):
+                dl.download_package(dep_ref, target_path)
+
+        assert any(call.args[0] == target_path for call in mock_rmtree.call_args_list), (
+            f"target_path was not cleaned up; _rmtree calls: {mock_rmtree.call_args_list}"
+        )
 
 
 # ---------------------------------------------------------------------------

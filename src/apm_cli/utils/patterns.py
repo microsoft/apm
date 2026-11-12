@@ -7,9 +7,18 @@ parse so converters and the placement optimizer behave consistently.
 
 from __future__ import annotations
 
+import json
+import re
+from collections.abc import Iterable
+
+import yaml
+
+from apm_cli.utils.yaml_io import load_yaml_str
+
 _APPLY_TO_ESCAPE = "\\"
 _APPLY_TO_SEPARATOR = ","
 _ESCAPABLE_APPLY_TO_CHARS = frozenset({_APPLY_TO_SEPARATOR, _APPLY_TO_ESCAPE})
+_GLOB_META_CHARACTERS = frozenset({"*", "?", "[", "{"})
 
 
 class _ApplyToPattern(str):
@@ -40,6 +49,7 @@ def has_top_level_comma(pattern: str) -> bool:
         return False
 
     depth = 0
+    in_character_class = False
     index = 0
     while index < len(pattern):
         ch = pattern[index]
@@ -50,7 +60,12 @@ def has_top_level_comma(pattern: str) -> bool:
         ):
             index += 2
             continue
-        if ch == "{":
+        if in_character_class:
+            if ch == "]":
+                in_character_class = False
+        elif ch == "[":
+            in_character_class = True
+        elif ch == "{":
             depth += 1
         elif ch == "}":
             if depth > 0:
@@ -67,9 +82,9 @@ def yaml_double_quote(value: str) -> str:
     Defence-in-depth for the instruction integrators that emit YAML
     frontmatter via f-strings (``f'  - "{g}"'``). A glob containing a
     literal backslash, double-quote, or control character would break
-    the surrounding YAML if inlined verbatim; this helper escapes the
-    minimal set needed for the YAML 1.2 double-quoted form. Returns the
-    value already wrapped in the surrounding double quotes.
+    the surrounding YAML if inlined verbatim. JSON string serialization
+    is a strict subset of YAML double-quoted scalar syntax and covers every
+    control character. Returns the value wrapped in double quotes.
 
     Note: ``parse_apply_to`` already strips leading/trailing whitespace
     per segment, and the Windsurf integrator strips newlines from the
@@ -77,14 +92,83 @@ def yaml_double_quote(value: str) -> str:
     is near-zero -- this exists so emitted YAML stays well-formed even
     on adversarial or copy-paste-mangled inputs.
     """
-    escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
-    return f'"{escaped}"'
+    return json.dumps(value, ensure_ascii=True)
+
+
+def yaml_plain_scalar(value: str) -> str:
+    """Render ``value`` in the least-quoted valid YAML scalar form.
+
+    Prefer a bare scalar when it round-trips losslessly
+    through YAML's own resolver, fall back to a single-quoted scalar
+    (still no backslash escaping) when the value merely needs
+    delimiting, and only resort to a double-quoted scalar for values
+    neither can represent, such as one containing a newline. Unlike
+    :func:`yaml_double_quote`, this never forces ``\\uXXXX`` escaping of
+    printable non-ASCII text -- the escaping there is ASCII-only
+    defence-in-depth for targets that always quote; here, the bare and
+    single-quoted forms already avoid backslash escapes entirely, so
+    the double-quoted fallback keeps UTF-8 literal for the same reason.
+
+    Introduced for the Cursor target (issue #3002); other converters
+    keep their existing always-double-quoted behavior via
+    :func:`yaml_double_quote`.
+    """
+    if not _YAML_UNSAFE_SCALAR_RE.search(value):
+        if _yaml_scalar_round_trips(value, value):
+            return value
+        single_quoted = "'" + value.replace("'", "''") + "'"
+        if _yaml_scalar_round_trips(single_quoted, value):
+            return single_quoted
+    return _yaml_double_quote_utf8_safe(value)
+
+
+def _yaml_scalar_round_trips(candidate: str, expected: str) -> bool:
+    """Return True if parsing ``candidate`` as a bare YAML scalar yields ``expected``.
+
+    ``description``/``globs`` values originate in an installed package's
+    frontmatter -- untrusted content. Routed through the same
+    ``_BoundedSafeLoader`` every other untrusted-YAML entry point in this
+    codebase uses (:func:`apm_cli.utils.yaml_io.load_yaml_str`), not stock
+    ``yaml.safe_load``: a description whose literal text happens to be a
+    YAML alias/merge-key expansion bomb would otherwise bypass that guard
+    on this second, in-memory parse even though the original frontmatter
+    parse was already bounded (issue #2389's attack class).
+    """
+    try:
+        return load_yaml_str(candidate) == expected
+    except yaml.YAMLError:
+        return False
+
+
+# Keep scalars on one physical line and escape YAML-forbidden literal
+# characters. JSON alone does not escape C1 controls, LS/PS or surrogates
+# when ensure_ascii=False.
+_YAML_UNSAFE_SCALAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\ud800-\udfff\ufffe\uffff]")
+
+
+def _yaml_double_quote_utf8_safe(value: str) -> str:
+    """Double-quote ``value``, keeping printable non-ASCII literal.
+
+    Like :func:`yaml_double_quote` but with ``ensure_ascii=False`` --
+    except for codepoints YAML 1.1 treats as a line break
+    or excludes from double-quoted scalars outright, and any lone UTF-16
+    surrogate, all of which still need a JSON-style ``\\uXXXX`` escape
+    despite being outside JSON's own required control-character range.
+    """
+    encoded = json.dumps(value, ensure_ascii=False)
+    return _YAML_UNSAFE_SCALAR_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", encoded)
+
+
+def yaml_globs_scalar(value: str) -> str:
+    """Render Cursor globs bare, escaping unsafe literal characters.
+
+    Ordinary globs, including leading ``**``, follow Cursor's documented
+    comma-separated format rather than strict YAML alias syntax. Controls,
+    line breaks and non-encodable characters still require double quoting.
+    """
+    if _YAML_UNSAFE_SCALAR_RE.search(value):
+        return _yaml_double_quote_utf8_safe(value)
+    return value
 
 
 def normalize_apply_to(value: object, default: str = "") -> str:
@@ -101,20 +185,38 @@ def normalize_apply_to(value: object, default: str = "") -> str:
                 continue
             normalized = str(pattern).strip()
             if normalized:
-                patterns.append(_escape_apply_to_segment(normalized))
+                patterns.append(escape_apply_to_segment(normalized))
         return ",".join(patterns) if patterns else default
     if value is None:
         return default
     return str(value)
 
 
-def _escape_apply_to_segment(pattern: str) -> str:
-    """Encode one YAML-list pattern so top-level commas retain their boundary."""
+def escape_apply_to_segment(pattern: str) -> str:
+    """Encode one already-resolved pattern so top-level commas/backslashes
+    round-trip losslessly back through :func:`parse_apply_to`.
+
+    Used both to re-encode a YAML-list ``applyTo`` into the single
+    comma-separated OR expression (:func:`normalize_apply_to`) and to
+    re-join :func:`parse_apply_to`'s output into one comma-separated
+    scalar (Cursor's ``globs:``, issue #3002) -- without this, a glob
+    that legitimately contains a literal comma (escaped by the author as
+    ``\\,``) would become indistinguishable from two separate globs once
+    rejoined.
+    """
     escaped: list[str] = []
     depth = 0
+    in_character_class = False
     for char in pattern:
-        if char == _APPLY_TO_ESCAPE:
+        if in_character_class:
+            escaped.append(char)
+            if char == "]":
+                in_character_class = False
+        elif char == _APPLY_TO_ESCAPE:
             escaped.append(_APPLY_TO_ESCAPE * 2)
+        elif char == "[":
+            in_character_class = True
+            escaped.append(char)
         elif char == "{":
             depth += 1
             escaped.append(char)
@@ -147,6 +249,7 @@ def parse_apply_to(value: str | None) -> list[str]:
         return []
     segments: list[_ApplyToPattern] = []
     depth = 0
+    in_character_class = False
     current: list[str] = []
     escaped_top_level_comma = False
 
@@ -167,7 +270,14 @@ def parse_apply_to(value: str | None) -> list[str]:
             )
             index += 2
             continue
-        if char == "{":
+        if in_character_class:
+            current.append(char)
+            if char == "]":
+                in_character_class = False
+        elif char == "[":
+            in_character_class = True
+            current.append(char)
+        elif char == "{":
             depth += 1
             current.append(char)
         elif char == "}":
@@ -183,3 +293,78 @@ def parse_apply_to(value: str | None) -> list[str]:
         index += 1
     append_current()
     return [segment for segment in (s.strip() for s in segments) if segment]
+
+
+def literal_apply_to_top_level_roots(
+    apply_to_values: Iterable[str | None],
+) -> frozenset[str] | None:
+    """Return provable literal roots for a batch of ``applyTo`` expressions.
+
+    ``None`` means a root-restricted scan could omit a matching file and callers
+    must retain their full traversal. Each expression must contain one or more
+    scoped patterns, whose first path component is literal. The returned roots
+    are the union across comma-separated expressions.
+    """
+    roots: set[str] = set()
+
+    for apply_to in apply_to_values:
+        if (
+            not apply_to
+            or not apply_to.strip()
+            or _APPLY_TO_ESCAPE in apply_to
+            or not _has_balanced_glob_groups(apply_to)
+        ):
+            return None
+
+        patterns = parse_apply_to(apply_to)
+        if not patterns:
+            return None
+
+        for pattern in patterns:
+            root = _literal_top_level_root(pattern)
+            if root is None:
+                return None
+            roots.add(root)
+
+    return frozenset(roots) if roots else None
+
+
+def _has_balanced_glob_groups(pattern: str) -> bool:
+    """Return whether brace and character-class delimiters are balanced."""
+    brace_depth = 0
+    in_character_class = False
+
+    for character in pattern:
+        if in_character_class:
+            if character == "]":
+                in_character_class = False
+            continue
+        if character == "[":
+            in_character_class = True
+        elif character == "{":
+            brace_depth += 1
+        elif character == "}":
+            if brace_depth == 0:
+                return False
+            brace_depth -= 1
+        elif character == "]":
+            return False
+
+    return brace_depth == 0 and not in_character_class
+
+
+def _literal_top_level_root(pattern: str) -> str | None:
+    """Return a pattern's literal first directory component, if provable."""
+    normalized = pattern
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+
+    first, separator, _ = normalized.partition("/")
+    if (
+        not separator
+        or not first
+        or first in {".", ".."}
+        or any(character in _GLOB_META_CHARACTERS for character in first)
+    ):
+        return None
+    return first

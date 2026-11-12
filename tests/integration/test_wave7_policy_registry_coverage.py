@@ -1038,6 +1038,19 @@ class TestMCPServerOperationsValidateServersExist:
 
         assert "io.github.acme/server" in valid
 
+    def test_network_error_on_non_custom_url_fail_closed_raises(self, _no_cache_env, monkeypatch):
+        import requests as _req
+
+        from apm_cli.registry.operations import MCPServerOperations
+
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        ops = MCPServerOperations()
+
+        with patch.object(ops.registry_client.session, "get") as mock_get:
+            mock_get.side_effect = _req.ConnectionError("network down")
+            with pytest.raises(RuntimeError, match="Could not reach MCP registry"):
+                ops.validate_servers_exist(["io.github.acme/server"], fail_closed=True)
+
     def test_network_error_on_custom_url_raises(self, _no_cache_env):
         import requests as _req
 

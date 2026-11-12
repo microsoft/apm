@@ -18,7 +18,14 @@ import pytest
 
 from apm_cli.deps.git_semver_resolver import GitSemverResolution
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.transport_selection import (
+    ProtocolPreference,
+    TransportAttempt,
+    TransportPlan,
+    TransportSelector,
+)
 from apm_cli.drift import detect_ref_change
+from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.dependency.reference import DependencyReference
@@ -37,6 +44,29 @@ def _make_dep_ref(*, reference="^1.2.0", source="github", is_local=False, artifa
 
 
 class TestMaybeResolveGitSemver:
+    @pytest.mark.parametrize(
+        ("source", "is_local", "artifactory_prefix", "reference", "expected"),
+        [
+            ("git", False, None, "^1.2.0", True),
+            (None, False, None, "~1.2.0", True),
+            ("registry", False, None, "^1.2.0", False),
+            ("git", True, None, "^1.2.0", False),
+            ("git", False, "proxy", "^1.2.0", False),
+            ("git", False, None, "v1.2.0", False),
+        ],
+    )
+    def test_git_semver_eligibility_is_source_aware(
+        self, source, is_local, artifactory_prefix, reference, expected
+    ):
+        dep = _make_dep_ref(
+            source=source,
+            is_local=is_local,
+            artifactory_prefix=artifactory_prefix,
+            reference=reference,
+        )
+
+        assert is_git_semver_resolution_eligible(dep) is expected
+
     def test_returns_none_for_local_dep(self):
         dep = _make_dep_ref(is_local=True)
         assert (
@@ -169,6 +199,145 @@ class TestMaybeResolveGitSemver:
             remote_url="https://dev.azure.com/apm-org/apm-project/_git/widget",
         )
 
+    def test_prefer_ssh_selects_rewrite_candidate_for_ssh_transport(self):
+        """Semver ref discovery must use the same SSH candidate as clone."""
+        dep = _make_dep_ref(reference="^1.2.0")
+        dep.ssh_user = "deploy"
+        dep.port = 2222
+        selector = MagicMock()
+        selector.select.return_value = TransportPlan(
+            attempts=[
+                TransportAttempt(
+                    scheme="ssh",
+                    use_token=False,
+                    label="SSH",
+                )
+            ],
+            strict=True,
+        )
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+                protocol_pref=ProtocolPreference.SSH,
+            )
+
+        assert selector.select.call_args.kwargs["candidate_url"] == (
+            "ssh://deploy@github.com:2222/acme/widget.git"
+        )
+        assert ref_resolver_cls.call_args.kwargs["transport_scheme"] == "ssh"
+
+    def test_explicit_ssh_preserves_custom_user_and_port(self):
+        """An explicit SSH dependency keeps its original SSH connection details."""
+        dep = DependencyReference.parse("ssh://deploy@github.com:2222/acme/widget#^1.2.0")
+        selector = MagicMock()
+        selector.select.return_value = TransportPlan(
+            attempts=[
+                TransportAttempt(
+                    scheme="ssh",
+                    use_token=False,
+                    label="SSH",
+                )
+            ],
+            strict=True,
+        )
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+            )
+
+        assert selector.select.call_args.kwargs["candidate_url"] == (
+            "ssh://deploy@github.com:2222/acme/widget.git"
+        )
+        assert ref_resolver_cls.call_args.kwargs["transport_scheme"] == "ssh"
+        assert ref_resolver_cls.call_args.kwargs["ssh_user"] == "deploy"
+        assert ref_resolver_cls.call_args.kwargs["port"] == 2222
+
+    def test_ado_prefer_ssh_uses_ado_candidate_and_selected_transport(self):
+        """ADO shorthand honors SSH preference without routing through HTTPS."""
+        dep = DependencyReference.parse(
+            "https://dev.azure.com/apm-org/apm-project/_git/widget#^1.2.0"
+        )
+        dep.explicit_scheme = None
+        selector = MagicMock()
+        selector.select.return_value = TransportPlan(
+            attempts=[
+                TransportAttempt(
+                    scheme="ssh",
+                    use_token=False,
+                    label="SSH",
+                )
+            ],
+            strict=True,
+        )
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+                protocol_pref=ProtocolPreference.SSH,
+            )
+
+        assert selector.select.call_args.kwargs["candidate_url"] == (
+            "git@ssh.dev.azure.com:v3/apm-org/apm-project/widget"
+        )
+        assert ref_resolver_cls.call_args.kwargs["transport_scheme"] == "ssh"
+
+    def test_https_to_ssh_rewrite_preserves_requested_url_for_git(self):
+        """Git must apply an HTTPS-to-SSH rewrite, including custom SSH details."""
+        dep = _make_dep_ref(reference="^1.2.0")
+        requested_url = "https://github.com/acme/widget.git"
+        effective_url = "ssh://git@github.com:443/acme/widget.git"
+        rewrite_resolver = MagicMock()
+        rewrite_resolver.resolve.side_effect = lambda candidate: (
+            effective_url if candidate == requested_url else None
+        )
+        rewrite_resolver.has_exact_rule.return_value = True
+        selector = TransportSelector(rewrite_resolver)
+        semver_resolver = MagicMock()
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as ref_resolver_cls,
+            patch(
+                "apm_cli.deps.git_semver_resolver.GitSemverResolver",
+                return_value=semver_resolver,
+            ),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                transport_selector=selector,
+                protocol_pref=ProtocolPreference.HTTPS,
+            )
+
+        assert ref_resolver_cls.call_args.kwargs.get("transport_scheme", "https") == "https"
+        rewrite_resolver.resolve.assert_called_once_with(requested_url)
+        semver_resolver.resolve.assert_called_once_with(
+            owner_repo="acme/widget",
+            package_name="widget",
+            constraint="^1.2.0",
+            remote_url=requested_url,
+        )
+
     def test_lockfile_replay_skipped_when_constraint_changed(self):
         """If the manifest constraint differs from the locked constraint,
         replay is skipped and a fresh resolution kicks in."""
@@ -241,6 +410,90 @@ class TestMaybeResolveGitSemver:
                 existing_lockfile=None,
                 update_refs=False,
             )
+
+
+class TestDownloadStrategyReplaysLockedSemver:
+    """#3382: a semver dep already in apm_modules skips the resolve callback,
+    so integrate must replay the locked tag instead of resolving the raw
+    range as a literal ref (which branch-drift healing then re-downloads)."""
+
+    def _lockfile(self, dep, *, constraint="^1.2.0", tag="v1.5.3"):
+        lockfile = LockFile()
+        lockfile.dependencies[dep.get_unique_key()] = LockedDependency(
+            host="github.com",
+            repo_url="acme/widget",
+            source="git",
+            resolved_ref=tag,
+            resolved_commit="a" * 40,
+            version="1.5.3",
+            constraint=constraint,
+            resolved_tag=tag,
+            resolved_at="2025-01-15T12:00:00Z",
+        )
+        return lockfile
+
+    def _ctx(self, lockfile, *, update_refs=False):
+        ctx = MagicMock()
+        ctx.existing_lockfile = lockfile
+        ctx.update_refs = update_refs
+        ctx.refresh = False
+        ctx.git_semver_resolutions = {}
+        ctx.pre_downloaded_keys = set()
+        ctx.callback_downloaded = {}
+        ctx.callback_content_hashes = {}
+        ctx.content_hash_verified_deps = set()
+        ctx.expected_hash_change_deps = set()
+        ctx.downloader.resolve_git_reference.side_effect = Exception("no remote")
+        return ctx
+
+    def _resolved_refs(self, ctx):
+        return [call.args[0].reference for call in ctx.downloader.resolve_git_reference.mock_calls]
+
+    def test_unchanged_constraint_replays_locked_tag(self, tmp_path):
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        dep = _make_dep_ref(reference="^1.2.0", source="git")
+        ctx = self._ctx(self._lockfile(dep))
+
+        _resolve_download_strategy(ctx, dep, tmp_path / "missing")
+
+        assert self._resolved_refs(ctx) == ["v1.5.3"]
+        assert dep.reference == "v1.5.3"
+        resolution = ctx.git_semver_resolutions[dep.get_unique_key()]
+        assert resolution.constraint == "^1.2.0"
+        assert resolution.resolved_tag == "v1.5.3"
+        assert resolution.resolved_sha == "a" * 40
+
+    @pytest.mark.parametrize("tag", ["v1.5.3", "1.5.3"], ids=("v-prefixed", "bare-version"))
+    def test_replayed_tag_is_not_reported_as_ref_drift(self, tmp_path, tag):
+        """A bare ``1.5.3`` tag is itself a semver string; drift must still be
+        judged against the declared constraint, not the replayed tag."""
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        dep = _make_dep_ref(reference="^1.2.0", source="git")
+        ctx = self._ctx(self._lockfile(dep, tag=tag))
+
+        _, _, _, ref_changed = _resolve_download_strategy(ctx, dep, tmp_path / "missing")
+
+        assert dep.reference == tag
+        assert ref_changed is False
+        assert ctx.expected_hash_change_deps == set()
+
+    @pytest.mark.parametrize(
+        ("update_refs", "constraint"),
+        [(True, "^1.2.0"), (False, "^1.0.0")],
+        ids=("update", "constraint-changed"),
+    )
+    def test_update_or_changed_constraint_does_not_replay(self, tmp_path, update_refs, constraint):
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        dep = _make_dep_ref(reference="^1.2.0", source="git")
+        ctx = self._ctx(self._lockfile(dep, constraint=constraint), update_refs=update_refs)
+
+        _resolve_download_strategy(ctx, dep, tmp_path / "missing")
+
+        assert dep.reference == "^1.2.0"
+        assert ctx.git_semver_resolutions == {}
 
 
 class TestDriftDetectRefChangeForSemver:

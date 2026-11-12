@@ -7,22 +7,26 @@ single subprocess call.
 
 Security notes
 --------------
-* Tokens embedded in ``https://x-access-token:<TOKEN>@`` URLs are
-  scrubbed from all error messages and exceptions before they leave
-  this module.
+* Managed credentials use process-scoped Authorization headers and stay out of
+  remote URLs. URL sanitization remains as defense for explicit userinfo.
 * The ``translate_git_stderr`` helper from ``git_stderr.py`` is used
   to classify failures and produce actionable hints.
 """
 
 from __future__ import annotations
 
+import contextlib
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 
+from ..deps.git_remote_ops import tag_commit_shas
+from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
@@ -33,7 +37,7 @@ from ..utils.github_host import (
     is_azure_devops_hostname,
     is_visualstudio_legacy_hostname,
 )
-from ._git_utils import redact_token as _redact_token
+from ._git_utils import redact_token as _redact_token  # noqa: F401
 from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
 
@@ -41,6 +45,7 @@ __all__ = [
     "RefCache",
     "RefResolver",
     "RemoteRef",
+    "is_commit_pin_ref",
 ]
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,15 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def is_commit_pin_ref(ref: str | None) -> bool:
+    """Return whether a marketplace entry ``ref`` is a full commit-SHA pin.
+
+    Shared by ``apm pack`` and ``apm marketplace check`` so both agree on
+    which refs name a commit rather than a tag or branch.
+    """
+    return bool(ref and _SHA_RE.match(ref))
 
 
 # Local import below avoids a dependency-model import cycle at module load time.
@@ -102,6 +116,17 @@ class RemoteRef:
 
     name: str  # e.g. "refs/tags/v1.2.0" or "refs/heads/main"
     sha: str  # 40-char hex SHA
+    peeled_sha: str | None = None  # commit behind an annotated tag, when advertised
+
+
+class _RemoteAttemptError(RuntimeError):
+    """Carry one failed ls-remote result through AuthResolver fallback."""
+
+    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.result = result
+        super().__init__(
+            redact_git_diagnostic(result.stderr or f"git ls-remote exited {result.returncode}")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -160,8 +185,15 @@ class RefCache:
 
 
 def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
-    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``."""
-    refs: list[RemoteRef] = []
+    """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``.
+
+    Tags carry the commit a checkout of them lands on, as resolved by
+    ``deps.git_remote_ops.tag_commit_shas``: an annotated or signed tag takes
+    the SHA of its peeled record, which adds no ref of its own. Branches and
+    other refs keep their only SHA. ``peeled_sha`` retains the same canonical
+    commit for consumers that distinguish annotated tags from other refs.
+    """
+    records: list[tuple[str, str]] = []
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -172,10 +204,18 @@ def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
         if not _SHA_RE.match(sha):
             continue
-        # Skip peeled tag objects (^{})
-        if refname.endswith("^{}"):
-            continue
-        refs.append(RemoteRef(name=refname, sha=sha))
+        records.append((sha, refname))
+    commits, annotated = tag_commit_shas(records)
+    refs: list[RemoteRef] = []
+    # Preserve record order; the owner's keys exclude peeled-only refnames.
+    for sha, refname in records:
+        if refname.startswith("refs/tags/"):
+            if refname not in commits:
+                continue  # the peeled record of an annotated tag
+            sha = commits[refname]
+        refs.append(
+            RemoteRef(name=refname, sha=sha, peeled_sha=sha if refname in annotated else None)
+        )
     return refs
 
 
@@ -217,6 +257,7 @@ class RefResolver:
         transport_scheme: str = "https",
         ssh_user: str = "git",
         port: int | None = None,
+        unauth_first: bool = False,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
@@ -230,6 +271,7 @@ class RefResolver:
         self._transport_scheme = transport_scheme
         self._ssh_user = ssh_user
         self._port = port
+        self._unauth_first = unauth_first
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -263,21 +305,41 @@ class RefResolver:
                 summary=f"Bearer authentication is not supported for host '{self._host}'.",
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
-        url_token = None if requested_bearer or use_ssh else self._token
-        if use_ssh and ado_host:
-            org, project, repo = _ado_coordinates_from_owner_repo(
-                host=self._host,
-                owner_repo=owner_repo,
-            )
-            ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
-            url = build_ado_ssh_url(org, project, repo, host=ssh_host)
-        elif use_ssh:
-            url = build_ssh_url(
-                self._host,
-                owner_repo,
-                port=self._port,
-                user=self._ssh_user,
-            )
+        if use_ssh:
+            if ado_host:
+                org, project, repo = _ado_coordinates_from_owner_repo(
+                    host=self._host,
+                    owner_repo=owner_repo,
+                )
+                ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
+                canonical_ssh_url = build_ado_ssh_url(org, project, repo, host=ssh_host)
+            else:
+                canonical_ssh_url = build_ssh_url(
+                    self._host,
+                    owner_repo,
+                    port=self._port,
+                    user=self._ssh_user,
+                )
+            if remote_url is not None:
+                accepted_requested_urls = {
+                    canonical_ssh_url,
+                    canonical_ssh_url.removesuffix(".git"),
+                }
+                if remote_url not in accepted_requested_urls:
+                    raise GitLsRemoteError(
+                        package=owner_repo,
+                        summary=(
+                            "The canonical SSH remote URL does not match the configured "
+                            "host or dependency coordinates."
+                        ),
+                        hint=(
+                            "Re-add the dependency with its original URL to regenerate "
+                            "the lock entry."
+                        ),
+                    )
+                url = remote_url
+            else:
+                url = canonical_ssh_url
         elif remote_url is not None:
             parsed_remote = urllib.parse.urlparse(remote_url)
             expected_ado_path = (
@@ -288,13 +350,17 @@ class RefResolver:
                 if ado_host
                 else None
             )
+            expected_path = (
+                expected_ado_path if ado_host else f"/{owner_repo.removesuffix('.git').strip('/')}"
+            )
+            expected_path = expected_path.removesuffix(".git").rstrip("/")
+            actual_path = parsed_remote.path.removesuffix(".git").rstrip("/")
             # urlparse lowercases hostname per RFC 3986 3.2.2; normalize both sides.
             if (
-                not ado_host
-                or parsed_remote.scheme != "https"
+                parsed_remote.scheme != "https"
                 or parsed_remote.hostname != self._host.lower()
                 or parsed_remote.port != self._port
-                or parsed_remote.path != expected_ado_path
+                or actual_path != expected_path
                 or parsed_remote.username is not None
                 or parsed_remote.password is not None
                 or parsed_remote.query
@@ -304,11 +370,10 @@ class RefResolver:
                     package=owner_repo,
                     summary=(
                         "The canonical remote URL does not match the configured host "
-                        "or Azure DevOps dependency coordinates."
+                        "or dependency coordinates."
                     ),
                     hint=(
-                        "Re-add the dependency with the original Azure DevOps URL "
-                        "to regenerate the lock entry."
+                        "Re-add the dependency with its original URL to regenerate the lock entry."
                     ),
                 )
             # ADO HTTPS intentionally keeps credentials out of the URL; auth
@@ -330,7 +395,7 @@ class RefResolver:
             url = build_https_clone_url(
                 self._host,
                 owner_repo,
-                token=url_token,
+                token=None,
                 port=self._port,
             )
         from apm_cli.core.auth import AuthResolver
@@ -352,7 +417,9 @@ class RefResolver:
                 base_env=env,
             )
         if use_ssh:
-            AuthResolver._clear_git_auth_env(env)
+            from ..utils.git_env import clear_git_auth_env
+
+            clear_git_auth_env(env)
             env.pop("GIT_ASKPASS", None)
         env["GIT_TERMINAL_PROMPT"] = "0"
         if not use_ssh:
@@ -375,8 +442,9 @@ class RefResolver:
         owner_repo:
             ``"owner/repo"`` string (no host, no ``.git`` suffix).
         remote_url:
-            Canonical ADO URL from ``DependencyReference.to_github_url``.
-            Pass consistently for the same logical remote within one
+            Canonical requested URL that Git must receive for an exact
+            ``insteadOf`` rewrite, or the canonical ADO HTTPS URL. Pass
+            consistently for the same logical remote within one
             ``RefResolver`` lifetime so cache identity stays aligned.
 
         Returns
@@ -403,14 +471,43 @@ class RefResolver:
                 raise OfflineMissError(package="", remote=cache_key)
 
             url, env = self._git_url_and_env(owner_repo, remote_url=remote_url)
-            try:
-                result = subprocess.run(
-                    ["git", "ls-remote", "--tags", "--heads", url],
-                    capture_output=True,
-                    text=True,
+
+            def _run_remote(run_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                from ..utils.git_env import git_remote_refs
+
+                return git_remote_refs(
+                    url,
                     timeout=self._timeout,
-                    env=env,
+                    env=run_env,
+                    options=("--tags", "--heads"),
                 )
+
+            try:
+                if self._unauth_first and self._auth_resolver is not None:
+
+                    def _attempt(
+                        _token: str | None,
+                        attempt_env: dict[str, str],
+                    ) -> subprocess.CompletedProcess[str]:
+                        attempt = _run_remote(attempt_env)
+                        if attempt.returncode != 0:
+                            raise _RemoteAttemptError(attempt)
+                        return attempt
+
+                    try:
+                        result = self._auth_resolver.try_with_fallback(
+                            self._host,
+                            _attempt,
+                            org=owner_repo.partition("/")[0],
+                            port=self._port,
+                            path=owner_repo,
+                            unauth_first=True,
+                            base_env=self._git_env,
+                        )
+                    except _RemoteAttemptError as exc:
+                        result = exc.result
+                else:
+                    result = _run_remote(env)
             except subprocess.TimeoutExpired:
                 raise GitLsRemoteError(  # noqa: B904
                     package="",
@@ -434,7 +531,7 @@ class RefResolver:
                 return fallback_refs
 
             if result.returncode != 0:
-                stderr = _redact_token(result.stderr)
+                stderr = redact_git_diagnostic(result.stderr)
                 if self._stderr_translator:
                     translated = translate_git_stderr(
                         stderr,
@@ -450,7 +547,7 @@ class RefResolver:
                 raise GitLsRemoteError(
                     package="",
                     summary=f"git ls-remote failed for '{owner_repo}' (exit {result.returncode}).",
-                    hint=_redact_token(stderr[:200]) if stderr else "No stderr output.",
+                    hint=redact_git_diagnostic(stderr[:200]) if stderr else "No stderr output.",
                 )
 
             refs = _parse_ls_remote_output(result.stdout)
@@ -560,10 +657,11 @@ class RefResolver:
         """
         url, env = self._git_url_and_env(owner_repo)
         try:
-            result = subprocess.run(
-                ["git", "ls-remote", url, ref],
-                capture_output=True,
-                text=True,
+            from ..utils.git_env import git_remote_refs
+
+            result = git_remote_refs(
+                url,
+                ref,
                 timeout=self._timeout,
                 env=env,
             )
@@ -581,7 +679,7 @@ class RefResolver:
             )
 
         if result.returncode != 0:
-            stderr = _redact_token(result.stderr)
+            stderr = redact_git_diagnostic(result.stderr)
             if self._stderr_translator:
                 translated = translate_git_stderr(
                     stderr,
@@ -597,7 +695,7 @@ class RefResolver:
             raise GitLsRemoteError(
                 package="",
                 summary=f"git ls-remote failed for '{owner_repo}' (exit {result.returncode}).",
-                hint=_redact_token(stderr[:200]) if stderr else "No stderr output.",
+                hint=redact_git_diagnostic(stderr[:200]) if stderr else "No stderr output.",
             )
 
         refs = _parse_ls_remote_output(result.stdout)
@@ -608,6 +706,110 @@ class RefResolver:
                 hint="Check that the ref exists and you have access to the repository.",
             )
         return refs[0].sha
+
+    # -----------------------------------------------------------------
+    # Commit reachability (no cache)
+    # -----------------------------------------------------------------
+
+    def commit_exists(self, owner_repo: str, sha: str) -> bool:
+        """Return whether the remote serves commit *sha* to a fetch.
+
+        ``git ls-remote`` only advertises ref tips, so a commit-SHA pin
+        that is not a tip is verified by a shallow, tree-less fetch of
+        that exact commit into a throwaway bare repository. The server
+        decides which commits it serves; a commit it refuses is treated
+        as unreachable.
+
+        Raises
+        ------
+        ValueError
+            When *sha* is not a full 40-character lowercase commit SHA.
+        OfflineMissError
+            In offline mode; reachability needs the network.
+        GitLsRemoteError
+            When git cannot run or the fetch times out.
+        """
+        if not is_commit_pin_ref(sha):
+            raise ValueError(f"not a full commit SHA: {sha!r}")
+        if self._offline:
+            raise OfflineMissError(package="", remote=owner_repo)
+
+        from ..config import get_apm_temp_dir
+        from ..utils.git_env import (
+            get_git_executable,
+            git_network_env,
+            git_no_templates_args,
+            git_subprocess_env,
+        )
+        from ..utils.path_security import safe_rmtree
+
+        url, env = self._git_url_and_env(owner_repo)
+        git_exe = get_git_executable()
+        timeout = max(self._timeout, 30.0)
+        tmpdir = Path(tempfile.mkdtemp(prefix="apm-commit-probe-", dir=get_apm_temp_dir()))
+        try:
+            bare = tmpdir / "probe.git"
+            subprocess.run(
+                [git_exe, "init", *git_no_templates_args(), "--bare", str(bare)],
+                check=True,
+                capture_output=True,
+                env=git_subprocess_env(env),
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            fetch_env = git_network_env(url, env, git_dir=bare)
+            fetch = subprocess.run(
+                [
+                    git_exe,
+                    "--git-dir",
+                    str(bare),
+                    "fetch",
+                    "--no-tags",
+                    "--depth=1",
+                    "--filter=tree:0",
+                    url,
+                    sha,
+                ],
+                capture_output=True,
+                text=True,
+                env=fetch_env,
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            if fetch.returncode != 0:
+                return False
+            verify = subprocess.run(
+                [
+                    git_exe,
+                    "--git-dir",
+                    str(bare),
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    sha + "^{commit}",
+                ],
+                capture_output=True,
+                text=True,
+                env=git_subprocess_env(env),
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            return verify.returncode == 0 and verify.stdout.strip() == sha
+        except subprocess.TimeoutExpired:
+            raise GitLsRemoteError(  # noqa: B904
+                package="",
+                summary=f"git fetch timed out after {timeout}s for '{owner_repo}'.",
+                hint="Check your network connection and retry.",
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise GitLsRemoteError(  # noqa: B904
+                package="",
+                summary=f"Failed to run git fetch for '{owner_repo}'.",
+                hint=f"Ensure git is installed and on PATH. Error: {exc}",
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                safe_rmtree(tmpdir, tmpdir.parent)
 
     def close(self) -> None:
         """Release resources (cache, locks)."""

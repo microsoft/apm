@@ -40,6 +40,7 @@ from apm_cli.install.drift import (
     _governed_root_dirs,
     _inline_diff_for,
     _make_integrators,
+    _normalize_legacy_local_plugin_for_replay,
     _read_apm_yml_target,
     _walk_managed,
     diff_scratch_against_project,
@@ -169,6 +170,39 @@ class TestMaterializeInstallPath:
         dep = LockedDependency(repo_url="owner/repo", resolved_commit=None)
         with pytest.raises(CacheMissError, match="no resolved_commit"):
             _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
+
+
+class TestLegacyPluginReplayNormalization:
+    def test_native_agent_plugin_bypasses_legacy_normalization(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins.constants import PLUGIN_SCHEMA_ID
+
+        plugin = tmp_path / "native"
+        plugin.mkdir()
+        (plugin / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "1.0.0",
+                    "extensions": {"com.microsoft.apm": {"schemaVersion": "1"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        dependency = LockedDependency(
+            repo_url="./native",
+            source="local",
+            local_path="./native",
+        )
+
+        result = _normalize_legacy_local_plugin_for_replay(
+            dependency,
+            plugin,
+            tmp_path / "apm_modules",
+        )
+
+        assert result == plugin
+        assert not (tmp_path / "apm_modules").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -94,12 +94,16 @@ class TestDependencyReference:
         with pytest.raises(ValueError):
             DependencyReference.parse("user/repo@myalias")
 
-    def test_parse_with_reference_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias -- @ is no longer parsed as alias separator."""
-        dep = DependencyReference.parse("user/repo#main@myalias")
+    def test_parse_with_reference_and_alias_requires_object_form(self):
+        """Reject shorthand aliases while preserving explicit ref and alias fields."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("user/repo#main@myalias")
+        dep = DependencyReference.parse_from_dict(
+            {"git": "https://github.com/user/repo.git", "ref": "main", "alias": "myalias"}
+        )
         assert dep.repo_url == "user/repo"
-        assert dep.reference == "main@myalias"  # @ treated as part of ref
-        assert dep.alias is None
+        assert dep.reference == "main"
+        assert dep.alias == "myalias"
 
     def test_parse_github_urls(self):
         """Test parsing various GitHub URL formats."""
@@ -703,7 +707,7 @@ class TestAPMPackage:
             f.flush()
 
             package = APMPackage.from_apm_yml(Path(f.name))
-            assert package.target == ["opencode", "claude", "vscode"]
+            assert package.target == ["opencode", "claude", "copilot"]
 
         Path(f.name).unlink()
 
@@ -745,7 +749,7 @@ class TestAPMPackage:
             f.flush()
 
             package = APMPackage.from_apm_yml(Path(f.name))
-            assert package.target == ["claude", "vscode"]
+            assert package.target == ["claude", "copilot"]
 
         Path(f.name).unlink()
 
@@ -1249,13 +1253,49 @@ class TestDetectPackageType:
         assert pkg_type == PackageType.INVALID
         assert pj_path is None
 
-    def test_apm_yml_takes_precedence_over_plugin_json(self, tmp_path):
-        """plugin.json (manifest) now takes priority over apm.yml."""
+    def test_metadata_only_apm_yml_preserves_plugin_selection(self, tmp_path):
+        """A metadata-only apm.yml leaves plugin.json authoritative."""
         (tmp_path / "apm.yml").write_text("name: test")
         (tmp_path / "plugin.json").write_text('{"name": "test"}')
         pkg_type, _ = detect_package_type(tmp_path)
-        # In the new cascade, plugin manifest wins (step 1)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+
+    @pytest.mark.parametrize(
+        "manifest_setup",
+        [
+            pytest.param("apm-dir", id="apm-directory"),
+            pytest.param("dependencies", id="declared-dependencies"),
+        ],
+    )
+    def test_eligible_apm_yml_wins_over_plugin_selection(self, tmp_path, manifest_setup):
+        """An eligible apm.yml remains authoritative over plugin.json."""
+        manifest = "name: test"
+        if manifest_setup == "apm-dir":
+            (tmp_path / ".apm").mkdir()
+        else:
+            manifest += "\ndependencies:\n  apm:\n    - owner/package"
+        (tmp_path / "apm.yml").write_text(manifest)
+        (tmp_path / "plugin.json").write_text('{"name": "test"}')
+
+        pkg_type, plugin_path = detect_package_type(tmp_path)
+
+        assert pkg_type == PackageType.APM_PACKAGE
+        assert plugin_path is None
+
+    def test_eligible_apm_yml_wins_during_agent_plugin_validation(self, tmp_path):
+        """Validation honors APM intent over a schema-bearing Agent Plugin."""
+        (tmp_path / ".apm").mkdir()
+        (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0")
+        (tmp_path / "plugin.json").write_text(
+            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",'
+            '"name":"test.plugin","version":"1.0.0"}'
+        )
+
+        result = validate_apm_package(tmp_path)
+
+        assert result.is_valid
+        assert result.package_type == PackageType.APM_PACKAGE
+        assert result.agent_plugin is None
 
     def test_hook_package_apm_yml_precedence(self, tmp_path):
         """apm.yml + hooks/ but no .apm/ -> INVALID (needs .apm/ for APM_PACKAGE)."""

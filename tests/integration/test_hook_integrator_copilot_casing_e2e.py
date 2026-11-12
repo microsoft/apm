@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +117,7 @@ def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> N
     assert set(hooks) == {
         "preToolUse",
         "postToolUse",
-        "userPromptSubmit",
+        "userPromptSubmitted",
         "sessionStart",
         "agentStop",
     }
@@ -124,6 +125,7 @@ def test_copilot_install_writes_only_camel_case_hook_events(tmp_path: Path) -> N
         "PreToolUse",
         "PostToolUse",
         "UserPromptSubmit",
+        "userPromptSubmit",
         "SessionStart",
         "Stop",
         "stop",
@@ -192,6 +194,8 @@ def test_copilot_install_scope_controls_script_paths(
     ).resolve()
     monkeypatch.chdir(package_info.install_path)
     if user_scope:
+        # Copilot CLI hands the cross-platform ``command`` field to PowerShell
+        # too, so only ``bash`` anchors to $HOME; this entry stays absolute.
         assert Path(command).is_absolute()
         assert Path(command).resolve() == installed_script
     else:
@@ -236,8 +240,12 @@ def test_kiro_install_scope_controls_script_paths(
     ).resolve()
     monkeypatch.chdir(package_info.install_path)
     if user_scope:
-        assert Path(command).is_absolute()
-        assert Path(command).resolve() == installed_script
+        # Kiro command actions run a shell command, so POSIX user-scope paths
+        # anchor to $HOME; Windows keeps the absolute form.
+        relative = f"{target.root_dir}/hooks/{package_info.package.name}/run.sh"
+        assert command == (f"$HOME/{relative}" if os.name != "nt" else str(installed_script))
+        expanded = command.replace("$HOME", str(Path.home()))
+        assert Path(expanded).resolve() == installed_script
     else:
         assert not Path(command).is_absolute()
         assert command == f"{target.root_dir}/hooks/{package_info.package.name}/run.sh"

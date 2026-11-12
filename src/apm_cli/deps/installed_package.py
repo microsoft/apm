@@ -8,8 +8,8 @@ field self-documenting.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.deps.git_semver_resolver import GitSemverResolution
@@ -72,3 +72,20 @@ class InstalledPackage:
     # Prefixed package_ to avoid collision with dep_ref identity fields.
     package_name: str | None = None
     package_version: str | None = None
+    # req-ext-003: vendor extension keys (x-*) from the dependency manifest,
+    # in declaration order. Empty when none were declared. Values are not
+    # interpreted. The lockfile omits the field when this is empty.
+    extensions: dict[str, Any] = field(default_factory=dict)
+
+
+def extensions_from_resolved_package(package: object | None) -> dict[str, Any]:
+    """Copy ``x-*`` extensions from a resolved package, or return {}.
+
+    req-ext-003: lock-entry construction must use this instead of re-reading
+    ``apm.yml``. Empty when the package is missing or declared none, so the
+    lockfile omits the field and existing lockfiles stay byte-identical.
+    """
+    raw = getattr(package, "extensions", None)
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    return {str(key): value for key, value in raw.items()}

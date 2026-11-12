@@ -5,8 +5,8 @@ sidebar:
   order: 22
 ---
 
-Discover, inspect, and install MCP servers from the public MCP registry
-(or an enterprise mirror).
+Discover, inspect, and install MCP servers from an MCP registry: the curated
+GitHub MCP Registry by default, or another registry such as an enterprise mirror.
 
 ## Synopsis
 
@@ -25,8 +25,10 @@ plus a thin install alias.
 The canonical install path for MCP servers is
 [`apm install --mcp NAME`](../install/#mcp-server-entry-use-only-with---mcp). It
 edits `apm.yml`, resolves the registry entry, and writes the resulting
-`mcpServers` block to your project. `apm mcp install` is a forwarder
-that calls the same code path -- use whichever spelling you prefer.
+`mcpServers` block to your project. With `-g` or `--global`, it creates or
+updates `~/.apm/apm.yml` and writes only to global-capable runtime
+configurations. `apm mcp install` is a forwarder that calls the same code path
+-- use whichever spelling you prefer.
 
 For an end-to-end consumer walkthrough (declaring an MCP server in
 `apm.yml`, configuring transport and credentials, deploying to a
@@ -89,39 +91,37 @@ apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch
 apm mcp install api --transport http --url https://example.com/mcp
 ```
 
-Forwarded install options (see `apm install --help` for the full
-list):
+`apm mcp install --help` lists these forwarded install options under
+"Forwarded install options". Their help text, accepted values, and shell
+completion come from `apm install` itself, so they always match
+[`apm install`](../install/):
 
-| Flag | Description |
-|---|---|
-| `--transport [stdio\|http\|sse\|streamable-http]` | Transport type. |
-| `--url URL` | Server URL for remote transports. |
-| `--env KEY=VALUE` | Environment variable. Repeatable. |
-| `--header KEY=VALUE` | HTTP header. Repeatable. |
-| `--registry URL` | Custom registry URL for this invocation. |
-| `--mcp-version VER` | Pin the registry entry to a specific version. |
-| `--dev` | Add to `devDependencies`. |
-| `--dry-run` | Resolve and print without writing `apm.yml`. |
-| `--force` | Overwrite an existing entry. |
-| `--no-policy` | Skip policy checks. |
-| `--verbose`, `-v` | Verbose output. |
+`--transport`, `--url`, `--env`, `--header`, `-t`/`--target`, `--registry`,
+`--mcp-version`, `-g`/`--global`, `--trust-transitive-mcp`, `--dev`,
+`--dry-run`, `--force`, `-v`/`--verbose`, `--no-policy`.
+
+Other `apm install` options are passed through unchanged.
 
 ## Environment variables
 
 | Variable | Effect |
 |---|---|
-| `MCP_REGISTRY_URL` | Override the registry endpoint used by `list`, `search`, `show`, and `install`. When set, every command prints a one-line `Registry: <url>` diagnostic so the override is visible. Unset: the public default registry is used silently. |
+| `MCP_REGISTRY_URL` | Override the registry endpoint used by `list`, `search`, `show`, and `install`. Read-only commands print `Registry: <url> (from MCP_REGISTRY_URL)`; installs print `Using MCP registry: <url> (from MCP_REGISTRY_URL)`. Unset: the default GitHub MCP Registry is used silently. |
 
-Network failures against an overridden registry surface an explicit
-hint pointing at `MCP_REGISTRY_URL` so misconfigurations are easy to
-spot in CI logs.
+Network failures against an overridden registry name the setting that supplied
+the URL so misconfigurations are easy to spot in CI logs. Direct
+`apm install --mcp` lookup also fails closed before writing user state.
 
-Registry URL resolution order (first set value wins):
+See [`apm config`](../config/#resolution-order) for the canonical resolution
+order. The same chain resolves `dependencies.mcp`; a per-dependency
+`registry:` URL overrides it for that entry only. To compare curated and open
+registries, see [Choosing an MCP registry](../../../consumer/choosing-an-mcp-registry/).
+Whenever a non-default endpoint is in effect, `apm install` names it once with
+`Using MCP registry: <url> (<source>)` before the lookup.
 
-1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (this invocation only)
-2. `MCP_REGISTRY_URL` environment variable -- prints `Registry: <url>` diagnostic
-3. `mcp-registry-url` in `~/.apm/config.json` (set via `apm config set mcp-registry-url`) -- prints `Registry (config): <url>` diagnostic
-4. Built-in public default (silent)
+Environment-selected and per-dependency `http://` endpoints require
+`MCP_REGISTRY_ALLOW_HTTP=1` when used. A persisted `mcp-registry-url` and an
+explicit `--registry http://...` flag are deliberate opt-ins.
 
 ## Examples
 
@@ -137,6 +137,15 @@ Install a stdio server with a runtime command:
 ```bash
 apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch
 ```
+
+Install the same server at user scope:
+
+```bash
+apm mcp install fetch -g --target claude -- npx -y @modelcontextprotocol/server-fetch
+```
+
+This creates or updates `~/.apm/apm.yml` and the selected runtime's user
+configuration.
 
 Install a remote HTTP server:
 
