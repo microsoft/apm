@@ -107,34 +107,6 @@ components:
     spdx: Apache-2.0
     copyright_snippet: 'Copyright (c) 2025 Anthony Shaw (LICENSE header) -- note: file contents are MIT-style header followed by Apache-2.0 reference; see Open Issues'
     notes: Upstream LICENSE file declares MIT license text but PyPI metadata + classifiers say Apache-2.0. See Open Issues.
-  - name: tomli
-    pyproject_name: tomli
-    upstream: https://github.com/hukkin/tomli
-    spdx: MIT
-    copyright_snippet: Copyright (c) 2021 Taneli Hukkinen
-    notes: 'Conditional dependency: only installed on Python < 3.11. Still ships in the sdist/wheel install graph.'
-    license_text: |
-      MIT License
-
-      Copyright (c) 2021 Taneli Hukkinen
-
-      Permission is hereby granted, free of charge, to any person obtaining a copy
-      of this software and associated documentation files (the "Software"), to deal
-      in the Software without restriction, including without limitation the rights
-      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-      copies of the Software, and to permit persons to whom the Software is
-      furnished to do so, subject to the following conditions:
-
-      The above copyright notice and this permission notice shall be included in all
-      copies or substantial portions of the Software.
-
-      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-      SOFTWARE.
   - name: toml
     pyproject_name: toml
     upstream: https://github.com/uiri/toml
@@ -160,7 +132,7 @@ components:
     upstream: https://github.com/tox-dev/filelock
     spdx: MIT
     copyright_snippet: "Copyright (c) 2025 Bern\u00e1t G\u00e1bor and contributors"
-    notes: Used for cross-process file-based locks in the persistent install cache. Attribution verified against the locked 3.29.0 release (Python 3.10) and the locked 4.2.10 release (Python 3.11+); this does not assert that every release admitted by filelock>=3.12 uses MIT.
+    notes: Used for cross-process file-based locks in the persistent install cache. Attribution verified against the locked 4.2.10 release; this does not assert that every release admitted by filelock>=4.2.1 uses MIT.
   - name: watchdog
     pyproject_name: watchdog
     upstream: https://github.com/gorakhargosh/watchdog

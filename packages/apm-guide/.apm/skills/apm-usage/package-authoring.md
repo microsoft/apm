@@ -232,13 +232,14 @@ becomes `PostToolUse` in Claude; see the alias table below) and rewrites path va
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
-For Claude, APM wraps flat command entries in `{ "matcher", "hooks": [...] }`
-groups in `.claude/settings.json` and adds the required `"type": "command"`
-when a flat command entry omits `type`. Explicit handler types are kept.
-Handlers already inside nested Claude groups and other targets are unchanged.
-
-For Codex, APM wraps flat command entries in hook groups containing a
-nested `hooks` array in `.codex/hooks.json`.
+For Claude and Codex, APM wraps flat command entries in hook groups with a
+nested `hooks` array: `{ "matcher", "hooks": [...] }` in
+`.claude/settings.json`, and the equivalent groups in `.codex/hooks.json`.
+For both targets, a flat command entry that omits `type` receives the required
+`"type": "command"`; explicit handler types are kept and other targets are
+unchanged. This default applies only to flat command entries in the source
+file, not to handlers already inside nested source groups, so supply `type`
+yourself when authoring nested groups.
 Claude, Codex, Gemini, and Antigravity preserve nested handler and
 hook-group metadata, including `env` objects and arrays, in native JSON.
 
