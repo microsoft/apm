@@ -215,6 +215,23 @@ def _index_source_tree(source_root: Path) -> _SourceIndex:
     return _SourceIndex(by_digest=by_digest, unindexed=tuple(unindexed))
 
 
+def _repository_prefix(dep: LockedDependency) -> str:
+    """Repository-relative directory a subdirectory package was cached from.
+
+    The cache holds only the package subdirectory, so source paths are
+    relative to it; the patch must be relative to the repository root.
+    """
+    if not dep.is_virtual or not dep.virtual_path:
+        return ""
+    try:
+        is_subdirectory = dep.to_dependency_ref().is_virtual_subdirectory()
+    except (ValueError, TypeError):
+        return ""
+    if not is_subdirectory:
+        return ""
+    return dep.virtual_path.strip("/")
+
+
 def _diff_lines(text: str) -> list[str]:
     """Split ``text`` into lines using git's line model.
 
@@ -407,12 +424,15 @@ def build_patch_export(
             continue
 
         index = _index_source_tree(source_root)
+        repo_prefix = _repository_prefix(dep)
         # (deployed path, source rel, diff text) per successful mapping;
         # grouped afterwards so several deployed copies of one source
         # file cannot emit clashing hunks into a single patch.
         successes: list[tuple[str, str, str]] = []
         for finding in sorted(group, key=lambda f: f.path):
-            edit = _export_one(finding, key, index, scratch_root, project_root, source_root)
+            edit = _export_one(
+                finding, key, index, scratch_root, project_root, source_root, repo_prefix
+            )
             if isinstance(edit, SkippedEdit):
                 result_skipped.append(edit)
                 continue
@@ -458,6 +478,7 @@ def _export_one(
     scratch_root: Path,
     project_root: Path,
     source_root: Path,
+    repo_prefix: str = "",
 ) -> SkippedEdit | tuple[str, str, str]:
     """Map one ``modified`` finding to (deployed, source rel, diff text).
 
@@ -517,7 +538,8 @@ def _export_one(
     except UnicodeDecodeError:
         return SkippedEdit(finding.path, dep_key, "binary or non-UTF-8 content")
 
-    diff_text = _unified_diff(a_text, b_text, source_rel)
+    patch_rel = f"{repo_prefix}/{source_rel}" if repo_prefix else source_rel
+    diff_text = _unified_diff(a_text, b_text, patch_rel)
     return finding.path, source_rel, diff_text
 
 
