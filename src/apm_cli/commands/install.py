@@ -76,8 +76,10 @@ from apm_cli.install.package_resolution import (
     apply_cli_skill_pin,
     cli_skill_subset,
     dependency_reference_to_yaml_entry,
+    dependency_sections,
     persist_dependency_list_if_changed,
     propagate_existing_registry_source,
+    reconcile_cross_section_declarations,
     resolve_parsed_dependency_reference,
     try_update_existing_dependency_entry,
     user_scope_rejection_reason,
@@ -617,15 +619,7 @@ def _validate_and_add_packages_to_apm_yml(
 
     _default_registry_for_cli = get_effective_default_registry(data, create_config=create_config)
 
-    # Ensure dependencies structure exists
-    dep_section = "devDependencies" if dev else "dependencies"
-    if dep_section not in data:
-        data[dep_section] = {}
-    if "apm" not in data[dep_section]:
-        data[dep_section]["apm"] = []
-
-    current_deps = data[dep_section]["apm"] or []
-
+    dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
     # Detect duplicates against existing deps
     existing_identities = _check_package_conflicts(current_deps)
 
@@ -653,6 +647,9 @@ def _validate_and_add_packages_to_apm_yml(
         updated_packages_out=updated_packages,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
+    )
+    dependencies_changed |= reconcile_cross_section_declarations(
+        validated_packages, _apm_yml_entries, other_deps, dev=dev, dry_run=dry_run, logger=logger
     )
 
     prospective_package = None

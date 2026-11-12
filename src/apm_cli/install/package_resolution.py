@@ -529,3 +529,79 @@ def persist_dependency_list_if_changed(
         else:
             rich_error(f"Failed to write {apm_yml_filename}: {e}")
         sys_exit(1)
+
+
+def dependency_sections(data: Any, *, dev: bool) -> tuple[str, builtins.list, builtins.list]:
+    """Return the install target section, its APM list and the other section's list.
+
+    The target section is created when missing; the other section is only read.
+    An empty or null target list is returned detached: the persist helpers
+    reattach it with ``data[target]["apm"] = current_deps`` before writing.
+    """
+    target, other = (
+        ("devDependencies", "dependencies") if dev else ("dependencies", "devDependencies")
+    )
+    data.setdefault(target, {})
+    data[target].setdefault("apm", [])
+    other_section = data.get(other)
+    other_deps = other_section.get("apm") if isinstance(other_section, dict) else None
+    return target, data[target]["apm"] or [], other_deps or []
+
+
+def reconcile_cross_section_declarations(
+    validated_packages: builtins.list,
+    apm_yml_entries: dict,
+    other_deps: builtins.list,
+    *,
+    dev: bool,
+    dry_run: bool = False,
+    logger: Any = None,
+) -> bool:
+    """Keep one declaration per package across dependencies and devDependencies.
+
+    npm semantics: ``install --dev X`` moves X out of ``dependencies`` (the
+    caller then appends it to ``devDependencies``); a plain ``install X`` keeps
+    X where ``devDependencies`` already declares it and updates that entry in
+    place. Kept packages leave *validated_packages*. Returns whether
+    *other_deps* changed.
+    """
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.models.dependency.selection import (
+        manifest_declarations_of,
+        parse_dependency_entry,
+    )
+
+    changed = False
+    for canonical in builtins.list(validated_packages):
+        entry = apm_yml_entries.get(canonical, canonical)
+        declared = manifest_declarations_of(other_deps, [entry])
+        if not declared:
+            continue
+        if dev:
+            # Dry-run moves in memory too, so the prospective manifest preview
+            # matches what a real run writes; nothing is persisted.
+            for declaration in declared:
+                other_deps.remove(declaration)
+            changed = True
+            action = "Would move" if dry_run else "Moved"
+            message = f"{action} {canonical} from dependencies to devDependencies"
+        else:
+            validated_packages.remove(canonical)
+            message = f"{canonical} is declared in devDependencies; kept it there"
+            try:
+                changed = (
+                    merge_structured_entry_into_current_deps(
+                        other_deps,
+                        entry,
+                        parse_dependency_entry(entry).get_identity(),
+                        canonical,
+                        dependency_reference_cls=DependencyReference,
+                        logger=logger,
+                    )
+                    or changed
+                )
+            except ValueError as exc:
+                message = f"{message} unchanged: {exc}"
+        if logger:
+            logger.progress(message)
+    return changed

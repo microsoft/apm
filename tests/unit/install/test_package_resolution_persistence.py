@@ -10,9 +10,11 @@ from urllib.parse import urlparse
 import pytest
 
 from apm_cli.install.package_resolution import (
+    dependency_sections,
     get_existing_dep_ref_for_identity,
     merge_structured_entry_into_current_deps,
     persist_dependency_list_if_changed,
+    reconcile_cross_section_declarations,
     update_existing_dependency_entry_if_needed,
 )
 from apm_cli.models.apm_package import APMPackage
@@ -390,3 +392,34 @@ def test_explicit_https_upgrade_preserves_metadata_and_repeats_without_writes(
     _, changed = _resolve_and_persist_request(manifest, request, None)
     assert changed is False
     assert manifest.read_bytes() == original
+
+
+def test_install_dev_moves_a_production_declaration() -> None:
+    """#3693: ``install --dev X`` with X in dependencies moves it (npm)."""
+    data = {"dependencies": {"apm": ["acme/c", "acme/d"]}}
+    section, current, other = dependency_sections(data, dev=True)
+    validated = ["acme/c"]
+
+    changed = reconcile_cross_section_declarations(validated, {}, other, dev=True)
+
+    assert (section, current, changed, validated) == ("devDependencies", [], True, ["acme/c"])
+    assert data["dependencies"]["apm"] == ["acme/d"]
+
+
+def test_plain_install_keeps_a_dev_declaration_in_place() -> None:
+    """#3693: plain ``install X`` keeps X in devDependencies and updates its ref."""
+    data = {"devDependencies": {"apm": ["acme/c#v1.0.0"]}}
+    _section, current, other = dependency_sections(data, dev=False)
+    validated = ["acme/c#v2.0.0"]
+
+    changed = reconcile_cross_section_declarations(validated, {}, other, dev=False)
+
+    assert (current, validated, changed) == ([], [], True)
+    assert data["devDependencies"]["apm"] == ["acme/c#v2.0.0"]
+    assert "dependencies" in data and "devDependencies" in data
+
+
+def test_dependency_sections_never_creates_the_other_section() -> None:
+    data: dict = {}
+    dependency_sections(data, dev=False)
+    assert data == {"dependencies": {"apm": []}}

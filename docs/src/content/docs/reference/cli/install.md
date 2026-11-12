@@ -57,7 +57,7 @@ not admitted.
 | `--dry-run` | off | [Preview without writing](#preview-without-writing), subject to offline dependency limits. Positional packages and ref changes are validated and previewed without changing an existing `apm.yml`. Project bootstrap keeps its manifest and explicit targets; global bootstrap uses temporary state without creating the APM home (`$APM_HOME`, default `~/.apm`). `-g --mcp` writes no user manifest, lockfile, or runtime configuration. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo) or select ref freshness. Add `--update` or `--refresh` to resolve mutable refs upstream; [`apm update`](../update/) does so with or without `--force`. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
-| `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. |
+| `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. A package already in `dependencies` moves to `devDependencies`; without `--dev`, a package already in `devDependencies` stays there (npm semantics), so one package is never declared twice. |
 
 Local-source verification is APM's frozen-install safety behavior, not a new
 lockfile format or an OpenAPM conformance requirement. Legacy bare SHA-256
