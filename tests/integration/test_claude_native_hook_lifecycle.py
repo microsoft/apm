@@ -127,10 +127,22 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
     assert not (claude_home / "apm-hooks.json").exists()
     assert not (claude_home / "hooks").exists()
 
+    # A one-shot --target narrowing keeps declared Claude registrations and consent.
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    for plugin in state["plugins"]:
+        plugin["enabled"] = Path(plugin["readFromFolder"]).name == "alpha"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    run("install", "--global", "--target", "codex", "--only", "apm")
+    narrowed = json.loads(state_file.read_text(encoding="utf-8"))["plugins"]
+    assert {Path(p["readFromFolder"]).name: p["enabled"] for p in narrowed} == {
+        "alpha": True,
+        "beta": False,
+    }
+
     # Substituted host: Claude sets CLAUDE_PLUGIN_ROOT per plugin; this is not
     # a native execution witness (see the PR's native hook check).
-    node = shutil.which("node")
-    if node is not None and os.name != "nt":
+    executed = shutil.which("node") is not None and os.name != "nt"
+    if executed:
         witness = isolated.root / "hook-witness.jsonl"
         for root in roots.values():
             hook_env = dict(env, CLAUDE_PLUGIN_ROOT=str(root), APM_HOOK_PROBE_MARKER=str(witness))
@@ -164,6 +176,8 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
     assert registered() == {}
     calls = json.loads(state_file.read_text(encoding="utf-8"))["calls"]
     assert all(call[1:2] not in (["enable"], ["disable"]) for call in calls)
+    if not executed:
+        pytest.skip("Registration checks passed; hook execution needs node on POSIX.")
 
 
 @pytest.mark.parametrize("failure", ["", "install", "uninstall"])
