@@ -28,8 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does; reproduction and approach by @nefayran. (#3600)
-
+- `apm audit --ci` no longer reports false drift on `.claude/apm-hooks.json` and `.claude/settings.json` after a clean install when the project's only root `.apm/` primitives are hooks: audit replay now integrates the project's own `.apm/` content whenever install does. -- reproduction and approach by @nefayran (#3600)
 - `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; the field is omitted. `apm init` still fills it in. (#3630)
 - HTTP lifecycle scripts keep the DNS-pinned direct connection when only `NO_PROXY` is exported (common in containers, CI runners and macOS shells), instead of connecting without the pin that guards against DNS rebinding; an `HTTPS_PROXY` or `ALL_PROXY` that applies to the URL still routes through the proxy. -- by @bodapatisaikrishna (#3575)
 - `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
