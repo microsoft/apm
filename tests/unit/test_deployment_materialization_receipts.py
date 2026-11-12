@@ -481,6 +481,66 @@ def test_uninstall_retires_before_recreating_and_binding_survivor_receipt(
     assert final.baseline(path, [TARGET]) == compute_file_hash(source)
 
 
+def _empty_cleanup_outcome():
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+
+    return IntegrationCleanupOutcome(counts={}, deployed_files={}, failed_paths=[], error_count=0)
+
+
+@pytest.mark.parametrize("defer", [True, False])
+def test_empty_uninstall_lock_is_kept_only_when_removal_is_deferred(
+    tmp_path: Path, defer: bool
+) -> None:
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import _persist_uninstall_lockfile
+
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text("stale\n", encoding="utf-8")
+    pending = _persist_uninstall_lockfile(
+        LockFile(), lock_path, MagicMock(), _empty_cleanup_outcome(), defer_empty_removal=defer
+    )
+    assert pending is defer
+    assert lock_path.exists() is defer
+    if defer:
+        assert not LockFile.read(lock_path).dependencies
+
+
+@pytest.mark.parametrize("native_fails", [False, True])
+def test_empty_uninstall_lock_is_removed_only_after_native_resync_converges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_fails: bool
+) -> None:
+    import contextlib
+    from unittest.mock import MagicMock
+
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.commands.uninstall import cli
+
+    def resync(**_kwargs) -> None:
+        assert lock_path.exists()
+        if native_fails:
+            raise ClaudeNativePluginError("native cleanup interrupted")
+
+    monkeypatch.setattr(cli, "_resync_native_registration_after_uninstall", resync)
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text("stale\n", encoding="utf-8")
+    expectation = (
+        pytest.raises(ClaudeNativePluginError) if native_fails else contextlib.nullcontext()
+    )
+    with expectation:
+        cli._persist_lock_then_resync_native(
+            persist=True,
+            lockfile=LockFile(),
+            lockfile_path=lock_path,
+            logger=MagicMock(),
+            integration_cleanup=_empty_cleanup_outcome(),
+            deploy_root=tmp_path,
+            modules_dir=tmp_path / "apm_modules",
+            scope=InstallScope.USER,
+        )
+    assert lock_path.exists() is native_fails
+
+
 @pytest.mark.windows_compat
 def test_scope_isolation_and_atomic_lf_serialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

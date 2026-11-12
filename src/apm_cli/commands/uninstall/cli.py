@@ -118,18 +118,25 @@ def _persist_lock_then_resync_native(
     lockfile_path,
     logger: CommandLogger,
     integration_cleanup: IntegrationCleanupOutcome,
-    **resync,
+    deploy_root,
+    modules_dir,
+    scope,
 ) -> None:
     """Persist survivors, converge native registrations, then drop an empty lock.
 
     An empty last-package lock stays on disk until Claude native cleanup
     converges, so an interrupted removal can retry from authoritative survivors.
     """
-    if not persist:
-        _resync_native_registration_after_uninstall(lockfile=lockfile, logger=logger, **resync)
-        return
-    empty = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
-    _resync_native_registration_after_uninstall(lockfile=lockfile, logger=logger, **resync)
+    empty = persist and bool(
+        _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
+    )
+    _resync_native_registration_after_uninstall(
+        deploy_root=deploy_root,
+        modules_dir=modules_dir,
+        scope=scope,
+        lockfile=lockfile,
+        logger=logger,
+    )
     if empty:
         lockfile_path.unlink(missing_ok=True)
 
