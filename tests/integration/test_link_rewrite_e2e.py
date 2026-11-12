@@ -472,9 +472,7 @@ class TestMultiTargetLinkRewriting:
 
         codex_file = consumer / ".codex" / "agents" / "reviewer.toml"
         copilot_file = consumer / ".github" / "agents" / "reviewer.agent.md"
-        codex_body = tomllib.loads(codex_file.read_text(encoding="utf-8"))[
-            "developer_instructions"
-        ]
+        codex_body = tomllib.loads(codex_file.read_text(encoding="utf-8"))["developer_instructions"]
         resolved = set()
         for deployed, body in (
             (codex_file, codex_body),
