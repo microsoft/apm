@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -75,8 +77,16 @@ def _publish(isolated: IsolatedApmEnvironment, env: dict[str, str], links: dict[
     return _git(env, "-C", str(work), "rev-parse", "HEAD")
 
 
-def _scenario(tmp_path: Path, links: dict[str, str]) -> tuple[Path, dict[str, str], str]:
-    isolated = IsolatedApmEnvironment.create(tmp_path / "env", base_env=dict(os.environ))
+@pytest.fixture
+def short_root() -> Iterator[Path]:
+    """Keep staging clones under Windows MAX_PATH; pytest basetemp nests deeply."""
+    root = Path(tempfile.mkdtemp(prefix="apl"))
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def _scenario(root: Path, links: dict[str, str]) -> tuple[Path, dict[str, str], str]:
+    isolated = IsolatedApmEnvironment.create(root / "e", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     sha = _publish(isolated, env, links)
     project = isolated.work_root / "consumer"
@@ -117,9 +127,9 @@ def _regular_tree(root: Path) -> dict[str, bytes]:
 
 
 def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
-    tmp_path: Path, apm_binary_path: Path
+    short_root: Path, apm_binary_path: Path
 ) -> None:
-    project, env, sha = _scenario(tmp_path, _LINKS)
+    project, env, sha = _scenario(short_root, _LINKS)
 
     _ok(_run(apm_binary_path, _INSTALL, project, env))
 
@@ -154,9 +164,9 @@ def test_links_install_as_content_and_frozen_replays_the_cross_platform_hash(
     ids=["escaping", "broken", "cyclic"],
 )
 def test_unresolvable_link_fails_before_hashing(
-    tmp_path: Path, apm_binary_path: Path, target: str, message: str
+    short_root: Path, apm_binary_path: Path, target: str, message: str
 ) -> None:
-    project, env, _ = _scenario(tmp_path, {**_LINKS, ".apm/skills/linked/bad.md": target})
+    project, env, _ = _scenario(short_root, {**_LINKS, ".apm/skills/linked/bad.md": target})
 
     result = _run(apm_binary_path, _INSTALL, project, env)
 
