@@ -61,6 +61,8 @@ from .errors import (
     FrozenInstallError,
     InstallFailureAlreadyRendered,
 )
+from .failure_residue import record_install_outcome
+from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
 from .transaction import InstallTransaction, transactional_pipeline
 
@@ -958,7 +960,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from .phases import finalize as _finalize_phase
 
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
-        return _run_phase("finalize", _finalize_phase, ctx)
+        return record_install_outcome(ctx, _run_phase("finalize", _finalize_phase, ctx))
 
     except (AgentPluginError, CodexNativeError):
         # Preserve schema-routing and native-boundary diagnostics verbatim.
@@ -994,7 +996,4 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
-        from .phases import copilot_plugins as _copilot_plugins_cleanup
-
-        _copilot_plugins_cleanup.deactivate(ctx)
-        ctx.tui.__exit__()
+        close_pipeline_attempt(ctx)
