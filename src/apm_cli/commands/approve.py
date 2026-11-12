@@ -111,7 +111,7 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     return _load_org_policy(project_root, logger=logger)
 
 
-@click.command("approve")
+@click.command("approve", short_help="Approve executable primitives for packages")
 @click.argument("packages", nargs=-1)
 @click.option("--pending", is_flag=True, help="List packages with unapproved executables.")
 @click.option("--all", "approve_all", is_flag=True, help="Approve every package with executables.")
@@ -189,7 +189,7 @@ def approve_cmd(
         logger.render_summary()
 
 
-@click.command("deny")
+@click.command("deny", short_help="Deny executable primitives for packages")
 @click.argument("packages", nargs=-1, required=True)
 @click.option(
     "--user",

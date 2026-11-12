@@ -79,7 +79,8 @@ def _preflight_prune_survivors(
     help=(
         "Remove APM packages absent from the resolved dependency graph "
         "and repair stale deployment owners"
-    )
+    ),
+    short_help="Remove packages absent from the dependency graph",
 )
 @click.option(
     "--dry-run",
