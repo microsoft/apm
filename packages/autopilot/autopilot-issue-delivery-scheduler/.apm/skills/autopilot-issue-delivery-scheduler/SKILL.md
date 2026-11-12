@@ -116,6 +116,10 @@ trusted default branch. A current unedited responsible-human
 `record-present` result is the grant, including ORIGIN
 `unattended`. Every other eligibility state stops before mutate.
 ORIGIN `unattended` never implements without that current record.
+Pass each worker its issue number and, when the caller supplied
+one, its `APPROVAL_URL`. Otherwise the worker discovers that URL
+from the issue's latest `apm-scope:v1` approve comment. Never
+guess a URL.
 Do not dispatch an unaccepted issue. Do not run
 triage-panel to create any marker. Do not write `status/accepted`.
 

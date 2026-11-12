@@ -92,6 +92,9 @@ posting. Do not guess.
 
 `Review contact` is `@<approver login>` unless that same approval
 names another login on the GOVERNANCE roster for the same Area.
+If it names another login, say in chat that delivery will report
+`contact_confirmation_needed: true` and unattended delivery will
+stop until that contact confirms.
 
 Present this exact body, and nothing else, in a fence:
 
@@ -142,12 +145,26 @@ Write the approved fence to a temp file and post it unchanged:
 gh issue comment "$ISSUE" --repo microsoft/apm --body-file "$BODY"
 ```
 
-Re-read that comment. Continue only if all of these hold:
+Re-read that comment (`COMMENT_URL` is its `html_url`). Continue
+only if all of these hold:
 
 - the body is the approved text
 - `user.login` is the `gh api user` login
 - `user.type` is `User`
 - `updated_at` equals `created_at`
+
+Immediately before the label write, run the shared eligibility
+tool from a trusted default-branch checkout (never a contributor
+branch) against the posted comment URL:
+
+```bash
+node scripts/governance/eligibility.cjs --repo microsoft/apm \
+  --issue "$ISSUE" --approval-url "$COMMENT_URL"
+```
+
+Require `state: record-present`. A later withdrawal, a malformed
+or edited later record, or a read error returns another state:
+do not label.
 
 Then, and only then:
 
@@ -157,7 +174,8 @@ gh issue edit "$ISSUE" --repo microsoft/apm --add-label status/accepted
 
 Also remove `status/deferred` and `status/needs-triage` when they
 are present. Do not edit the comment after posting. If the re-read
-fails, do not label and do not edit the comment.
+or the eligibility check fails, do not label and do not edit the
+comment.
 
 Return the comment URL
 `https://github.com/microsoft/apm/issues/<n>#issuecomment-<id>`.

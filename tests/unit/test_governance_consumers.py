@@ -227,6 +227,7 @@ def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
     assert "authority.cjs" in gate
     assert "authorizes_implementation: false" in gate
     assert "Do not require a fresh explicit responsible-human confirmation for this wave" in gate
+    assert "`contact_confirmation_needed: false`" in gate
     assert "deleted withdrawals" in gate
     for failure in ("withdrawn", "error", "uncertain confirmation"):
         assert failure in gate

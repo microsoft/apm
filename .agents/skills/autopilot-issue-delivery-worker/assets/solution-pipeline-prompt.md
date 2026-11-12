@@ -45,9 +45,13 @@ receipt or a previous wave's snapshot as permission for the next wave.
    result with `authorizes_implementation: false`. That result is evidence,
    never permission; current snapshots cannot detect deleted withdrawals.
 2. Treat a complete `state: record-present` result for this same
-   APPROVAL_URL as the grant for this wave, including ORIGIN
-   `unattended`. Do not require a fresh explicit responsible-human confirmation for this wave when the re-read is still
-   `record-present`. The report stays neutral. Record the evidence
+   APPROVAL_URL with `contact_confirmation_needed: false` as the grant
+   for this wave, including ORIGIN `unattended`.
+   Do not require a fresh explicit responsible-human confirmation for this wave
+   when the re-read is still `record-present`. If `contact_confirmation_needed` is `true`,
+   the named review contact has not agreed; treat it as uncertain
+   confirmation unless that contact confirmed through the parent
+   session. The report stays neutral. Record the evidence
    in session state and pass its scope to task children.
 3. Any non-record-present state (including `withdrawn` or `error`), missing
    or untrusted tool, incomplete read, changed scope, or uncertain confirmation

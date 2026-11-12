@@ -130,8 +130,8 @@ node scripts/governance/eligibility.cjs --help
 The tool reads current policy from the default branch. Until the new roster
 format is deployed there, it deliberately reports a policy error rather than
 using a feature branch as authority. A snapshot cannot recover deleted
-withdrawals, so a deleted withdrawal is not recoverable. The issue delivery
-worker may treat a current unedited roster-authored record as its grant.
+withdrawals. The issue delivery worker may treat a current unedited
+roster-authored record as its grant.
 Other manual automation still requires fresh responsible-human
 confirmation of the bounded issue scope. No historical acceptance is restored.
 

@@ -70,7 +70,8 @@ approved: n/a
 - `REPO_ROOT` -- required
 - `ORIGIN` -- if the parent passed it, honor it; else resolve
 - `TRUSTED_GOVERNANCE_ROOT` -- trusted default-branch copy
-- `APPROVAL_URL` -- nominated scope-comment URL
+- `APPROVAL_URL` -- nominated scope-comment URL; discovered when absent
+  (see Gate)
 - `HUMAN_SCOPE_RECEIPT` -- nominated scope-comment evidence, not a second grant
 
 ## ORIGIN and assignment
@@ -128,6 +129,23 @@ any type.
 
 Then re-check human-scope evidence. Do not create another
 parser or roster; `authority.cjs` alone interprets the record.
+If the caller did not pass `APPROVAL_URL`, discover it from the
+complete comment history. Take the latest comment by a `User`
+whose body starts with `<!-- apm-scope:v1 -->` and has the line
+`Decision: approve`:
+
+```
+gh api --paginate repos/microsoft/apm/issues/N/comments \
+  --jq '.[] | select(.user.type == "User"
+    and (.body | startswith("<!-- apm-scope:v1 -->"))
+    and (.body | test("(?m)^Decision: approve\\r?$")))
+    | .html_url' | tail -n 1
+```
+
+No candidate or a failed read -- STOP (`needs-evidence`). Do not
+fall back to an older record when the latest one fails; the tool
+below judges roster, edits, and withdrawals.
+
 From `TRUSTED_GOVERNANCE_ROOT` (trusted default-branch copy,
 never the issue worktree):
 
@@ -137,9 +155,14 @@ node scripts/governance/eligibility.cjs --repo microsoft/apm --issue N --approva
 ```
 
 Require `state: record-present` with
-`authorizes_implementation: false`. The report stays neutral.
+`authorizes_implementation: false` and
+`contact_confirmation_needed: false`. The report stays neutral.
 A current unedited responsible-human scope record is the worker
-grant, including for ORIGIN `unattended`. Do not reuse a stored
+grant, including for ORIGIN `unattended`. When
+`contact_confirmation_needed` is `true`, the named review contact
+has not agreed: ORIGIN `unattended` STOPs (`blocked`); ORIGIN
+`actor-session` continues only if `gh api user` is that review
+contact and confirms review capacity in this session. Do not reuse a stored
 receipt as fresh permission; re-read eligibility before mutate
 and again before the PR. Current snapshots cannot detect deleted withdrawals,
 so a record that later disappears still stops.

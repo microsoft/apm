@@ -126,9 +126,9 @@ eligibility states stop.
 ### `autopilot-issue-delivery-worker`
 
 Implements one already-selected issue. Queue signal is not permission.
-A current unedited scope record is the grant. Actor-session: assign
-`@me` on the issue and any fix PR before edits. Do not steal. Do not
-request that actor as a reviewer.
+A current unedited scope record with an agreed review contact is the
+grant. Actor-session: assign `@me` on the issue and any fix PR before
+edits. Do not steal. Do not request that actor as a reviewer.
 
 ### `autopilot-pr-triage-scheduler`
 
