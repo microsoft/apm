@@ -112,9 +112,7 @@ def test_new_violation_outside_baseline_fails(tmp_path: Path) -> None:
     result = _run(tmp_path)
 
     assert result.returncode == 1
-    assert "new complexity violation: src/service.py::Service.configure PLR0913" in (
-        result.stderr
-    )
+    assert "new complexity violation: src/service.py::Service.configure PLR0913" in (result.stderr)
     assert "src/service.py::Service.configure.<locals>.nested PLR0913" in result.stderr
 
 

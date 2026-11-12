@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from json import JSONDecodeError
 from pathlib import Path
@@ -48,16 +49,19 @@ def load_baseline_at_ref(
         relative = path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError as error:
         raise BaselineError(f"{label} baseline {path} is outside {root}") from error
-    verify = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+    git = shutil.which("git")
+    if git is None:
+        raise BaselineError("git executable not found")
+    verify = subprocess.run(  # noqa: S603 - fixed git operation, no shell
+        [git, "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
         capture_output=True,
         text=True,
         check=False,
     )
     if verify.returncode != 0:
         raise BaselineError(f"unknown git ref for {label} baseline: {ref}")
-    shown = subprocess.run(
-        ["git", "-C", str(root), "show", f"{ref}:{relative}"],
+    shown = subprocess.run(  # noqa: S603 - fixed git operation, no shell
+        [git, "-C", str(root), "show", f"{ref}:{relative}"],
         capture_output=True,
         text=True,
         encoding="utf-8",

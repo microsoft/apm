@@ -98,7 +98,7 @@ def observe(root: Path) -> set[Entry]:
     for name, value in sorted(LIMITS.items()):
         command += ["--config", f"{_RUFF_SETTINGS[name]} = {value}"]
     command += SCOPE
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - fixed ruff invocation, no shell
         command, cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
     )
     if result.returncode != 0:
@@ -217,17 +217,13 @@ def _run(args: argparse.Namespace) -> int:
         else root / "tests" / "quality" / "complexity_baseline.json"
     )
     payload = load_baseline(baseline, label=LABEL)
-    provisional = validate_provisional(
-        payload, baseline, allow=args.allow_provisional, label=LABEL
-    )
+    provisional = validate_provisional(payload, baseline, allow=args.allow_provisional, label=LABEL)
     allowed = _validated_entries(payload, "")
     missing = [entry for entry in SCOPE if not (root / entry).exists()]
     if missing:
         raise BaselineError(f"{LABEL} scope path(s) missing: {', '.join(missing)}")
 
-    grew = args.base_ref is not None and _check_base_growth(
-        root, baseline, args.base_ref, allowed
-    )
+    grew = args.base_ref is not None and _check_base_growth(root, baseline, args.base_ref, allowed)
     observed = observe(root)
     new = observed - allowed
     stale = allowed - observed
