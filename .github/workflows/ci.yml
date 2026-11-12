@@ -16,6 +16,13 @@ on:
 permissions:
   contents: read
 
+# Supersede in-flight PR runs when a newer push lands on the same PR.
+# Only pull_request runs share a group; every other event (merge_group)
+# gets a unique per-run group, so it is never cancelled or serialized.
+concurrency:
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Fast lint gate -- runs in ~3s using Astral's ruff-action (no Python/uv setup needed).
   # Fails fast on style, import, and complexity violations before the heavier build-and-test job.
@@ -151,11 +158,14 @@ jobs:
         git --version
         where git
 
+    # Four xdist workers use the runner's four vCPUs; loadgroup keeps
+    # every xdist_group (HOME-mutating integration tests) on one worker.
     - name: Run cross-platform contract family
       env:
         APM_E2E_TESTS: '1'
       run: >-
         uv run --extra dev pytest -p no:cacheprovider -v
+        -n 4 --dist loadgroup
         -m windows_compat
         tests/unit
         tests/integration
@@ -449,7 +459,8 @@ jobs:
       run: uv sync --frozen --extra dev
 
     # --splits 2 --group N matches the layout used by ci-integration.yml.
-    # -n 2 --dist worksteal parallelises within the shard.
+    # -n 4 --dist worksteal parallelises within the shard across all four
+    # vCPUs of the hosted ubuntu-24.04 runner.
     #
     # Per-shard floor of 60% catches regressions at PR time on roughly
     # half the codebase (observed per-shard coverage today is ~65%).
@@ -461,7 +472,7 @@ jobs:
       run: |
         uv run pytest tests/unit tests/test_console.py tests/red_team \
           --splits 2 --group ${{ matrix.shard }} \
-          -n 2 --dist worksteal \
+          -n 4 --dist worksteal \
           --cov --cov-report= --cov-fail-under=60
 
     - name: Rename coverage data for shard
@@ -730,7 +741,10 @@ jobs:
       with:
         enable-cache: true
 
+    # Normal installs take ~10 s; the script bounds each apt attempt, so a
+    # stalled mirror fails over instead of hanging the shard for ~7.5 min.
     - name: Install Unix shell startup test runtimes
+      timeout-minutes: 5
       run: bash scripts/ci-apt-install.sh fish zsh
 
     - name: Install dependencies
