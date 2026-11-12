@@ -7,6 +7,7 @@ import io
 import json
 import os
 import platform
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -141,12 +142,16 @@ def run_setup(
     release_json: Path,
     tarball: Path,
     env_updates: dict[str, str] | None = None,
+    curl_script: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     home_dir = tmp_path / "home"
     bin_dir = tmp_path / "bin"
-    home_dir.mkdir()
-    bin_dir.mkdir()
-    write_fake_curl(bin_dir / "curl")
+    home_dir.mkdir(exist_ok=True)
+    bin_dir.mkdir(exist_ok=True)
+    if curl_script is None:
+        write_fake_curl(bin_dir / "curl")
+    else:
+        shutil.copy2(curl_script, bin_dir / "curl")
 
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
@@ -170,4 +175,5 @@ def run_setup(
         text=True,
         env=env,
         check=False,
+        timeout=30,
     )

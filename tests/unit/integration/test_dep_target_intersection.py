@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +12,7 @@ from apm_cli.core.errors import ConflictingTargetsError
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS, HookIntegrator
+from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
@@ -60,12 +60,12 @@ class _NoopSkillIntegrator:
 
     def integrate_package_skill(self, package_info, project_root: Path, **kwargs):
         self.seen_targets = [target.name for target in kwargs["targets"]]
-        return SimpleNamespace(
-            target_paths=[],
+        return SkillIntegrationResult(
             skill_created=False,
-            sub_skills_promoted=0,
-            bin_deployed=0,
-            bin_skipped_reason="",
+            skill_updated=False,
+            skill_skipped=True,
+            skill_path=None,
+            references_copied=0,
         )
 
 
@@ -352,13 +352,19 @@ def _target_command_hook(command: str) -> dict:
 
     ``SessionStart`` and a trivial command survive event normalization across
     every merge harness, so the command string is a reliable per-file marker
-    regardless of a target's casing/matcher conventions.
+    regardless of a target's casing/matcher conventions. The matcher is the
+    wildcard ``"*"`` rather than an arbitrary word: ``SessionStart`` is not a
+    tool-use event, so Cursor's native contract only has a verified
+    translation for wildcard/empty matchers on non-tool lifecycle events
+    (see ``_cursor_matcher``); a non-wildcard placeholder would be rejected
+    by Cursor's strict preflight while being semantically meaningless for
+    every other harness too, so the wildcard is the correct value here, not
+    a weakening of this test's actual regression (per-target file routing
+    isolation, asserted below).
     """
     return {
         "hooks": {
-            "SessionStart": [
-                {"matcher": "startup", "hooks": [{"type": "command", "command": command}]}
-            ],
+            "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": command}]}],
         }
     }
 
@@ -400,7 +406,20 @@ def _write_divergent_pair(package_path: Path, first: str, second: str) -> dict[s
 
 @pytest.mark.parametrize(
     ("first", "second"),
-    [(a, b) for i, a in enumerate(_MERGE_HARNESSES) for b in _MERGE_HARNESSES[i + 1 :]],
+    [
+        (a, b)
+        for i, a in enumerate(_MERGE_HARNESSES)
+        for b in _MERGE_HARNESSES[i + 1 :]
+        # claude+cursor is intentionally excluded from this "any two harnesses
+        # diverge independently" matrix: Cursor's native/Claude-import
+        # coexistence preflight correctly refuses two per-target files that
+        # both declare the same event for this specific pair (same-event
+        # double-activation risk), unlike every other harness pair. That
+        # refusal is the PR's own feature and is covered directly by
+        # test_cursor_hook_native_contract.py's overlap tests, not by this
+        # generic routing-isolation matrix.
+        if {a, b} != {"claude", "cursor"}
+    ],
 )
 def test_divergent_hook_files_route_per_target_under_multi_dep_targets(
     tmp_path: Path, first: str, second: str
@@ -559,6 +578,7 @@ def test_skills_integrate_to_all_targets_when_no_dep_targets(tmp_path: Path) -> 
         canvas=None,
     )
 
+    (tmp_path / "pkg").mkdir()
     integrate_package_primitives(
         _package_info(tmp_path / "pkg"),
         tmp_path / "project",

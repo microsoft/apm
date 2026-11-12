@@ -11,7 +11,8 @@ from __future__ import annotations
 import hashlib
 import io
 import tarfile
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -71,6 +72,50 @@ def _make_dep(version: str = "^1.2.0") -> DependencyReference:
 
 
 class TestHappyPath:
+    @pytest.mark.parametrize(
+        ("selector", "expected"),
+        [("1.7.0", "1.7.0"), ("=1.7.0", "1.7.0"), ("^1.7.0", "1.8.0")],
+    )
+    def test_refresh_keeps_constraint_even_when_outdated_reports_newer(
+        self, tmp_path: Path, selector: str, expected: str
+    ) -> None:
+        """The install/update download boundary must not consume reporting latest."""
+        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.deps.registry.outdated import (
+            RegistryOutdatedContext,
+            check_registry_locked_dep,
+        )
+
+        raw, digest = _make_apm_tarball(version=expected)
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(version=v, digest=f"sha256:{digest}", published_at="")
+            for v in ["1.7.0", "1.8.0", "2.0.0"]
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        dep = _make_dep(selector)
+        ctx = RegistryOutdatedContext(
+            manifest_index={dep.get_unique_key(): dep},
+            registries={"corp-main": "https://reg.example.com/apm"},
+            default_registry="corp-main",
+        )
+        with patch("apm_cli.deps.registry.outdated.is_package_registry_enabled", return_value=True):
+            row = check_registry_locked_dep(
+                LockedDependency(repo_url=dep.repo_url, source="registry", version="1.7.0"),
+                ctx,
+                client_factory=lambda url, auth: fake,
+            )
+        assert row.latest == "2.0.0"
+        assert row.wanted == expected
+
+        resolver = _make_resolver(fake)
+        info = resolver.download_package(dep, tmp_path / "package")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", expected)
+        assert resolver.last_resolutions[dep.get_unique_key()].version == expected
+        assert info.resolved_reference.ref_name == expected
+        assert dep.reference == selector
+
     def test_install_full_package(self, tmp_path):
         raw, digest = _make_apm_tarball()
         fake = MagicMock(spec=RegistryClient)
@@ -149,6 +194,60 @@ class TestHappyPath:
 
         # Confirm download_archive was asked for the highest matching version.
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
+
+    def test_build_metadata_selector_matches_exact_build(self, tmp_path):
+        # Two published builds share the same major.minor.patch and differ only
+        # by build metadata (e.g. a branch-build git hash). Range matching
+        # ignores build metadata entirely, so without an exact-match check
+        # first, this selector could resolve to the *other* build depending on
+        # version-list order (microsoft/apm#2877). Each build gets its own
+        # tarball (apm.yml version matches its VersionEntry) so a wrong pick
+        # would surface as a hash/content mismatch, not just a mock-call check.
+        raw_863e, digest_863e = _make_apm_tarball(version="1.0.2+863e11af")
+        raw_fa16, digest_fa16 = _make_apm_tarball(version="1.0.2+fa163e16")
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.2+863e11af",
+                digest=f"sha256:{digest_863e}",
+                published_at="2026-01-01T00:00:00Z",
+            ),
+            VersionEntry(
+                version="1.0.2+fa163e16",
+                digest=f"sha256:{digest_fa16}",
+                published_at="2026-01-02T00:00:00Z",
+            ),
+        ]
+        archives = {
+            "1.0.2+863e11af": (raw_863e, "application/gzip"),
+            "1.0.2+fa163e16": (raw_fa16, "application/gzip"),
+        }
+        fake.download_archive.side_effect = lambda owner, repo, version: archives[version]
+        fake.archive_url.return_value = "https://x/download"
+
+        resolver = _make_resolver(fake)
+        resolver.download_package(_make_dep("1.0.2+fa163e16"), tmp_path / "p")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.0.2+fa163e16")
+
+    def test_bare_version_selector_unaffected_by_exact_match(self, tmp_path):
+        # A selector with no build metadata still resolves via range matching
+        # when no published version literally equals the selector string --
+        # the exact-match fast path must not change this existing behavior.
+        raw, digest = _make_apm_tarball(version="1.0.2+aaa")
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.2+aaa", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            ),
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x/download"
+
+        resolver = _make_resolver(fake)
+        resolver.download_package(_make_dep("1.0.2"), tmp_path / "p")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.0.2+aaa")
 
 
 class TestFailurePaths:

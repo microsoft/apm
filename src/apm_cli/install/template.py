@@ -13,6 +13,7 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -23,8 +24,10 @@ from apm_cli.agent_plugins.errors import (
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.install.services import (
     IntegratorBundle,
+    PackageDeploymentPlan,
     enforce_agent_plugin_deployment_boundary,
     integrate_package_primitives,
+    prepare_package_deployment,
 )
 from apm_cli.install.sources import (
     DependencySource,
@@ -83,6 +86,7 @@ def run_integration_template(
     source: DependencySource,
     *,
     materialization: Materialization | None | object = _MATERIALIZATION_UNSET,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict[str, int] | None:
     """Run the shared post-acquire integration flow for one dependency.
 
@@ -96,7 +100,9 @@ def run_integration_template(
     if materialization is None:
         return None
 
-    return _integrate_materialization(source, cast(Materialization, materialization))
+    return _integrate_materialization(
+        source, cast(Materialization, materialization), deployment_plan=deployment_plan
+    )
 
 
 def prepare_integration_materialization(
@@ -118,9 +124,10 @@ def preflight_agent_plugin_materializations(
     """Reject the batch once, before any package can mutate a target.
 
     A native Agent Plugin whose effective targets simply do not select
-    ``copilot`` is not a failure: it is skipped per-package during integration
-    (:func:`_record_agent_plugin_target_skip`), so it must not abort the
-    batch -- ``AgentPluginTargetExcludedError`` carries that distinction.
+    ``copilot`` is not a structural package failure: it is skipped per-package
+    during integration (:func:`_record_agent_plugin_target_skip`), so it must
+    not abort a batch that can still deploy other packages. The final install
+    outcome may still fail a pure no-op run.
     Anything else raised here (missing canonical IR, the imperative bundle
     route) is a real, actionable failure and aborts the whole batch.
     """
@@ -129,6 +136,90 @@ def preflight_agent_plugin_materializations(
             enforce_agent_plugin_deployment_boundary(materialization.package_info)
         except AgentPluginTargetExcludedError:
             continue
+
+
+def preflight_skill_materializations(
+    ctx: InstallContext,
+    prepared: list[tuple[DependencySource, Materialization]],
+) -> tuple[dict[str, PackageDeploymentPlan], PackageDeploymentPlan | None]:
+    """Refuse known unmanaged collisions before any selected package deploys."""
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+    from apm_cli.install.errors import DirectDependencyError
+    from apm_cli.install.project_package import build_project_local_package_info
+    from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.integration.skill_preflight import format_skill_conflicts
+
+    if not ctx.targets:
+        return {}, None
+    plans: dict[str, PackageDeploymentPlan] = {}
+    conflicts = []
+    skill = ctx.integrators["skill"]
+    managed = BaseIntegrator.normalize_managed_files(
+        set(ctx.managed_files) | set(ctx.old_local_deployed)
+    )
+
+    def check(package_info, plan: PackageDeploymentPlan) -> None:
+        if plan.source_plan is None or admits_native_plugin(package_info):
+            return
+        conflicts.extend(
+            skill.find_unmanaged_conflicts(
+                package_info,
+                ctx.project_root,
+                targets=plan.projection_targets,
+                source_plan=plan.source_plan,
+                managed_files=managed,
+                force=ctx.force,
+                skip_bin=plan.skip_bin,
+            )
+        )
+
+    for source, materialization in prepared:
+        if materialization.package_info is None or not ctx.targets:
+            continue
+        try:
+            enforce_agent_plugin_deployment_boundary(materialization.package_info)
+        except AgentPluginTargetExcludedError:
+            continue
+        dependency = source.dep_ref
+        plan = prepare_package_deployment(
+            materialization.package_info,
+            ctx.project_root,
+            targets=ctx.targets,
+            diagnostics=ctx.diagnostics,
+            package_name=materialization.dep_key,
+            logger=ctx.logger,
+            scope=ctx.scope,
+            skill_subset=effective_deploy_skill_subset(
+                skill_subset_from_cli=ctx.skill_subset_from_cli,
+                cli_subset=ctx.skill_subset,
+                persisted_subset=dependency.skill_subset,
+            ),
+            dep_target_subset=dependency.target_subset,
+            ctx=ctx,
+            allow_executables=_effective_allow(ctx),
+            trust_bin=ctx.trust_bin,
+        )
+        plans[materialization.dep_key] = plan
+        check(materialization.package_info, plan)
+
+    local_plan = None
+    if ctx.root_has_local_primitives and ctx.targets:
+        local = build_project_local_package_info(ctx.source_root or ctx.project_root)
+        local_plan = prepare_package_deployment(
+            local,
+            ctx.project_root,
+            targets=ctx.targets,
+            diagnostics=ctx.diagnostics,
+            package_name="_local",
+            logger=ctx.logger,
+            scope=ctx.scope,
+            ctx=ctx,
+            is_first_party=True,
+        )
+        check(local, local_plan)
+    if conflicts:
+        raise DirectDependencyError(format_skill_conflicts(conflicts))
+    return plans, local_plan
 
 
 def preflight_agent_plugin_dry_run(
@@ -145,11 +236,12 @@ def preflight_agent_plugin_dry_run(
     'no native harness' fallback. Admission never depends on whether a
     Copilot binary exists or which version it reports.
 
-    Target exclusion (``AgentPluginTargetExcludedError``) is never fatal --
-    a real install skips that package with one warning and installs the
-    rest of the batch, so the dry-run preview must not abort the whole
-    preview for the same reason either. Only a genuine structural failure
-    (missing canonical IR, the imperative bundle route) aborts here.
+    Target exclusion (``AgentPluginTargetExcludedError``) is non-fatal during
+    preflight and per-package integration: a real install skips that package
+    with one warning and can still install the rest of the batch. The command
+    outcome owner may still fail a pure no-op install after integration. Only a
+    genuine structural failure (missing canonical IR, the imperative bundle
+    route) aborts here.
     """
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.copilot_plugins.capability import native_registration_scope
@@ -189,11 +281,13 @@ def preflight_agent_plugin_dry_run(
                     package_path,
                     source_path=package_path,
                     agent_plugin_detection=detection,
+                    read_only=True,
                 )
             else:
                 validation = validate_apm_package(
                     package_path,
                     agent_plugin_detection=detection,
+                    read_only=True,
                 )
             if validation.is_valid and validation.package is not None:
                 try:
@@ -242,17 +336,83 @@ def _record_agent_plugin_boundary_failure(
     return deltas
 
 
+def _target_names_for_hint(ctx: InstallContext) -> str:
+    """Return the target argument to use in a recovery command."""
+    names: list[str] = []
+    for target in getattr(ctx, "targets", None) or ():
+        name = getattr(target, "name", target)
+        if isinstance(name, str) and name:
+            names.append(name)
+    return ",".join(sorted(set(names))) or "<target>"
+
+
+def _dependency_parts_for_skill_subpath(dep_ref) -> tuple[str, str]:
+    """Return dependency base and ref suffix for a skill-subpath command."""
+    if getattr(dep_ref, "is_local", False) and getattr(dep_ref, "local_path", None):
+        display = dep_ref.local_path
+    elif hasattr(dep_ref, "to_display_reference"):
+        display = dep_ref.to_display_reference()
+    elif hasattr(dep_ref, "get_identity"):
+        display = dep_ref.get_identity()
+    else:
+        display = getattr(dep_ref, "repo_url", "")
+    base, separator, reference = str(display).partition("#")
+    return base.rstrip("/"), f"{separator}{reference}" if separator else ""
+
+
+def _agent_plugin_skill_name_for_hint(
+    source: DependencySource,
+    materialization: Materialization,
+) -> str | None:
+    """Return one skill name that can be installed through the subpath route."""
+    package = getattr(materialization.package_info, "package", None)
+    plugin = getattr(package, "agent_plugin", None)
+    if plugin is None or not plugin.components.skills:
+        return None
+    requested = frozenset(getattr(source.ctx, "skill_subset", None) or ())
+    for skill in plugin.components.skills:
+        if skill.directory_name in requested or skill.name in requested:
+            return skill.directory_name
+    return plugin.components.skills[0].directory_name
+
+
+def _agent_plugin_target_skip_message(
+    source: DependencySource,
+    materialization: Materialization,
+    error: AgentPluginTargetExcludedError,
+) -> str:
+    """Return the actionable target-exclusion diagnostic for one package."""
+    message = str(error)
+    skill_name = _agent_plugin_skill_name_for_hint(source, materialization)
+    if skill_name is None:
+        return (
+            f"{message} No selected target received this package. "
+            "Select --target copilot or install a target-compatible package."
+        )
+
+    dep_base, ref_suffix = _dependency_parts_for_skill_subpath(source.dep_ref)
+    target_arg = _target_names_for_hint(source.ctx)
+    dependency = f"{dep_base}/skills/{skill_name}{ref_suffix}"
+    command = f"apm install {shlex.quote(dependency)} --target {shlex.quote(target_arg)}"
+    shell_note = " (POSIX shell)" if shlex.quote(dependency) != dependency else ""
+    return (
+        f"{message} No selected target received this package. "
+        f"To install available skill '{skill_name}' as a plain skill bundle, "
+        f"use{shell_note}: {command}"
+    )
+
+
 def _record_agent_plugin_target_skip(
     source: DependencySource,
     materialization: Materialization,
     error: AgentPluginTargetExcludedError,
 ) -> dict[str, int]:
-    """Record a non-fatal skip for a package this project does not target at copilot.
+    """Record a target skip for a package this project does not target at copilot.
 
     Mirrors the per-dependency ``targets:`` subset already handled in
     ``finalize_native_plugin``: native registration is skipped, ONE warning
-    names the package, and the rest of the batch installs. This is a warning,
-    not an error, so the install still exits 0.
+    names the package, and the rest of the batch can still install. The
+    install outcome owner fails later only when no package deployed.
     """
     ctx = source.ctx
     deltas = materialization.deltas
@@ -261,13 +421,18 @@ def _record_agent_plugin_target_skip(
     deltas["installed"] = 0
     ctx.package_deployed_files[dep_key] = []
     package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
-    ctx.diagnostics.warn(str(error), package=package_key)
+    ctx.diagnostics.agent_plugin_target_excluded(
+        _agent_plugin_target_skip_message(source, materialization, error),
+        package=package_key,
+    )
     return deltas
 
 
 def _integrate_materialization(
     source: DependencySource,
     m: Materialization,
+    *,
+    deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict[str, int]:
     """Apply security gate + primitive integration on a materialised package.
 
@@ -357,6 +522,7 @@ def _integrate_materialization(
             ctx=ctx,
             allow_executables=_effective_allow(ctx),
             trust_bin=getattr(ctx, "trust_bin", None),
+            deployment_plan=deployment_plan,
         )
         mutation_keys = (
             "prompts",
@@ -378,6 +544,11 @@ def _integrate_materialization(
         if int_result.get("native_plugin"):
             deltas["installed"] = 1
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
+        from apm_cli.core.deployment_state import CompletedReintegration
+
+        completed = int_result.get("completed_reintegration")
+        if isinstance(completed, CompletedReintegration) and completed.owner == dep_key:
+            ctx.package_completed_reintegrations[dep_key] = completed
     except Exception as e:
         # Per-source error wording: each DependencySource subclass
         # declares its own INTEGRATE_ERROR_PREFIX (Strategy pattern).

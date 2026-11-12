@@ -13,6 +13,8 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
+import pytest
+
 from apm_cli.cache.paths import get_cache_root
 from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy._gitlab import (
@@ -47,6 +49,7 @@ from apm_cli.policy.discovery import (
 )
 from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy
+from apm_cli.utils.git_env import get_git_executable
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
@@ -725,6 +728,68 @@ class TestDiscoverPolicy(unittest.TestCase):
             )
             self.assertTrue(result.found)
             self.assertIn("org:", result.source)
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_missing_local_path_skips_repo_lookup(self, mock_fetch):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for ref in (
+                "./missing-policy.yml",
+                "../policies/apm-policy.yml",
+                str(Path(tmpdir) / "missing.yml"),
+                "missing.yaml",
+                "missing.YML",
+            ):
+                result = discover_policy(Path(tmpdir), policy_override=ref, no_cache=True)
+                self.assertFalse(result.found)
+                self.assertEqual(result.outcome, "absent")
+                self.assertEqual(result.source, f"file:{ref}")
+                self.assertEqual(result.error, f"Policy file not found: {ref}")
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_tilde_path_expands_home(self, mock_fetch):
+        with tempfile.TemporaryDirectory() as home:
+            (Path(home) / "pol.yml").write_text(VALID_POLICY_YAML, encoding="utf-8")
+            with patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+                found = discover_policy(Path(home), policy_override="~/pol.yml", no_cache=True)
+                missing = discover_policy(Path(home), policy_override="~/nope.yml", no_cache=True)
+        self.assertTrue(found.found)
+        self.assertEqual(missing.outcome, "absent")
+        self.assertEqual(missing.error, "Policy file not found: ~/nope.yml")
+        # Unknown ~user: pathlib raises RuntimeError; the ref must still fail
+        # with the actionable not-found diagnostic instead of crashing.
+        with patch.object(
+            Path, "expanduser", side_effect=RuntimeError("Could not determine home directory.")
+        ):
+            unknown_user = discover_policy(
+                Path("/fake"), policy_override="~apm-no-such-user-3195/p.yml", no_cache=True
+            )
+        self.assertEqual(unknown_user.outcome, "absent")
+        self.assertEqual(unknown_user.error, "Policy file not found: ~apm-no-such-user-3195/p.yml")
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_existing_directory_reports_not_a_file(self, mock_fetch):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = discover_policy(Path(tmpdir), policy_override=tmpdir, no_cache=True)
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "absent")
+            self.assertEqual(result.error, f"Policy path is not a file: {tmpdir}")
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy.discovery._fetch_github_contents")
+    def test_override_owner_repo_with_yaml_suffix_still_tries_repo(self, mock_fetch):
+        mock_fetch.return_value = (VALID_POLICY_YAML, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = discover_policy(
+                Path(tmpdir),
+                policy_override="contoso/policy.yml",
+                no_cache=True,
+            )
+            self.assertTrue(result.found)
+            self.assertEqual(result.source, "org:contoso/policy.yml")
+        mock_fetch.assert_called_once()
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
     @patch("apm_cli.policy.discovery.subprocess.run")
@@ -1920,6 +1985,7 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
         self.assertFalse((root / ".apm").exists())
         mock_project_state.assert_called_once()
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.policy._gitlab.subprocess.run")
     @patch("apm_cli.core.auth.AuthResolver")
     def test_git_reachability_probe_uses_bounded_auth_resolver_credentials(
@@ -1952,7 +2018,7 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
         self.assertTrue(state)
         mock_run.assert_called_once()
         command = mock_run.call_args.args[0]
-        self.assertEqual(Path(command[0]).name, "git")
+        self.assertEqual(command[0], get_git_executable())
         self.assertEqual(
             command[1:],
             [

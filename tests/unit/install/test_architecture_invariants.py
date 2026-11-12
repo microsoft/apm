@@ -49,7 +49,8 @@ KNOWN_LARGE_MODULES = {
     "services.py": 1175,
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
-    "drift.py": 1020,
+    # Replay builds the project's own package through the install builder (#3151).
+    "drift.py": 1025,
 }
 
 

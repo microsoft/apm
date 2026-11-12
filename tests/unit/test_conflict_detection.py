@@ -112,6 +112,23 @@ class TestMCPConflictDetection(unittest.TestCase):
         result = self.detector.check_server_exists("notion")
         self.assertFalse(result)
 
+    def test_resolved_info_without_id_matches_by_name_without_registry_lookup(self):
+        """v0.1 registry entries have no id; a supplied entry matches by name only."""
+        info = {"name": "github-server"}
+
+        self.assertTrue(self.detector.check_server_exists("github-server", server_info=info))
+        self.assertFalse(
+            self.detector.check_server_exists("notion", server_info={"name": "notion"})
+        )
+        self.mock_adapter.registry_client.find_server_by_reference.assert_not_called()
+
+    def test_resolved_info_with_empty_id_does_not_match_empty_config_ids(self):
+        """An empty registry id is not an identity and cannot collide with other servers."""
+        self.existing_config["mcpServers"]["other"] = {"url": "https://x.invalid", "id": ""}
+
+        result = self.detector.check_server_exists("new-server", server_info={"id": ""})
+        self.assertFalse(result)
+
     def test_handles_registry_lookup_failure(self):
         """Test graceful handling when registry lookup fails."""
         # Mock registry to raise exception
@@ -258,10 +275,13 @@ class TestMCPConflictDetectionByTargetName(unittest.TestCase):
     def test_opencode_extracts_mcp_servers(self):
         detector = self._make_detector(
             "opencode",
-            "mcpServers",
-            {"mcpServers": {"o": {"command": "x"}}},
+            "mcp",
+            {"mcp": {"o": {"type": "local", "command": ["x"]}}},
         )
-        self.assertEqual(detector.get_existing_server_configs(), {"o": {"command": "x"}})
+        self.assertEqual(
+            detector.get_existing_server_configs(),
+            {"o": {"type": "local", "command": ["x"]}},
+        )
 
     def test_vscode_extracts_servers_key(self):
         detector = self._make_detector(

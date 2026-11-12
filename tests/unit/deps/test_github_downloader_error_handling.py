@@ -105,12 +105,12 @@ class TestDebug:
         assert "[DEBUG]" not in out.out
 
     def test_debug_redacts_git_credentials(self, capsys: pytest.CaptureFixture[str]) -> None:
-        secret = "github_pat_" + "A" * 30
+        sentinel = "github_pat_" + "A" * 30
         with patch.dict(os.environ, {"APM_DEBUG": "1"}):
-            _debug(f"git failed with {secret}")
+            _debug(f"git failed with {sentinel}")
 
         out = capsys.readouterr()
-        assert secret not in out.err
+        assert sentinel not in out.err
         assert "[DEBUG] git failed with ***" in out.err
 
 
@@ -1249,7 +1249,9 @@ class TestDownloadPackage:
             patch("apm_cli.deps.github_downloader.checkout_git_worktree") as checkout,
         ):
             downloader.download_package(dep, tmp_path / "pkg")
-        checkout.assert_called_once_with(tmp_path / "pkg", sha, env=downloader.git_env)
+        checkout.assert_called_once_with(
+            tmp_path / "pkg", sha, env=downloader.git_env, package=str(dep)
+        )
 
     def test_virtual_artifactory_subdir_routes_to_artifactory(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

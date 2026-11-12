@@ -1877,20 +1877,20 @@ class TestBundleMcpWiringE2E:
         assert result.exit_code == 0, result.output
         mock_install.assert_not_called()
 
-    def test_bundle_v3_lockfile_fails_before_project_mutation(
+    def test_bundle_unsupported_lockfile_fails_before_project_mutation(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
         lock_path = bundle / "apm.lock.yaml"
         lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
-        lock["lockfile_version"] = "3"
+        lock["lockfile_version"] = "4"
         lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
         project = _make_project(tmp_path / "dst")
 
         result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
         assert result.exit_code == 2
-        assert "Unsupported lockfile version '3'; supported versions: 1, 2" in result.output
+        assert "Unsupported lockfile version '4'; supported versions: 1, 2, 3" in result.output
         assert not (project / "apm.lock.yaml").exists()
 
 

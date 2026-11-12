@@ -13,7 +13,10 @@
       "decision": "Effective install target selection",
       "owner": "core/target_detection.py (EffectiveTargetDecision)",
       "selectors": ["src/apm_cli/core/target_detection.py"],
-      "guards": ["registry-delegation-install-target-selection"]
+      "guards": [
+        "registry-delegation-install-target-selection",
+        "registry-delegation-audit-target-selection"
+      ]
     },
     {
       "id": "behavioral-test-taxonomy-classification",
@@ -51,15 +54,18 @@
     },
     {
       "id": "distributed-agents-output-preparation",
-      "decision": "Agent root-context output eligibility and content preparation",
-      "owner": "compilation/agents_compiler.py with compilation/root_context_protection.py",
+      "decision": "Agent root-context output eligibility, user-root replacement and redundant-root cleanup, and content preparation",
+      "owner": "compilation/agents_compiler.py with compilation/root_context_protection.py and compilation/build_id.py",
       "selectors": [
         "src/apm_cli/compilation/agents_compiler.py",
-        "src/apm_cli/compilation/root_context_protection.py"
+        "src/apm_cli/compilation/root_context_protection.py",
+        "src/apm_cli/compilation/user_root_context.py",
+        "src/apm_cli/compilation/build_id.py"
       ],
       "guards": [
         "contracts-tooling-distributed-agents-output",
-        "contracts-tooling-root-context-write-eligibility"
+        "contracts-tooling-root-context-write-eligibility",
+        "registry-delegation-build-id-verification"
       ]
     },
     {
@@ -75,6 +81,27 @@
       "owner": "core/project_name.py (resolve_bootstrap_project_name)",
       "selectors": ["src/apm_cli/core/project_name.py"],
       "guards": ["registry-delegation-bootstrap-project-name"]
+    },
+    {
+      "id": "user-invocable-resolution",
+      "decision": "Agent user-invocable resolution from frontmatter, including the visibility: internal alias",
+      "owner": "primitives/models.py (resolve_user_invocable)",
+      "selectors": [
+        "src/apm_cli/primitives/models.py",
+        "src/apm_cli/primitives/parser.py",
+        "src/apm_cli/integration/agent_integrator.py"
+      ],
+      "guards": ["registry-delegation-user-invocable-resolution"]
+    },
+    {
+      "id": "cli-version-rendering",
+      "decision": "CLI version rendering and lightweight entrypoint delegation",
+      "owner": "version_output.py (print_version) + entrypoint.py (main)",
+      "selectors": [
+        "src/apm_cli/version_output.py",
+        "src/apm_cli/entrypoint.py"
+      ],
+      "guards": ["registry-delegation-version-rendering"]
     }
   ]
 }

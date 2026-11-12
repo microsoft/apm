@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import _socket
 import inspect
 import os
 import subprocess
@@ -747,7 +748,12 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         )
 
         assert result.returncode != 0
-        assert result.stderr.count("IP network disabled by test environment") == 1
+        if ".sendmsg(" in script and not hasattr(_socket.socket, "sendmsg"):
+            assert "AttributeError:" in result.stderr
+            assert "has no attribute 'sendmsg'" in result.stderr
+            assert "IP network disabled by test environment" not in result.stderr
+        else:
+            assert result.stderr.count("IP network disabled by test environment") == 1
 
 
 @pytest.mark.parametrize(

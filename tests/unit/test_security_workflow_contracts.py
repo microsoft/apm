@@ -2,9 +2,38 @@
 
 from pathlib import Path
 
-from tests.workflow_contracts import load_workflow, workflow_job, workflow_step
+from tests.workflow_contracts import (
+    assert_unconditional,
+    load_workflow,
+    workflow_job,
+    workflow_step,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_codeql_covers_merge_queue_with_existing_analysis_configurations() -> None:
+    """Required scans must run on the queue SHA, not just the earlier PR SHA."""
+    workflow = load_workflow(ROOT / ".github" / "workflows" / "codeql.yml")
+    assert workflow["on"]["merge_group"] == {
+        "branches": ["main"],
+        "types": ["checks_requested"],
+    }
+    for event in ("pull_request", "push"):
+        assert workflow["on"][event] == {"branches": ["main"]}
+
+    analyze = workflow_job(workflow, "analyze")
+    assert analyze["strategy"]["matrix"]["language"] == ["python", "actions"]
+    init = workflow_step(analyze, "Initialize CodeQL")
+    assert init["with"]["languages"] == "${{ matrix.language }}"
+    upload = workflow_step(analyze, "Perform CodeQL Analysis")
+    assert upload.get("with", {}).get("upload", True) is True
+    for node, label in (
+        (analyze, "CodeQL matrix"),
+        (init, "CodeQL initialization"),
+        (upload, "CodeQL analysis upload"),
+    ):
+        assert_unconditional(node, label=label)
 
 
 def test_merge_gate_executes_base_commit_script() -> None:

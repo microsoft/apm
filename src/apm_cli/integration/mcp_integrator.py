@@ -28,13 +28,19 @@ import yaml
 from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
+from apm_cli.deps.lockfile import (
+    LockFile,
+    LockfileSymlinkError,
+    get_lockfile_path,
+    installed_apm_version,
+)
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import (
@@ -44,6 +50,7 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
+from apm_cli.utils.staging_guard import assert_no_staging_paths
 from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 
 if TYPE_CHECKING:
@@ -295,6 +302,7 @@ def _clean_claude_config(
     logger,
     is_user_scope: bool = False,
     fail_on_write_error: bool = False,
+    label: str | None = None,
 ) -> int:
     """Remove stale entries from a Claude Code JSON config file.
 
@@ -308,11 +316,14 @@ def _clean_claude_config(
         logger: Command logger for progress messages.
         is_user_scope: When True, validates that the top-level config is a dict
             (``~/.claude.json`` guard) and uses the user-scope log label.
+        fail_on_write_error: When True, raise RequiredIntegrationError on write failure.
+        label: Optional human-readable config label used in log messages.
 
     Returns:
         Number of entries removed.
     """
-    label = "~/.claude.json" if is_user_scope else ".mcp.json"
+    if label is None:
+        label = str(config_path) if is_user_scope else ".mcp.json"
     if (
         _reject_symlink_config(
             config_path,
@@ -428,7 +439,10 @@ class MCPIntegrator:
         Mimics the structure returned by the MCP registry so that existing
         adapter code can consume self-defined deps without changes.
         """
-        info: dict = {"name": dep.name}
+        info: dict = {
+            "name": dep.name,
+            "is_self_defined": True,
+        }
 
         # For stdio self-defined deps, store raw command/args so adapters
         # can bypass registry-specific formatting (npm, docker, etc.).
@@ -450,7 +464,10 @@ class MCPIntegrator:
                 "url": dep.url or "",
             }
             if dep.headers:
-                remote["headers"] = [{"name": k, "value": v} for k, v in dep.headers.items()]
+                remote["headers"] = [
+                    {"name": k, "value": ManifestHeaderValue(v) if isinstance(v, str) else v}
+                    for k, v in dep.headers.items()
+                ]
             info["remotes"] = [remote]
         else:
             # Build as a stdio package
@@ -482,10 +499,13 @@ class MCPIntegrator:
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
 
+        dep.apply_opencode_enabled(info)
+
         # Pass through harness-specific extra keys for adapters to merge
         if dep.extra:
             info["_extra"] = dict(dep.extra)
 
+        assert_no_staging_paths(info, f"MCP client configuration for '{dep.name}'")
         return info
 
     @staticmethod
@@ -498,6 +518,8 @@ class MCPIntegrator:
         info = server_info_cache.get(dep.name)
         if not info:
             return
+
+        dep.apply_opencode_enabled(info)
 
         # Transport overlay: select matching transport from available options
         if dep.transport:
@@ -526,10 +548,20 @@ class MCPIntegrator:
                 existing_headers = remote.get("headers", [])
                 if isinstance(existing_headers, builtins.list):
                     for k, v in dep.headers.items():
-                        existing_headers.append({"name": k, "value": v})
+                        existing_headers.append(
+                            {
+                                "name": k,
+                                "value": ManifestHeaderValue(v) if isinstance(v, str) else v,
+                            }
+                        )
                     remote["headers"] = existing_headers
                 elif isinstance(existing_headers, builtins.dict):
-                    existing_headers.update(dep.headers)
+                    existing_headers.update(
+                        {
+                            k: ManifestHeaderValue(v) if isinstance(v, str) else v
+                            for k, v in dep.headers.items()
+                        }
+                    )
 
         # Args overlay: merge into package runtime arguments
         if dep.args and "packages" in info:
@@ -542,6 +574,12 @@ class MCPIntegrator:
                     for k, v in dep.args.items():
                         existing_args.append({"value_hint": f"--{k}={v}"})
                 pkg["runtime_arguments"] = existing_args
+
+        # Registry data cannot supply authored overlay metadata.
+        info.pop("_apm_env_overlay", None)
+        # Keep authored values separate from collected install-time values.
+        if dep.env:
+            info["_apm_env_overlay"] = dict(dep.env)
 
         # Tools overlay: embed for adapters to pick up
         if dep.tools:
@@ -620,13 +658,17 @@ class MCPIntegrator:
         previously stored config in the lockfile.  Only dependencies that
         have a stored baseline *and* whose config has changed are returned.
         """
+        from apm_cli.models.dependency.mcp import opencode_enabled_matches
+
         drifted: builtins.set = builtins.set()
         for dep in mcp_deps:
             if not hasattr(dep, "to_dict") or not hasattr(dep, "name"):
                 continue
             current_config = dep.to_dict()
             stored = stored_configs.get(dep.name)
-            if stored is not None and stored != current_config:
+            if stored is not None and (
+                stored != current_config or not opencode_enabled_matches(current_config, stored)
+            ):
                 drifted.add(dep.name)
         return drifted
 
@@ -689,6 +731,8 @@ class MCPIntegrator:
         logger=None,
         scope=None,
         fail_on_write_error: bool = False,
+        stored_configs: builtins.dict | None = None,
+        native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
     ) -> None:
         """Remove MCP server entries that are no longer required by any dependency.
 
@@ -720,9 +764,10 @@ class MCPIntegrator:
         if exclude:
             target_runtimes.discard(exclude)
 
-        # Scope filtering: at USER scope, only clean global-capable runtimes.
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.mcp.ownership import require_removable_mcp_connections
 
+        # Scope filtering: at USER scope, only clean global-capable runtimes.
         if scope is InstallScope.USER:
             from apm_cli.factory import ClientFactory as _CF
 
@@ -736,12 +781,14 @@ class MCPIntegrator:
             target_runtimes = supported
 
         # Claude Code: when scope is unspecified, fail safely toward the project
-        # config only -- never touch ~/.claude.json on the user's behalf without
+        # config only -- never touch user config on the user's behalf without
         # an explicit USER scope, since that file is shared across all Claude
         # Code projects on the host.
-        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
-        clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
-        if "claude" in target_runtimes and scope is None:
+        clean_claude_user = "claude" in target_runtimes and (
+            scope is InstallScope.USER or user_scope
+        )
+        clean_claude_project = "claude" in target_runtimes and not clean_claude_user
+        if "claude" in target_runtimes and scope is None and not user_scope:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
                 "project .mcp.json only; pass -g/--global to also clean ~/.claude.json"
@@ -789,38 +836,49 @@ class MCPIntegrator:
         if "codex" in target_runtimes:
             from apm_cli.factory import ClientFactory
 
-            codex_cfg = Path(
-                ClientFactory.create_client(
-                    "codex",
-                    project_root=project_root,
-                    user_scope=user_scope,
-                ).get_config_path()
+            codex_client = ClientFactory.create_client(
+                "codex",
+                project_root=project_root,
+                user_scope=user_scope,
+            )
+            codex_cfg = Path(codex_client.get_config_path())
+            if _reject_symlink_config(
+                codex_cfg, "Codex CLI config", logger, fail_on_write_error=fail_on_write_error
+            ):
+                return
+            verified_keys = require_removable_mcp_connections(
+                codex_client, stale_names, stored_configs or {}, (native_hashes or {}).get("codex")
             )
             _clean_toml_mcp_config(
                 codex_cfg,
-                expanded_stale,
+                verified_keys,
                 "Codex CLI config",
                 fail_on_write_error=fail_on_write_error,
             )
 
+        clean_user_scope = user_scope or scope is InstallScope.USER
         if "cursor" in target_runtimes:
+            from apm_cli.adapters.client.cursor import CursorClientAdapter
+
             _clean_json_mcp_config(
-                project_root_path / ".cursor" / "mcp.json",
+                CursorClientAdapter.config_path_for(project_root_path, clean_user_scope),
                 expanded_stale,
                 logger,
-                ".cursor/mcp.json",
+                "Cursor MCP config",
                 use_rich=True,
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Clean opencode.json (only if .opencode/ directory exists)
+        # Project scope is opt-in; user scope uses ~/.config/opencode/.
         if "opencode" in target_runtimes:
-            if (project_root_path / ".opencode").is_dir():
+            if clean_user_scope or (project_root_path / ".opencode").is_dir():
+                from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+
                 _clean_json_mcp_config(
-                    project_root_path / "opencode.json",
+                    OpenCodeClientAdapter.config_path_for(project_root_path, clean_user_scope),
                     expanded_stale,
                     logger,
-                    "opencode.json",
+                    "OpenCode MCP config",
                     servers_key="mcp",
                     fail_on_write_error=fail_on_write_error,
                 )
@@ -930,22 +988,71 @@ class MCPIntegrator:
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
-            if (project_root_path / ".claude").is_dir():
+            claude_project_enabled = (project_root_path / ".claude").is_dir()
+            if claude_project_enabled or stored_configs:
+                if _reject_symlink_config(
+                    project_root_path / ".mcp.json",
+                    ".mcp.json",
+                    logger,
+                    fail_on_write_error=fail_on_write_error,
+                ):
+                    return
+                project_client = ClientFactory.create_client(
+                    "claude", project_root=project_root_path, user_scope=False
+                )
+                verified_keys = require_removable_mcp_connections(
+                    project_client,
+                    stale_names,
+                    stored_configs or {},
+                    (native_hashes or {}).get("claude"),
+                )
+            if claude_project_enabled:
                 _clean_claude_config(
                     project_root_path / ".mcp.json",
-                    expanded_stale,
+                    verified_keys,
                     logger,
                     fail_on_write_error=fail_on_write_error,
                 )
 
-        # Clean Claude Code user ~/.claude.json (USER scope only)
+        # Clean Claude Code user ~/.claude.json or $CLAUDE_CONFIG_DIR/.claude.json (USER scope only)
         if clean_claude_user:
+            from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+            claude_label = "Claude user config"
+            try:
+                unresolved_cfg = ClaudeClientAdapter.resolve_user_claude_unresolved_path()
+                claude_label = str(unresolved_cfg)
+                if _reject_symlink_config(
+                    unresolved_cfg,
+                    claude_label,
+                    logger,
+                    fail_on_write_error=fail_on_write_error,
+                ):
+                    return
+                claude_cfg = ClaudeClientAdapter.resolve_user_claude_json_path(unresolved_cfg)
+            except Exception as exc:
+                _log.debug("Failed to resolve Claude user-scope config path", exc_info=True)
+                if fail_on_write_error:
+                    from apm_cli.install.errors import RequiredIntegrationError
+
+                    raise RequiredIntegrationError(
+                        _cleanup_failure_message(claude_label, exc)
+                    ) from exc
+                return
+
+            user_client = ClientFactory.create_client(
+                "claude", project_root=project_root_path, user_scope=True
+            )
+            verified_keys = require_removable_mcp_connections(
+                user_client, stale_names, stored_configs or {}, (native_hashes or {}).get("claude")
+            )
             _clean_claude_config(
-                Path.home() / ".claude.json",
-                expanded_stale,
+                claude_cfg,
+                verified_keys,
                 logger,
                 is_user_scope=True,
                 fail_on_write_error=fail_on_write_error,
+                label=claude_label,
             )
 
     # ------------------------------------------------------------------
@@ -960,6 +1067,7 @@ class MCPIntegrator:
         mcp_configs: builtins.dict | None = None,
         mcp_target_servers: builtins.dict | None = None,
         mcp_config_provenance: builtins.dict | None = None,
+        native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
         logger: CommandLogger | None = None,
         fail_on_write_error: bool = False,
     ) -> None:
@@ -1023,6 +1131,7 @@ class MCPIntegrator:
                         for target, servers in sorted(mcp_target_servers.items())
                         if servers
                     },
+                    native_hashes=native_hashes,
                 )
             if mcp_config_provenance is not None:
                 lockfile.mcp_config_provenance = mcp_config_provenance
@@ -1049,7 +1158,7 @@ class MCPIntegrator:
                 lock_path,
                 exc_info=True,
             )
-            if creating:
+            if creating and not isinstance(exc, LockfileSymlinkError):
                 # Failing to UPDATE leaves a usable lockfile behind, but failing
                 # to CREATE one reproduces #2373 exactly -- install reports
                 # success and the next audit says "run 'apm install'". Debug
@@ -1065,6 +1174,8 @@ class MCPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
+                if isinstance(exc, LockfileSymlinkError):
+                    raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "MCP lockfile update failed. Check apm.lock.yaml permissions, then retry."
                 ) from exc
@@ -1152,6 +1263,9 @@ class MCPIntegrator:
         user_scope: bool = False,
         logger=None,
         replace_existing: bool = False,
+        installed_servers: builtins.set[str] | None = None,
+        managed_fields: builtins.set[str] | None = None,
+        written_native_hashes: builtins.dict[str, str] | None = None,
     ) -> bool:
         """Install MCP dependencies for a specific runtime.
 
@@ -1175,11 +1289,16 @@ class MCPIntegrator:
                         project_root=project_root,
                         user_scope=user_scope,
                         replace_existing=replace_existing,
+                        managed_fields=managed_fields,
                     )
                     if result["failed"]:
                         logger.error(f"  Failed to install {dep}")
                         all_ok = False
-                    elif logger and runtime == "codex":
+                    elif result.get("installed") and installed_servers is not None:
+                        installed_servers.add(dep)
+                        if written_native_hashes is not None:
+                            written_native_hashes.update(result.get("native_hashes", {}))
+                    if not result["failed"] and logger and runtime == "codex":
                         from apm_cli.factory import ClientFactory
 
                         config_path = ClientFactory.create_client(
@@ -1200,7 +1319,8 @@ class MCPIntegrator:
                     all_ok = False
 
             # Emit aggregated post-install diagnostics for runtimes that
-            # support runtime env-var substitution (currently Copilot CLI).
+            # support runtime env-var substitution (currently Copilot CLI;
+            # Claude Code's are emitted once per run by run_mcp_install).
             # Safe no-op for runtimes whose adapter doesn't aggregate state.
             try:
                 if runtime == "copilot":
@@ -1455,6 +1575,7 @@ class MCPIntegrator:
         managed_target_servers: builtins.dict | None = None,
         prevalidated_registry_servers: builtins.dict[str, builtins.dict] | None = None,
         fail_on_write_error: bool = False,
+        native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1501,4 +1622,5 @@ class MCPIntegrator:
             managed_target_servers=managed_target_servers,
             prevalidated_registry_servers=prevalidated_registry_servers,
             fail_on_write_error=fail_on_write_error,
+            native_hashes=native_hashes,
         )

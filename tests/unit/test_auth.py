@@ -92,12 +92,23 @@ class TestClassifyHost:
         with pytest.raises(ValueError, match="Supported values: gitlab"):
             AuthResolver.classify_host("code.acme.com", host_type="gitea")
 
+    @pytest.mark.windows_compat
     def test_gitlab_host_type_hint_reuses_gitlab_cache_entry(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ) as mock_cred,
+            patch(
+                "apm_cli.core.token_manager.subprocess.run",
+                side_effect=AssertionError("Cache identity must not launch credential helpers"),
+            ),
+        ):
             resolver = AuthResolver()
             ctx_a = resolver.resolve("gitlab.com")
             ctx_b = resolver.resolve("gitlab.com", host_type="gitlab")
         assert ctx_a is ctx_b
+        mock_cred.assert_called_once_with("gitlab.com", port=None)
 
     def test_gitlab_self_managed_apm_gitlab_hosts_env(self):
         with patch.dict(
@@ -1305,12 +1316,24 @@ class TestResolvePortDiscrimination:
         assert ctx.host_info.port == 7990
         mock_cred.assert_called_once_with("bitbucket.corp.com", port=7990, env=ANY)
 
+    @pytest.mark.windows_compat
     def test_host_info_carries_port(self):
-        with patch.dict(os.environ, {"GITHUB_APM_PAT": "t"}, clear=True):
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "t"}, clear=True),
+            patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ) as mock_cred,
+            patch(
+                "apm_cli.core.token_manager.subprocess.run",
+                side_effect=AssertionError("Port metadata must not launch credential helpers"),
+            ),
+        ):
             resolver = AuthResolver()
             ctx = resolver.resolve("gitlab.corp.com", port=8443)
             assert ctx.host_info.port == 8443
             assert ctx.host_info.display_name == "gitlab.corp.com:8443"
+            assert ctx.token is None
+        mock_cred.assert_called_once_with("gitlab.corp.com", port=8443, env=ANY)
 
 
 # ---------------------------------------------------------------------------
@@ -1672,13 +1695,25 @@ class TestCredentialFallbackOrderRegressionTrap:
                 def ado_op(token, env):
                     raise RuntimeError("401 unauthorized")
 
-                with pytest.raises(RuntimeError, match="401 unauthorized"):
+                with (
+                    patch.object(
+                        GitHubTokenManager,
+                        "resolve_credential_from_git",
+                        return_value=None,
+                    ),
+                    pytest.raises(
+                        RuntimeError,
+                        match=r"ADO_APM_PAT, az CLI bearer, and git credential fill",
+                    ) as caught,
+                ):
                     resolver.try_with_fallback("dev.azure.com", ado_op)
 
         assert bearer_calls, (
-            "ADO bearer must be attempted before re-raising original PAT error; "
+            "ADO bearer must be attempted before wrapping the exhausted chain; "
             "cascade order changed (regression trap #935)"
         )
+        assert caught.value.__cause__ is not None
+        assert str(caught.value.__cause__) == "401 unauthorized"
 
     def test_ghe_cloud_never_falls_back_to_unauth(self):
         """ghe_cloud: unauthenticated fallback must NEVER be attempted.
@@ -1728,7 +1763,7 @@ class TestCredentialFallbackOrderRegressionTrap:
                 ):
                     resolver = AuthResolver()
 
-                    def op_embed_secret(token, env):
+                    def op_raise_on_authenticated_attempt(token, env):
                         if token is not None:
                             # Simulates an HTTP library embedding a bearer token in
                             # the exception message (the real supply-chain risk).
@@ -1736,7 +1771,9 @@ class TestCredentialFallbackOrderRegressionTrap:
                         return "ok"
 
                     with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
-                        resolver.try_with_fallback("github.com", op_embed_secret, path="owner/repo")
+                        resolver.try_with_fallback(
+                            "github.com", op_raise_on_authenticated_attempt, path="owner/repo"
+                        )
         finally:
             auth_logger.removeFilter(redaction_filter)
 

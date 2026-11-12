@@ -130,8 +130,9 @@ each declared harness directory.
 
 All major verbs match npm semantics: `apm install` deploys, `apm update`
 refreshes dependencies, `apm install --frozen` is the lockfile-only CI
-install (mirrors `npm ci`). The CLI binary itself updates via
-`apm self-update`, not `apm update`.
+install (mirrors `npm ci`). CLI upgrades use your package manager
+(`brew upgrade apm` for Homebrew), or `apm self-update` for standalone installs,
+not `apm update`.
 
 Source: `src/apm_cli/commands/install.py`.
 

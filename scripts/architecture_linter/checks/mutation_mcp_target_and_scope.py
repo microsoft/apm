@@ -124,7 +124,7 @@ def _missing_consumers(
             continue
         if not _has_fixed(facts, needle):
             findings.append(violation(rule_id, path, message))
-    return findings
+    return tuple(findings)
 
 
 def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
@@ -239,6 +239,19 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "canonical target projection must return the target/targets shape",
             )
         )
+    for fragment in (
+        ").validate_config_for_install()",
+        "_raise_strict_config_failures(unsafe_runtimes, console=console, logger=logger)",
+        "_validate_target_configs(\n        target_runtimes,",
+    ):
+        findings.extend(
+            _require(
+                _has_fixed(install_facts, fragment),
+                rule_id,
+                _MCP_INSTALL,
+                "Selected MCP targets must delegate safe-config preflight before no-op detection",
+            )
+        )
     return findings
 
 
@@ -320,12 +333,92 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
                 "unlocked collector must read package.get_mcp_dependencies exactly once",
             )
         )
+    if not _span_has_fixed(
+        facts, derive_span, "active_package_keys=active_package_keys,"
+    ) or not _span_has_fixed(
+        facts,
+        locked_span,
+        "active_package_keys is not None and package_key not in active_package_keys",
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "MCP source scope must preserve supplied complete active graph membership",
+            )
+        )
+    if not _span_has_fixed(facts, locked_span, "build_download_ref(") or not _span_has_fixed(
+        facts, locked_span, "require_locked=True,"
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "Pending MCP sources must use the locked acquisition owner",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
+            pattern=r"^\s*def pending_servers\(|_absent_apm_package_mcp_configs",
+            message="Deferred MCP origin evidence belongs to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
     return findings
 
 
 def _count_span_fixed(facts: FileFacts, span: tuple[int, int], needle: str) -> int:
     """Count lines in `span` containing fixed `needle`."""
     return sum(1 for _, text in _span_lines(facts, span) if needle in text)
+
+
+def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]:
+    """Persistent MCP omission decisions must remain in the current-view owner."""
+    rule_id = "mutation_writes.mcp_omission_evidence"
+    required = {
+        _MCP_SCOPE_OWNER: (
+            "def omission_evidence(",
+            "def with_recorded_omissions(",
+            "def _declaration_fingerprint(",
+            '"dependency": dependency.get_unique_key()',
+            '"declaration": declaration.to_dict()',
+            "if valid and name not in admitted:",
+        ),
+        "src/apm_cli/policy/ci_checks.py": (").with_recorded_omissions(lock)",),
+        "src/apm_cli/install/mcp/integration.py": (
+            "include_dependency_mcp=should_install",
+            "current_view.omission_evidence(lockfile or LockFile())",
+            "current_view if should_install else None",
+        ),
+    }
+    facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "MCP omission evidence must retain dependency/declaration binding and owner routing",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
+            pattern=r"^\s*def (?:omission_evidence|with_recorded_omissions|_declaration_fingerprint)\(",
+            message="MCP omission selection and comparison belong to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
 
 
 def _check_mcp_package_launcher(provider: FactsProvider) -> Iterable[Violation]:
@@ -380,6 +473,36 @@ def _mpl_container(
             _MCP_CONTAINER_CONSUMERS,
             "_ensure_docker_image_arg(",
             "container consumer must route image arguments through MCPClientAdapter",
+        )
+    )
+    # #3404: the `docker run -i --rm` default and options-only normalization
+    # have one owner; consumers must not re-grow an inline default.
+    findings.extend(
+        _require(
+            _sum_regex_lines(provider, rule_id, adapter_paths, r"^\s*def _ensure_docker_run_args\(")
+            == 1,
+            rule_id,
+            _MCP_ADAPTER_BASE,
+            "_ensure_docker_run_args must be defined exactly once across client adapters",
+        )
+    )
+    findings.extend(
+        _missing_consumers(
+            provider,
+            rule_id,
+            _MCP_CONTAINER_CONSUMERS,
+            "_ensure_docker_run_args(",
+            "container consumer must route docker run arguments through MCPClientAdapter",
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_MCP_CONTAINER_CONSUMERS,
+            pattern=r"\bor\s+\[\s*[\"']run[\"']",
+            message="inline docker run default bypasses MCPClientAdapter._ensure_docker_run_args",
+            exempt=False,
         )
     )
     return tuple(findings)
@@ -500,8 +623,16 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
         _require(
             _has_fixed(
                 facts_by_path[_MCP_MODEL],
-                '_HARNESS_EXTRA_ALIASES = frozenset({"enabled", "environment", '
-                '"http_headers", "id"})',
+                "_HARNESS_EXTRA_ALIASES = frozenset(\n"
+                "    {\n"
+                '        "bearer_token_env_var",\n'
+                '        "enabled",\n'
+                '        "env_http_headers",\n'
+                '        "environment",\n'
+                '        "http_headers",\n'
+                '        "id",\n'
+                "    }\n"
+                ")",
             ),
             rule_id,
             _MCP_MODEL,
@@ -539,6 +670,71 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
             rule_id,
             _MCP_OPENCODE,
             "OpenCode translation must derive exclusions from the canonical denylist",
+        )
+    )
+    return tuple(findings)
+
+
+def _check_opencode_enabled_intent(provider: FactsProvider) -> Iterable[Violation]:
+    """OpenCode consumers must retain the model's presence and trust boundary."""
+    rule_id = "mutation_writes.opencode_enabled_intent"
+    integrator = "src/apm_cli/integration/mcp_integrator.py"
+    required = {
+        _MCP_MODEL: (
+            'OPENCODE_ENABLED_KEY = "_apm_opencode_enabled"',
+            "return intent.value if isinstance(intent, OpenCodeEnabled) else default",
+            'if ("enabled" in current) != ("enabled" in stored):',
+            'json.dumps(current["enabled"], sort_keys=True)',
+            'stored["enabled"], sort_keys=True',
+            "return self.enabled is not _ENABLED_UNSET",
+            "server_info.pop(OPENCODE_ENABLED_KEY, None)",
+            "server_info[OPENCODE_ENABLED_KEY] = OpenCodeEnabled(self.enabled)",
+            'enabled=d.get("enabled", _ENABLED_UNSET)',
+            'if self.has_enabled:\n            result["enabled"] = self.enabled',
+        ),
+        integrator: (
+            "from apm_cli.models.dependency.mcp import opencode_enabled_matches",
+            "not opencode_enabled_matches(current_config, stored)",
+        ),
+        _MCP_OPENCODE: (
+            "from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value",
+            "enabled=opencode_enabled_value(server_info, enabled)",
+        ),
+        _MCP_OWNERSHIP: ("opencode_enabled_matches(existing[name], expected)",),
+    }
+    facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "OpenCode enabled intent must retain the canonical model contract",
+                )
+            )
+    findings.extend(
+        _require(
+            _count_regex_lines(
+                facts_by_path[integrator], r"^\s+dep\.apply_opencode_enabled\(info\)$"
+            )
+            == 2,
+            rule_id,
+            integrator,
+            "Both self-defined and registry overlays must use the enabled owner",
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_MODEL,)),
+            pattern=r"_apm_opencode_enabled|^\s*(?:def opencode_enabled_|class OpenCodeEnabled)",
+            message="OpenCode enabled vocabulary and decisions belong to the MCP model",
+            exempt=False,
         )
     )
     return tuple(findings)
@@ -645,6 +841,13 @@ RULES: tuple[Rule, ...] = (
         check=_check_mcp_declaration_scope,
     ),
     Rule(
+        id="mutation_writes.mcp_omission_evidence",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-omission-evidence",),
+        description="Dependency MCP omission evidence and comparison use the current-view owner.",
+        check=_check_mcp_omission_evidence,
+    ),
+    Rule(
         id="mutation_writes.mcp_package_launcher",
         group=GROUP,
         guard_ids=("hooks-integrations-mcp-package-launcher",),
@@ -657,6 +860,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-mcp-passthrough-denylist",),
         description="MCP passthrough filtering must route through the base adapter denylist.",
         check=_check_mcp_passthrough_denylist,
+    ),
+    Rule(
+        id="mutation_writes.opencode_enabled_intent",
+        group=GROUP,
+        guard_ids=("hooks-integrations-opencode-enabled-intent",),
+        description="OpenCode enabled presence and trust must route through the MCP model.",
+        check=_check_opencode_enabled_intent,
     ),
     Rule(
         id="mutation_writes.jetbrains_mcp_path",

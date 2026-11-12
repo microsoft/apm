@@ -90,11 +90,20 @@ CODEX_MARKETPLACE_OUTPUT = MarketplaceOutputProfile(
     required_package_fields=("category",),
 )
 
+COPILOT_MARKETPLACE_OUTPUT = MarketplaceOutputProfile(
+    name="copilot",
+    config_attr="copilot",
+    default_output=".github/plugin/marketplace.json",
+    mapper="copilot",
+    path_env_var="APM_MARKETPLACE_COPILOT_PATH",
+)
+
 MARKETPLACE_OUTPUTS: dict[str, MarketplaceOutputProfile] = {
     profile.name: profile
     for profile in (
         DEFAULT_MARKETPLACE_OUTPUT,
         CODEX_MARKETPLACE_OUTPUT,
+        COPILOT_MARKETPLACE_OUTPUT,
     )
 }
 

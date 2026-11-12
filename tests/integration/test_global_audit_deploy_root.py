@@ -47,12 +47,23 @@ def _tree_snapshot(
     return directories, files
 
 
+@pytest.mark.parametrize("aliased_home", [False, True])
 def test_global_install_audit_reads_home_deployment_root(
+    aliased_home: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     isolated = IsolatedApmEnvironment.create(tmp_path / "global-audit", base_env=os.environ)
     environment = isolated.subprocess_env()
+    if aliased_home:
+        alias = isolated.root / "home-alias"
+        try:
+            alias.symlink_to(isolated.home, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("directory symlinks unavailable")
+        environment["HOME"] = str(alias)
+        environment["USERPROFILE"] = str(alias)
+        environment["APM_HOME"] = str(alias / ".apm")
     environment["APM_NO_CACHE"] = "1"
     for name, value in environment.items():
         monkeypatch.setenv(name, value)

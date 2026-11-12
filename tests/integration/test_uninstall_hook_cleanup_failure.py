@@ -1,5 +1,6 @@
 """Component contract for uninstall hook-cleanup failures."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,22 @@ def _assert_incomplete_cleanup(result: Result, hook_file: Path) -> None:
     assert "Uninstall complete" not in result.output
 
 
+def _inject_after_target_preflight(
+    monkeypatch: pytest.MonkeyPatch, callback: Callable[[], int]
+) -> None:
+    """Race target cleanup after its gate, independently of disk-removal ordering."""
+    from importlib import import_module
+
+    command = import_module("apm_cli.commands.uninstall.cli")
+    original = command._abort_if_retained_target_cleanup_paths
+
+    def after_preflight(*args, **kwargs) -> None:
+        original(*args, **kwargs)
+        callback()
+
+    monkeypatch.setattr(command, "_abort_if_retained_target_cleanup_paths", after_preflight)
+
+
 def test_uninstall_reports_real_managed_hook_unlink_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -94,10 +111,7 @@ def test_uninstall_reports_real_managed_hook_unlink_failure(
         return 0
 
     monkeypatch.setattr(Path, "unlink", fail_hook_unlink)
-    monkeypatch.setattr(
-        "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
-        recreate_hook_after_preflight,
-    )
+    _inject_after_target_preflight(monkeypatch, recreate_hook_after_preflight)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(uninstall, [package])
@@ -118,10 +132,7 @@ def test_uninstall_preserves_hook_replaced_after_provenance_preflight(
         hook_file.write_text(user_content, encoding="ascii")
         return 0
 
-    monkeypatch.setattr(
-        "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
-        replace_hook_after_preflight,
-    )
+    _inject_after_target_preflight(monkeypatch, replace_hook_after_preflight)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(uninstall, [package])
@@ -146,10 +157,7 @@ def test_uninstall_preserves_symlink_replaced_after_provenance_preflight(
         hook_file.symlink_to(outside_file)
         return 0
 
-    monkeypatch.setattr(
-        "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
-        replace_hook_with_symlink,
-    )
+    _inject_after_target_preflight(monkeypatch, replace_hook_with_symlink)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(uninstall, [package])

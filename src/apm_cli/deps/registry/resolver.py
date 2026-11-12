@@ -233,6 +233,18 @@ class RegistryPackageResolver:
                 f"constraint (version selector required)"
             )
         version_strings = [v.version for v in versions]
+
+        # Exact-string match always wins, before range matching runs. This
+        # matters for semver-shaped selectors too: range matching (below)
+        # ignores build metadata per the semver spec, so a selector like
+        # '1.0.2+fa163e16' would otherwise tie with, and could resolve to,
+        # a *different* published build such as '1.0.2+863e11af'. No real
+        # range operator ('^', '~', '>=', a wildcard, ...) can ever equal a
+        # published version string, so this can't shadow genuine ranges.
+        exact = next((v for v in versions if v.version == spec), None)
+        if exact is not None:
+            return exact
+
         if not is_semver_range(spec):
             from apm_cli.models.dependency.identity import _looks_like_invalid_semver_range
 
@@ -244,15 +256,13 @@ class RegistryPackageResolver:
                     f"use a complete range like '^1.0.0' or a published version"
                 )
             # Non-semver selector: exact match per the registry HTTP API spec
-            # (section 1.3 -- "Non-semver selectors are matched exactly").
-            chosen = next((v for v in versions if v.version == spec), None)
-            if chosen is None:
-                raise RegistryResolutionError(
-                    f"version {spec!r} not found for {dep_ref.repo_url!r} "
-                    f"in registry {dep_ref.registry_name!r} "
-                    f"(available: {', '.join(version_strings) or '<none>'})"
-                )
-            return chosen
+            # (section 1.3 -- "Non-semver selectors are matched exactly") --
+            # already tried above and failed.
+            raise RegistryResolutionError(
+                f"version {spec!r} not found for {dep_ref.repo_url!r} "
+                f"in registry {dep_ref.registry_name!r} "
+                f"(available: {', '.join(version_strings) or '<none>'})"
+            )
         best = pick_best(spec, version_strings)
         if best is None:
             raise RegistryResolutionError(

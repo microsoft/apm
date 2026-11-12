@@ -2,6 +2,7 @@
 
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from apm_cli.marketplace.errors import NoMatchingVersionError
 from apm_cli.marketplace.ref_resolver import RemoteRef
@@ -215,3 +216,41 @@ class TestResolveVersionConstraint(unittest.TestCase):
 
         tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "^1.0.0")
         assert tag == "secrets-vault--v1.2.3"
+
+    def test_passes_remote_url_to_list_remote_refs(self, MockResolver):
+        """Package remotes are queried when remote_url is provided (#2928)."""
+        refs = _make_refs("1.0.0", plugin_name="my-plugin")
+        MockResolver.return_value.list_remote_refs.return_value = refs
+        package_url = "https://git.example.invalid/owner/repo"
+
+        resolve_version_constraint(
+            "my-plugin",
+            "owner/repo",
+            "^1.0.0",
+            remote_url=package_url,
+        )
+        MockResolver.return_value.list_remote_refs.assert_called_once_with(
+            "owner/repo",
+            remote_url=package_url,
+        )
+
+    def test_error_includes_remote_url_when_set(self, MockResolver):
+        MockResolver.return_value.list_remote_refs.return_value = []
+        package_url = "https://git.example.invalid/owner/repo"
+
+        with self.assertRaises(NoMatchingVersionError) as ctx:
+            resolve_version_constraint(
+                "my-plugin",
+                "owner/repo",
+                "^1.0.0",
+                remote_url=package_url,
+            )
+        printed_url = str(ctx.exception).split("remote_url='", 1)[1].split("'", 1)[0]
+        actual = urlparse(printed_url)
+        expected = urlparse(package_url)
+        assert (actual.scheme, actual.hostname, actual.port, actual.path) == (
+            expected.scheme,
+            expected.hostname,
+            expected.port,
+            expected.path,
+        )

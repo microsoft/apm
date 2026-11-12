@@ -18,12 +18,12 @@ from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
 from ..models.apm_package import APMPackage
+from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
     _build_expected_install_paths,
-    _expand_with_ancestors,
+    _find_orphaned_packages,
     _scan_installed_packages,
-    _standalone_installed_packages,
 )
 from .uninstall.lockfile_state import lockfile_has_persisted_state
 
@@ -116,23 +116,17 @@ def prune(ctx, dry_run):
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
             expected_installed = _build_expected_install_paths(
-                declared_deps, lockfile, apm_modules_dir
+                declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
+        except MaterializationPathCollisionError as e:
+            logger.error(str(e))
+            sys.exit(1)
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
         installed_packages = (
             _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
-        )
-        standalone_installed = _standalone_installed_packages(
-            installed_packages,
-            apm_modules_dir,
-            lockfile=lockfile,
-        )
-        expected_with_ancestors = _expand_with_ancestors(
-            expected_installed,
-            standalone_installed,
         )
         expected_lock_keys = {dependency.get_unique_key() for dependency in declared_deps}
         if lockfile is not None:
@@ -144,14 +138,19 @@ def prune(ctx, dry_run):
         lock_keys_by_path = (
             _lock_keys_by_install_path(lockfile, apm_modules_dir) if lockfile is not None else {}
         )
-        orphaned_packages = sorted(
-            p for p in installed_packages if p not in expected_with_ancestors
+        orphaned_paths = set(
+            _find_orphaned_packages(
+                set(installed_packages) | set(lock_keys_by_path), expected_installed
+            )
         )
+        orphaned_packages = sorted(set(installed_packages) & orphaned_paths)
+        retained_packages = set(installed_packages) - orphaned_paths
+        for package in sorted(retained_packages - expected_installed):
+            logger.progress(f"Retained {package}: required package content.")
         missing_orphaned_keys = sorted(
             dep_key
             for relative_path, dep_keys in lock_keys_by_path.items()
-            if relative_path in expected_with_ancestors
-            or not (apm_modules_dir / relative_path).exists()
+            if relative_path not in orphaned_paths or not (apm_modules_dir / relative_path).exists()
             for dep_key in dep_keys
             if dep_key not in expected_lock_keys
         )
@@ -208,7 +207,7 @@ def prune(ctx, dry_run):
         if missing_orphaned_keys:
             logger.progress(
                 f"Found {len(missing_orphaned_keys)} stale lockfile dependency "
-                "record(s) without installed package content."
+                "record(s) without removable package content."
             )
 
         if dry_run:
@@ -241,6 +240,7 @@ def prune(ctx, dry_run):
             return
 
         removed_count = 0
+        failed_count = 0
         removed_packages: list[str] = []
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
@@ -263,6 +263,7 @@ def prune(ctx, dry_run):
                         pruned_key_set.add(dep_key)
                 deleted_pkg_paths.append(pkg_path)
             except Exception as e:
+                failed_count += 1
                 logger.error(f"Failed to remove {org_repo_name}: {e}")
 
         BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
@@ -396,6 +397,17 @@ def prune(ctx, dry_run):
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
+
+        if failed_count:
+            logger.error(
+                f"Prune incomplete: removed {removed_count} orphaned package(s); "
+                f"failed to remove {failed_count} package(s)."
+            )
+            logger.error_detail(
+                "Filesystem cleanup may be partial. Resolve the removal errors, "
+                "then rerun 'apm prune'."
+            )
+            sys.exit(1)
 
         if removed_count > 0:
             message = f"Pruned {removed_count} orphaned package(s)"

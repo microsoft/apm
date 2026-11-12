@@ -13,6 +13,8 @@ MCP config derivation are exercised end-to-end without a real git server or PAT.
 from __future__ import annotations
 
 import os
+import shutil
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +25,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
@@ -43,19 +45,8 @@ def _clear_package_cache() -> None:
     clear_apm_yml_cache()
 
 
-def _make_locked_dep() -> LockedDependency:
-    return LockedDependency(
-        repo_url=_PKG_REPO,
-        resolved_ref="v1.0.0",
-        resolved_commit=_COMMIT,
-        package_type="apm_package",
-        depth=1,
-        name="mcp-skill-pkg",
-    )
-
-
-def _write_project(project: Path, dep: LockedDependency, *, with_mcp: bool) -> LockFile:
-    """Write apm.yml and apm.lock.yaml; return the lockfile object."""
+def _write_project(project: Path, monkeypatch: pytest.MonkeyPatch, *, with_mcp: bool) -> LockFile:
+    """Generate a genuine install baseline, then remove only its source cache."""
     project.mkdir(parents=True)
     (project / "apm.yml").write_text(
         yaml.safe_dump(
@@ -69,18 +60,13 @@ def _write_project(project: Path, dep: LockedDependency, *, with_mcp: bool) -> L
         ),
         encoding="utf-8",
     )
-    lockfile = LockFile()
-    lockfile.add_dependency(dep)
-    if with_mcp:
-        # Simulate a package that declared an MCP server at install time.
-        # The dep's install dir does NOT exist yet (cold cache).
-        install_dir_name = dep.to_dependency_ref().get_install_path(project / "apm_modules").name
-        lockfile.mcp_servers = [_MCP_SERVER]
-        lockfile.mcp_configs = {
-            _MCP_SERVER: {"name": _MCP_SERVER, "command": "npx", "args": ["-y", _MCP_SERVER]}
-        }
-        lockfile.mcp_config_provenance = {_MCP_SERVER: install_dir_name}
-    lockfile.write(project / "apm.lock.yaml")
+    result, downloaded = _run_frozen_install(project, monkeypatch, frozen=False, with_mcp=with_mcp)
+    assert result.exit_code == 0, result.output
+    assert downloaded
+    lockfile = LockFile.read(project / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.mcp_servers == ([_MCP_SERVER] if with_mcp else [])
+    shutil.rmtree(project / "apm_modules")
     return lockfile
 
 
@@ -89,6 +75,7 @@ def _stub_download_package(
     dep_ref: DependencyReference,
     install_path: Path,
     *_args: object,
+    with_mcp: bool = True,
     **_kwargs: object,
 ) -> PackageInfo:
     """Simulate a successful package download without network access."""
@@ -99,7 +86,19 @@ def _stub_download_package(
                 "name": "mcp-skill-pkg",
                 "version": "1.0.0",
                 "description": "Cold-cache E2E fixture",
-                "mcp": {"servers": {_MCP_SERVER: {"command": "npx", "args": ["-y", _MCP_SERVER]}}},
+                "dependencies": {
+                    "mcp": [
+                        {
+                            "name": _MCP_SERVER,
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "npx",
+                            "args": ["-y", _MCP_SERVER],
+                        }
+                    ]
+                    if with_mcp
+                    else [],
+                },
             },
             sort_keys=False,
         ),
@@ -142,7 +141,13 @@ def _stub_auth_resolve(
     )
 
 
-def _run_frozen_install(project: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+def _run_frozen_install(
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    frozen: bool = True,
+    with_mcp: bool = True,
+) -> object:
     """Run ``apm install --frozen`` in project, stub download, return result."""
     monkeypatch.chdir(project)
     monkeypatch.setenv("APM_NO_CACHE", "1")
@@ -166,12 +171,12 @@ def _run_frozen_install(project: Path, monkeypatch: pytest.MonkeyPatch) -> objec
         ),
         patch.object(AuthResolver, "resolve", autospec=True, side_effect=_stub_auth_resolve),
     ):
-        download.side_effect = _stub_download_package
+        download.side_effect = partial(_stub_download_package, with_mcp=with_mcp)
         result = CliRunner().invoke(
             cli,
             [
                 "install",
-                "--frozen",
+                *(["--frozen"] if frozen else []),
                 "--no-policy",
                 "--parallel-downloads",
                 "0",
@@ -198,9 +203,10 @@ def test_frozen_cold_cache_git_apm_package_with_mcp_passes(
     The fix must make enforce_frozen pass AND let the install pipeline run
     (proven by download_called).
     """
-    dep = _make_locked_dep()
     project = tmp_path / "with-mcp"
-    _write_project(project, dep, with_mcp=True)
+    _write_project(project, monkeypatch, with_mcp=True)
+    locked = (project / "apm.lock.yaml").read_bytes()
+    native = (project / ".github/mcp.json").read_bytes()
 
     # Confirm cold cache: apm_modules/ does not exist
     assert not (project / "apm_modules").exists()
@@ -218,6 +224,8 @@ def test_frozen_cold_cache_git_apm_package_with_mcp_passes(
     )
     assert "out of sync" not in result.output
     assert "McpSourceProblem" not in result.output
+    assert (project / "apm.lock.yaml").read_bytes() == locked
+    assert (project / ".github/mcp.json").read_bytes() == native
 
 
 def test_frozen_cold_cache_git_apm_package_without_mcp_passes(
@@ -225,13 +233,12 @@ def test_frozen_cold_cache_git_apm_package_without_mcp_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``apm install --frozen`` passes on cold cache when git dep has no MCP servers."""
-    dep = _make_locked_dep()
     project = tmp_path / "no-mcp"
-    _write_project(project, dep, with_mcp=False)
+    _write_project(project, monkeypatch, with_mcp=False)
 
     assert not (project / "apm_modules").exists()
 
-    result, download_called = _run_frozen_install(project, monkeypatch)
+    result, download_called = _run_frozen_install(project, monkeypatch, with_mcp=False)
 
     assert result.exit_code == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert download_called
@@ -247,9 +254,8 @@ def test_frozen_cold_cache_real_mcp_drift_still_fails(
     lockfile.mcp_configs but NOT attributed to any absent dep via provenance
     should still produce a FrozenInstallError.
     """
-    dep = _make_locked_dep()
     project = tmp_path / "real-drift"
-    _write_project(project, dep, with_mcp=False)
+    _write_project(project, monkeypatch, with_mcp=False)
 
     # Manually inject a stale MCP server with no provenance -> lock_only drift
     lockfile = LockFile.read(project / "apm.lock.yaml")
@@ -261,9 +267,31 @@ def test_frozen_cold_cache_real_mcp_drift_still_fails(
 
     assert not (project / "apm_modules").exists()
 
-    result, _ = _run_frozen_install(project, monkeypatch)
+    result, downloaded = _run_frozen_install(project, monkeypatch, with_mcp=False)
 
     assert result.exit_code != 0, (
         "Expected frozen install to fail when lockfile has an unprovenanced MCP server"
     )
-    assert "out of sync" in result.output or result.exit_code == 1
+    assert "out of sync" in result.output
+    assert not downloaded
+
+
+def test_frozen_hydrated_declaration_mismatch_preserves_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cold hydration cannot silently discard a genuinely recorded MCP declaration."""
+    project = tmp_path / "changed-source"
+    lock = _write_project(project, monkeypatch, with_mcp=True)
+    lock_path = project / "apm.lock.yaml"
+    native_path = project / ".github/mcp.json"
+    lock.mcp_configs[_MCP_SERVER]["command"] = "changed-command"
+    lock.save(lock_path)
+    locked, native = lock_path.read_bytes(), native_path.read_bytes()
+    result, downloaded = _run_frozen_install(project, monkeypatch)
+    assert downloaded
+    assert result.exit_code == 1
+    assert "--frozen: restored MCP declarations differ from apm.lock.yaml." in result.output
+    assert f"MCP server '{_MCP_SERVER}' config differs from apm.lock.yaml" in result.output
+    assert lock_path.read_bytes() == locked
+    assert native_path.read_bytes() == native

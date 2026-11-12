@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.cache.git_cache import GitCache
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -418,6 +419,7 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
     )
     assert consumer.manifest_path.read_bytes() == manifest_bytes
     _assert_copilot_contract(consumer, expected_marker="esm-hook-v1")
+    initial_lock = (consumer.root / "apm.lock.yaml").read_bytes()
     _execute_hook(
         scenario,
         consumer,
@@ -452,6 +454,21 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
         scenario_id=f"{target_selector}-execute-v2",
     )
     after_update = _capture_copilot(consumer)
+
+    if target_selector == "copilot":
+        receipt = GitCache(scenario.isolated.cache_root)._resolved_ref_path(_REMOTE_URL, "main")
+        current_receipt = receipt.read_bytes()
+        old_consumer = _consumer(scenario, published, name="older-lock-consumer")
+        (old_consumer.root / "apm.lock.yaml").write_bytes(initial_lock)
+        _run_success(
+            scenario,
+            old_consumer,
+            install_args,
+            environment=published.environment,
+            scenario_id="copilot-replay-older-lock",
+        )
+        _assert_copilot_contract(old_consumer, expected_marker="esm-hook-v1")
+        assert receipt.read_bytes() == current_receipt
 
     _run_success(
         scenario,

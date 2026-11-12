@@ -116,7 +116,12 @@ class RegistryIntegration:
         if "repository" in server:
             package["repository"] = server["repository"]
 
-        # Add version information if available
+        # MCP Registry v0.1 records carry the version at ``server.version``.
+        version = server.get("version")
+        if isinstance(version, str) and version:
+            package["version"] = version
+
+        # Legacy registries nest it under ``version_detail``.
         if "version_detail" in server:
             package["version_detail"] = server["version_detail"]
 

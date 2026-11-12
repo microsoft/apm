@@ -288,3 +288,278 @@ class TestCiWithoutPolicy:
         data = json.loads(result.stdout)
         # Only the nine baseline checks, including deployment ownership.
         assert data["summary"]["total"] == 9
+
+
+# -- #3195: explicit --policy fails closed when it cannot be loaded -------
+
+
+def _invoke_ci(runner, *args: str):
+    return runner.invoke(audit, ["--ci", "--no-drift", *args], catch_exceptions=False)
+
+
+def _assert_explicit_load_failure(result, source: str) -> None:
+    import re
+    from urllib.parse import urlparse
+
+    assert result.exit_code == 1, result.output
+    match = re.search(r"^\[x\] Policy '([^']+)' could not be loaded:", result.stderr, re.M)
+    assert match is not None, result.stderr
+    printed = match.group(1)
+    if "://" in source:
+        expected, actual = urlparse(source), urlparse(printed)
+        assert (actual.scheme, actual.hostname, actual.path) == (
+            expected.scheme,
+            expected.hostname,
+            expected.path,
+        )
+    else:
+        assert printed == source
+    assert "--policy was passed explicitly" in result.stderr
+    assert "enforcement skipped" not in result.stderr
+    # Fail-closed exits before any report; stdout must not claim a pass.
+    assert "passed" not in result.stdout
+
+
+class TestExplicitPolicyLoadFailureFailsClosed:
+    """An explicit ``--policy <source>`` that cannot be loaded exits 1."""
+
+    def test_unreachable_url_exits_1(self, runner, tmp_path, monkeypatch):
+        import requests
+
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        source = "https://policy.invalid/apm-policy.yml"
+
+        with patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=requests.exceptions.ConnectionError(),
+        ):
+            result = _invoke_ci(runner, "--policy", source, "--no-cache")
+
+        _assert_explicit_load_failure(result, source)
+        assert "Connection error fetching" in result.stderr
+
+    def test_url_404_exits_1(self, runner, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        source = "https://policy.invalid/apm-policy.yml"
+        resp = MagicMock(status_code=404)
+
+        with patch("apm_cli.policy.discovery.requests.get", return_value=resp):
+            result = _invoke_ci(runner, "--policy", source, "--no-cache")
+
+        _assert_explicit_load_failure(result, source)
+        assert "404: Policy file not found" in result.stderr
+
+    def test_garbage_url_response_exits_1(self, runner, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        source = "https://policy.invalid/apm-policy.yml"
+        resp = MagicMock(status_code=200, text="<html>captive portal</html>")
+
+        with patch("apm_cli.policy.discovery.requests.get", return_value=resp):
+            result = _invoke_ci(runner, "--policy", source, "--no-cache")
+
+        _assert_explicit_load_failure(result, source)
+        assert "is not a YAML mapping" in result.stderr
+
+    @pytest.mark.parametrize("relative", [True, False])
+    def test_missing_local_file_exits_1_without_remote_lookup(
+        self, runner, tmp_path, monkeypatch, relative
+    ):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        source = "./missing-policy.yml" if relative else str(tmp_path / "missing-policy.yml")
+
+        with patch("apm_cli.policy.discovery._fetch_github_contents") as remote:
+            result = _invoke_ci(runner, "--policy", source)
+
+        remote.assert_not_called()
+        _assert_explicit_load_failure(result, source)
+        assert f"Policy file not found: {source}" in result.stderr
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ("not: [valid\n", "YAML parse error"),
+            ("- a\n- b\n", "Policy must be a YAML mapping"),
+            ("enforcement: bogus\n", "enforcement must be one of"),
+        ],
+        ids=["garbage-yaml", "not-a-mapping", "schema-invalid"],
+    )
+    def test_malformed_local_policy_exits_1(self, runner, tmp_path, monkeypatch, content, expected):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        (tmp_path / "bad-policy.yml").write_text(content, encoding="utf-8")
+
+        result = _invoke_ci(runner, "--policy", "bad-policy.yml")
+
+        _assert_explicit_load_failure(result, "bad-policy.yml")
+        assert expected in result.stderr
+
+    def test_repo_without_policy_exits_1(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+
+        with patch(
+            "apm_cli.policy.discovery._fetch_github_contents",
+            return_value=(None, "404: Not Found"),
+        ):
+            result = _invoke_ci(runner, "--policy", "contoso/no-policy", "--no-cache")
+
+        _assert_explicit_load_failure(result, "contoso/no-policy")
+        assert "no apm-policy.yml found in repository 'contoso/no-policy'" in result.stderr
+
+    def test_project_warn_default_does_not_reopen_explicit_failure(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """policy.fetch_failure_default=warn governs discovery, not --policy."""
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            apm_yml.read_text(encoding="utf-8") + "policy:\n  fetch_failure_default: warn\n",
+            encoding="utf-8",
+        )
+
+        result = _invoke_ci(runner, "--policy", "./missing-policy.yml")
+
+        _assert_explicit_load_failure(result, "./missing-policy.yml")
+
+    def test_stale_but_valid_cached_policy_is_still_enforced(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        stale = PolicyFetchResult(
+            policy=ApmPolicy(enforcement="block"),
+            source="url:https://policy.invalid/apm-policy.yml",
+            cached=True,
+            cache_stale=True,
+            fetch_error="Connection error",
+            outcome="cached_stale",
+        )
+
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=stale):
+            result = _invoke_ci(
+                runner, "--policy", "https://policy.invalid/apm-policy.yml", "-f", "json"
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["policy"]["enforced"] is True
+        assert payload["policy"]["enforcement"] == "block"
+        assert payload["summary"]["total"] > 9
+
+    def test_failure_message_redacts_url_credentials(self, runner, tmp_path, monkeypatch):
+        import requests
+
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+
+        with patch(
+            "apm_cli.policy.discovery.requests.get",
+            side_effect=requests.exceptions.ConnectionError(),
+        ):
+            result = _invoke_ci(
+                runner,
+                "--policy",
+                "https://user:s3cr3t-token@policy.invalid/apm-policy.yml?sig=leak",
+                "--no-cache",
+            )
+
+        assert result.exit_code == 1, result.output
+        assert "could not be loaded" in result.stderr
+        assert "s3cr3t-token" not in result.stderr
+        assert "sig=leak" not in result.stderr
+
+    def test_policy_disable_env_warns_and_skips(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("APM_POLICY_DISABLE", "1")
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(tmp_path)
+
+        result = _invoke_ci(runner, "--policy", str(policy_path), "-f", "json")
+
+        assert result.exit_code == 0, result.output
+        assert "APM_POLICY_DISABLE=1 disables policy enforcement" in result.stderr
+        assert json.loads(result.stdout)["policy"]["enforced"] is False
+
+
+class TestDiscoveryFetchFailureUnchanged:
+    """Auto-discovery and ``--policy org`` keep the #829 warn default."""
+
+    @pytest.mark.parametrize("args", [(), ("--policy", "org")], ids=["auto", "org"])
+    def test_discovery_fetch_failure_still_warns_and_exits_0(
+        self, runner, tmp_path, monkeypatch, args
+    ):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        failed = PolicyFetchResult(
+            source="org:contoso/.github",
+            outcome="cache_miss_fetch_fail",
+            error="dns failure",
+        )
+
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed):
+            result = _invoke_ci(runner, *args, "-f", "json")
+
+        assert result.exit_code == 0, result.output
+        assert "[!] Policy fetch failed: dns failure; enforcement skipped" in result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["passed"] is True
+        assert payload["policy"] == {"enforced": False, "source": None, "enforcement": None}
+
+
+class TestPolicyEnforcementReport:
+    """JSON and SARIF report whether a policy was actually enforced."""
+
+    def test_json_reports_enforced_policy(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(tmp_path)
+
+        result = _invoke_ci(runner, "--policy", str(policy_path), "-f", "json")
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["policy"] == {
+            "enforced": True,
+            "source": f"file:{policy_path}",
+            "enforcement": "block",
+        }
+
+    def test_json_reports_enforcement_off_as_not_enforced(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(tmp_path, enforcement="off")
+
+        result = _invoke_ci(runner, "--policy", str(policy_path), "-f", "json")
+
+        assert result.exit_code == 0, result.output
+        report = json.loads(result.stdout)["policy"]
+        assert report["enforced"] is False
+        assert report["enforcement"] == "off"
+
+    def test_sarif_reports_policy_in_invocation_properties(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+        policy_path = _write_policy_file(tmp_path)
+
+        result = _invoke_ci(runner, "--policy", str(policy_path), "-f", "sarif")
+
+        assert result.exit_code == 0, result.output
+        sarif = json.loads(result.stdout)
+        report = sarif["runs"][0]["invocations"][0]["properties"]["policy"]
+        assert report["enforced"] is True
+        assert report["enforcement"] == "block"
+
+    def test_no_policy_reports_not_enforced(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _setup_clean_project(tmp_path)
+
+        result = _invoke_ci(runner, "--no-policy", "-f", "json")
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["policy"]["enforced"] is False

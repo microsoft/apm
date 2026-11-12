@@ -51,7 +51,7 @@ from ..utils.github_host import (
 )
 from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
-from .transport_selection import ProtocolPreference
+from .transport_selection import ProtocolPreference, initial_transport_scheme
 
 if TYPE_CHECKING:
     import requests
@@ -128,7 +128,8 @@ class GitReferenceResolver:
 
         Uses ``git ls-remote --tags --heads`` for all git hosts (GitHub,
         Azure DevOps, GitLab, generic). Artifactory dependencies return
-        an empty list (no git repo).
+        an empty list (no git repo), as do all dependencies when
+        registry-only mode (``PROXY_REGISTRY_ONLY``) is active.
         """
         return self._list_remote_refs(dep_ref, include_heads=True)
 
@@ -148,12 +149,18 @@ class GitReferenceResolver:
         if dep_ref.is_artifactory():
             return []
 
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: the proxy is the only sanctioned source,
+            # so skip the direct ls-remote against the upstream host. Mirrors
+            # the is_artifactory() short-circuit above: a registry-only
+            # dependency has no git remote we are permitted to enumerate.
+            return []
+
         is_ado = dep_ref.is_azure_devops()
         repo_url_base = dep_ref.repo_url
-        explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower()
-        candidate_uses_ssh = explicit_scheme == "ssh" or (
-            not explicit_scheme and host._protocol_pref == ProtocolPreference.SSH
-        )
+        candidate_uses_ssh = initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh"
         rewrite_candidate = host._build_repo_url(
             repo_url_base,
             use_ssh=candidate_uses_ssh,
@@ -411,6 +418,8 @@ class GitReferenceResolver:
         Returns the SHA on success, or ``None`` on any failure (404,
         network, non-GitHub host, unexpected body shape, etc.).
         Failures are swallowed so callers can still record the ref name.
+        Registry-only mode (``PROXY_REGISTRY_ONLY``) returns ``None``
+        without a request; an already-full SHA is still passed through.
         """
         host = self._host
 
@@ -424,6 +433,17 @@ class GitReferenceResolver:
 
         if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
             return ref.lower()
+
+        from .registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: the commits API is on the upstream host,
+            # which the mode forbids contacting. Callers already treat None
+            # as "keep the ref name" and fall through to proxy resolution.
+            return None
+
+        if initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh":
+            return None
 
         try:
             if len(repository_path_segments(dep_ref.repo_url)) < 2:

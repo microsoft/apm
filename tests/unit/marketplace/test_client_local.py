@@ -25,12 +25,14 @@ from apm_cli.marketplace.client import (
 )
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
+from apm_cli.utils.git_env import get_git_executable
 
 
 def _local_source(name: str, path: Path, ref: str = "main") -> MarketplaceSource:
     return MarketplaceSource(name=name, url=f"file://{path}", ref=ref)
 
 
+@pytest.mark.windows_compat
 def test_fetch_local_bare_repo_via_git_show(tmp_path: Path) -> None:
     """Bare repo: ``git show`` returns blob content, parsed as JSON."""
     bare = tmp_path / "mkt.git"
@@ -47,7 +49,7 @@ def test_fetch_local_bare_repo_via_git_show(tmp_path: Path) -> None:
 
     assert result == manifest
     args = run_mock.call_args.args[0]
-    assert Path(args[0]).name == "git"
+    assert args[0] == get_git_executable()
     assert "--git-dir" in args
     assert "core.hooksPath=/dev/null" in args
     assert "main:marketplace.json" in args

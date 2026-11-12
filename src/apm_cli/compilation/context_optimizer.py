@@ -28,7 +28,9 @@ from ..utils.patterns import (
     literal_apply_to_top_level_roots,
     parse_apply_to,
 )
+from .constants import decode_utf8_prefix, has_generated_marker_header
 from .inventory import CompileInventory
+from .root_context_protection import catalog_root_context_markers
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -66,6 +68,43 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
         ".windsurf",
     }
 )
+
+
+def _has_text_outside_managed_section(content: str, start_marker: str, end_marker: str) -> bool:
+    """Return whether authored text surrounds a complete managed-section block."""
+    start = content.find(start_marker)
+    end = content.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+    if end < 0:
+        return False
+    return bool((content[:start] + content[end + len(end_marker) :]).strip())
+
+
+def _is_generated_context_output(
+    path: Path,
+    markers: tuple[str, ...] | None,
+    managed_section_markers: tuple[str, str] | None = None,
+) -> bool:
+    """Return whether ``path`` is a context file written by a prior ``apm compile``.
+
+    Only regular files with catalog context filenames are probed. Symlinks,
+    special files, unreadable or non-UTF-8 files, and managed-section files
+    with authored text outside the managed block count as authored.
+    """
+    if markers is None:
+        return False
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        with path.open("rb") as handle:
+            raw = handle.read() if managed_section_markers else handle.read(4096)
+        content = decode_utf8_prefix(raw)
+    except (OSError, UnicodeDecodeError):
+        return False
+    if managed_section_markers is not None and _has_text_outside_managed_section(
+        content, *managed_section_markers
+    ):
+        return False
+    return has_generated_marker_header(content, markers)
 
 
 @dataclass
@@ -142,12 +181,15 @@ class ContextOptimizer:
         base_dir: str = ".",
         exclude_patterns: builtins.list[str] | None = None,
         inventory: CompileInventory | None = None,
+        managed_section_markers: tuple[str, str] | None = None,
     ):
         """Initialize the context optimizer.
 
         Args:
             base_dir (str): Base directory for optimization analysis.
             exclude_patterns (Optional[List[str]]): Glob patterns for directories to exclude.
+            managed_section_markers: Configured AGENTS.md managed-section
+                start/end markers, when managed-section mode is active.
         """
         try:
             self.base_dir = Path(base_dir).resolve()
@@ -183,6 +225,7 @@ class ContextOptimizer:
         # Configurable exclusion patterns (validated at init time)
         self._exclude_patterns = validate_exclude_patterns(exclude_patterns)
         self._inventory = inventory
+        self._managed_section_markers = managed_section_markers
 
     def enable_timing(self, verbose: bool = False):
         """Enable performance timing instrumentation."""
@@ -513,13 +556,23 @@ class ContextOptimizer:
             if self._scan_top_level_roots is None
             else set(inventory.files_under(self._scan_top_level_roots))
         )
+        generated_markers_by_name = catalog_root_context_markers()
         for entry in inventory.directories:
             current_path = entry.path
             if not self._is_placement_path(current_path, entry.relative_path):
                 continue
 
+            # Prior compile outputs are not authored content; counting them
+            # feeds placement its own output and breaks idempotency (#3506).
             project_files = [
-                current_path / name for name in entry.file_names if not name.startswith(".")
+                current_path / name
+                for name in entry.file_names
+                if not name.startswith(".")
+                and not _is_generated_context_output(
+                    current_path / name,
+                    generated_markers_by_name.get(name),
+                    self._managed_section_markers,
+                )
             ]
             self._children_by_directory[current_path] = [
                 current_path / name
@@ -863,9 +916,9 @@ class ContextOptimizer:
             # For patterns with **, use cached glob results
             if "**" in expanded_pattern:
                 try:
-                    # Resolve both paths to handle symlinks and path inconsistencies
+                    # Resolve the candidate against the constructor-resolved base path.
                     resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir.resolve())
+                    rel_path = resolved_file.relative_to(self.base_dir)
 
                     # Use cached glob results instead of repeated glob calls
                     matches = self._cached_glob(expanded_pattern)
@@ -1195,9 +1248,7 @@ class ContextOptimizer:
             return None
 
         # Convert to relative paths for easier analysis
-        relative_dirs = [
-            d.resolve().relative_to(self.base_dir.resolve()) for d in matching_directories
-        ]
+        relative_dirs = [d.resolve().relative_to(self.base_dir) for d in matching_directories]
 
         # Find the lowest common ancestor that covers all directories
         if len(relative_dirs) == 1:
