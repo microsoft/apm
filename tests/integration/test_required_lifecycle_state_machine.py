@@ -1938,6 +1938,123 @@ def test_required_claude_untyped_hook_upgrade_preserves_ownership_and_converges(
         baseline = snapshot
 
 
+@pytest.mark.parametrize("legacy_shape", ["nested-untyped", "flat"])
+@pytest.mark.parametrize("with_native_group", [False, True], ids=["standalone", "merged"])
+def test_required_codex_untyped_hook_upgrade_preserves_ownership_and_converges(
+    tmp_path: Path, apm_binary_path: Path, with_native_group: bool, legacy_shape: str
+) -> None:
+    """Real installs and updates heal pre-fix Codex handlers without claiming user hooks."""
+    scenario = _new_scenario(tmp_path / "codex-untyped", apm_binary_path)
+    source = _publish(scenario, "flat-kit", hook_command="echo native")
+    hook_root = source.repository.worktree / ".apm" / "hooks"
+    if not with_native_group:
+        (hook_root / "pretool.json").unlink()
+    command = "echo must-not-run > hook-executed"
+    flat = {"command": command, "matcher": "Write", "timeout": 10}
+    (hook_root / "flat.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [flat]}}), encoding="ascii"
+    )
+    scenario.repositories.commit(source.repository, message="publish untyped flat hook")
+    consumer = scenario.consumers.create(
+        "codex-consumer",
+        dependencies=({**source.dependency, "ref": "main"},),
+        targets=("codex",),
+    )
+    scenario.consumers.add_hook(
+        consumer, "root", {"hooks": {"PreToolUse": [{"command": "echo root"}]}}
+    )
+    hooks_path = consumer.root / ".codex/hooks.json"
+    sidecar_path = consumer.root / ".codex/apm-hooks.json"
+    hooks_path.parent.mkdir()
+    user_group = {"matcher": "Read", "hooks": [{"type": "prompt"}]}
+    manual_untyped = {"matcher": "Edit", "hooks": [{"command": "echo manual"}]}
+    hooks_path.write_text(
+        json.dumps({"hooks": {"PreToolUse": [user_group, manual_untyped]}}), encoding="ascii"
+    )
+    sentinel = consumer.root / ".claude/settings.json"
+    sentinel.parent.mkdir()
+    sentinel.write_bytes(b'{"hooks": {}, "user": "unchanged"}\n')
+    authored = ArtifactSnapshot.capture(consumer.root / ".apm")
+    owned_commands = {command, "echo root"}
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "codex"),
+        environment=source.environment,
+        scenario_id="codex-untyped-install",
+    )
+    expected_hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+    expected_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    groups = expected_hooks["hooks"]["PreToolUse"]
+    handlers = [handler for group in groups for handler in group["hooks"]]
+    assert {"type": "command", "command": command, "timeout": 10} in handlers
+    assert {"type": "command", "command": "echo root"} in handlers
+    assert groups[:2] == [user_group, manual_untyped]
+    assert len(groups) == 4 + int(with_native_group)
+    assert {entry["_apm_source"] for entry in expected_sidecar["PreToolUse"]} == {
+        f"{_OWNER}/flat-kit",
+        "_local/codex-consumer",
+    }
+    assert all(
+        entry["hooks"] not in (user_group["hooks"], manual_untyped["hooks"])
+        for entry in expected_sidecar["PreToolUse"]
+    )
+
+    def write_legacy_output() -> None:
+        """Recreate the previous renderer's untyped output and a renamed root source."""
+        legacy_hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+        legacy_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        for entries in (legacy_hooks["hooks"]["PreToolUse"], legacy_sidecar["PreToolUse"]):
+            for index, entry in enumerate(entries):
+                handler = entry["hooks"][0]
+                if handler.get("command") not in owned_commands:
+                    continue
+                handler.pop("type")
+                if legacy_shape == "flat":
+                    group = {key: value for key, value in entry.items() if key != "hooks"}
+                    entries[index] = entry = {**handler, **group}
+                if entry.get("_apm_source") == "_local/codex-consumer":
+                    entry["_apm_source"] = "old-checkout-name"
+        hooks_path.write_text(json.dumps(legacy_hooks), encoding="ascii")
+        sidecar_path.write_text(json.dumps(legacy_sidecar), encoding="ascii")
+
+    def assert_converged() -> None:
+        assert json.loads(hooks_path.read_text(encoding="utf-8")) == expected_hooks
+        assert json.loads(sidecar_path.read_text(encoding="utf-8")) == expected_sidecar
+        assert sentinel.read_bytes() == b'{"hooks": {}, "user": "unchanged"}\n'
+        assert not (consumer.root / "hook-executed").exists()
+        assert_unchanged(authored, ArtifactSnapshot.capture(consumer.root / ".apm"))
+
+    write_legacy_output()
+    baseline = None
+    for cycle in range(2):
+        _run_success(
+            scenario,
+            consumer,
+            (*_INSTALL_ARGS, "--target", "codex"),
+            environment=source.environment,
+            scenario_id=f"codex-untyped-reinstall-{cycle}",
+        )
+        assert_converged()
+        snapshot = LifecycleStateSnapshot.capture(consumer.root, targets=("codex",))
+        if baseline is not None:
+            _assert_same_state(baseline, snapshot)
+        baseline = snapshot
+
+    commit_b = _publish_revision(scenario, source, "b")
+    write_legacy_output()
+    _run_success(
+        scenario,
+        consumer,
+        ("update", "--yes", "--parallel-downloads", "0"),
+        environment=source.environment,
+        scenario_id="codex-untyped-update",
+    )
+    assert commit_b.sha in (consumer.root / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert_converged()
+
+
 @pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
 def test_required_reinstall_is_byte_idempotent_across_durable_state(
     tmp_path: Path,
