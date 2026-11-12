@@ -172,7 +172,7 @@ class TestDisplayPackageInfo:
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
 
-    def test_rich_rendering_no_context_files(self, tmp_path):
+    def test_rich_rendering_no_context_files(self, tmp_path, capsys):
         """Covers 'No context files found' branch."""
         from apm_cli.commands.view import display_package_info
 
@@ -187,6 +187,10 @@ class TestDisplayPackageInfo:
             patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("", "", "")),
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
+
+        out = capsys.readouterr().out
+        assert "No context" in out
+        assert "No agent" in out
 
     def test_rich_rendering_with_hooks(self, tmp_path):
         """Covers hooks > 0 branch."""
@@ -239,18 +243,32 @@ class TestDisplayPackageInfo:
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
 
+        out = capsys.readouterr().out
+        assert "Package Info: org/repo" in out
+        assert "Name: test-pkg" in out
+        assert "Ref: v1.0" in out
+        assert "Commit: abc123" in out
+        assert "2 skills" in out
+        assert "1 executable workflows" in out
+        assert "2 hook file(s)" in out
+
     def test_no_project_root_skips_lockfile(self, tmp_path):
         from apm_cli.commands.view import display_package_info
 
         logger = _make_logger()
         pkg_info = _make_package_info()
 
-        with patch(
-            "apm_cli.commands.view._get_detailed_package_info",
-            return_value=pkg_info,
+        with (
+            patch(
+                "apm_cli.commands.view._get_detailed_package_info",
+                return_value=pkg_info,
+            ),
+            patch("apm_cli.commands.view._lookup_lockfile_ref") as lookup,
         ):
             # No project_root passed -> _lookup_lockfile_ref not called
             display_package_info("org/repo", tmp_path, logger, project_root=None)
+
+        lookup.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
