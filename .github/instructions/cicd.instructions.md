@@ -16,8 +16,11 @@ integration suite runs only at merge time via GitHub Merge Queue
    - Runs in both PR context (fast feedback for contributors) and merge_group
      context (against the tentative merge commit before queue auto-merges).
 2. **`ci-integration.yml`** - Tier 2, `merge_group` trigger only
-   - **Linux-only**. Builds binary inline, then runs smoke + integration +
-     release-validation against the tentative merge commit.
+   - Builds the Linux binary once, inline, then runs smoke, duration-sharded
+     hermetic integration (`scripts/ci_sharding.py`, shard count planned
+     while the binary builds), a retriable network lane, release validation
+     and the full Windows unit suite in three shards (`Windows Unit Tests`),
+     all against the tentative merge commit.
    - Trust boundary is the write-access grant (only users with write can
      enqueue a PR). No environment approval gate.
    - Inlines the binary build instead of fetching from `ci.yml` to avoid
@@ -40,10 +43,10 @@ integration suite runs only at merge time via GitHub Merge Queue
      `gh workflow run merge-gate.yml -f pr_number=NNN`, or close+reopen.
    - `.github/CODEOWNERS` requires Lead Maintainer review for any change
      to `.github/workflows/**`.
-4. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
-   - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job). Unit tests run on every push for platform-regression signal; **smoke tests are gated to tag/schedule/dispatch only** (promotion boundaries) to avoid duplicating `ci-integration.yml`'s merge-time smoke and to cut redundant codex-binary downloads.
-   - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; tag/schedule/dispatch promotion runs add marker-bounded `lifecycle_smoke and not live` integration coverage and isolated release validation.
-   - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Promotion runs retain the full non-live integration corpus and isolated release validation.
+4. **`build-release.yml`** - `push` to main, tags, schedule, `repository_dispatch`
+   - A `release-plan` job (`scripts/release_plan.py`) picks the mode: **push** (main: unit tests + Linux/Windows binaries), **full** (schedule/dispatch: every lane; a green full run is promotion evidence for its SHA), or **promoted** (tag whose SHA has evidence: build, smoke, release validation; no repeated unit/integration suites). A tag without evidence fails closed; the one-tag override is the repository variable `APM_RELEASE_FULL_VALIDATION_TAG`.
+   - Builds run per platform (`build-linux-x86`, `build-linux-arm`, `build-windows`), so each platform's integration and release validation start when its own binary exists. Linux integration is duration-sharded (x86_64 runs the hermetic corpus incl. `architecture_contract`; arm64 deselects those platform-agnostic contracts); network-dependent tests run once in a lane that retries only failed tests.
+   - **macOS** stays at one Intel and one ARM job per run (capacity), only on full and promoted runs. Full runs add a platform-sensitive integration subset: ARM `(lifecycle_smoke or windows_compat or platform_sensitive)`, Intel `(windows_compat or platform_sensitive)`; ARM is the macOS unit-test authority.
    - Publication jobs do not receive `ADO_APM_PAT`; live ADO PAT acceptance is an explicit `ado_pat_e2e` mode in `auth-acceptance.yml`. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).
 5. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
@@ -52,7 +55,8 @@ integration suite runs only at merge time via GitHub Merge Queue
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows + macOS are tested post-merge (platform-specific issues are rare and the full matrix runs on every push to main).
-- **Post-merge**: Full 5-platform matrix (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64) catches remaining platform-specific issues on main.
+- **Merge queue**: Linux integration (sharded) plus the full Windows unit suite (sharded) gate the merge.
+- **Post-merge**: Linux x86_64/arm64 and Windows unit + build on every push; nightly full runs add macOS and every integration lane.
 - **Rationale**: ci.yml has always been Linux-only - Windows and macOS are covered by `build-release.yml` on every push to main. This keeps PR feedback fast while still catching platform issues before release.
 
 ## PyInstaller Binary Packaging
@@ -80,10 +84,9 @@ integration suite runs only at merge time via GitHub Merge Queue
 ## Release Flow Dependencies
 - **PR workflow**: Tier 1 only - ci.yml (build-and-test, Linux-only) provides fast feedback. Tier 2 does not run until enqueued.
 - **Merge queue workflow**: ci.yml (Tier 1 against tentative merge ref) + ci-integration.yml (Tier 2: build -> smoke-test -> integration-tests -> release-validation). Queue auto-merges on success; ejects on failure.
-- **Push/Release workflow (Linux + Windows)**: build-and-test -> integration-tests -> release-validation -> create-release -> publish-pypi (gh-aw-compat runs in parallel, informational)
+- **Push/Release workflow (Linux + Windows)**: release-plan -> build-<platform> -> (integration-<platform> shards, release-validation) per platform -> integration-tests summary -> create-release -> publish-pypi (gh-aw-compat runs in parallel, informational). A promoted tag skips the integration lanes.
 - **Homebrew distribution**: `microsoft/homebrew-apm` polls the latest public APM release and updates its formula with its own `GITHUB_TOKEN`; this workflow must not send a cross-repository dispatch or hold a tap credential.
-- **Push/Release workflow (macOS Intel)**: build-and-validate-macos-intel (root node: unit tests + build always + conditional `lifecycle_smoke and not live` integration/release-validation) -> create-release
-- **Push/Release workflow (macOS ARM)**: build-and-validate-macos-arm (root node, tag/schedule/dispatch only; full non-live integration corpus and all phases run) -> create-release
+- **Push/Release workflow (macOS)**: build-and-validate-macos-intel / -arm (full and promoted runs only: build + startup smoke + release validation; full runs add unit tests on ARM and the platform-sensitive integration subset) -> create-release
 - **Live ADO PAT acceptance**: manual `auth-acceptance.yml` dispatch with `ado_pat_e2e: true` -> exact `live and requires_ado_pat` marker intersection. Invalid credentials fail with production auth diagnostics but do not block publication.
 - **Tag Triggers**: Only `v*.*.*` tags trigger full release pipeline
 - **Artifact Retention**: 30 days for debugging failed releases
@@ -108,11 +111,11 @@ integration suite runs only at merge time via GitHub Merge Queue
 
 ## Performance Considerations
 - **Combined build-and-test**: Eliminates ~1.5m runner re-provisioning overhead by running unit tests and binary build in the same job.
-- **macOS as root nodes**: macOS consolidated jobs run their own unit tests and start immediately - no dependency on Linux/Windows test completion.
+- **macOS as root nodes**: macOS consolidated jobs start immediately - no dependency on Linux/Windows test completion.
+- **Duration-balanced shards**: `scripts/ci_sharding.py` keeps xdist groups and modules whole, balances by `.github/ci-durations/*.json` (nightly publishes fresh `integration-durations`), and plans the shard count from a target per-shard wall time.
 - **Native uv caching**: `setup-uv` action with `enable-cache: true` replaces manual `actions/cache@v3` blocks.
 - **Targeted setup-node usage**: Node.js is only installed in `ci-runtime.yml`, macOS consolidated jobs, and integration-tests/release-validation phases (for `apm runtime setup copilot` -> npm install).
-- **macOS runner consolidation**: Each macOS arch has a single consolidated job (build + integration + release-validation). Intel (`build-and-validate-macos-intel`) runs on every push since Intel runners are plentiful and uses marker-bounded non-live lifecycle integration coverage for promotions. ARM (`build-and-validate-macos-arm`) is gated to tag/schedule/dispatch only since ARM runners are extremely scarce (2-4h+ queue waits) and remains the full non-live corpus macOS authority. This avoids serial re-queuing of runners across multiple jobs and redundant corpus replay on Intel.
-- **Unit tests skip macOS**: Python unit tests are platform-agnostic; Linux + Windows coverage is sufficient. macOS-specific validation (binary build, focused Intel integration, full non-live ARM integration, and release validation) still runs via the consolidated jobs.
+- **macOS runner consolidation**: Each macOS arch has a single consolidated job (build + platform-sensitive integration + release-validation), on full and promoted runs only. Never add macOS jobs or matrices: macOS capacity is scarce; reduce the work per job instead.
 - **Tier 2 runs once per merged PR**, not per WIP push, since it triggers on `merge_group` only. Saves the bulk of integration minutes that the previous per-push flow burned.
 - UPX compression when available (reduces binary size ~50%)
 - Python optimization level 2 in PyInstaller
