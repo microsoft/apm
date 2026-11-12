@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Cursor rules generated from an instruction whose `applyTo` is exactly one universal `**` (scalar, padded or single-item list) now use Cursor's always-on `alwaysApply: true` instead of `globs: **`, at project and user scope; reinstalling replaces old `globs: **` rules, while scoped, mixed and missing `applyTo` output is unchanged. -- by @WilliamK112 (#2030)
+- Cursor rules now use Cursor's native always-on `alwaysApply: true` instead of `globs: **` when an instruction's `applyTo` is exactly one `**`; reinstalling replaces old rules, and other `applyTo` values are unchanged. -- by @WilliamK112 (#2030)
 - `apm mcp install --help` now lists its forwarded install options (`--transport`, `--url`, `--env`, `--header`, `--target`, `--registry`, `--mcp-version`, `--global`, `--trust-transitive-mcp`, `--dev`, `--dry-run`, `--force`, `--verbose`, `--no-policy`) with the same help text, accepted values and shell completion as `apm install`, instead of a hand-written summary that had drifted; forwarded installs behave as before. (#3633)
 - `apm compile` places scoped `applyTo` instructions much faster on large projects (about 41x on a ~10,000-directory benchmark) by caching resolved paths and computing placement scores once per run; matching, placement, symlink handling and generated output are unchanged. -- by @sekosen (#3379)
 - **BREAKING:** APM now requires Python 3.11 or newer (Python 3.10 reached end of life in October 2026); standalone installers are unaffected (#3562)

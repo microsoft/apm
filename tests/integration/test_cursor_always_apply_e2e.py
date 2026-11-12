@@ -112,8 +112,8 @@ def test_cursor_universal_apply_to_installs_always_apply(
         }
 
     run(*install)
-    for name in _CASES:
-        assert (rules / f"{name}.mdc").read_text(encoding="utf-8") == _expected(name), name
+    rendered = {name: (rules / f"{name}.mdc").read_text(encoding="utf-8") for name in _CASES}
+    assert rendered == {name: _expected(name) for name in _CASES}
     assert handwritten.read_text(encoding="utf-8") == _HANDWRITTEN
     if user_scope:
         assert not (project / ".cursor").exists()

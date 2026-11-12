@@ -164,7 +164,10 @@ Cursor.
 - **Deploy directory.** `.cursor/` (project scope); `~/.cursor/` (user scope).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: `.cursor/rules/<name>.mdc`; exactly one universal `**` pattern (scalar, padded, or single-item list) emits `alwaysApply: true` with no `globs:`; other non-empty patterns, including a mix of `**` and scoped globs, emit one comma-joined `globs:` scalar; absent, empty, or null `applyTo` emits neither key
+  - instructions: `.cursor/rules/<name>.mdc`
+    - exactly one universal `**` (scalar, padded, or single-item list) -> `alwaysApply: true`, no `globs:`
+    - other non-empty `applyTo`, including `**` mixed with scoped globs -> one comma-joined `globs:` scalar
+    - absent, empty, or null `applyTo` -> neither key
   - agents: `.cursor/agents/<name>.md`
   - commands: `.cursor/commands/<name>.md`
   - skills: `.agents/skills/<name>/SKILL.md` (project) or
