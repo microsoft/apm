@@ -24,7 +24,7 @@
     }
   },
   "pinned-version": {
-    "image": "ubuntu:22.04",
+    "image": "ubuntu:24.04",
     "features": {
       "apm-cli": {
         "version": "0.8.11"

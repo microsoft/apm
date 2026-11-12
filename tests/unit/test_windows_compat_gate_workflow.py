@@ -154,10 +154,10 @@ def test_windows_compat_gate_runs_on_windows_with_bounded_timeout() -> None:
 
 
 def test_legacy_windows_git_discovery_runs_real_consumer_contracts() -> None:
-    """Python 3.10/3.11 must execute the native resolver and CLI marker family."""
+    """Python 3.11 must execute the native resolver and CLI marker family."""
     job = workflow_job(_ci_workflow(), "windows-git-discovery")
     assert job["runs-on"] == "windows-latest"
-    assert job["strategy"]["matrix"]["python-version"] == ["3.10", "3.11"]
+    assert job["strategy"]["matrix"]["python-version"] == ["3.11"]
     assert job["env"]["UV_PYTHON"] == "${{ matrix.python-version }}"
     assert job["strategy"]["fail-fast"] is False
     assert 0 < job["timeout-minutes"] <= 15
