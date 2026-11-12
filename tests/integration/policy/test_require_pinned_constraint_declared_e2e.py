@@ -47,6 +47,10 @@ _POLICY_SOURCE = "dev.azure.com/contoso/apm/apm-policy"
 _POLICY_REMOTE = "https://dev.azure.com/contoso/project/_git/pinned-declared"
 _POLICY_DIAGNOSTIC = f"Policy: org:{_POLICY_SOURCE} (cached"
 _GIT_URL = "https://github.com/acme/mono.git"
+_FORK_URL = "https://github.com/acme/fork.git"
+_REPLACE_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
 _SUBDIR_DEP = "acme/mono/packages/pkg-a"
 _ROOT_DEP = "acme/mono"
 _SKILL = "pkg-a-skill"
@@ -98,7 +102,18 @@ def _publish_monorepo(
     repositories.tag(repository, "pkg-a-v1.1.0", second)
     repositories.tag(repository, "pkg-a--v1.1.0", second)
 
-    env = repositories.url_rewrite_subprocess_env(repository, _GIT_URL)
+    # A fork of pkg-a at its repository root, for the ``replace:`` contract:
+    # ``v1.0.0`` is a bounded choice, ``main`` a moving branch.
+    fork_bundle = packages.create("fork", targets=("copilot",))
+    dump_yaml(
+        {"name": "pkg-a", "version": "1.0.0", "targets": ["copilot"]},
+        fork_bundle.root / "apm.yml",
+    )
+    packages.add_skill(fork_bundle, _SKILL, _skill_document("pkg-a fork"))
+    fork = repositories.create("fork", source_tree=fork_bundle.root)
+    repositories.tag(fork, "v1.0.0", repositories.commit(fork, message="fork 1.0.0"))
+
+    env = repositories.url_rewrite_subprocess_env_many(((repository, _GIT_URL), (fork, _FORK_URL)))
 
     def publish_next() -> None:
         # A newer compatible release, so ``apm update`` has something to
@@ -424,5 +439,52 @@ def test_bounded_dev_declaration_does_not_cover_a_branch(scenario, apm_binary_pa
     assert "bare branch 'main'" in text, text
     assert not (project / "apm.lock.yaml").exists()
     verdict = _pinned_verdict(runner, project, env, "dup")
+    assert verdict["passed"] is False, verdict
+    assert any("bare branch 'main'" in detail for detail in verdict["details"]), verdict
+
+
+@pytest.mark.parametrize(
+    ("name", "fork_ref", "allowed"),
+    [("replace-fork-tag", "v1.0.0", True), ("replace-fork-branch", "main", False)],
+)
+def test_replacement_is_judged_by_the_ref_it_selects(
+    scenario, apm_binary_path, name, fork_ref, allowed
+):
+    # The bounded original ``^1.0.0`` is provenance only: the gate and audit
+    # judge the ref the ``replace:`` rule selects (Copilot review on #3652).
+    isolated, env, _ = scenario
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=600
+    )
+    project = _consumer(isolated.work_root, f"{name}-consumer", f"{_SUBDIR_DEP}#^1.0.0", env)
+    manifest = load_yaml(project / "apm.yml")
+    manifest["$schema"] = _REPLACE_SCHEMA
+    manifest["replace"] = [
+        {
+            "for": {"git": _GIT_URL, "path": "packages/pkg-a"},
+            "with": {"git": _FORK_URL, "ref": fork_ref},
+        }
+    ]
+    dump_yaml(manifest, project / "apm.yml")
+    _warm_policy(runner, project, env, name)
+    result = _governed(
+        _run(
+            runner,
+            ("install", *_COMMON),
+            cwd=project,
+            env=env,
+            scenario_id=f"{name}-install",
+            expected=0 if allowed else 1,
+        )
+    )
+    text = result.stdout + result.stderr
+    verdict = _pinned_verdict(runner, project, env, name)
+    if allowed:
+        assert "pkg-a fork" in (project / _DEPLOYED_SKILL).read_text()
+        assert verdict["passed"] is True, verdict
+        return
+    assert "blocked by org policy" in text.lower(), text
+    assert "bare branch 'main'" in text, text
+    assert not (project / "apm.lock.yaml").exists()
     assert verdict["passed"] is False, verdict
     assert any("bare branch 'main'" in detail for detail in verdict["details"]), verdict

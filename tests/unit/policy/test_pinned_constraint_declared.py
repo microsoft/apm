@@ -25,8 +25,8 @@ from apm_cli.policy._constraint_pinning import (
     classify_unbounded_reason,
     collect_declared_refs,
 )
-from apm_cli.policy.policy_checks import _check_pinned_constraints
-from apm_cli.policy.schema import DependencyPolicy
+from apm_cli.policy.policy_checks import _check_pinned_constraints, run_policy_checks
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
 _REPLACE_SCHEMA = (
     "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
@@ -278,3 +278,13 @@ def test_replacement_is_judged_by_its_selected_ref(tmp_path, fork_ref, passed):
         declared_refs=collect_declared_refs(selected),
     )
     assert result.passed is passed, result.details
+
+
+@pytest.mark.parametrize(("fork_ref", "passed"), [("main", False), ("v2.0.0", True)])
+def test_audit_judges_a_replacement_by_its_selected_ref(tmp_path, fork_ref, passed):
+    # ``apm audit`` must agree with the install gate on a replaced dep.
+    _manifest(tmp_path, fork_ref)
+    policy = ApmPolicy(dependencies=DependencyPolicy(require_pinned_constraint=True))
+    result = run_policy_checks(tmp_path, policy, fail_fast=False)
+    (check,) = [c for c in result.checks if c.name == "dependency-pinned-constraint"]
+    assert check.passed is passed, check.details

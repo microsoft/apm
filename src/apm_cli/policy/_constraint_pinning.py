@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -167,15 +168,29 @@ def collect_declared_refs(
     source. The unique key excludes the ref and folds repository casing,
     so one package declared twice (for example under ``dependencies`` and
     ``devDependencies``) keeps both declarations: neither a sibling
-    declaration nor a selected tag can stand in for another. Pass the
-    source-selected projection (``project_manifest_dependencies``) so a
-    ``replace:`` rule is judged by the source and ref it selects.
+    declaration nor a selected tag can stand in for another. Callers
+    holding a manifest use ``collect_manifest_declarations``.
     """
     declared: dict[str, tuple[DependencyReference, ...]] = {}
     for dep in deps:
         key = dep.get_unique_key()
         declared[key] = (*declared.get(key, ()), copy.copy(dep))
     return declared
+
+
+def collect_manifest_declarations(
+    manifest: APMPackage,
+) -> dict[str, tuple[DependencyReference, ...]]:
+    """Snapshot every direct declaration of *manifest* as policy judges it.
+
+    Single owner of that view for the install pipeline and ``apm audit``:
+    ``replace:`` rules are applied first (``project_manifest_dependencies``),
+    so a replaced dependency is judged by the source and ref it selects and
+    the original ref stays provenance only.
+    """
+    from apm_cli.models.dependency.replacement import project_manifest_dependencies
+
+    return collect_declared_refs(project_manifest_dependencies(manifest))
 
 
 def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | None:

@@ -1077,8 +1077,9 @@ def _check_pinned_constraints(
     pass ``declared_refs`` (unique key -> a snapshot of every declaration
     of it, see ``collect_declared_refs``) and the check classifies each
     of those instead (#3224); one bounded declaration never covers for an
-    unbounded one sharing the key. Callers that still hold the manifest
-    view (preflight, audit) leave it ``None``.
+    unbounded one sharing the key. ``apm audit`` passes the same
+    snapshot (``collect_manifest_declarations``); install preflight already
+    receives source-selected manifest deps and leaves it ``None``.
 
     When ``direct_dep_keys`` is provided, the check is restricted to
     direct dependencies only -- transitives are excluded, since the
@@ -1412,6 +1413,8 @@ def run_policy_checks(
     # will pass effective_target directly (W2-target-aware).
 
     # -- Delegate dependency + MCP checks to shared seam ---------------
+    from ._constraint_pinning import collect_manifest_declarations
+
     dep_result = run_dependency_policy_checks(
         apm_deps,
         lockfile=lock,
@@ -1421,6 +1424,8 @@ def run_policy_checks(
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
         registries=getattr(manifest, "registries", None),
+        # Judge the same source-selected declarations as the install gate.
+        declared_refs=collect_manifest_declarations(manifest),
     )
     result.checks.extend(dep_result.checks)
 
