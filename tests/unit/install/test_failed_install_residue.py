@@ -9,6 +9,7 @@ they were rolled back or restored, and must give one next step.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,10 +17,13 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.core.command_logger import InstallLogger
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
 from apm_cli.install.context import InstallContext
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.failure_residue import (
+    FailedInstallResidue,
+    failed_install_residue,
     report_failed_install_residue,
     unrecorded_deployed_paths,
 )
@@ -41,9 +45,13 @@ def _assert_no_rollback_claim(text: str) -> None:
 
 def _write_local_package(root: Path) -> None:
     (root / ".apm" / "agents").mkdir(parents=True)
+    (root / ".apm" / "skills" / "demo").mkdir(parents=True)
     (root / "apm.yml").write_text("name: good\nversion: 1.0.0\n", encoding="ascii")
     (root / ".apm" / "agents" / "helper.agent.md").write_text(
         "---\ndescription: helper\n---\nhello\n", encoding="ascii"
+    )
+    (root / ".apm" / "skills" / "demo" / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: demo\n---\nbody\n", encoding="ascii"
     )
 
 
@@ -74,14 +82,16 @@ class TestCliFailureAfterNativeDeploy:
             result = CliRunner().invoke(cli, ["install", "--target", "claude"])
 
         output = _flat(result.output)
-        leftover = project / ".claude" / "agents" / "helper.md"
+        listed = {line.strip() for line in result.output.splitlines()}
         assert result.exit_code == 1, result.output
-        assert leftover.is_file(), "the forced failure must come after a native deploy"
-        assert ".claude/agents/helper.md" in output
-        assert "native target" in output
-        assert "Remove these files" in output
-        assert "re-run 'apm install'" in output
-        assert "--force" in output
+        assert (project / ".claude" / "agents" / "helper.md").is_file()
+        assert (project / ".claude" / "skills" / "demo" / "SKILL.md").is_file()
+        assert ".claude/agents/helper.md" in listed
+        assert ".claude/skills/demo/SKILL.md" in listed
+        # The skill directory may hold unrelated files; it is not listed as removable.
+        assert ".claude/skills/demo" not in listed
+        assert "native target files on disk" in output
+        assert "Remove these files, or re-run 'apm install' (add --force" in output
         _assert_no_rollback_claim(result.output)
         # Existing apm.yml and lockfile behavior on failure is unchanged.
         assert (project / "apm.yml").read_bytes() == manifest
@@ -123,17 +133,25 @@ def _run_pipeline_with_integrate(tmp_path: Path, monkeypatch, integrate, logger)
 
 
 def _record_partial_deploy(ctx: InstallContext) -> None:
-    ctx.package_deployed_files["owner/b"] = [".claude/skills/b-skill", ".claude/agents/b.md"]
+    ctx.package_deployed_files["owner/b"] = [
+        ".claude/skills/b-skill",
+        ".claude/skills/b-skill/SKILL.md",
+        ".claude/agents/b.md",
+    ]
     ctx.package_deployed_files["owner/a"] = [".claude/agents/a.md"]
     ctx.local_deployed_files = [".claude/agents/local.md"]
 
 
-_EXPECTED_PARTIAL = [
-    ".claude/agents/a.md",
-    ".claude/agents/b.md",
-    ".claude/agents/local.md",
-    ".claude/skills/b-skill",
-]
+_EXPECTED_PARTIAL = FailedInstallResidue(
+    files=(
+        ".claude/agents/a.md",
+        ".claude/agents/b.md",
+        ".claude/agents/local.md",
+        ".claude/skills/b-skill/SKILL.md",
+    ),
+    entries=(),
+    user_scope=False,
+)
 
 
 class TestPipelineFailureExits:
@@ -196,6 +214,18 @@ def _ctx(tmp_path: Path, logger) -> InstallContext:
     return ctx
 
 
+class _CoworkTarget:
+    """Minimal file-backed dynamic-root target for locator decoding."""
+
+    lockfile_uri_schemes = ("cowork://",)
+
+    def __init__(self, root: Path) -> None:
+        self.managed_deploy_root = root
+
+    def decode_external_locator(self, locator: str, deploy_root: Path) -> Path | None:
+        return deploy_root / locator.removeprefix("cowork://")
+
+
 class TestUnrecordedDeployedPaths:
     def test_paths_recorded_by_on_disk_lockfile_are_excluded(self, tmp_path: Path) -> None:
         lockfile = LockFile()
@@ -216,6 +246,18 @@ class TestUnrecordedDeployedPaths:
             ".claude/agents/new.md",
         ]
 
+    def test_skill_directory_claims_are_not_reported_as_removable(self, tmp_path: Path) -> None:
+        skill = tmp_path / ".claude" / "skills" / "demo"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("body\n", encoding="ascii")
+        (skill / "personal.txt").write_text("mine\n", encoding="ascii")
+        ctx = _ctx(tmp_path, MagicMock())
+        ctx.package_deployed_files = {
+            "owner/new": [".claude/skills/demo/", ".claude/skills/demo/SKILL.md"]
+        }
+
+        assert unrecorded_deployed_paths(ctx) == [".claude/skills/demo/SKILL.md"]
+
     def test_unreadable_lockfile_lists_every_deployed_path(self, tmp_path: Path) -> None:
         get_lockfile_path(tmp_path).write_text(": not [valid yaml", encoding="ascii")
         ctx = _ctx(tmp_path, MagicMock())
@@ -234,23 +276,79 @@ class TestUnrecordedDeployedPaths:
         logger.failed_install_residue.assert_not_called()
 
 
-class TestInstallLoggerResidue:
-    @patch("apm_cli.core.command_logger._rich_echo")
-    @patch("apm_cli.core.command_logger._rich_info")
-    @patch("apm_cli.core.command_logger._rich_warning")
-    def test_residue_lists_paths_and_one_next_step(self, mock_warning, mock_info, mock_echo):
-        InstallLogger().failed_install_residue([".claude/agents/a.md", ".claude/skills/s"])
+class TestResidueClassification:
+    def test_user_scope_paths_are_home_rooted(self, tmp_path: Path) -> None:
+        ctx = _ctx(tmp_path, MagicMock())
+        ctx.scope = InstallScope.USER
+        ctx.package_deployed_files = {"owner/new": [".claude/agents/new.md"]}
 
-        rendered = " ".join(
-            str(call.args[0])
-            for mock in (mock_warning, mock_echo, mock_info)
-            for call in mock.call_args_list
+        assert failed_install_residue(ctx) == FailedInstallResidue(
+            files=("~/.claude/agents/new.md",), entries=(), user_scope=True
         )
+
+    def test_file_backed_locators_resolve_and_rows_stay_entries(self, tmp_path: Path) -> None:
+        onedrive = tmp_path / "OneDrive" / "Cowork"
+        ctx = _ctx(tmp_path, MagicMock())
+        ctx.targets = [SimpleNamespace(), _CoworkTarget(onedrive)]
+        ctx.package_deployed_files = {
+            "owner/new": ["cowork://skills/demo/SKILL.md", "copilot-app-db://workflows/42"]
+        }
+
+        residue = failed_install_residue(ctx)
+
+        assert residue.files == (str(onedrive / "skills" / "demo" / "SKILL.md"),)
+        assert residue.entries == ("copilot-app-db://workflows/42",)
+
+
+def _render(residue: FailedInstallResidue) -> str:
+    with (
+        patch("apm_cli.core.command_logger._rich_warning") as warning,
+        patch("apm_cli.core.command_logger._rich_echo") as echo,
+        patch("apm_cli.core.command_logger._rich_info") as info,
+    ):
+        InstallLogger().failed_install_residue(residue)
+    return " ".join(
+        str(call.args[0]) for mock in (warning, echo, info) for call in mock.call_args_list
+    )
+
+
+class TestInstallLoggerResidue:
+    def test_residue_lists_paths_and_one_next_step(self) -> None:
+        rendered = _render(
+            FailedInstallResidue(
+                files=(".claude/agents/a.md", ".claude/skills/s/SKILL.md"),
+                entries=(),
+                user_scope=False,
+            )
+        )
+
         assert "2 native target files" in rendered
         assert ".claude/agents/a.md" in rendered
-        assert ".claude/skills/s" in rendered
-        assert "Remove these files, or re-run 'apm install'" in rendered
-        assert "--force" in rendered
+        assert ".claude/skills/s/SKILL.md" in rendered
+        assert "Remove these files, or re-run 'apm install' (add --force" in rendered
+        _assert_no_rollback_claim(rendered)
+
+    def test_user_scope_next_step_reruns_global_install(self) -> None:
+        rendered = _render(
+            FailedInstallResidue(files=("~/.claude/agents/a.md",), entries=(), user_scope=True)
+        )
+
+        assert "~/.claude/agents/a.md" in rendered
+        assert "re-run 'apm install -g' (add --force" in rendered
+
+    def test_entries_are_not_called_files(self) -> None:
+        rendered = _render(
+            FailedInstallResidue(
+                files=(), entries=("copilot-app-db://workflows/42",), user_scope=False
+            )
+        )
+
+        assert (
+            "1 native target entry that apm.lock.yaml does not track (not plain files)" in rendered
+        )
+        assert "copilot-app-db://workflows/42" in rendered
+        assert "Remove these files" not in rendered
+        assert "Re-run 'apm install' (add --force" in rendered
         _assert_no_rollback_claim(rendered)
 
     @patch("apm_cli.core.command_logger._rich_error")
@@ -261,7 +359,9 @@ class TestInstallLoggerResidue:
             patch("apm_cli.core.command_logger._rich_echo"),
             patch("apm_cli.core.command_logger._rich_info"),
         ):
-            logger.failed_install_residue([".claude/agents/a.md"])
+            logger.failed_install_residue(
+                FailedInstallResidue(files=(".claude/agents/a.md",), entries=(), user_scope=False)
+            )
 
         logger.install_summary(
             apm_count=0, mcp_count=0, errors=1, disposition=InstallDisposition.FAILED
@@ -269,7 +369,7 @@ class TestInstallLoggerResidue:
 
         msg = mock_error.call_args[0][0]
         assert "No install transaction changes were committed" not in msg
-        assert "1 native target file listed above remains on disk" in msg
+        assert "1 native target item listed above remains in place" in msg
         _assert_no_rollback_claim(msg)
 
     @patch("apm_cli.core.command_logger._rich_error")
