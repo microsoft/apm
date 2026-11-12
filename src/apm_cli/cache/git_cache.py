@@ -192,17 +192,24 @@ def _unmaterialized_paths(
 
 
 def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str, str]) -> None:
-    """Record that a sparse shard was verified complete (#3071)."""
+    """Record that a sparse shard was verified complete (#3071).
+
+    The pin only lets later cache hits skip the probe, so a failed write is
+    logged and ignored rather than discarding a verified checkout.
+    """
     key, value = _SPARSE_COMPLETENESS_PIN
-    subprocess.run(
-        [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        check=True,
-    )
+    try:
+        subprocess.run(
+            [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        _log.debug("Could not pin sparse completeness for %s", checkout_dir)
 
 
 def _sparse_checkout_is_complete(
@@ -235,10 +242,7 @@ def _sparse_checkout_is_complete(
         return False
     if missing:
         return False
-    try:
-        _pin_sparse_completeness(git_exe, checkout_dir, env=subprocess_env)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        _log.debug("Could not pin sparse completeness for %s", checkout_dir)
+    _pin_sparse_completeness(git_exe, checkout_dir, env=subprocess_env)
     return True
 
 

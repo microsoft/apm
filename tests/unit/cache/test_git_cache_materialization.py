@@ -216,6 +216,34 @@ def test_verified_sparse_shard_skips_probe_on_hit(
     assert probes == [first]
 
 
+def test_pin_write_failure_keeps_verified_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pin is an optimization: failing to write it never discards a shard."""
+    bare, sha = _build_monorepo(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    url = bare.as_uri()
+    sparse = ["packages/pkg-shared"]
+    real_run = subprocess.run
+    pin_writes: list[list[str]] = []
+
+    def run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if isinstance(cmd, list) and _SPARSE_COMPLETENESS_PIN[0] in cmd and "config" in cmd:
+            pin_writes.append(cmd)
+            raise subprocess.CalledProcessError(255, cmd, "", "error: could not lock config")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    first = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse)
+    again = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=sparse)
+
+    assert again == first
+    assert validate_apm_package(again / "packages" / "pkg-shared").is_valid
+    assert len(pin_writes) == 2  # fresh checkout, then the unpinned hit
+    assert "sparseMaterialization" not in (again / ".git" / "config").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     "error",
     [
