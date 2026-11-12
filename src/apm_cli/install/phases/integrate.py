@@ -283,9 +283,16 @@ def _resolve_download_strategy(
         and _dep_locked_chk.content_hash
         and not content_hash_already_verified
     ):
-        from apm_cli.utils.content_hash import verify_package_hash
+        from apm_cli.deps.carried_license import verify_locked_package
+        from apm_cli.install.source_helpers import carried_licenses_for
 
-        if not verify_package_hash(install_path, _dep_locked_chk.content_hash):
+        # The lock's own carried records are the baseline; a pre-#3556 entry
+        # has none, so only exclude the copies this run carried (#3556).
+        if not verify_locked_package(
+            install_path,
+            _dep_locked_chk.content_hash,
+            _dep_locked_chk.carried_licenses or carried_licenses_for(ctx, dep_key, _dep_locked_chk),
+        ):
             _hash_msg = f"Content hash mismatch for {dep_ref.get_unique_key()} -- re-downloading"
             diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
             if logger:

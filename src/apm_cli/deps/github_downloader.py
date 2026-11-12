@@ -56,6 +56,7 @@ from .bare_cache import (
     fetch_sha_into_bare,
     materialize_from_bare,
 )
+from .carried_license import carry_licenses
 from .download_strategies import DownloadDelegate
 from .git_remote_ops import (
     parse_ls_remote_output,
@@ -1641,6 +1642,11 @@ class GitHubPackageDownloader:
                     robust_copytree(src, dst)
                 else:
                     robust_copy2(src, dst)
+            # Sparse cones keep ancestor-directory files, so the repository
+            # licence is still readable here (#3556).
+            carried = carry_licenses(
+                target_path, repository_root=temp_clone_path, package_subpath=subdir_path
+            )
 
             # Capture commit SHA; close the Repo object immediately so its file
             # handles are released before _rmtree() runs in the finally block.
@@ -1722,6 +1728,7 @@ class GitHubPackageDownloader:
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,
             package_type=validation_result.package_type,
+            carried_licenses=carried,
         )
 
     def _download_subdirectory_from_artifactory(
@@ -1907,6 +1914,7 @@ class GitHubPackageDownloader:
                         installed_at=datetime.now().isoformat(),
                         dependency_ref=dep_ref,
                         package_type=validation_result.package_type,
+                        carried_licenses=carry_licenses(target_path),
                     )
                 # Validation failed against cached copy: fall through to a
                 # fresh clone (cache may be stale or repo structure changed).
@@ -2024,6 +2032,7 @@ class GitHubPackageDownloader:
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,  # Store for canonical dependency string
             package_type=validation_result.package_type,  # Track if APM, Claude Skill, or Hybrid
+            carried_licenses=carry_licenses(target_path),
         )
 
     def _get_clone_progress_callback(self):

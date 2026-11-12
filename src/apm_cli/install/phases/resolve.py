@@ -699,6 +699,9 @@ def _resolve_dependencies(
                     dep_ref.get_unique_key(),
                     callback_downloaded_value,
                 )
+                ctx.package_carried_licenses[dep_ref.get_unique_key()] = tuple(
+                    getattr(result, "carried_licenses", ()) or ()
+                )
             return replacement_path
         except Exception as e:
             if replacement_path is not None:

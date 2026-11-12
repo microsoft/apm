@@ -99,6 +99,13 @@ def record_declared_license(ctx: Any, dep_key: str, install_path: Path) -> None:
         ctx.package_declared_licenses[dep_key] = declared
 
 
+def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
+    """Return this run's carried licence records for *dep_key*, else the lock's (#3556)."""
+    if dep_key in ctx.package_carried_licenses:
+        return ctx.package_carried_licenses[dep_key]
+    return tuple(getattr(locked_dep, "carried_licenses", ()) or ())
+
+
 def rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
     """Rebuild a complete ``GitSemverResolution`` from a cached lockfile entry."""
     if dep_locked_chk is None:

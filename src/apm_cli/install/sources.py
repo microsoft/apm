@@ -32,12 +32,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.deps.carried_license import carried_copies_intact, carried_license_paths
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.primitive_classification import warn_unrecognized_plugin_schema
 from apm_cli.install.registry_wiring import (
     get_registry_resolver,
     registry_resolution_for_cached_registry_dep,
     resolver_last_registry_resolution,
+)
+from apm_cli.install.source_helpers import (
+    carried_licenses_for as _carried_licenses_for,
 )
 from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
@@ -603,8 +607,14 @@ class CachedDependencySource(DependencySource):
                 extensions=extensions_from_resolved_package(cached_package_info.package),
             )
         )
+        _carried = _carried_licenses_for(ctx, dep_key, dep_locked_chk)
+        if _carried and not carried_copies_intact(install_path, _carried):
+            _carried = ()
+        ctx.package_carried_licenses[dep_key] = _carried
         if install_path.is_dir():
-            ctx.package_hashes[dep_key] = _compute_hash(install_path)
+            ctx.package_hashes[dep_key] = _compute_hash(
+                install_path, exclude=carried_license_paths(_carried)
+            )
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
         _record_declared_license(ctx, dep_key, install_path)
@@ -861,8 +871,11 @@ class FreshDependencySource(DependencySource):
                     ),
                 )
             )
+            _carried = tuple(getattr(package_info, "carried_licenses", ()) or ())
+            ctx.package_carried_licenses[dep_key] = _carried
+            _carried_paths = carried_license_paths(_carried)
             if install_path.is_dir():
-                ctx.package_hashes[dep_key] = _compute_hash(install_path)
+                ctx.package_hashes[dep_key] = _compute_hash(install_path, exclude=_carried_paths)
 
             # Supply-chain protection: verify content hash on fresh
             # downloads when the lockfile already records a hash.
@@ -893,6 +906,7 @@ class FreshDependencySource(DependencySource):
                         dep_key,
                         lockfile=ctx.existing_lockfile,
                         package_type=getattr(package_info, "package_type", None),
+                        exclude=_carried_paths,
                     ):
                         safe_rmtree(install_path, ctx.apm_modules_dir)
                         raise DirectDependencyError(
@@ -902,6 +916,22 @@ class FreshDependencySource(DependencySource):
                             "This may indicate a supply-chain attack. Use "
                             "'apm install --update' to accept new content and update the lockfile."
                         )
+            # The carried licence copies are excluded from content_hash, so
+            # their own lock record is their integrity baseline (#3556).
+            if (
+                not ctx.update_refs
+                and dep_key not in _expected_hash_deps
+                and dep_locked_chk
+                and dep_locked_chk.carried_licenses
+                and frozenset(dep_locked_chk.carried_licenses) != frozenset(_carried)
+            ):
+                safe_rmtree(install_path, ctx.apm_modules_dir)
+                raise DirectDependencyError(
+                    f"Licence file mismatch for {dep_key}: the licence files carried "
+                    "from the repository differ from the lockfile record. "
+                    "This may indicate a supply-chain attack. Use "
+                    "'apm install --update' to accept new content and update the lockfile."
+                )
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value

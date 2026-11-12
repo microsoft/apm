@@ -36,6 +36,7 @@ from ..models.dependency.replacement import (
     parse_replace_block,
     project_effective_reference,
 )
+from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +384,12 @@ class LockedDependency:
     # rather than stored as a sentinel, so absence stays distinguishable from
     # an explicit declaration.
     declared_license: str | None = None
+    # Verbatim licence copies APM placed in the materialized package (#3556):
+    # the nearest LICENSE/COPYING/NOTICE from the package path up to the
+    # repository root. Each records the copy path, its repository source path
+    # and its hash. The package content_hash excludes these copies. Omitted
+    # when empty so packages that carry nothing stay byte-identical.
+    carried_licenses: tuple[CarriedLicense, ...] = ()
     # Resolved executable-trust state (issue #1873). One of ``deployed`` |
     # ``gated_pending_approval`` | ``denied`` | ``absent``, mirroring the
     # resolver ``trust_state``. Absence (``None``) means the package declared
@@ -548,6 +555,8 @@ class LockedDependency:
             result["resolved_at"] = self.resolved_at
         if self.declared_license:
             result["declared_license"] = self.declared_license
+        if self.carried_licenses:
+            result["carried_licenses"] = records_to_lock_data(self.carried_licenses)
         if self.extensions:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
@@ -633,6 +642,7 @@ class LockedDependency:
             "resolved_tag",
             "resolved_at",
             "declared_license",
+            "carried_licenses",
             "extensions",
             "exec_status",
             "name",
@@ -684,6 +694,7 @@ class LockedDependency:
             resolved_tag=data.get("resolved_tag"),
             resolved_at=data.get("resolved_at"),
             declared_license=data.get("declared_license"),
+            carried_licenses=records_from_lock_data(data.get("carried_licenses")),
             exec_status=exec_status,
             name=data.get("name"),
             extensions=_copy_extension_map(data.get("extensions")),
