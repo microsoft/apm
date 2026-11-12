@@ -258,3 +258,46 @@ def test_unix_installer_centralizes_fail_closed_error_style() -> None:
     assert text.count("fail_closed_error APM_RELEASE_BASE_URL") == 2
     assert text.count("fail_closed_error APM_RELEASE_METADATA_URL") == 1
     assert text.count("fail_closed_error APM_PYPI_INDEX_URL") == 1
+
+
+def _windows_python_requirement_function() -> str:
+    text = _read_repo_file("install.ps1")
+    body = text.split("function Test-PythonRequirement {", 1)[1].split(
+        "function Install-ViaPip {", 1
+    )[0]
+    return "function Test-PythonRequirement {" + body
+
+
+@pytest.mark.parametrize(
+    ("python3_version", "expected"),
+    [("3.10", ""), ("3.11", "python3"), ("3.12", "python3"), ("4.0", "python3")],
+)
+def test_windows_pip_fallback_enforces_python_311_floor(
+    python3_version: str, expected: str
+) -> None:
+    """install.ps1 pip fallback must refuse interpreters below Python 3.11."""
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    if host is None:
+        pytest.skip("PowerShell host not available")
+    script = (
+        f"function python3 {{ '{python3_version}' }}\n"
+        "function python { '2.7' }\n"
+        f"{_windows_python_requirement_function()}\n"
+        "$selected = Test-PythonRequirement\n"
+        "if ($selected) { Write-Output $selected }\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+def test_windows_pip_fallback_reports_python_311_requirement() -> None:
+    """The pip fallback refusal must name the Python 3.11 floor."""
+    text = _read_repo_file("install.ps1")
+    assert '"Python 3.11+ is not available - cannot fall back to pip."' in text
