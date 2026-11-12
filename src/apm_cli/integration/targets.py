@@ -56,11 +56,22 @@ on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 USER_ROOT_ENV_VARS: dict[str, str] = {
     "claude": "CLAUDE_CONFIG_DIR",
     "hermes": "HERMES_HOME",
+    "codex": "CODEX_HOME",
 }
 """Targets whose user-scope root an environment variable selects.
 
 Each value of the variable is a separate profile of the same runtime, and
 all of them share one user lockfile.
+"""
+
+_ABSOLUTE_USER_ROOT_TOOLS: dict[str, str] = {
+    "codex": "Codex CLI",
+}
+"""Targets whose user-root variable must be an absolute path, by tool label.
+
+A relative value is rejected with :class:`PathTraversalError` instead of being
+resolved against the working directory; the Codex MCP adapter rejects a
+relative ``CODEX_HOME`` the same way.
 """
 
 
@@ -545,24 +556,32 @@ class TargetProfile:
         if self.name == "copilot":
             generated_files = ()
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
-        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
-        # `apm install -g` lands where the tool reads.
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
+        # honors HERMES_HOME (default ~/.hermes) and Codex honors CODEX_HOME
+        # (default ~/.codex); mirror that at user scope so `apm install -g`
+        # and `apm compile --global` land where the tool reads.
         if self.name in USER_ROOT_ENV_VARS:
             import os
-            from pathlib import Path
 
-            env = os.environ.get(USER_ROOT_ENV_VARS[self.name], "").strip()
+            env_var = USER_ROOT_ENV_VARS[self.name]
+            env = os.environ.get(env_var, "").strip()
             if env:
+                expanded = Path(env).expanduser()
+                tool_label = _ABSOLUTE_USER_ROOT_TOOLS.get(self.name)
+                if tool_label and not expanded.is_absolute():
+                    raise PathTraversalError(
+                        f"{env_var} is set to a non-absolute path; cannot locate the "
+                        f"{tool_label} configuration directory."
+                    )
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = Path(env).expanduser().resolve(strict=False)
+                abs_path = expanded.resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
+                    # Fallback: when the user-root variable points outside $HOME we
                     # store an absolute path. ``pathlib.Path / <absolute>`` is
                     # ``<absolute>`` so deploy + cleanup write to the right
                     # place. The lockfile path translator treats an absolute
@@ -735,7 +754,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
-    # Instructions are compile-only (AGENTS.md) -- not installed.
+    # Instructions are compile-only (AGENTS.md) -- not installed.  At user
+    # scope the root honors CODEX_HOME (default ~/.codex) via for_scope().
     "codex": TargetProfile(
         capability=TARGET_CAPABILITIES["codex"],
         root_dir=".codex",
@@ -1380,8 +1400,8 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
 def selected_user_profiles() -> dict[str, TargetProfile]:
     """Return the user-scope profile each :data:`USER_ROOT_ENV_VARS` target selects.
 
-    Without the variable the default root (``~/.claude``, ``~/.hermes``) is
-    the selected profile.
+    Without the variable the default root (``~/.claude``, ``~/.hermes``,
+    ``~/.codex``) is the selected profile.
     """
     profiles: dict[str, TargetProfile] = {}
     for name in USER_ROOT_ENV_VARS:

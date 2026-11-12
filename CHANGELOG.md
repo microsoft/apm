@@ -131,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompt authoring, `copilot` target and packaged `apm-usage` docs now state that `.github/prompts/` files load only in VS Code Local harness sessions, not the Copilot harness or Copilot CLI, and show the skill alternative with `disable-model-invocation: true`; prompt deployment is unchanged. (#3550)
 - The devcontainer README no longer advertises the `ghcr.io/microsoft/apm/apm-cli` feature, which is not published to GHCR, and points to the supported ways to use APM in a dev container. (#3526)
 - The lockfile spec now shows `deployed_file_hashes` and `local_deployed_file_hashes` values in the `sha256:<hex>` form APM writes instead of bare hex. (#3519)
+- `apm compile --global` writes Codex instructions to `$CODEX_HOME/AGENTS.md` when `CODEX_HOME` is set, and `apm install -g` places Codex agents and hooks in the same directory as its MCP config; unset or blank keeps `~/.codex`, a relative value fails before writing, and skills stay in `~/.agents/skills/`. -- by @xubenqiang (#3491)
 
 ## [0.35.0] - 2026-10-22
 

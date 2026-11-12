@@ -56,6 +56,9 @@ def _ensure_home_env(home: Path) -> None:
 
 
 _ensure_home_env(_TMP_HOME)
+# User-scope Codex roots honor CODEX_HOME; keep a developer's value from
+# redirecting tests that expect the default ~/.codex root.
+os.environ.pop("CODEX_HOME", None)
 
 
 def _hermetic_home(_cls=Path) -> Path:

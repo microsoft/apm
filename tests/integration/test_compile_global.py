@@ -143,6 +143,67 @@ def test_compile_global_honors_user_manifest_targets(
     assert not (home / ".hermes").exists()
 
 
+def _seed_codex_global_home(home: Path) -> None:
+    apm_root = home / ".apm"
+    instruction_dir = apm_root / "apm_modules" / "demo" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global test instructions\n---\nUse Codex home.\n",
+        encoding="utf-8",
+    )
+    (apm_root / "apm.yml").write_text(
+        "name: global\nversion: 1.0.0\ntargets: [codex]\n",
+        encoding="utf-8",
+    )
+
+
+def test_compile_global_writes_codex_agents_md_under_codex_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-blank CODEX_HOME receives AGENTS.md; ~/.codex stays untouched (#3483)."""
+    from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    _seed_codex_global_home(home)
+    codex_home = home / "custom-codex"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(compile_cmd, ["--global"])
+
+    clear_discovery_cache()
+    assert result.exit_code == 0, result.output
+    assert "Use Codex home." in (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (home / ".codex").exists()
+
+
+def test_compile_global_rejects_relative_codex_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative CODEX_HOME fails clearly before any Codex root file is written."""
+    from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    _seed_codex_global_home(home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", "relative/codex")
+    monkeypatch.chdir(tmp_path)
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(compile_cmd, ["--global"])
+
+    clear_discovery_cache()
+    assert result.exit_code != 0
+    assert "CODEX_HOME is set to a non-absolute path" in f"{result.output}{result.exception}"
+    assert not (home / ".codex").exists()
+    assert not (tmp_path / "relative").exists()
+
+
 @pytest.mark.parametrize(
     ("manifest", "expected"),
     [
