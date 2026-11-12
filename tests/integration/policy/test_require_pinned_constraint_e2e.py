@@ -67,6 +67,11 @@ def _fetch(policy: ApmPolicy) -> PolicyFetchResult:
     )
 
 
+_REPLACE_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
+
+
 def _write_apm_yml(path: Path, deps: list) -> None:
     data = {
         "name": "test-project",
@@ -250,6 +255,16 @@ class TestPromiseCDirectDepKeysWiring:
         )
 
 
+def _forwarded_refs(call, needle: str) -> list[tuple]:
+    """Declared refs a ``run_dependency_policy_checks`` call carried for *needle*."""
+    declared = call.kwargs.get("declared_refs") or {}
+    return [
+        tuple(dep.reference for dep in snapshot)
+        for key, snapshot in declared.items()
+        if needle in str(key)
+    ]
+
+
 class TestDeclaredRefsWiring:
     """#3224: the gate must forward the manifest-declared refs to the runner.
 
@@ -300,8 +315,7 @@ class TestDeclaredRefsWiring:
             f"policy_gate did not run the dep checks: {mock_run_checks.call_args_list}"
         )
         for call in gate_calls:
-            declared = call.kwargs.get("declared_refs") or {}
-            matching = [refs for key, refs in declared.items() if "test-org/skills" in str(key)]
+            matching = _forwarded_refs(call, "test-org/skills")
             assert matching == [("^1.2.0",)], (
                 "policy_gate did not forward the manifest-declared range for the "
                 f"direct dep; it would judge the resolved tag instead. kwargs: {call.kwargs!r}"
@@ -317,10 +331,75 @@ class TestDeclaredRefsWiring:
             f"policy_target_check did not run the dep checks: {mock_run_checks.call_args_list}"
         )
         for call in target_calls:
-            declared = call.kwargs.get("declared_refs") or {}
-            matching = [refs for key, refs in declared.items() if "test-org/skills" in str(key)]
+            matching = _forwarded_refs(call, "test-org/skills")
             assert matching == [("^1.2.0",)], (
                 f"policy_target_check did not forward the manifest-declared range: {call.kwargs!r}"
+            )
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    @patch(_PATCH_RUN_DEP_CHECKS)
+    def test_policy_gate_forwards_the_replacement_ref(
+        self,
+        mock_run_checks,
+        mock_gate,
+        mock_preflight,
+        mock_dl,
+        mock_updates,
+        project,
+    ):
+        # A bounded original is provenance only; the gate must judge the
+        # source the ``replace:`` rule selects (Copilot review on #3652).
+        project_dir, runner = project
+        fork = project_dir / "vendor" / "skills"
+        (fork / ".apm" / "instructions").mkdir(parents=True)
+        (fork / "apm.yml").write_text("name: skills\nversion: 1.2.0\n", encoding="utf-8")
+        (fork / ".apm" / "instructions" / "a.instructions.md").write_text(
+            '---\napplyTo: "**"\n---\nFork.\n', encoding="utf-8"
+        )
+        (project_dir / "apm.yml").write_text(
+            f"$schema: {_REPLACE_SCHEMA}\n"
+            "name: test-project\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - test-org/skills#^1.2.0\n"
+            "replace:\n"
+            "  - for: {git: https://github.com/test-org/skills}\n"
+            "    with: {path: ./vendor/skills}\n",
+            encoding="utf-8",
+        )
+        fetch = _fetch(_load_fixture("apm-policy-block.yml"))
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        from apm_cli.policy.models import CIAuditResult
+
+        mock_run_checks.return_value = CIAuditResult(checks=[])
+
+        _invoke_install(runner)
+
+        gate_calls = [
+            c
+            for c in mock_run_checks.call_args_list
+            if "fetch_outcome" in c.kwargs and c.kwargs.get("effective_target") is None
+        ]
+        assert gate_calls, (
+            f"policy_gate did not run the dep checks: {mock_run_checks.call_args_list}"
+        )
+        for call in gate_calls:
+            declared = call.kwargs.get("declared_refs") or {}
+            snapshot = [
+                dep
+                for key, deps in declared.items()
+                if "test-org/skills" in str(key)
+                for dep in deps
+            ]
+            assert snapshot, f"policy_gate forwarded no declaration: {call.kwargs!r}"
+            assert all(dep.is_local and dep.reference != "^1.2.0" for dep in snapshot), (
+                f"policy_gate judged the original ref, not the replacement: {snapshot!r}"
             )
 
 

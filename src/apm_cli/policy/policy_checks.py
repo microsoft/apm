@@ -1063,7 +1063,7 @@ def _check_pinned_constraints(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
     direct_dep_keys: set[str] | None = None,
-    declared_refs: Mapping[str, Sequence[str | None]] | None = None,
+    declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
 ) -> CheckResult:
     """Check: every direct dep declares a bounded constraint.
 
@@ -1074,9 +1074,9 @@ def _check_pinned_constraints(
     authors learn before the install completes that a moving ref
     slipped past review. After the resolve phase ``dep.reference``
     already holds the selected tag, so the install-pipeline callers
-    pass ``declared_refs`` (unique key -> every manifest ref declared for
-    it, see ``collect_declared_refs``) and the check classifies each of
-    those instead (#3224); one bounded declaration never covers for an
+    pass ``declared_refs`` (unique key -> a snapshot of every declaration
+    of it, see ``collect_declared_refs``) and the check classifies each
+    of those instead (#3224); one bounded declaration never covers for an
     unbounded one sharing the key. Callers that still hold the manifest
     view (preflight, audit) leave it ``None``.
 
@@ -1108,18 +1108,12 @@ def _check_pinned_constraints(
         if direct_dep_keys is not None and unique_key not in direct_dep_keys:
             continue
         declared = declared_refs.get(unique_key) if declared_refs else None
-        if declared is None:
-            reason = classify_unbounded_reason(dep)
-            if reason is not None:
-                key = dep.get_canonical_dependency_string()
-                violations.append(f"{key}: {humanize_reason(reason, dep)}")
-            continue
-        for ref in declared:
-            reason = classify_unbounded_reason(dep, declared_ref=ref)
+        for judged in declared or (dep,):
+            reason = classify_unbounded_reason(judged)
             if reason is None:
                 continue
-            key = dep.get_canonical_dependency_string()
-            violations.append(f"{key}: {humanize_reason(reason, dep, ref=ref or '')}")
+            key = judged.get_canonical_dependency_string()
+            violations.append(f"{key}: {humanize_reason(reason, judged)}")
     violations = list(dict.fromkeys(violations))
 
     if not violations:
@@ -1208,7 +1202,7 @@ def run_dependency_policy_checks(
     manifest_includes=_INCLUDES_NOT_PROVIDED,
     registries: dict[str, str] | None = None,
     direct_dep_keys: set[str] | None = None,
-    declared_refs: Mapping[str, Sequence[str | None]] | None = None,
+    declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1256,11 +1250,12 @@ def run_dependency_policy_checks(
         and the audit wrapper that already iterates direct-only
         manifest deps) every dep in ``deps_to_install`` is evaluated.
     declared_refs:
-        Optional map of ``get_unique_key()`` -> every manifest-declared
-        ref for that direct dep (``collect_declared_refs``). The resolve phase rewrites ``dep.reference`` to
-        the selected tag, so the install-pipeline callers pass the refs
-        they captured beforehand and ``require_pinned_constraint`` judges
-        the authored constraint rather than its replacement (#3224).
+        Optional map of ``get_unique_key()`` -> a snapshot of every
+        declaration of that direct dep (``collect_declared_refs``). The
+        resolve phase rewrites ``dep.reference`` to the selected tag, so
+        the install-pipeline callers pass the declarations they captured
+        beforehand and ``require_pinned_constraint`` judges the authored
+        constraint rather than the selected tag (#3224).
 
     Returns
     -------

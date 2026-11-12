@@ -140,12 +140,13 @@ class InstallContext:
     # consumed by install/sources.py to plumb the resolution into the
     # lockfile via InstalledPackage.git_semver_resolution.
     git_semver_resolutions: dict[str, Any] = field(default_factory=dict)
-    # Every manifest-declared ref of each direct dep, keyed by unique key
+    # A snapshot of every declaration of each direct dep after ``replace:``
+    # source selection, keyed by unique key
     # (``policy._constraint_pinning.collect_declared_refs``). The pipeline
     # fills this before semver resolution rewrites ``dep_ref.reference`` to
     # the selected tag, so the policy gate judges the authored constraint
     # while everything else keeps the resolved ref (#3224).
-    declared_direct_refs: dict[str, tuple[str | None, ...]] = field(default_factory=dict)
+    declared_direct_refs: dict[str, tuple[Any, ...]] = field(default_factory=dict)
     # Run-scoped cache of RefResolver instances keyed by (host, token-fingerprint)
     # so semver deps sharing an upstream repo reuse one ``git ls-remote`` tag
     # listing (RefResolver memoizes per instance) instead of one per dep.

@@ -31,12 +31,13 @@ constraint string only; no remote calls and no subprocess.  Used by
 
 The install pipeline rewrites ``dep.reference`` to the selected tag once
 a semver range is resolved, so callers that run after that point pass
-the manifest-declared ref (``collect_declared_refs``) through
-``declared_ref`` and the classifier never judges the replacement (#3224).
+snapshots of the declared dependencies (``collect_declared_refs``) and
+the classifier never judges the selected tag (#3224).
 """
 
 from __future__ import annotations
 
+import copy
 import re
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -157,40 +158,28 @@ def _is_package_literal_tag(spec: str, dep: DependencyReference) -> bool:
 
 def collect_declared_refs(
     deps: Iterable[DependencyReference],
-) -> dict[str, tuple[str | None, ...]]:
-    """Map each direct dep's unique key to every ref the manifest declares for it.
+) -> dict[str, tuple[DependencyReference, ...]]:
+    """Map each direct dep's unique key to a snapshot of every declaration of it.
 
-    Taken before resolution rewrites ``dep.reference`` to a selected tag.
-    The unique key excludes the ref, so one package declared twice (for
-    example under ``dependencies`` and ``devDependencies``) keeps both
-    declarations, and a missing ref is kept as ``None``: neither a
-    sibling declaration nor a selected tag can stand in for it.
+    Taken before resolution rewrites ``dep.reference`` to a selected tag;
+    each entry is a shallow copy, so the snapshot keeps the declared ref
+    (``None`` when missing) and the declaration's own package name and
+    source. The unique key excludes the ref and folds repository casing,
+    so one package declared twice (for example under ``dependencies`` and
+    ``devDependencies``) keeps both declarations: neither a sibling
+    declaration nor a selected tag can stand in for another. Pass the
+    source-selected projection (``project_manifest_dependencies``) so a
+    ``replace:`` rule is judged by the source and ref it selects.
     """
-    declared: dict[str, tuple[str | None, ...]] = {}
+    declared: dict[str, tuple[DependencyReference, ...]] = {}
     for dep in deps:
         key = dep.get_unique_key()
-        declared[key] = (*declared.get(key, ()), getattr(dep, "reference", None))
+        declared[key] = (*declared.get(key, ()), copy.copy(dep))
     return declared
 
 
-class _Unset(Enum):
-    TOKEN = 0
-
-
-_FROM_DEP = _Unset.TOKEN
-
-
-def classify_unbounded_reason(
-    dep: DependencyReference,
-    *,
-    declared_ref: str | None | _Unset = _FROM_DEP,
-) -> UnboundedReason | None:
+def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | None:
     """Return ``None`` if *dep*'s constraint is pinned, otherwise the reason.
-
-    ``declared_ref`` is the manifest-declared ref when the caller knows
-    ``dep.reference`` has since been rewritten to a resolved tag; when
-    given (including ``None`` for a declaration without a ref) it is
-    classified in place of ``dep.reference``.
 
     Classification order (first match wins):
 
@@ -207,7 +196,7 @@ def classify_unbounded_reason(
     if getattr(dep, "is_local", False):
         return None
 
-    ref = getattr(dep, "reference", None) if declared_ref is _FROM_DEP else declared_ref
+    ref = getattr(dep, "reference", None)
     source = getattr(dep, "source", None)
 
     # Lazy import: avoid pulling marketplace.semver into policy import graph.
@@ -268,22 +257,13 @@ def is_pinned_constraint(dep: DependencyReference) -> bool:
     return classify_unbounded_reason(dep) is None
 
 
-def humanize_reason(
-    reason: UnboundedReason,
-    dep: DependencyReference,
-    *,
-    ref: str | None = None,
-) -> str:
+def humanize_reason(reason: UnboundedReason, dep: DependencyReference) -> str:
     """Render a one-line actionable hint for the given reason.
-
-    ``ref`` is the declared ref to name in the hint when the caller
-    classified something other than ``dep.reference``.
 
     Emitted in ``[x]``/``[!]`` policy diagnostics; ASCII only per
     ``.github/instructions/encoding.instructions.md``.
     """
-    if ref is None:
-        ref = getattr(dep, "reference", None) or ""
+    ref = getattr(dep, "reference", None) or ""
     if reason is UnboundedReason.NO_REF:
         return "no ref; resolves to default branch"
     if reason is UnboundedReason.BARE_BRANCH:
