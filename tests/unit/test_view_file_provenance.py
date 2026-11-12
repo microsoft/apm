@@ -349,6 +349,18 @@ class TestCurrentFileStatus:
         assert "matches the recorded" not in out
 
     @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_logical_absolute_path_through_symlinked_cwd(self, project, tmp_path, monkeypatch):
+        """A shell ``$PWD`` keeps symlinked parents (macOS /tmp) that getcwd resolves."""
+        _standard_project(project)
+        link = tmp_path / "linked"
+        link.symlink_to(project, target_is_directory=True)
+        monkeypatch.chdir(link)
+        result, out = _run("--file", str(link / SKILL))
+        assert result.exit_code == 0, result.output
+        assert "Owner: acme/skills [active writer]" in out
+        assert "matches the recorded deployed hash" in out
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
     def test_symlinked_user_deploy_root_is_not_followed(self, tmp_path, monkeypatch):
         real_home = tmp_path / "real-home"
         home = tmp_path / "home"

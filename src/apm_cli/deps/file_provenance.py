@@ -193,6 +193,24 @@ def _lexical_absolute(query: str, cwd: Path) -> Path:
     return Path(os.path.normpath(candidate))
 
 
+def _anchor_to_root(absolute: Path, deploy_root: Path) -> Path:
+    """Map a logical path through symlinked parents onto the deploy root.
+
+    ``Path.cwd()`` is physical, while a shell ``$PWD`` (or a symlinked
+    workspace such as macOS ``/tmp``) is logical. Resolve only the parent
+    directory so the queried leaf stays exact, and only when the lexical
+    form is not already under the root.
+    """
+    roots = _roots(deploy_root)
+    if _relative_to_any(absolute, roots) is not None:
+        return absolute
+    try:
+        physical = Path(os.path.realpath(absolute.parent)) / absolute.name
+    except (OSError, ValueError):
+        return absolute
+    return physical if _relative_to_any(physical, roots) is not None else absolute
+
+
 def _relative_to_any(path: Path, roots: tuple[Path, ...]) -> tuple[Path, str] | None:
     """Return the first ``(root, posix-relative)`` for which *path* is contained."""
     for root in roots:
@@ -295,7 +313,9 @@ def lookup_file_provenance(
     """
     if not query or not query.strip():
         raise FileProvenanceError("--file requires a non-empty PATH.")
-    absolute = _lexical_absolute(query, cwd if cwd is not None else Path.cwd())
+    absolute = _anchor_to_root(
+        _lexical_absolute(query, cwd if cwd is not None else Path.cwd()), deploy_root
+    )
     if absolute in _roots(deploy_root):
         raise FileProvenanceError(
             f"'{query}' is the deploy root itself. Pass the path of one deployed file."
