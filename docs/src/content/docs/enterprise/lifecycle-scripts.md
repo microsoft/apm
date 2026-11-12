@@ -145,7 +145,9 @@ lifecycle:
       run: "./scripts/generate-guidelines.sh"
 ```
 
-A failure prints a warning and the compile continues with what is under `.apm/`. The script runs while compile holds
+A failure does not stop the compile; it continues with what is under `.apm/`
+(see [Security considerations](#security-considerations) for when a failure
+warns). The script runs while compile holds
 APM's lifecycle lock, so an `apm` command it starts that changes state waits
 for that lock and fails after its timeout.
 
