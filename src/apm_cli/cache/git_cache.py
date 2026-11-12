@@ -714,10 +714,13 @@ class GitCache:
             try:
                 # Clone from local bare repo (fast, no network).
                 # ``promisor`` and ``partialclonefilter`` ride on the clone
-                # via ``-c key=val`` (one spawn). ``remote.origin.url``
-                # needs a separate post-clone ``git config`` because git
-                # clone always rewrites it to the clone source after
-                # applying ``-c`` overrides.
+                # via ``-c key=val`` (one spawn), as do the materialization
+                # pins that cache hits require to recognize post-fix shards.
+                # Checkout itself still needs the ``-c`` pins from
+                # ``_safe_git_args`` because env-frozen host config outranks
+                # these local values. ``remote.origin.url`` needs a separate
+                # post-clone ``git config`` because git clone always rewrites
+                # it to the clone source after applying ``-c`` overrides.
                 subprocess.run(
                     [
                         git_exe,
@@ -728,6 +731,11 @@ class GitCache:
                         "--shared",
                         "--no-checkout",
                         "--no-recurse-submodules",
+                        *(
+                            arg
+                            for key, value in _checkout_materialization_pins()
+                            for arg in ("-c", f"{key}={value}")
+                        ),
                         *(
                             [
                                 "-c",
@@ -748,20 +756,6 @@ class GitCache:
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-                # Persist the pins so cache hits can recognize post-fix shards.
-                # Checkout itself still needs the ``-c`` pins from
-                # ``_safe_git_args`` because env-frozen host config outranks
-                # these local values.
-                for key, value in _checkout_materialization_pins():
-                    subprocess.run(
-                        [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                        env=subprocess_env,
-                        stdin=subprocess.DEVNULL,
-                        check=True,
-                    )
                 if promisor_url:
                     # Point origin at the real upstream (clone set it to the
                     # local bare). Single config call; the other two promisor
