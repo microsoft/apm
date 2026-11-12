@@ -210,6 +210,9 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
         "workspace_yml = get_manifest_path(InstallScope.USER)"
     ),
     "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
+    "src/apm_cli/core/deployment_ledger.py": (
+        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+    ),
 }
 
 

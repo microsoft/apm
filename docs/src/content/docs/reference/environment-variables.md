@@ -106,19 +106,38 @@ use the same overridden root:
 | User lockfile | `$APM_HOME/apm.lock.yaml` |
 | Installed package metadata and content | `$APM_HOME/apm_modules/` |
 | User configuration | `$APM_HOME/config.json` |
+| Marketplace registrations | `$APM_HOME/marketplaces.json` |
+| Marketplace cache and version pins | `$APM_HOME/cache/marketplace/` |
 | Lifecycle trust | `$APM_HOME/scripts-trust.json` |
 | Lifecycle logs | `$APM_HOME/logs/` |
+| Lifecycle lock and deployment receipts | `$APM_HOME/.apm-lifecycle.lock`, `$APM_HOME/deployment-receipts/` |
 
 This applies to user-scope operations such as `apm install --global`, `apm
-update --global`, `apm lock --global`, `apm deps ... --global`, `apm compile
---global`, and `apm config`.
+update --global`, `apm uninstall --global`, `apm lock --global`, `apm deps ...
+--global`, `apm compile --global`, `apm marketplace`, `apm lifecycle`, and `apm
+config`. `apm prune` is project-scope only. Other pages write `~/.apm` for the
+default location.
 
-`APM_HOME` does **not** redirect target deployment. A target-specific home
-variable, when supported, selects that target's destination (for example,
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `HERMES_HOME`); otherwise the destination
-is derived from the operating-system home. These settings control different
-path families, so a target-specific variable does not override `APM_HOME`, and
-`APM_HOME` does not act as a fallback for target deployment.
+APM reads `APM_HOME` once at process start. Changing it does not move an
+existing `~/.apm`; copy the files yourself if you want to keep them.
+
+These paths are outside the contract:
+
+- The download cache follows `APM_CACHE_DIR` (see above); the update-check
+  timestamp stays in the operating-system cache directory.
+- Runtimes installed by `apm runtime setup` stay under `~/.apm/runtimes/`.
+- `apm install --global` keeps its installation identity at `~/.apm-local/`,
+  beside the deployment root, like deployed target files.
+
+`APM_HOME` does **not** redirect target deployment. Precedence:
+
+1. APM metadata: `APM_HOME`, then `~/.apm`.
+2. Target files: the target's own home variable when it has one (for example
+   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `HERMES_HOME`), then the
+   operating-system home.
+
+The two families never fall back to each other: a target variable does not
+move APM metadata, and `APM_HOME` does not move target files.
 
 To isolate APM metadata for a temporary global install:
 

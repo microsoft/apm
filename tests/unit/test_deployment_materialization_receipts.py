@@ -497,6 +497,31 @@ def test_scope_isolation_and_atomic_lf_serialization(
     assert user.baseline(path, [TARGET]) is None
 
 
+def test_receipts_live_under_apm_home_while_identity_stays_at_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    apm_home = tmp_path / "isolated-metadata"
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    session = _session(root, lock)
+    session.record({path: compute_file_hash(path)}, [TARGET], "pkg")
+    session.flush()
+    assert session.state_path.parent == apm_home / "deployment-receipts"
+    assert session.state_path.is_file()
+    assert session.identity_path == root.resolve() / ".apm-local" / "installation"
+    assert not (tmp_path / "home" / ".apm").exists()
+    assert _session(root, lock).baseline(path, [TARGET]) == compute_file_hash(path)
+
+
+def test_unset_apm_home_keeps_receipts_under_home_dot_apm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    monkeypatch.delenv("APM_HOME", raising=False)
+    session = _session(root, lock)
+    assert session.state_path.parent == tmp_path / "home" / ".apm" / "deployment-receipts"
+
+
 def test_changed_canonical_claims_cannot_rebind_without_actual_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

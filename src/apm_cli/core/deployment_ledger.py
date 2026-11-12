@@ -89,8 +89,12 @@ class DeploymentMaterializationSession:
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
         self.scope = scope
+        from apm_cli.core.scope import get_apm_home
+
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
-        self.state_path = Path.home() / ".apm" / "deployment-receipts" / f"{key}.json"
+        apm_home = get_apm_home()
+        self._receipts_base = apm_home.parent
+        self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
         self.identity_path = self.root / ".apm-local" / "installation"
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
@@ -113,7 +117,7 @@ class DeploymentMaterializationSession:
 
     def _validate_paths(self) -> None:
         for base, path in (
-            (Path.home(), self.state_path),
+            (self._receipts_base, self.state_path),
             (self.root, self.identity_path),
             (self.root, self.identity_path.parent / ".gitignore"),
         ):

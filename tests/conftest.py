@@ -56,6 +56,8 @@ def _ensure_home_env(home: Path) -> None:
 
 
 _ensure_home_env(_TMP_HOME)
+# A developer's APM_HOME must not redirect user-scope metadata during tests.
+os.environ.pop("APM_HOME", None)
 
 
 def _hermetic_home(_cls=Path) -> Path:

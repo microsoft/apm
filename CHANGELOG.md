@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `APM_HOME` is now the single root for APM-owned user state: global `apm.yml`, `apm.lock.yaml` and `apm_modules/`, `config.json`, marketplace registrations, lifecycle trust and logs, and deployment receipts all follow it, so two `APM_HOME` values no longer share or leak into `~/.apm`. Unset keeps `~/.apm`; target deployment destinations are unchanged. -- by @WilliamK112 (#PRNUM)
 - `apm install <plugin>@<marketplace>` pins `github`, `url` and `git-subdir` sources to their `sha`, which wins over `ref`, and rejects a malformed `sha` before writing `apm.yml`, the lockfile or any deployed file, so commit pins emitted by `apm pack` install pinned. -- by @abhishekacharya200 (#3534)
 - When a registry proxy serves an archive that APM rejects (an unsafe member such as a symlink, or a body that is not a zip), `apm install` now reports that rejection instead of a later fallback URL's HTTP 404. Symlinks are still refused. (#3375)
 - `apm install --target claude` keeps `${VAR}` and `${VAR:-default}` references in the project `.mcp.json` instead of prompting for and writing the values, names missing variables, and on reinstall replaces values APM can confirm it wrote earlier; user scope (`~/.claude.json`) is unchanged. -- by @Aaryan-Dadu (#3377)
@@ -252,7 +253,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `APM_HOME` now consistently controls global manifests, lockfiles, modules, configuration, lifecycle trust, logs, and command locking while leaving target deployment destinations under their target-specific overrides or the operating-system home. (closes #2884)
 - GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
 
 ## [0.30.0] - 2026-09-07

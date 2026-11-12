@@ -252,8 +252,9 @@ still cleans up its managed files, subject to the usual user-edit protections.
   prior deployment can update even if modules and cache were removed. Edited
   files remain protected, including edits matching an older package version.
   The ignored `.apm-local/` installation identity and
-  `~/.apm/deployment-receipts/` are local state, not files to commit or share.
-  The identity lives in the project root, or your home directory for `--global`.
+  `$APM_HOME/deployment-receipts/` (default `~/.apm/deployment-receipts/`) are
+  local state, not files to commit or share. The identity lives in the project
+  root, or your home directory for `--global`.
   On Linux and macOS, a receipt stays valid when a reboot or remount changes
   only the root's device number; the inode, path, installation identity and
   recorded creation time must still match, so a recreated root is rejected.
