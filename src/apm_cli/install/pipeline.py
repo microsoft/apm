@@ -615,6 +615,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ctx.target_override = target_decision.value
         ctx.target_override_source = target_decision.source
 
+    pipeline_completed = False
     ctx.tui.__enter__()
     try:
         # --------------------------------------------------------------
@@ -948,7 +949,11 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from .phases import finalize as _finalize_phase
 
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
-        return _run_phase("finalize", _finalize_phase, ctx)
+        final_result = _run_phase("finalize", _finalize_phase, ctx)
+        pipeline_completed = (
+            final_result is None or final_result.disposition is not InstallDisposition.FAILED
+        )
+        return final_result
 
     except (AgentPluginError, CodexNativeError):
         # Preserve schema-routing and native-boundary diagnostics verbatim.
@@ -988,3 +993,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
         _copilot_plugins_cleanup.deactivate(ctx)
         ctx.tui.__exit__()
+        if not pipeline_completed:
+            from .failure_residue import report_failed_install_residue
+
+            report_failed_install_residue(ctx)

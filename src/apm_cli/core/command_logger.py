@@ -247,6 +247,29 @@ class InstallLogger(CommandLogger):
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        self._failed_install_residue_count = 0
+
+    def failed_install_residue(self, paths: Sequence[str]) -> None:
+        """List native target files a failed install left on disk, with one next step.
+
+        Native target integrations are outside the install transaction, so
+        these files are neither removed nor tracked by apm.lock.yaml.
+        """
+        count = len(paths)
+        if count == 0:
+            return
+        self._failed_install_residue_count = count
+        noun = "file" if count == 1 else "files"
+        self.warning(
+            f"This failed install left {count} native target {noun} on disk "
+            "that apm.lock.yaml does not track:"
+        )
+        for path in paths:
+            self.error_detail(f"  {path}")
+        self.info(
+            "Remove these files, or re-run 'apm install' (add --force if it skips "
+            "them as not managed by APM)."
+        )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -946,10 +969,17 @@ class InstallLogger(CommandLogger):
             )
         elif disposition is InstallDisposition.FAILED:
             error_suffix = f" with {errors} error(s)" if errors > 0 else ""
+            residue = self._failed_install_residue_count
+            if residue:
+                state_note = (
+                    "1 native target file listed above remains on disk."
+                    if residue == 1
+                    else f"{residue} native target files listed above remain on disk."
+                )
+            else:
+                state_note = "No install transaction changes were committed."
             _rich_error(
-                "Installation failed"
-                f"{error_suffix}{timing_suffix}. "
-                "No install transaction changes were committed.",
+                f"Installation failed{error_suffix}{timing_suffix}. {state_note}",
                 symbol="error",
             )
         elif parts:
