@@ -383,13 +383,18 @@ def _normalize_legacy_local_plugin_for_replay(
     """Normalize a local legacy plugin only in the scratch replay tree."""
     from apm_cli.agent_plugins.loader import detect_agent_plugin
     from apm_cli.deps.plugin_parser import normalize_plugin_directory
-    from apm_cli.models.validation import PackageType
+    from apm_cli.models.validation import PackageType, detect_package_type
     from apm_cli.utils.helpers import find_plugin_json
 
     if lock_dep.package_type == PackageType.AGENT_PLUGIN.value:
         return install_path
 
     if detect_agent_plugin(install_path) is not None:
+        return install_path
+
+    # Install normalizes only what the canonical classifier calls a legacy
+    # plugin; an apm.yml package that also ships plugin.json is not one.
+    if detect_package_type(install_path)[0] != PackageType.MARKETPLACE_PLUGIN:
         return install_path
 
     plugin_json = find_plugin_json(install_path)
