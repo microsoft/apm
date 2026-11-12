@@ -120,8 +120,10 @@ def _safe_git_args() -> list[str]:
 
 
 # Shards whose tracked links hold their Git-object content carry this local
-# key. Older shards hold OS symlinks or Git link text instead (#3457).
-_LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects")
+# key. Older shards hold OS symlinks or Git link text instead (#3457), and
+# ``git-objects`` shards may hold out-of-cone targets read without their
+# ``.gitattributes`` (e.g. LF for ``eol=crlf``), so the value is versioned.
+_LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects-checkout")
 
 # Sparse (promisor) shards verified to hold every tracked file carry this
 # local key, so cache hits skip the ``ls-files`` probe (#3071).
