@@ -152,3 +152,65 @@ def test_opencode_v1_install_moves_to_v2_after_opt_in(
     assert mcp["personal"] == PERSONAL_SERVER
     assert set(mcp["servers"]) == {"local"}
     assert "enabled" not in mcp["servers"]["local"]
+
+
+def test_opencode_v2_global_install_and_rollback_to_v1(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A user-scope v2 config gets native entries; removing the map restores v1."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
+    project = isolated.work_root / "project"
+    project.mkdir()
+    global_path = isolated.home / ".config" / "opencode" / "opencode.json"
+    global_path.parent.mkdir(parents=True)
+    global_path.write_text(
+        json.dumps({"theme": "user-theme", "mcp": {"servers": {"personal": PERSONAL_SERVER}}}),
+        encoding="utf-8",
+    )
+    local = {
+        "name": "local",
+        "registry": False,
+        "transport": "stdio",
+        "command": "echo",
+        "enabled": False,
+    }
+    manifest = {
+        "name": "opencode-v2-global",
+        "version": "1.0.0",
+        "targets": ["opencode"],
+        "dependencies": {"apm": [], "mcp": [local]},
+    }
+    dump_yaml(manifest, isolated.config_root / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    environment = isolated.subprocess_env()
+
+    def install(scenario_id: str):
+        result = runner.run(
+            ("install", "--global", "--runtime", "opencode", "--no-policy"),
+            cwd=project,
+            env=environment,
+            scenario_id=scenario_id,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    install("opencode-v2-global-install")
+    rendered = json.loads(global_path.read_text(encoding="utf-8"))
+    assert rendered["theme"] == "user-theme"
+    assert set(rendered["mcp"]) == {"servers"}
+    servers = rendered["mcp"]["servers"]
+    assert servers["personal"] == PERSONAL_SERVER
+    assert servers["local"]["disabled"] is True
+    assert "enabled" not in servers["local"]
+    assert not (project / "opencode.json").exists()
+
+    installed = global_path.read_bytes()
+    install("opencode-v2-global-reinstall")
+    assert global_path.read_bytes() == installed
+
+    del rendered["mcp"]["servers"]
+    global_path.write_text(json.dumps(rendered), encoding="utf-8")
+    install("opencode-v2-global-rollback")
+    mcp = json.loads(global_path.read_text(encoding="utf-8"))["mcp"]
+    assert set(mcp) == {"local"}
+    assert mcp["local"]["enabled"] is False
+    assert "disabled" not in mcp["local"]
