@@ -197,12 +197,27 @@ def test_fan_out_expansion_is_rejected_by_a_shared_budget(
 def test_entries_unsafe_on_windows_are_rejected_before_any_write(tmp_path: Path, name: str) -> None:
     """A directory link must not copy a host-unsafe entry name (``..\\`` or ``:``)."""
     origin, _ = build_link_origin(tmp_path, {"pkg/assets": "../evil"})
+
     # mktree bypasses index path checks, so a POSIX-authored name can be
     # committed even where Git for Windows refuses to stage it.
+    def mktree(listing: str) -> str:
+        # Bytes, not text: Windows text-mode stdin would append CR to names.
+        return (
+            subprocess.run(
+                ["git", "-C", str(origin), "mktree"],
+                input=listing.encode("utf-8"),
+                env=neutral_git_env(),
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+            .stdout.decode("ascii")
+            .strip()
+        )
+
     blob = git("-C", str(origin), "hash-object", "-w", "--stdin", input="payload")
-    evil = git("-C", str(origin), "mktree", input=f"100644 blob {blob}\t{name}\n")
-    root = git("-C", str(origin), "ls-tree", "HEAD") + f"\n040000 tree {evil}\tevil\n"
-    tree = git("-C", str(origin), "mktree", input=root)
+    evil = mktree(f"100644 blob {blob}\t{name}\n")
+    tree = mktree(git("-C", str(origin), "ls-tree", "HEAD") + f"\n040000 tree {evil}\tevil\n")
     commit = git("-C", str(origin), "commit-tree", tree, "-p", "HEAD", "-m", "unsafe entry")
     git("-C", str(origin), "update-ref", "refs/heads/main", commit)
     # Planning reads only the commit tree, so no checkout is needed (Git for
