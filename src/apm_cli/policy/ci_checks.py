@@ -1016,8 +1016,9 @@ def run_baseline_checks(
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
-    When *ci_mode* is ``True``, the ``manifest-missing`` check is a hard
-    failure (``passed=False``); otherwise it is an advisory warning only.
+    When *ci_mode* is ``True``, a missing ``apm.yml`` is always a hard
+    ``manifest-missing`` failure, so a CI gate never passes without auditing
+    anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
@@ -1060,6 +1061,20 @@ def run_baseline_checks(
                             "apm.yml is missing but APM artifacts"
                             " (.apm/ or apm.lock.yaml or apm.lock) were found"
                             " -- this may indicate a deleted manifest"
+                        ),
+                    )
+                )
+            elif ci_mode:
+                # A CI gate that checks nothing must not pass: the usual cause
+                # is running from a subdirectory or the wrong checkout path.
+                result.checks.append(
+                    CheckResult(
+                        name="manifest-missing",
+                        passed=False,
+                        message=(
+                            "No apm.yml in the current directory -- nothing was audited."
+                            " Run 'apm audit --ci' from the project root that"
+                            " contains apm.yml (APM does not search parent directories)."
                         ),
                     )
                 )

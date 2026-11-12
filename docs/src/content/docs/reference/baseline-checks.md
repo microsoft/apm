@@ -31,6 +31,7 @@ first failure to skip expensive I/O.
 | ID | Severity | Source | Always on? |
 |---|---|---|---|
 | `manifest-parse` | block | `ci_checks.py` | only when `apm.yml` cannot be parsed |
+| `manifest-missing` | block in `--ci`, advisory otherwise | `ci_checks.py` | only when `apm.yml` is absent |
 | `lockfile-exists` | block | `ci_checks.py` | yes |
 | `ref-consistency` | block | `ci_checks.py` | yes |
 | `deployment-ledger-owners` | block | `ci_checks.py` | yes |
@@ -57,6 +58,12 @@ the [policy schema](../policy-schema/).
 - **Fails when.** The file exists but cannot be parsed (`yaml.YAMLError`, `ValueError`, or `OSError`).
 - **Effect.** Skips every other check and exits `1`. This is the only check that runs before the lockfile gate.
 - **Remediation.** Fix the YAML syntax error reported in the message and re-run.
+
+### `manifest-missing`
+
+- **What it verifies.** That the current directory holds the `apm.yml` to audit. APM does not search parent directories.
+- **Fails when.** In `--ci` mode, `apm.yml` is absent: from a subdirectory or a wrong checkout path the gate would otherwise pass without auditing anything. Without `--ci` it is an advisory warning, shown only when `.apm/`, `apm.lock.yaml` or `apm.lock` suggests a deleted manifest.
+- **Remediation.** Run `apm audit --ci` from the project root that contains `apm.yml`, or restore the deleted manifest.
 
 ### `lockfile-exists`
 

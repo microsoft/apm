@@ -562,6 +562,9 @@ on stderr, not a JSON audit report. Missing or modified managed files retain
 the existing drift and CI-check rules; bare audit drift is advisory unless
 configured otherwise. Retained historical paths remain eligible for CI
 presence and recorded-hash checks. Audit does not repair them.
+Run `apm audit --ci` from the project root: APM does not search parent
+directories, and without an `apm.yml` in the current directory the gate fails
+`manifest-missing` (exit 1) instead of passing an empty audit.
 
 For shared hook targets, drift compares only APM-owned hook entries. Ownership
 sidecars are compared as JSON: object-key order and formatting do not cause

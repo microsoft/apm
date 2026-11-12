@@ -144,7 +144,7 @@ single-file `--file` operation is unchanged.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--ci` | off | Run lockfile consistency checks and drift as a CI gate. Cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`. |
+| `--ci` | off | Run lockfile consistency checks and drift as a CI gate. Run it from the project root: without an `apm.yml` in the current directory it fails `manifest-missing` (exit 1) instead of passing an empty audit. Cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`. |
 | `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. A path, URL, or `owner/repo` that cannot be loaded (missing, unreachable, malformed) fails the gate with exit 1; `org` keeps the discovery default (warn unless `policy.fetch_failure_default: block`). Experimental. Without `--ci` it is ignored with a warning. |
 | `--no-policy` | off | Skip policy discovery and enforcement. Overridden when `--policy` is passed explicitly. `APM_POLICY_DISABLE=1` also disables enforcement, but it is not overridden by `--policy`: audit prints a `[!]` warning that the explicit policy was not enforced and reports `policy.enforced: false`. |
 | `--no-cache` | off | Force a fresh policy fetch (skip the policy cache). Only relevant with policy discovery active. |
