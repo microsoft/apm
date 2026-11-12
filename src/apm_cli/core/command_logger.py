@@ -617,6 +617,14 @@ class InstallLogger(CommandLogger):
         noun = "file" if count == 1 else "files"
         _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
 
+    def frozen_orphans_kept(self, dep_keys: list[str]) -> None:
+        """Name undeclared packages a frozen install left in place (#3662)."""
+        _rich_info(
+            "Kept packages no longer in apm.yml because --frozen does not change "
+            f"apm.lock.yaml: {', '.join(dep_keys)}. Run 'apm install' to remove them.",
+            symbol="info",
+        )
+
     def orphan_cleanup(self, count: int):
         """Log post-install orphan-file cleanup outcome at default verbosity.
 

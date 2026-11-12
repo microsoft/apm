@@ -516,16 +516,26 @@ class LockfileBuilder:
                         # OR package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
                     elif retained := retained_orphans.get(dep_key):
-                        self._keep_retained_orphan(lockfile, dep_key, dep, retained)
+                        self._keep_retained_orphan(
+                            lockfile, dep_key, dep, retained, self.ctx.existing_lockfile
+                        )
                     # else: orphan -- package was in lockfile but is no longer in
                     # the manifest (full install only). Don't preserve so the
                     # lockfile stays in sync with what apm.yml declares.
 
     @staticmethod
     def _keep_retained_orphan(
-        lockfile: LockFile, dep_key: str, dep: object, retained: dict[str, str | None]
+        lockfile: LockFile,
+        dep_key: str,
+        dep: object,
+        retained: dict[str, str | None],
+        source: LockFile | None = None,
     ) -> None:
-        """Keep an orphan's undeleted files owned so the next install can retry."""
+        """Keep an orphan's undeleted files owned so the next install can retry.
+
+        *source* is the lockfile the orphan came from when *lockfile* is a fresh
+        build; its rows keep the orphan's concrete target attribution.
+        """
         retained_files = [path for path in dep.deployed_files if path in retained]
         retained_hashes = {
             path: dep.deployed_file_hashes[path]
@@ -540,6 +550,7 @@ class LockfileBuilder:
             dep_key,
             retained_files,
             retained_hashes,
+            provenance=DeploymentLedgerCodec.from_lockfile(source) if source else None,
         )
 
     def _reconcile_partial_subtree(self, existing: LockFile) -> None:
