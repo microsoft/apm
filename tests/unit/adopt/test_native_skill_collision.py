@@ -129,3 +129,24 @@ def test_native_skill_metadata_uses_first_successful_destination(
     assert [item.message for item in diagnostics.by_category()["collision"]] == [
         first.relative_to(tmp_path).as_posix()
     ]
+
+
+def test_native_skill_deploys_into_empty_preexisting_directory(tmp_path: Path) -> None:
+    """An empty pre-existing skill directory must not count as an unmanaged collision."""
+    info = package(tmp_path)
+    target = tmp_path / ".agents/skills/review"
+    target.mkdir(parents=True)
+    diagnostics = DiagnosticCollector()
+    result = SkillIntegrator().integrate_package_skill(
+        info,
+        tmp_path,
+        targets=[KNOWN_TARGETS["copilot"]],
+        managed_files=set(),
+        diagnostics=diagnostics,
+    )
+    assert result.target_paths == [target]
+    assert not result.skill_skipped
+    assert result.skill_created
+    assert not result.skill_updated
+    assert snapshot(target) == snapshot(info.install_path)
+    assert not diagnostics.by_category().get("collision")

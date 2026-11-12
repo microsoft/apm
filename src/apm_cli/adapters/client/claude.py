@@ -297,28 +297,24 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     # Entries written before references were kept (#3252)
     # ------------------------------------------------------------------ #
 
-    def matches_legacy_managed_config(
-        self, native: object, expected: dict, *, native_hash: str | None = None
+    def matches_legacy_managed_server_config(
+        self, native: object, expected: dict, *, recorded_write: bool | None = None
     ) -> bool:
         """Whether *native* is the expanded form APM wrote for *expected*.
 
         Earlier releases expanded references at install time. Such an entry is
         treated as APM-generated only when it is unchanged since APM recorded
-        its write hash, or when expanding the references in *expected* (the
-        current rendering of the same declaration) from this environment
+        its write fingerprint, or when expanding the references in *expected*
+        (the current rendering of the same declaration) from this environment
         reproduces it exactly. Anything else may hold user edits.
         """
         if self._is_user_scope() or not isinstance(native, dict):
             return False
         if not any(_CLAUDE_REFERENCE_RE.search(text) for text in _string_leaves(expected)):
             return False
-        comparable = self.managed_server_config(native)
-        if native_hash is not None:
-            from apm_cli.install.mcp.ownership import mcp_native_hash
-
-            if mcp_native_hash(comparable) == native_hash:
-                return True
-        return _legacy_equivalent(comparable, expected, os.environ)
+        if recorded_write:
+            return True
+        return _legacy_equivalent(self.managed_server_config(native), expected, os.environ)
 
     def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
         """Explain a preserved entry that holds values where apm.yml has references."""
@@ -583,7 +579,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry")
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             previously_baked = self._begin_env_tracking(server_url, server_name)
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)

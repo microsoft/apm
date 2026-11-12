@@ -209,7 +209,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             # Update configuration using the chosen key
             self.update_config({config_key: server_config})
@@ -606,7 +606,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                 config["env"] = resolved_env
         elif registry_name == "docker":
             config["command"] = "docker"
-            runtime_args = processed_runtime_args or ["run", "-i", "--rm"]
+            runtime_args = self._ensure_docker_run_args(processed_runtime_args)
             docker_args = self._inject_env_vars_into_docker_args(
                 self._ensure_docker_image_arg(runtime_args, package_name),
                 resolved_env,

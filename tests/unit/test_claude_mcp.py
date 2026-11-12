@@ -506,7 +506,7 @@ class TestClaudeLegacyEntries(unittest.TestCase):
     def test_expansion_from_current_environment_is_recognized(self):
         with patch.dict(os.environ, {"OLD_TOKEN": "old-sentinel"}):
             self.assertTrue(
-                self.adapter.matches_legacy_managed_config(
+                self.adapter.matches_legacy_managed_server_config(
                     self._native("old-sentinel"), _LEGACY_EXPECTED
                 )
             )
@@ -514,7 +514,7 @@ class TestClaudeLegacyEntries(unittest.TestCase):
     def test_other_values_are_not_recognized(self):
         with patch.dict(os.environ, {"OLD_TOKEN": "rotated"}):
             self.assertFalse(
-                self.adapter.matches_legacy_managed_config(
+                self.adapter.matches_legacy_managed_server_config(
                     self._native("old-sentinel"), _LEGACY_EXPECTED
                 )
             )
@@ -523,20 +523,41 @@ class TestClaudeLegacyEntries(unittest.TestCase):
         with patch.dict(os.environ):
             os.environ.pop("OLD_TOKEN", None)
             native = self._native("${env:OLD_TOKEN}")
-            self.assertTrue(self.adapter.matches_legacy_managed_config(native, _LEGACY_EXPECTED))
+            self.assertTrue(
+                self.adapter.matches_legacy_managed_server_config(native, _LEGACY_EXPECTED)
+            )
 
     def test_unresolved_registry_variable_written_empty_is_recognized(self):
         expected = {"type": "stdio", "command": "npx", "args": [], "env": {"API_KEY": "${API_KEY}"}}
         native = {"type": "stdio", "command": "npx", "args": [], "env": {"API_KEY": ""}}
         with patch.dict(os.environ):
             os.environ.pop("API_KEY", None)
-            self.assertTrue(self.adapter.matches_legacy_managed_config(native, expected))
+            self.assertTrue(self.adapter.matches_legacy_managed_server_config(native, expected))
 
     def test_extra_or_missing_keys_are_not_recognized(self):
         native = self._native("old-sentinel")
         native["env"]["EXTRA"] = "user-added"
         with patch.dict(os.environ, {"OLD_TOKEN": "old-sentinel"}):
-            self.assertFalse(self.adapter.matches_legacy_managed_config(native, _LEGACY_EXPECTED))
+            self.assertFalse(
+                self.adapter.matches_legacy_managed_server_config(native, _LEGACY_EXPECTED)
+            )
+
+    def test_unchanged_recorded_write_is_recognized_without_environment(self):
+        with patch.dict(os.environ):
+            os.environ.pop("OLD_TOKEN", None)
+            self.assertTrue(
+                self.adapter.matches_legacy_managed_server_config(
+                    self._native("typed-at-a-prompt"), _LEGACY_EXPECTED, recorded_write=True
+                )
+            )
+
+    def test_mismatched_recorded_write_still_needs_exact_expansion(self):
+        with patch.dict(os.environ, {"OLD_TOKEN": "rotated"}):
+            self.assertFalse(
+                self.adapter.matches_legacy_managed_server_config(
+                    self._native("old-sentinel"), _LEGACY_EXPECTED, recorded_write=False
+                )
+            )
 
     def test_conflict_guidance_names_fields_without_values(self):
         native = self._native("someone-elses-value")

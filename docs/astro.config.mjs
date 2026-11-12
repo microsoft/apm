@@ -85,6 +85,9 @@ export default defineConfig({
 				baseUrl: 'https://github.com/microsoft/apm/edit/main/docs/',
 			},
 			lastUpdated: true,
+			components: {
+				Footer: './src/components/Footer.astro',
+			},
 			head: [
 				{
 					tag: 'meta',

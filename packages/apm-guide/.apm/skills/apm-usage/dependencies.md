@@ -77,14 +77,14 @@ fallback requires an exhausted plan with an executed same-origin effective
 HTTPS attempt. Path containment rejects symlink or traversal escapes.
 See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-self-managed).
 
-### Git symlink checkout fallback
+### Packages with symbolic links
 
-APM preserves Git's detected `core.symlinks` setting and explicit command-scope
-overrides without changing global Git configuration, so a successful checkout
-is not proof that a package requiring real symlinks works (common on non-admin
-Windows accounts). See [Install packages: symlink checkout
-fallback](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong)
-for the full behavior and troubleshooting steps.
+APM checks out in-repo links in a dependency as real symlinks
+(`core.symlinks=true` on its own Git commands only), so the `content_hash` is
+the same on every platform. A host that cannot create symlinks fails the
+install with a diagnostic naming the package; on Windows enable Developer
+Mode or the "Create symbolic links" privilege. See [Install packages: when
+things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
 
 ### Custom git ports
 
@@ -121,6 +121,8 @@ across protocols.
 | `https://...` or `http://...` | The explicit HTTP(S) scheme |
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Shorthand otherwise | HTTPS |
+
+`apm audit --ci` cold replay uses the same declared transport as install.
 
 A failed clone fails loudly, naming the URL and the protocol attempted.
 An explicit scheme prevents APM from selecting another protocol unless
@@ -583,7 +585,18 @@ dependencies:
         #                            Reinstall replaces values APM wrote earlier.
         #                            Claude user scope (-g)/Windsurf/Gemini:
         #                            resolved at install time.
-        #                            Codex: env resolved at install time; a remote
+        #                            Codex project scope: a stdio env value that is
+        #                            exactly KEY: ${KEY} or KEY: ${env:KEY} becomes
+        #                            env_vars = ["KEY"], read from the environment
+        #                            that launches Codex and never written. Other
+        #                            references are still resolved at install time
+        #                            and written, with a names-only warning.
+        #                            Reinstall replaces an APM-written value only for
+        #                            an unchanged managed entry; otherwise it keeps
+        #                            the entry, exits 1, and asks you to reconcile
+        #                            by hand and rotate any committed credential.
+        #                            Codex user scope (-g): env resolved at install
+        #                            time as before; a remote
         #                            server's headers are written as
         #                            bearer_token_env_var / env_http_headers and
         #                            resolved by Codex at server-start.
@@ -657,7 +670,8 @@ for the dependency contract.
 MCP Registry v0.1 uses `registryType: oci` for container packages. APM
 maps that type to the Docker launcher automatically, preserves Docker
 run options before the image, and appends package arguments after the
-image. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
+image. Options-only `runtimeArguments` (no leading `run`) gain
+`run -i --rm` ahead of them. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
 then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
 available when the harness starts an OCI server. Do not add per-target
 launcher overrides.

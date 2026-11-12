@@ -180,7 +180,7 @@ class TestGitCacheGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
         )
 
         # Mock git rev-parse HEAD to return the expected SHA
@@ -412,7 +412,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+        )
 
         with (
             patch("subprocess.run") as mock_run,
@@ -477,7 +479,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
-        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
+        (final_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+        )
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 
         def _populate(*args, **kwargs):
