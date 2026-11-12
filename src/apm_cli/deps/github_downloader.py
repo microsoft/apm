@@ -1899,6 +1899,9 @@ class GitHubPackageDownloader:
                     package = validation_result.package
                     package.source = dep_ref.to_github_url()
                     package.resolved_commit = resolved_ref.resolved_commit
+                    # Single stamping implementation (shared with the clone
+                    # paths): also invalidates the from_apm_yml cache entry
+                    # after rewriting apm.yml (apm#2619 migration fallout).
                     from .package_validator import stamp_plugin_version
 
                     stamp_plugin_version(

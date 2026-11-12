@@ -199,6 +199,7 @@ class InstallContext:
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+    skill_baseline_refused: bool = False  # integrate -- preflight refused before any write
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.
