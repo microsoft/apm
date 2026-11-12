@@ -34,6 +34,8 @@ from apm_cli.core.tls_trust import (
     ensure_child_tls_bootstrap,
     has_explicit_ca_override,
     log_tls_trust_status,
+    selected_tls_trust,
+    tls_failure_guidance,
 )
 
 _NON_REQUESTS_CA_ENV_VARS = ("SSL_CERT_FILE", "SSL_CERT_DIR")
@@ -47,9 +49,17 @@ _ALL_TRUST_ENV = (
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Start each test from a pristine env (no override / opt-out set)."""
+    """Start each test from a pristine env (no override / opt-out set).
+
+    Also restore the module's recorded trust selection afterwards so a
+    synthetic selection made here never leaks into failure-guidance tests.
+    """
+    import apm_cli.core.tls_trust as tls
+
     for var in _ALL_TRUST_ENV:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(tls, "_LAST_TLS_STATUS", tls._LAST_TLS_STATUS)
+    monkeypatch.setattr(tls, "_LAST_TLS_SELECTION", tls._LAST_TLS_SELECTION)
 
 
 def _install_fake_truststore(monkeypatch, inject=None, ssl_context=None):
@@ -794,3 +804,180 @@ def test_ensure_child_tls_bootstrap_write_failure_leaves_no_partial(tmp_path, mo
     assert not (site / "_apm_tls_bootstrap.py").exists()
     assert not (site / "_apm_tls.pth").exists()
     assert list(site.glob(".apm_tls_*.tmp")) == []
+
+
+# ---------------------------------------------------------------------------
+# #2035 -- normal TLS failure guidance must match the selected trust mode.
+# Before the fix the hint was unconditional: it recommended the OS trust store
+# and APM_EXTRA_CA_BUNDLE even when an opt-out or an explicit replacement
+# bundle made both ineffective.
+# ---------------------------------------------------------------------------
+
+# Advice from the former unconditional hint that the opt-out and replacement
+# modes ignore. It must never be offered as a remedy in those modes.
+_IGNORED_REMEDIES = (
+    "installed in the OS trust store",
+    f"set {_EXTRA_CA_ENV_VAR} to a readable PEM bundle",
+)
+
+
+def _guidance_after(env: dict[str, str]) -> str:
+    """Select trust through the canonical owner, then render its guidance."""
+    configure_tls_trust(env=env)
+    return tls_failure_guidance()
+
+
+def test_unavailable_selection_keeps_default_guidance_without_claiming_a_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import apm_cli.core.tls_trust as tls
+
+    monkeypatch.setattr(tls, "_LAST_TLS_SELECTION", None)
+    guidance = tls_failure_guidance()
+
+    # The former unconditional text: it recommends both ignored remedies.
+    assert all(remedy in guidance for remedy in _IGNORED_REMEDIES)
+    assert "uses the system trust store by default" in guidance
+    assert " is set" not in guidance
+
+
+def test_opt_out_guidance_names_setting_and_drops_ignored_remedies() -> None:
+    guidance = _guidance_after({_DISABLE_ENV_VAR: "1"})
+
+    assert selected_tls_trust().source.value == "opt-out"
+    assert f"{_DISABLE_ENV_VAR} is set" in guidance
+    assert f"unset {_DISABLE_ENV_VAR}" in guidance
+    assert "REQUESTS_CA_BUNDLE to a complete PEM bundle" in guidance
+    assert not any(remedy in guidance for remedy in _IGNORED_REMEDIES)
+
+
+@pytest.mark.parametrize(
+    ("env", "winner"),
+    [
+        ({"REQUESTS_CA_BUNDLE": "/replacement/requests.pem"}, "REQUESTS_CA_BUNDLE"),
+        ({"CURL_CA_BUNDLE": "/replacement/curl.pem"}, "CURL_CA_BUNDLE"),
+        (
+            {
+                "REQUESTS_CA_BUNDLE": "/replacement/requests.pem",
+                "CURL_CA_BUNDLE": "/replacement/curl.pem",
+            },
+            "REQUESTS_CA_BUNDLE",
+        ),
+    ],
+    ids=["requests", "curl", "requests-over-curl"],
+)
+def test_replacement_guidance_names_winning_bundle(env: dict[str, str], winner: str) -> None:
+    guidance = _guidance_after(env)
+
+    assert f"{winner} is set and replaces the complete Requests trust set" in guidance
+    assert f"unset {winner}" in guidance
+    assert "the OS trust store and APM_EXTRA_CA_BUNDLE are not used" in guidance
+    assert _DISABLE_ENV_VAR not in guidance
+    assert not any(remedy in guidance for remedy in _IGNORED_REMEDIES)
+
+
+def test_replacement_with_opt_out_names_both_settings() -> None:
+    guidance = _guidance_after(
+        {"CURL_CA_BUNDLE": "/replacement/curl.pem", _DISABLE_ENV_VAR: "1"},
+    )
+
+    selection = selected_tls_trust()
+    assert selection.source.value == "replacement"
+    assert selection.opt_out is True
+    assert "CURL_CA_BUNDLE is set and replaces" in guidance
+    assert f"If you unset CURL_CA_BUNDLE, {_DISABLE_ENV_VAR} still applies" in guidance
+    assert "bundled CA set only" in guidance
+    assert not any(remedy in guidance for remedy in _IGNORED_REMEDIES)
+
+
+@pytest.mark.parametrize(
+    "precedence",
+    [{_DISABLE_ENV_VAR: "1"}, {"REQUESTS_CA_BUNDLE": "/replacement/requests.pem"}],
+    ids=["opt-out", "replacement"],
+)
+def test_ignored_additive_bundle_is_not_recommended(
+    tmp_path: Path, precedence: dict[str, str]
+) -> None:
+    env = {_EXTRA_CA_ENV_VAR: str(tmp_path / "must-not-be-read.pem"), **precedence}
+
+    guidance = _guidance_after(env)
+
+    assert f"OS trust store and {_EXTRA_CA_ENV_VAR} are not used" in guidance
+    assert not any(remedy in guidance for remedy in _IGNORED_REMEDIES)
+
+
+def test_os_store_guidance_is_unchanged_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    import apm_cli.core.tls_trust as tls
+
+    _install_fake_truststore(monkeypatch)
+
+    guidance = _guidance_after({})
+
+    assert selected_tls_trust().source.value == "os-store"
+    assert guidance == tls._DEFAULT_TLS_FAILURE_GUIDANCE
+
+
+def test_os_store_additive_guidance_points_at_both_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import certifi
+
+    import apm_cli.core.tls_trust as tls
+
+    _install_fake_truststore(monkeypatch)
+    monkeypatch.setattr(tls, "_install_additive_ca_context", lambda *_args: None)
+
+    guidance = _guidance_after({_EXTRA_CA_ENV_VAR: certifi.where()})
+
+    assert "OS trust store plus the APM_EXTRA_CA_BUNDLE certificates" in guidance
+    assert "is set" not in guidance
+
+
+def test_certifi_fallback_guidance_does_not_offer_os_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "truststore", None)
+
+    guidance = _guidance_after({})
+
+    assert selected_tls_trust().source.value == "certifi-fallback"
+    assert "does not read the OS trust store" in guidance
+    assert "installed in the OS trust store" not in guidance
+    assert f"Set {_EXTRA_CA_ENV_VAR} to a readable PEM bundle" in guidance
+
+
+def test_certifi_additive_guidance_points_at_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    import certifi
+
+    import apm_cli.core.tls_trust as tls
+
+    monkeypatch.setitem(sys.modules, "truststore", None)
+    monkeypatch.setattr(tls, "_install_additive_ca_context", lambda *_args: None)
+
+    guidance = _guidance_after({_EXTRA_CA_ENV_VAR: certifi.where()})
+
+    assert selected_tls_trust().source.value == "certifi-additive"
+    assert f"bundled CA set plus the {_EXTRA_CA_ENV_VAR} certificates" in guidance
+    assert "installed in the OS trust store" not in guidance
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {},
+        {_DISABLE_ENV_VAR: "1"},
+        {"REQUESTS_CA_BUNDLE": "/replacement/requests.pem", _DISABLE_ENV_VAR: "1"},
+    ],
+    ids=["default", "opt-out", "replacement-opt-out"],
+)
+def test_failure_guidance_is_ascii_and_never_claims_cause(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    _install_fake_truststore(monkeypatch)
+
+    guidance = _guidance_after(env)
+
+    assert guidance.isascii()
+    assert guidance.startswith("TLS verification failed -- ")
+    assert "caused" not in guidance
+    assert "ssl-issues" in guidance

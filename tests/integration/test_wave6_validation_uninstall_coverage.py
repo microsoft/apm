@@ -22,6 +22,13 @@ from apm_cli.deps.lockfile import LockedDependency
 class TestTLSHelpers:
     """Cover _is_tls_failure, _log_tls_failure."""
 
+    @pytest.fixture(autouse=True)
+    def _default_trust_selection(self, monkeypatch):
+        """Pin the unrecorded trust selection whose guidance these tests assert."""
+        import apm_cli.core.tls_trust as tls
+
+        monkeypatch.setattr(tls, "_LAST_TLS_SELECTION", None)
+
     def test_is_tls_failure_with_ssl_error(self) -> None:
         from apm_cli.install.validation import _is_tls_failure
 
