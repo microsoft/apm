@@ -78,10 +78,12 @@ or removal of an old comment. Earlier approvals require fresh evidence.
 The deterministic PR eligibility report is **always neutral and advisory**.
 It distinguishes a present record, withdrawal, missing evidence, and read
 errors, but never grants implementation permission. GitHub's current comment
-snapshot cannot prove that a withdrawal was not deleted. Fresh human
-confirmation of the bounded issue scope is therefore still required before
-an automation run implements changes. No persistent authorization ledger,
-required check, or automatic closing/acceptance policy is introduced.
+snapshot cannot prove that a withdrawal was not deleted. The issue delivery
+worker may still treat a current unedited roster-authored issue record as
+its grant (see [CONTRIBUTING](CONTRIBUTING.md#scope-record-format)). The
+eligibility tool stays neutral; that grant is delivery-worker policy.
+No persistent authorization ledger, required check, or automatic
+closing/acceptance policy is introduced.
 
 ## Roadmap and release planning
 
@@ -178,8 +180,8 @@ Save these views with `repo:microsoft/apm is:issue` plus the filters below:
 | [Intake](https://github.com/orgs/microsoft/projects/2304/views/6) | Table: `is:open`. All open issues are visible, not implicitly approved. |
 | [Ready to contribute](https://github.com/orgs/microsoft/projects/2304/views/7) | Table: `is:open label:"status/accepted" label:"help wanted" no:assignee`. A discovery shortlist, not an approval check. |
 | [Release](https://github.com/orgs/microsoft/projects/2304/views/8) | Table: `has:milestone`, grouped by Milestone. Narrow to an existing milestone when needed; do not filter out closed issues. |
-| [Epics](https://github.com/orgs/microsoft/projects/2304/views/9) | Table: `is:open` with `parent-issue:` set to the ten `[EPIC]` issues, grouped by Parent issue. |
-| [Enterprise](https://github.com/orgs/microsoft/projects/2304/views/10) | Table: `is:open parent-issue:microsoft/apm#3297,microsoft/apm#3618,microsoft/apm#3619`, grouped by Parent issue. |
+| [Epics](https://github.com/orgs/microsoft/projects/2304/views/9) | Table: `is:open has:parent-issue`, grouped by Parent issue. Lists open sub-issues under their parent; an epic with no open sub-issues does not appear. |
+| [Enterprise](https://github.com/orgs/microsoft/projects/2304/views/10) | Table: `is:open pillar:Govern`, with the sub-issue hierarchy shown so each Govern epic lists its sub-issues. Filter by Pillar; saved views reject a comma list of `parent-issue` values. |
 | [Release 0.36](https://github.com/orgs/microsoft/projects/2304/views/11) | Table: `milestone:"0.36.0"`, grouped by Status. Retarget the milestone each release. |
 | [Shipped](https://github.com/orgs/microsoft/projects/2304/views/12) | Table: `is:closed status:Done`, sorted by Closed, newest first. |
 
