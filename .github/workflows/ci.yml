@@ -34,7 +34,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Ruff lint
       run: >-
@@ -144,7 +144,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -207,7 +207,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -247,7 +247,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11']
+        python-version: ['3.11']
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -260,7 +260,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
@@ -331,7 +331,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -366,7 +366,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -440,7 +440,7 @@ jobs:
 
     - name: Install uv
       if: steps.changes.outputs.run == 'true'
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -511,7 +511,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -657,7 +657,7 @@ jobs:
         } >> "$GITHUB_ENV"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 
@@ -712,7 +712,7 @@ jobs:
       # committed managed files are preserved: content-integrity detects
       # tampered file hashes and the drift replay compares the committed tree
       # (including .agents/skills/) against a fresh cache-free replay.
-      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -822,7 +822,7 @@ jobs:
         node-version: '24'
 
     - name: Install uv
-      uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
 

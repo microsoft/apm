@@ -1234,14 +1234,14 @@ check_python_requirements() {
         PYTHON_CMD="python"
     fi
     
-    # Check Python version (need 3.10+)
+    # Check Python version (need 3.11+)
     PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
     if [ -z "$PYTHON_VERSION" ]; then
         return 1
     fi
     
-    # Compare version (need >= 3.10)
-    REQUIRED_VERSION="3.10"
+    # Compare version (need >= 3.11)
+    REQUIRED_VERSION="3.11"
     if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$PYTHON_VERSION" | sort -V | head -n1)" = "$REQUIRED_VERSION" ]; then
         return 0  # Python version is sufficient
     else
@@ -1264,9 +1264,9 @@ print_selected_pip_install_command() {
 print_pip_recovery_guidance() {
     case "${PIP_FALLBACK_FAILURE:-python-unavailable}" in
         python-unavailable)
-            apm_echo "${YELLOW}Python 3.10+ is not available on this system.${NC}"
+            apm_echo "${YELLOW}Python 3.11+ is not available on this system.${NC}"
             echo ""
-            echo "Install Python 3.10+ first, then rerun this installer:"
+            echo "Install Python 3.11+ first, then rerun this installer:"
             echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
             echo "  CentOS/RHEL: sudo yum install python3 python3-pip"
             echo "  Alpine: apk add python3 py3-pip"

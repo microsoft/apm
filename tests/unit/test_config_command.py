@@ -1329,6 +1329,106 @@ class TestGetApmAllowProtocolFallback:
             assert cfg_module.get_apm_allow_protocol_fallback() is True
 
 
+class TestGithubAuthFirstFunctions:
+    """Tests for get_github_auth_first and set_github_auth_first in apm_cli.config."""
+
+    def test_get_github_auth_first_default_is_false(self):
+        """Default value is False when not set."""
+        import apm_cli.config as cfg_module
+
+        with patch.object(cfg_module, "get_config", return_value={}):
+            assert cfg_module.get_github_auth_first() is False
+
+    def test_get_github_auth_first_true(self):
+        """Returns True when set to True."""
+        import apm_cli.config as cfg_module
+
+        with patch.object(cfg_module, "get_config", return_value={"github_auth_first": True}):
+            assert cfg_module.get_github_auth_first() is True
+
+    def test_set_github_auth_first_calls_update_config(self):
+        """set_github_auth_first delegates to update_config."""
+        import apm_cli.config as cfg_module
+
+        with patch.object(cfg_module, "update_config") as mock_update:
+            cfg_module.set_github_auth_first(True)
+            mock_update.assert_called_once_with({"github_auth_first": True})
+
+    def test_set_github_auth_first_false_calls_update_config(self):
+        """set_github_auth_first(False) passes False to update_config."""
+        import apm_cli.config as cfg_module
+
+        with patch.object(cfg_module, "update_config") as mock_update:
+            cfg_module.set_github_auth_first(False)
+            mock_update.assert_called_once_with({"github_auth_first": False})
+
+
+class TestGetApmGithubAuthFirst:
+    """Tests for get_apm_github_auth_first resolution chain."""
+
+    def test_env_var_wins_over_config(self):
+        """APM_GITHUB_AUTH_FIRST=1 wins even when config is False."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_github_auth_first", return_value=False),
+            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": "1"}),
+        ):
+            assert cfg_module.get_apm_github_auth_first() is True
+
+    def test_env_var_true_wins(self):
+        """APM_GITHUB_AUTH_FIRST=true is accepted."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_github_auth_first", return_value=False),
+            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": "true"}),
+        ):
+            assert cfg_module.get_apm_github_auth_first() is True
+
+    def test_config_used_when_env_unset(self):
+        """Config value is used when APM_GITHUB_AUTH_FIRST is unset."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_github_auth_first", return_value=True),
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("APM_GITHUB_AUTH_FIRST", None)
+            assert cfg_module.get_apm_github_auth_first() is True
+
+    def test_returns_false_when_both_unset(self):
+        """Returns False when neither env var nor config is set."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_github_auth_first", return_value=False),
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("APM_GITHUB_AUTH_FIRST", None)
+            assert cfg_module.get_apm_github_auth_first() is False
+
+    def test_env_var_explicit_zero_overrides_config_true(self):
+        """APM_GITHUB_AUTH_FIRST=0 overrides a persisted config value of True."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_github_auth_first", return_value=True),
+            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": "0"}),
+        ):
+            assert cfg_module.get_apm_github_auth_first() is False
+
+    def test_empty_env_var_falls_through_to_config(self):
+        """Empty APM_GITHUB_AUTH_FIRST (unset/empty) falls back to config."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_github_auth_first", return_value=True),
+            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": ""}),
+        ):
+            assert cfg_module.get_apm_github_auth_first() is True
+
+
 class TestGetApmProtocolPref:
     """Tests for get_apm_protocol_pref resolution chain."""
 
@@ -1499,6 +1599,103 @@ class TestConfigGetAllowProtocolFallback:
         result = self.runner.invoke(config, ["get", "nonexistent"])
         assert result.exit_code == 1
         assert "allow-protocol-fallback" in result.output
+
+
+# ---------------------------------------------------------------------------
+# CLI -- apm config set github-auth-first
+# ---------------------------------------------------------------------------
+
+
+class TestConfigSetGithubAuthFirst:
+    """Tests for `apm config set github-auth-first <value>`."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_set_github_auth_first_true(self):
+        """Set github-auth-first to true."""
+        with patch("apm_cli.config.set_github_auth_first") as mock_set:
+            result = self.runner.invoke(config, ["set", "github-auth-first", "true"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with(True)
+
+    def test_set_github_auth_first_false(self):
+        """Set github-auth-first to false."""
+        with patch("apm_cli.config.set_github_auth_first") as mock_set:
+            result = self.runner.invoke(config, ["set", "github-auth-first", "false"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with(False)
+
+    def test_set_github_auth_first_invalid_value(self):
+        """Reject an invalid value."""
+        result = self.runner.invoke(config, ["set", "github-auth-first", "maybe"])
+        assert result.exit_code == 1
+
+    def test_set_github_auth_first_not_gated(self):
+        """github-auth-first does not require any experimental flag."""
+        with patch("apm_cli.config.set_github_auth_first"):
+            result = self.runner.invoke(config, ["set", "github-auth-first", "true"])
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# CLI -- apm config get github-auth-first
+# ---------------------------------------------------------------------------
+
+
+class TestConfigGetGithubAuthFirst:
+    """Tests for `apm config get github-auth-first`."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_get_github_auth_first_when_true(self):
+        """Display the configured github-auth-first when True."""
+        with patch("apm_cli.config.get_github_auth_first", return_value=True):
+            result = self.runner.invoke(config, ["get", "github-auth-first"])
+        assert result.exit_code == 0
+        assert "github-auth-first: true" in result.output
+
+    def test_get_github_auth_first_when_false(self):
+        """Display the configured github-auth-first when False."""
+        with patch("apm_cli.config.get_github_auth_first", return_value=False):
+            result = self.runner.invoke(config, ["get", "github-auth-first"])
+        assert result.exit_code == 0
+        assert "github-auth-first: false" in result.output
+
+    def test_get_all_config_includes_github_auth_first(self):
+        """apm config get (no key) shows github-auth-first only when true."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
+            patch("apm_cli.config.get_github_auth_first", return_value=True),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, ["get"])
+        assert result.exit_code == 0
+        assert "github-auth-first" in result.output
+
+    def test_get_all_config_suppresses_github_auth_first_when_false(self):
+        """apm config get (no key) omits github-auth-first when false (noise reduction)."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
+            patch("apm_cli.config.get_github_auth_first", return_value=False),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, ["get"])
+        assert result.exit_code == 0
+        assert "github-auth-first" not in result.output
+
+    def test_unknown_key_error_lists_github_auth_first(self):
+        """Error message for unknown keys lists github-auth-first as valid."""
+        result = self.runner.invoke(config, ["get", "nonexistent"])
+        assert result.exit_code == 1
+        assert "github-auth-first" in result.output
 
 
 # ---------------------------------------------------------------------------

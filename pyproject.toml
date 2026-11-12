@@ -7,15 +7,13 @@ name = "apm-cli"
 version = "0.35.1"
 description = "MCP configuration tool"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [
     {name = "Daniel Meppiel", email = "user@example.com"}
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: Apache Software License",
@@ -30,7 +28,6 @@ dependencies = [
     "python-frontmatter>=1.0.0",
     "llm>=0.28",
     "llm-github-models>=0.18.0",
-    "tomli>=1.2.0; python_version<'3.11'",
     "toml>=0.10.2",
     "tomlkit>=0.13",
     "rich>=13.0.0",
@@ -38,7 +35,7 @@ dependencies = [
     "watchdog>=3.0.0",
     "GitPython>=3.1.0",
     "ruamel.yaml>=0.18.0",
-    "filelock>=3.12",
+    "filelock>=4.2.1",
     "websockets>=12,<17",
 ]
 
@@ -75,15 +72,9 @@ include = ["apm_cli*"]
 # .pth inline), but packaging it keeps the source tree and wheel in sync.
 "apm_cli.core._child_tls" = ["*.pth"]
 
-[tool.uv]
-# filelock >=4.2.1 (the first release with the GHSA-v4x8-3wr5-3wq8 family of
-# fixes) requires Python >=3.11. Keep Python 3.10 on the 3.x line already
-# shipped (3.29.0) rather than resolving to the vulnerable 4.1.x releases.
-constraint-dependencies = ["filelock==3.29.0; python_version < '3.11'"]
-
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -107,6 +98,7 @@ ignore = [
     "S602",     # subprocess-popen-with-shell -- intentional in CLI wrapping git/pip
     # --- Deferred rules: enable in dedicated future PRs ---
     "SIM102",   # collapsible-if -- 28 violations, auto-fixable style improvement
+    "UP042",    # replace-str-enum -- StrEnum changes str()/format() output; migrate deliberately
 ]
 
 [tool.ruff.lint.pylint]
@@ -214,7 +206,7 @@ markers = [
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
     "windows_compat: load-bearing cross-platform regression contract family (CRLF-safe atomic writes, portable path formatting, git-executable resolution, socket/thread shutdown); runs on every OS and is additionally selected by the PR-time Windows Compatibility Gate -- NOT a requires_windows skip-gate, do not use requires_windows for this",
-    "trusted_executable: native trusted git/gh discovery and real consumer regressions; additionally selected on Windows Python 3.10 and 3.11",
+    "trusted_executable: native trusted git/gh discovery and real consumer regressions; additionally selected on Windows Python 3.11",
     "requires_e2e_mode: requires APM_E2E_TESTS=1",
     "requires_github_token: requires GITHUB_APM_PAT or GITHUB_TOKEN",
     "requires_ado_pat: requires ADO_APM_PAT",
