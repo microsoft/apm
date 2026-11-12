@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm marketplace add ./apm.yml --name <name>` registers a local authoring `apm.yml` as a live marketplace without running `apm pack`; `browse`, `view` and `install` reread the file on each command, relative package paths stay anchored to that file, and `--offline` on `add` and `browse` reads it without network when remote entries pin full commit SHAs. Registering or browsing never installs packages, runs hooks or writes catalog files. -- by @Nadeesha-D-Shalom (#3367)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
 - A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
