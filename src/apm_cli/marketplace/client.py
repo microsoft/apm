@@ -432,8 +432,11 @@ def _try_proxy_fetch(
 def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
     """Build the GitHub Contents API URL for a file (GitHub / GHES / generic)."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(source.ref, safe="")
-    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={encoded_ref}"
+    return (
+        f"{api_base}/repos/{source.owner}/{source.repo}/contents/{encoded_path}?ref={encoded_ref}"
+    )
 
 
 def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -> str:
@@ -1060,8 +1063,9 @@ _FETCHERS: dict[str, Callable] = {
 def _github_raw_contents_url(host_info, owner: str, repo: str, file_path: str, ref: str) -> str:
     """Build the GitHub Contents API URL for an arbitrary file."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(ref, safe="")
-    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={encoded_ref}"
+    return f"{api_base}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
 
 
 def fetch_raw(

@@ -316,6 +316,50 @@ range exits non-zero before you push the release commit. A full
 40-character commit SHA `ref` passes when the remote serves that commit;
 abbreviated SHAs are rejected.
 
+## One catalog per audience
+
+One `apm.yml` holds one `marketplace:` block. To publish a separate catalog
+per audience from one repository, give each audience a subfolder with its
+own `apm.yml` and run `apm pack` in that subfolder:
+
+```text
+agent-skills/
+  packages/lint/  packages/review/  packages/deploy/
+  catalogs/frontend/apm.yml   -> catalogs/frontend/marketplace.json
+  catalogs/backend/apm.yml    -> catalogs/backend/marketplace.json
+```
+
+```yaml
+# catalogs/frontend/apm.yml
+name: acme-frontend-catalog
+version: 1.0.0
+marketplace:
+  name: acme-frontend
+  owner:
+    name: Acme
+  output: marketplace.json
+  packages:
+    - name: lint
+      source: acme/agent-skills
+      subdir: packages/lint
+      version: "^1.0.0"
+```
+
+List packages as remote entries for this repository with `subdir`, as above.
+Local `./` entries are read relative to the subfolder when you pack, but
+consumers resolve them from the repository root, so they break in a
+subfolder catalog.
+
+Consumers register each catalog by path:
+
+```bash
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+```
+
+Separate catalogs help each audience find its packages. They are not access
+control: anyone who can read the repository can read every catalog and
+package in it. Use separate repositories when audiences need separate access.
+
 ## Pitfalls
 
 - **`packages:` not `plugins:`** in the `apm.yml` source. The

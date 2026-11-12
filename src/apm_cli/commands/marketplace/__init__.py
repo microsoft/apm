@@ -307,6 +307,7 @@ Examples:
   apm marketplace add git@gitea.example.com:org/repo.git --name custom
   apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
   apm marketplace add /srv/marketplaces/agent-forge --name agent-forge
+  apm marketplace add acme/skills --path catalogs/frontend/marketplace.json --name acme-frontend
 """
 
 
@@ -325,6 +326,16 @@ Examples:
     default=None,
     help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
 )
+@click.option(
+    "--path",
+    "catalog_path",
+    default=None,
+    metavar="PATH",
+    help=(
+        "Repository-relative path to the marketplace JSON file, for "
+        "catalogs outside the default locations. Skips auto-discovery."
+    ),
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.option(
     "--offline",
@@ -332,7 +343,7 @@ Examples:
     help="Read local apm.yml without network (remote entries need commit SHAs)",
 )
 @serialized_lifecycle
-def add(source, name, ref, branch, host, verbose, offline=False):
+def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
@@ -342,17 +353,25 @@ def add(source, name, ref, branch, host, verbose, offline=False):
     ``ssh://git@host:2222/org/repo.git``),
     a local filesystem path (including an explicitly selected ``apm.yml``),
     or a ``file://`` URI.
+
+    Without --path, APM looks for marketplace.json at the repository root,
+    then .github/plugin/, then .claude-plugin/. Use --path to select another
+    catalog in the same repository, for example one per audience.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
         from ...marketplace.client import (
             _auto_detect_path_with_payload,
+            _fetch_file,
             fetch_marketplace,
             is_local_authoring_source,
         )
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
-        from ...marketplace.source_identity import parse_marketplace_source
+        from ...marketplace.source_identity import (
+            admit_marketplace_catalog_path,
+            parse_marketplace_source,
+        )
 
         source_arg, fragment_ref = _split_source_fragment_ref(source)
 
@@ -412,6 +431,26 @@ def add(source, name, ref, branch, host, verbose, offline=False):
                 symbol="warning",
             )
 
+        explicit_path = None
+        if catalog_path is not None:
+            if is_direct_url:
+                logger.error(
+                    "--path is not supported for hosted marketplace.json URLs; "
+                    "the URL already names the catalog file. Remove --path.",
+                    symbol="error",
+                )
+                sys.exit(1)
+            try:
+                explicit_path = admit_marketplace_catalog_path(catalog_path)
+            except ValueError as exc:
+                logger.error(
+                    f"Invalid --path '{catalog_path}': {exc}. Use a path relative to the "
+                    "repository root that names a marketplace JSON file, "
+                    "for example catalogs/frontend/marketplace.json.",
+                    symbol="error",
+                )
+                sys.exit(1)
+
         if name is not None and not _is_valid_alias(name):
             logger.error(
                 f"Invalid marketplace name: '{name}'. "
@@ -459,8 +498,27 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             )
             sys.exit(1)
         if is_direct_url or _local_source_points_to_file(probe_source):
+            if explicit_path is not None:
+                logger.error(
+                    "--path is not supported when SOURCE is a marketplace.json file. "
+                    "Pass the repository directory as SOURCE instead.",
+                    symbol="error",
+                )
+                sys.exit(1)
             detected_path = ""
             discovered_manifest = None
+        elif explicit_path is not None:
+            discovered_manifest = _fetch_file(probe_source, explicit_path)
+            if discovered_manifest is None:
+                at_ref = "" if kind == "local" else f" at ref '{effective_ref}'"
+                logger.error(
+                    f"No marketplace catalog found at '{explicit_path}' in "
+                    f"'{probe_source.display_source}'{at_ref}. Check that --path is "
+                    "relative to the repository root and that the file exists.",
+                    symbol="error",
+                )
+                sys.exit(1)
+            detected_path = explicit_path
         else:
             detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
 
@@ -525,7 +583,9 @@ def add(source, name, ref, branch, host, verbose, offline=False):
         )
         if not is_direct_url:
             logger.verbose_detail(f"    Ref: {effective_ref}")
-        if detected_path:
+        if explicit_path is not None:
+            logger.verbose_detail(f"    Catalog path: {detected_path} (--path)")
+        elif detected_path:
             logger.verbose_detail(f"    Detected path: {detected_path}")
         elif not is_direct_url:
             logger.verbose_detail("    Detected path: direct local file")
@@ -537,6 +597,7 @@ def add(source, name, ref, branch, host, verbose, offline=False):
             ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
+        _warn_if_replacing_catalog(logger, final_source, explicit_path is not None)
         add_marketplace(final_source)
 
         logger.success(
@@ -621,6 +682,34 @@ def _local_source_points_to_file(source: MarketplaceSource) -> bool:
         return path.is_file() or is_local_authoring_source(source)
     except OSError:
         return False
+
+
+def _warn_if_replacing_catalog(
+    logger: CommandLogger, source: MarketplaceSource, explicit_path: bool
+) -> None:
+    """Warn before a registration silently replaces a different catalog.
+
+    Only fires when a catalog path is involved (``--path`` now, or a custom
+    path on the existing entry), so registrations without ``--path`` keep
+    their existing replace-by-name behaviour.
+    """
+    from ...marketplace.registry import get_registered_marketplaces
+
+    for existing in get_registered_marketplaces():
+        if existing.name.lower() != source.name.lower():
+            continue
+        if (existing.url, existing.path) == (source.url, source.path):
+            return
+        if explicit_path or existing.path != source.path:
+            where = existing.display_source
+            if existing.path:
+                where += f", path '{existing.path}'"
+            logger.warning(
+                f"Replacing marketplace '{existing.name}' ({where}). "
+                "Use --name to keep both registrations.",
+                symbol="warning",
+            )
+        return
 
 
 def _display_source_kind(kind: str, is_direct_url: bool) -> str:

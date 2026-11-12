@@ -27,8 +27,8 @@
     },
     {
       "id": "marketplace-source-admission",
-      "decision": "Marketplace source admission and transport identity",
-      "owner": "marketplace/source_identity.py (parse_marketplace_source)",
+      "decision": "Marketplace source admission, transport identity, and repository-relative catalog path",
+      "owner": "marketplace/source_identity.py (parse_marketplace_source, admit_marketplace_catalog_path)",
       "selectors": ["src/apm_cli/marketplace/source_identity.py"],
       "guards": ["marketplace-integrations-source-admission"]
     },

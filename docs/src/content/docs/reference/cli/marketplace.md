@@ -14,7 +14,7 @@ validating it, and preparing artifacts for consumer repositories).
 
 ```bash
 # Consume
-apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--offline]
+apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--path P] [--offline]
 apm marketplace list
 apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
@@ -144,6 +144,10 @@ apm marketplace add ./vendor/marketplace.json --name vendor
 
 # file:// URI
 apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
+
+# One catalog per audience from the same repository
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json --name acme-backend
 ```
 
 | Flag | Description |
@@ -152,12 +156,24 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. Applies only to git-backed sources. For HTTPS git URLs, a `#ref` fragment is equivalent and is stored as the ref. |
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
+| `--path` | Repository-relative path to the catalog JSON file, such as `catalogs/frontend/marketplace.json`. Skips auto-discovery. Applies to git-backed sources and local repository directories, not to hosted `marketplace.json` URLs or a direct local file. |
 | `--verbose`, `-v` | Show detailed output. |
 
-For git-backed sources without a direct file path, APM looks for the catalog
-at `marketplace.json`, `.github/plugin/marketplace.json`, then
-`.claude-plugin/marketplace.json`, and registers the first one found without
-downloading it again.
+Without `--path`, APM checks `marketplace.json`,
+`.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json`, and
+registers the first one found without downloading it again.
+
+With `--path`, APM reads only that file, like the `path` field of Claude Code's
+`github` and `git` marketplace sources. The path must stay inside the
+repository (no absolute paths, `..`, backslashes, `?`, or `#`) and name a
+`.json` file; an escaping or missing path fails before anything is registered.
+The path is saved in the registration, so `browse`, `search`, `update`, and
+`apm install` read the same catalog. Register several catalogs from one
+repository under different `--name` values; reusing a name for a different
+catalog replaces it with a warning. Relative plugin sources (`./plugins/x`) in
+any catalog resolve from the repository root, not from the catalog's folder.
+Separate catalogs help discovery but are not access control: anyone who can
+read the repository can read every catalog in it.
 
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
