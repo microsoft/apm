@@ -651,8 +651,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-user-hook-home-reference",
         rule_id="mutation_writes.user_hook_home_reference",
         path="src/apm_cli/integration/hook_integrator.py",
-        old="            if reference is not None:\n",
-        new='            if reference is not None and os.name != "nt":\n',
+        old="            if home_reference is None:\n",
+        new='            if home_reference is None or os.name == "nt":\n',
         intent="The hook rewriter gates home anchoring on the host OS, not the capability.",
     ),
     MutationCase(

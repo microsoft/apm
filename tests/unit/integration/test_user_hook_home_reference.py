@@ -128,13 +128,14 @@ class TestCapabilityCatalog:
     ) -> None:
         reference = UserHookHomeReference(shell_selectors=("bash",), evidence="https://x.test")
         monkeypatch.setattr(targets_mod, "_posix_shell_host", lambda: True)
-        assert reference.reference_for("bash", quote='"', exec_form=False) == "$HOME"
-        assert reference.reference_for("bash", quote="", exec_form=False) == "$HOME"
-        assert reference.reference_for("bash", quote="'", exec_form=False) is None
-        assert reference.reference_for("bash", quote="", exec_form=True) is None
-        assert reference.reference_for("powershell", quote="", exec_form=False) is None
+        assert reference.reference_for("bash", quote='"') == "$HOME"
+        assert reference.reference_for("bash", quote="") == "$HOME"
+        assert reference.reference_for("bash", quote="'") is None
+        assert reference.reference_for("powershell", quote="") is None
+        assert reference.for_handler({"command": "./run.sh"}) is reference
+        assert reference.for_handler({"command": "./run.sh", "args": []}) is None
         monkeypatch.setattr(targets_mod, "_posix_shell_host", lambda: False)
-        assert reference.reference_for("bash", quote="", exec_form=False) is None
+        assert reference.reference_for("bash", quote="") is None
 
 
 class TestRewrite:
@@ -163,11 +164,10 @@ class TestRewrite:
     @pytest.mark.parametrize(
         "kwargs",
         [
-            {"exec_form": True},
             {"source_key": "powershell"},
             {"reference": UserHookHomeReference(("bash",), "https://x.test")},
         ],
-        ids=["exec-form", "powershell-shell", "field-not-shell-executed"],
+        ids=["powershell-shell", "field-not-shell-executed"],
     )
     def test_non_shell_forms_stay_absolute(self, home: Path, kwargs: dict) -> None:
         absolute = (home / ".claude/hooks/my-pkg/hooks/run.sh").resolve()

@@ -18,7 +18,7 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -92,11 +92,32 @@ class UserHookHomeReference:
     reference: str = "$HOME"
     """Home reference the harness expands; ``$HOME`` unless a native placeholder exists."""
 
-    def reference_for(self, selector: str, *, quote: str, exec_form: bool) -> str | None:
+    def for_handler(self, handler: Mapping[str, object]) -> UserHookHomeReference | None:
+        """Return this capability for a shell-form handler; exec form (``args``) has no shell."""
+        return None if "args" in handler else self
+
+    def reference_for(self, selector: str, *, quote: str) -> str | None:
         """Return the home reference for one command field, or ``None`` to stay absolute."""
-        if exec_form or quote == "'" or selector not in self.shell_selectors:
+        if quote == "'" or selector not in self.shell_selectors:
             return None
         return self.reference if _posix_shell_host() else None
+
+    def anchor(self, path: Path, selector: str | None, *, quote: str) -> str:
+        """Return the hook command spelling of absolute *path* for one command field.
+
+        ``selector`` is the command field, or Claude's ``shell`` value (``None``
+        means the default shell form). Paths stay absolute unless the field is
+        shell-executed and *path* lives under the current home directory.
+        """
+        reference = self.reference_for(selector or "command", quote=quote)
+        if reference is None:
+            return str(path)
+        try:
+            relative = path.relative_to(Path.home().resolve())
+        except ValueError:
+            # A custom root such as CLAUDE_CONFIG_DIR outside home stays absolute.
+            return str(path)
+        return f"{reference}/{relative.as_posix()}"
 
 
 @dataclass(frozen=True)

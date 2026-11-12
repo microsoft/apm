@@ -106,9 +106,9 @@ def _check_user_hook_home_reference(provider: FactsProvider) -> Iterable[Violati
 
     ``TargetProfile.user_hook_home_reference`` owns which harnesses expand a
     home reference and for which command fields. Hook rewriters must resolve
-    it through ``_home_reference_for_hook_rewrite`` and ask
-    ``reference_for``; they must never gate anchoring on the host OS or emit
-    a hard-coded ``$HOME`` prefix themselves.
+    it through ``_home_reference_for_hook_rewrite``, narrow it per handler with
+    ``for_handler`` (exec form has no shell) and spell paths with ``anchor``;
+    they must never gate anchoring on the host OS or hard-code ``$HOME``.
     """
     rule_id = "mutation_writes.user_hook_home_reference"
     paths = (_USER_ROOT_OWNER, _HOOK_REWRITER, _KIRO_HOOK_REWRITER)
@@ -126,9 +126,11 @@ def _check_user_hook_home_reference(provider: FactsProvider) -> Iterable[Violati
             "TargetProfile must own the user-scope hook home reference capability",
         ),
         (
-            _has_fixed(owner, "def reference_for("),
+            _has_fixed(owner, "def reference_for(")
+            and _has_fixed(owner, "def for_handler(")
+            and _has_fixed(owner, "def anchor("),
             _USER_ROOT_OWNER,
-            "UserHookHomeReference must own the per-field home reference decision",
+            "UserHookHomeReference must own the per-handler and per-field decision",
         ),
         (
             _has_fixed(rewriter, '"user_hook_home_reference"'),
@@ -136,9 +138,11 @@ def _check_user_hook_home_reference(provider: FactsProvider) -> Iterable[Violati
             "hook rewriter must read the TargetProfile home reference capability",
         ),
         (
-            _has_fixed(rewriter, "home_reference.reference_for("),
+            _has_fixed(rewriter, "home_reference.anchor(")
+            and _has_fixed(rewriter, "home_reference.for_handler(matcher)")
+            and _has_fixed(rewriter, "home_reference.for_handler(hook)"),
             _HOOK_REWRITER,
-            "hook rewriter must ask the capability for the home reference",
+            "hook rewriter must ask the capability per handler and per path",
         ),
         (
             _has_fixed(kiro, "integrator._home_reference_for_hook_rewrite("),
