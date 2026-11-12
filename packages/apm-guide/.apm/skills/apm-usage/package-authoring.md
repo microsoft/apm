@@ -445,12 +445,15 @@ target-specific YAML arrays/lists (under `paths:` / `globs:` /
 For Cursor, APM emits one comma-joined scalar rather than a YAML list
 (`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
 characters are escaped. Descriptions keep printable non-ASCII text readable
-and are quoted when needed to preserve their value. With `--global`, Cursor
-rules deploy to `~/.cursor/rules/<name>.mdc`, which local Cursor 2.1+ clients
-include in context; `apm uninstall -g` removes only package-owned rules. For Antigravity, APM
+and are quoted when needed to preserve their value. For Antigravity, APM
 emits `trigger: glob` plus one double-quoted comma-joined string
 (`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
 `trigger: always_on`.
+
+With `--global`, Cursor rules deploy to `~/.cursor/rules/<name>.mdc`, which
+local Cursor 2.1+ clients include in context. `apm uninstall -g` removes only
+package-owned rules; an existing rule with the same name as a package rule is
+replaced on install.
 
 A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is
 normalized to the same comma-separated OR expression for distributed

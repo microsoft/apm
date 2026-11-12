@@ -171,7 +171,9 @@ Cursor.
   - hooks: `.cursor/hooks.json`
 - **User scope.** Supported. Instructions deploy to
   `~/.cursor/rules/<name>.mdc` (same `cursor_rules` transform as project
-  scope), and `apm uninstall -g` removes only package-owned rules. Local
+  scope), and `apm uninstall -g` removes only package-owned rules. As at
+  project scope, an existing rule with the same filename as a package rule is
+  replaced on install. Local
   Cursor 2.1+ clients include `~/.cursor/rules` in context
   ([changelog](https://cursor.com/changelog/2-1)). APM manages the files;
   other Cursor surfaces, such as cloud agents or remote workspaces, are not
