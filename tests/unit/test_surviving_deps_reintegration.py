@@ -556,7 +556,7 @@ _PRE_TOOL_USE = {
 }
 
 
-@pytest.mark.parametrize(
+_UNDEPLOYABLE_SURVIVOR_CASES = pytest.mark.parametrize(
     ("hook_documents", "message"),
     [
         pytest.param(
@@ -573,19 +573,17 @@ _PRE_TOOL_USE = {
                     "errorOccurred": [{"hooks": [{"type": "command", "command": "echo e"}]}]
                 }
             },
-            "no Claude Code equivalent",
+            "acme/survivor: hook events have no documented Claude Code name",
             id="event-without-claude-pair",
         ),
     ],
 )
-def test_uninstall_rejects_undeployable_survivor_hooks_before_wiping(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    hook_documents: dict[str, dict],
-    message: str,
-) -> None:
-    """A survivor whose hooks the rebuild would refuse keeps its live settings (#3226)."""
-    monkeypatch.chdir(tmp_path)
+
+
+def _seed_undeployable_survivor(
+    tmp_path: Path, hook_documents: dict[str, dict]
+) -> tuple[APMPackage, LockFile, dict[Path, bytes]]:
+    """Seed a hook survivor plus known-good Claude settings it owns."""
     survivor = tmp_path / "apm_modules" / "acme" / "survivor"
     survivor.mkdir(parents=True)
     (survivor / "apm.yml").write_text("name: survivor\nversion: 1.0.0\n", encoding="utf-8")
@@ -609,6 +607,19 @@ def test_uninstall_rejects_undeployable_survivor_hooks_before_wiping(
     survivors = LockFile()
     survivors.add_dependency(LockedDependency(repo_url="acme/survivor"))
     apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+    return apm_package, survivors, {config: config_bytes, sidecar: sidecar_bytes}
+
+
+@_UNDEPLOYABLE_SURVIVOR_CASES
+def test_uninstall_rejects_undeployable_survivor_hooks_before_wiping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_documents: dict[str, dict],
+    message: str,
+) -> None:
+    """A survivor whose hooks the rebuild would refuse keeps its live settings (#3226)."""
+    monkeypatch.chdir(tmp_path)
+    apm_package, survivors, known_good = _seed_undeployable_survivor(tmp_path, hook_documents)
 
     with pytest.raises(HookContractError, match=message):
         _sync_integrations_after_uninstall(
@@ -619,8 +630,24 @@ def test_uninstall_rejects_undeployable_survivor_hooks_before_wiping(
             lockfile=survivors,
         )
 
-    assert config.read_bytes() == config_bytes
-    assert sidecar.read_bytes() == sidecar_bytes
+    assert {path: path.read_bytes() for path in known_good} == known_good
+
+
+@_UNDEPLOYABLE_SURVIVOR_CASES
+def test_reconcile_after_removal_refuses_undeployable_survivor_before_wiping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_documents: dict[str, dict],
+    message: str,
+) -> None:
+    """Prune-style reconciliation keeps live settings for a refused survivor (#3226)."""
+    monkeypatch.chdir(tmp_path)
+    apm_package, survivors, known_good = _seed_undeployable_survivor(tmp_path, hook_documents)
+
+    with pytest.raises(HookContractError, match=message):
+        HookIntegrator().reconcile_after_removal(apm_package, tmp_path, lockfile=survivors)
+
+    assert {path: path.read_bytes() for path in known_good} == known_good
 
 
 def test_uninstall_reports_survivor_hook_refusal_as_incomplete(tmp_path: Path) -> None:
@@ -648,3 +675,6 @@ def test_uninstall_reports_survivor_hook_refusal_as_incomplete(tmp_path: Path) -
     assert error is refusal
     assert outcome.counts == {"hooks": 0}
     assert call(str(refusal)) in logger.warning.call_args_list
+    assert call("Migrate the package above, then run 'apm install' to resync.") in (
+        logger.warning.call_args_list
+    )

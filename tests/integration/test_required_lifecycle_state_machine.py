@@ -4357,3 +4357,129 @@ def test_required_repo_to_subdirectory_switch_trims_superseded_checkout(
         assert f"{_OWNER}/{name}/{path}" in tree
     pruned = run(("prune", "--dry-run"), "repo-to-subdirectory-prune")
     assert "No orphaned packages found" in pruned
+
+
+def _retarget_published(
+    scenario: _Scenario, published: _PublishedPackage, target: str
+) -> dict[str, object]:
+    """Declare the package's own ``target:`` and return a dependency pinned to it."""
+    manifest_path = published.repository.worktree / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["target"] = target
+    dump_yaml(manifest, manifest_path)
+    commit = scenario.repositories.commit(published.repository, message=f"target {target}")
+    return {**published.dependency, "ref": commit.sha}
+
+
+def test_required_configured_hook_routing_lifecycle(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Hook routing follows apm.yml across install, repeat, audit and uninstall (#3226)."""
+    scenario = _new_scenario(tmp_path / "configured-hook-routing", apm_binary_path)
+    claude_kit = _publish(scenario, "claude-kit", hook_command="echo claude")
+    copilot_kit = _publish(scenario, "copilot-kit", hook_command="echo copilot")
+    claude_dependency = _retarget_published(scenario, claude_kit, "claude")
+    copilot_dependency = _retarget_published(scenario, copilot_kit, "copilot")
+    consumer = scenario.consumers.create(
+        "configured-hooks-consumer",
+        dependencies=(claude_dependency,),
+        targets=("claude", "copilot"),
+    )
+    settings = consumer.root / ".claude" / "settings.json"
+    copilot_hooks = consumer.root / ".github" / "hooks"
+
+    def copilot_commands() -> set[str]:
+        if not copilot_hooks.is_dir():
+            return set()
+        return {
+            command
+            for path in copilot_hooks.glob("*.json")
+            for command in ("echo claude", "echo copilot")
+            if command in path.read_text(encoding="utf-8")
+        }
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=claude_kit.environment,
+        scenario_id="configured-hooks-install-claude",
+    )
+    scenario.consumers.replace_apm_dependencies(consumer, (claude_dependency, copilot_dependency))
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=copilot_kit.environment,
+        scenario_id="configured-hooks-install-both",
+    )
+    assert _hook_commands(settings) == ["echo claude"]
+    assert copilot_commands() == {"echo copilot"}
+    installed = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "copilot"))
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=copilot_kit.environment,
+        scenario_id="configured-hooks-repeat",
+    )
+    _assert_same_state(
+        installed, LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "copilot"))
+    )
+    _, installed_audit = _audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="configured-hooks-audit",
+    )
+    assert installed_audit["passed"] is True
+
+    # A package that relied on retired filename routing is refused before any write.
+    legacy_kit = _publish(scenario, "legacy-kit")
+    legacy_hooks = legacy_kit.repository.worktree / ".apm" / "hooks"
+    legacy_hooks.mkdir(parents=True)
+    for name, command in (("hooks.json", "echo generic"), ("x-claude-hooks.json", "echo x")):
+        (legacy_hooks / name).write_text(json.dumps(_hook(command)), encoding="ascii")
+    legacy_commit = scenario.repositories.commit(
+        legacy_kit.repository, message="legacy filename routing"
+    )
+    scenario.consumers.replace_apm_dependencies(
+        consumer,
+        (
+            claude_dependency,
+            copilot_dependency,
+            {**legacy_kit.dependency, "ref": legacy_commit.sha},
+        ),
+    )
+    settings_before = settings.read_bytes()
+    refused = scenario.runner.run(
+        _INSTALL_ARGS,
+        scenario_id="configured-hooks-legacy-refused",
+        cwd=consumer.root,
+        env=legacy_kit.environment,
+    )
+    assert refused.returncode != 0, _result_evidence(refused)
+    assert "would newly activate" in refused.stdout + refused.stderr
+    assert settings.read_bytes() == settings_before
+    assert "echo generic" not in json.dumps(_hook_commands(settings))
+    assert copilot_commands() == {"echo copilot"}
+
+    scenario.consumers.replace_apm_dependencies(consumer, (claude_dependency, copilot_dependency))
+    _run_success(
+        scenario,
+        consumer,
+        ("uninstall", f"{_OWNER}/copilot-kit"),
+        environment=scenario.environment,
+        scenario_id="configured-hooks-uninstall-copilot",
+    )
+    _, uninstall_audit = _audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="configured-hooks-audit-after-uninstall",
+    )
+    assert _hook_commands(settings) == ["echo claude"]
+    assert copilot_commands() == set()
+    assert uninstall_audit["passed"] is True
