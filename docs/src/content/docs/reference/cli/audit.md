@@ -31,9 +31,11 @@ links, including Kiro prompt links, compare against their deployed equivalents.
 Both modes also enforce the lockfile's canonical deployment ownership; see
 [Deployment-owner integrity](#deployment-owner-integrity).
 
-Drift reports distinguish a differing unowned skill file (`unmanaged-conflict`)
-from an edited managed file (`modified`). Ordinary reinstall refuses the former:
-rename the local skill or correct the dependency's existing skill/target
+Drift reports distinguish a differing file that no lockfile entry claims
+(`unmanaged-conflict`: a skipped user-authored file, a refused skill, or a
+case-only name variant) from an edited managed file (`modified`). Ordinary
+reinstall skips or refuses the former and never offers `apm export-patch` for
+it: rename the local file or correct the dependency's existing skill/target
 selection first. Audit does not adopt, overwrite, or delete either file.
 JSON retains the finding's path and kind; SARIF uses
 `apm/drift/unmanaged-conflict` with error severity.

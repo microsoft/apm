@@ -116,7 +116,9 @@ def test_diff_engine_modified_kind(tmp_path):
     _write(scratch / ".apm" / "skills" / "x.md", b"new content\n")
     _write(project / ".apm" / "skills" / "x.md", b"old content\n")
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([".apm/skills/x.md"]), targets=[]
+    )
     assert len(findings) == 1
     assert findings[0].kind == "modified"
     assert findings[0].path == ".apm/skills/x.md"
@@ -162,7 +164,9 @@ def test_normalization_does_not_mask_real_drift_under_build_id(tmp_path):
         b"<!-- Build ID: bbbb -->\nBLOCKED line\n",
     )
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([".apm/skills/x.md"]), targets=[]
+    )
     assert len(findings) == 1
     assert findings[0].kind == "modified"
     assert findings[0].path == ".apm/skills/x.md"
@@ -176,7 +180,9 @@ def test_normalization_does_not_mask_real_drift_under_bom(tmp_path):
     # Project starts with a BOM (ignorable) but has different body content.
     _write(project / ".apm" / "skills" / "x.md", b"\xef\xbb\xbfhello WORLD\n")
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([".apm/skills/x.md"]), targets=[]
+    )
     assert len(findings) == 1
     assert findings[0].kind == "modified"
 
@@ -192,7 +198,9 @@ def test_normalization_does_not_mask_real_drift_under_crlf(tmp_path):
         b"alpha\r\nBETA-changed\r\ngamma\r\n",
     )
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([".apm/skills/x.md"]), targets=[]
+    )
     assert len(findings) == 1
     assert findings[0].kind == "modified"
 
@@ -493,15 +501,28 @@ def test_diff_engine_reports_malformed_shared_hook_event_as_modified(tmp_path):
     assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
 
 
-def test_diff_engine_unrecorded_yields_to_modified(tmp_path):
-    """Differing bytes report ``modified`` only -- never both kinds for one file."""
+def test_diff_engine_unrecorded_yields_to_unmanaged_conflict(tmp_path):
+    """Differing unclaimed bytes are an unmanaged conflict only, never a local edit (#3682)."""
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
     _write(scratch / ".apm" / "skills" / "beta.md", b"from source\n")
     _write(project / ".apm" / "skills" / "beta.md", b"hand-edited\n")
 
     findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
-    assert [f.kind for f in findings] == ["modified"]
+    assert [(f.kind, f.package) for f in findings] == [("unmanaged-conflict", "")]
+
+
+def test_diff_engine_case_only_variant_is_unmanaged_conflict(tmp_path):
+    """A case-only user file shadowing a package file on a case-insensitive FS (#3682)."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    _write(scratch / ".apm" / "skills" / "hello.md", b"package\n")
+    _write(project / ".apm" / "skills" / "Hello.md", b"user\n")
+    if not (project / ".apm" / "skills" / "hello.md").exists():
+        pytest.skip("case-sensitive filesystem: both files coexist")
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert [(f.path, f.kind) for f in findings] == [(".apm/skills/hello.md", "unmanaged-conflict")]
 
 
 def test_render_text_lists_unrecorded_group_and_lockfile_remedy():
@@ -521,7 +542,9 @@ def test_diff_engine_100kb_inline_cap(tmp_path):
     _write(scratch / ".apm" / "skills" / "huge.md", big_a)
     _write(project / ".apm" / "skills" / "huge.md", big_b)
 
-    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    findings = diff_scratch_against_project(
+        scratch, project, _lockfile_with_tracked([".apm/skills/huge.md"]), targets=[]
+    )
     assert len(findings) == 1
     assert findings[0].kind == "modified"
     assert "too large for inline diff" in findings[0].inline_diff

@@ -42,10 +42,13 @@ lockfile-exists -> ref-consistency -> deployment-ledger-owners
 
 After the baseline passes, it replays the install in a scratch directory
 and diffs against the working tree to surface `unintegrated`, `modified`,
-`orphaned`, `unrecorded`, and `unmanaged-conflict` files. An unmanaged skill
-conflict is not managed drift: ordinary reinstall now refuses that selected
-plan before deployment. Rename the local skill or choose a valid existing
-skill/target selection first; audit does not adopt, overwrite, or delete it.
+`orphaned`, `unrecorded`, and `unmanaged-conflict` files. An unmanaged
+conflict is a differing file that no lockfile entry claims (including a
+case-only name variant on a case-insensitive filesystem): a user-authored file
+that install skipped, or a skill it refused. It is not managed drift and never
+gets the `apm export-patch` hint. Rename the local file or choose a valid
+existing skill/target selection first (`apm install --force` overwrites a
+skipped non-skill file); audit does not adopt, overwrite, or delete it.
 Root-local primitives use the same
 source discovery scope as a normal install; the scratch directory is
 only the deployment destination. `unrecorded` means replay produced the

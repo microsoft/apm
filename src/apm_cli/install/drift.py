@@ -5,7 +5,7 @@ directory, then diffs the resulting tree against the working project to
 surface five kinds of divergence:
 
 * ``modified``     -- a tracked deployed file's content differs.
-* ``unmanaged-conflict`` -- a selected skill differs at an unowned destination.
+* ``unmanaged-conflict`` -- a replayed file differs at a destination no lockfile entry claims.
 * ``unintegrated`` -- a tracked deployed file is missing from the project.
 * ``orphaned``     -- a managed-directory file exists in the project but
   is not present in the scratch replay AND not tracked in the lockfile.
@@ -836,7 +836,9 @@ def diff_scratch_against_project(
     Five kinds of findings are emitted:
 
     * ``modified``     -- file exists in both, normalized content differs.
-    * ``unmanaged-conflict`` -- a replayed skill differs from an unowned file.
+    * ``unmanaged-conflict`` -- a replayed file differs from (or is shadowed
+      by a case-only variant of) a file no lockfile entry claims: install
+      skipped a user-authored file, so it is never a managed local edit.
     * ``unintegrated`` -- file exists in scratch but not in project, and the
       path is part of the committed working tree when git tracking is known.
     * ``orphaned``     -- file exists in project + tracked in lockfile
@@ -939,9 +941,17 @@ def diff_scratch_against_project(
         target.skills_deploy_path(project_root) for target in targets if target.supports("skills")
     ]
 
+    def _unclaimed(rel: str) -> bool:
+        return not (rel in tracked or rel.startswith(claimed_prefixes) or rel in merge_config_paths)
+
     for rel, scratch_path in sorted(scratch_files.items()):
         project_path = project_files.get(rel)
         if project_path is None:
+            # A case-only variant occupies the destination on a
+            # case-insensitive filesystem: install skipped it as user-authored.
+            if _unclaimed(rel) and (project_root / rel).is_file():
+                findings.append(DriftFinding(path=rel, kind="unmanaged-conflict", package=""))
+                continue
             if tracked_files is not None and rel not in tracked_files:
                 continue
             findings.append(
@@ -957,6 +967,7 @@ def diff_scratch_against_project(
                 project_path, rel, managed, False, diagnostics=collision_diagnostics
             )
         )
+        unmanaged = unmanaged_skill or _unclaimed(rel)
         try:
             s_bytes = _normalize(scratch_path.read_bytes())
             p_bytes = _normalize(project_path.read_bytes())
@@ -983,7 +994,7 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
+                    kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=f"(read error: {exc})",
                 )
@@ -996,12 +1007,12 @@ def diff_scratch_against_project(
             findings.append(
                 DriftFinding(
                     path=rel,
-                    kind="unmanaged-conflict" if unmanaged_skill else "modified",
+                    kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
                 )
             )
-        elif not (rel in tracked or rel.startswith(claimed_prefixes) or rel in merge_config_paths):
+        elif _unclaimed(rel):
             # Content agrees, so nothing else in the audit will ever look at
             # this file again: no manifest entry means no hash baseline and no
             # Unicode scan. Reported only in the content-clean case -- when the

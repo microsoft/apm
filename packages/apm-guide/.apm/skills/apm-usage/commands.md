@@ -835,8 +835,10 @@ an allow-list does not automatically include future skills. Cached preparation
 may remain, and old partial state is preserved. A shared name/directory alone
 is not a conflict, and a skill directory with no files or symlinks at any
 depth is deployed into. `--force` remains destructive and also bypasses the critical
-security-scan block. Audit reports unowned differing skill files as
-`unmanaged-conflict`, not managed `modified` drift, and does not repair them.
+security-scan block. Audit reports any differing file no lockfile entry claims
+(skipped user files, refused skills, case-only variants) as
+`unmanaged-conflict`, not managed `modified` drift, without the export-patch
+hint, and does not repair them.
 
 By default, Copilot, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf deploy skills to `.agents/skills/` (the agentskills.io standard). Claude, Grok Build, and Kiro retain native per-client routing (`.claude/skills/`, `.grok/skills/`, `.kiro/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 

@@ -162,7 +162,7 @@ def test_cursor_rules_installed_lifecycle(
     }
     # The preserved user collision shadows the package rule, so replay reports it.
     assert [(item["path"], item["kind"]) for item in drift["drift"]["drift"]] == [
-        (".cursor/rules/collision.mdc", "modified"),
+        (".cursor/rules/collision.mdc", "unmanaged-conflict"),
         (".cursor/rules/edited.mdc", "modified"),
     ]
     assert snapshot() == audit_before

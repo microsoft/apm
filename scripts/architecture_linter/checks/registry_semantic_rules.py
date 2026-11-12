@@ -251,6 +251,23 @@ _MCP_NATIVE_COMPARISON_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] =
 )
 _MCP_RUNTIME_NAME_GATE = r"""\{\s*["']claude["']\s*,\s*["']codex["']\s*\}"""
 
+_DRIFT_OWNER = "src/apm_cli/install/drift.py"
+_DRIFT_CLASSIFICATION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _DRIFT_OWNER,
+        "diff_scratch_against_project",
+        ("unmanaged = unmanaged_skill or _unclaimed(rel)",),
+    ),
+    (
+        _DRIFT_OWNER,
+        "diff_scratch_against_project._unclaimed",
+        (
+            "return not (rel in tracked or rel.startswith(claimed_prefixes) "
+            "or rel in merge_config_paths)",
+        ),
+    ),
+)
+
 _NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         _INSTRUCTION_PROJECTION_OWNER,
@@ -564,6 +581,15 @@ def _check_mcp_native_comparison(provider: FactsProvider) -> Iterable[Violation]
         )
     )
     return findings
+
+
+def _check_drift_unmanaged_classification(provider: FactsProvider) -> Iterable[Violation]:
+    """Unclaimed differing files are unmanaged conflicts, never managed edits (#3682)."""
+    rule_id = "registry_delegation.drift_unmanaged_classification"
+    _, failures = _read_required(provider, rule_id, (_DRIFT_OWNER,))
+    if failures:
+        return failures
+    return list(_function_contract_violations(provider, rule_id, _DRIFT_CLASSIFICATION_CONTRACTS))
 
 
 def _check_native_instruction_projection(provider: FactsProvider) -> Iterable[Violation]:
@@ -900,6 +926,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(),
         description="Same-name MCP connections must be compared through native_comparison_clients.",
         check=_check_mcp_native_comparison,
+    ),
+    Rule(
+        id="registry_delegation.drift_unmanaged_classification",
+        group=GROUP,
+        guard_ids=(),
+        description="Audit drift must classify unclaimed differing files as unmanaged-conflict.",
+        check=_check_drift_unmanaged_classification,
     ),
     Rule(
         id="hooks-integrations-native-instruction-projection",
