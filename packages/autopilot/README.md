@@ -78,7 +78,7 @@ reviewers.
 | `status/accepted` | human | Human agrees to act. Required for delivery and PR review/merge. |
 | `status/deferred` | human | Not now. Not accepted. |
 | `panel-review` | request | Fresh PR-review pass. Re-apply (remove + add) to run again. |
-| `type/*` `area/*` `theme/*` | classification | Optional allowlist only. Preserve human choices. |
+| `type/*` `area/*` `pillar/*` | classification | Optional allowlist only. Preserve human choices. |
 | `panel-approved` / `panel-rejected` | leftover | Sweep on advisory review. Do not write. |
 
 Contract file:

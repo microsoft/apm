@@ -31,6 +31,7 @@ from apm_cli.utils.paths import portable_relpath
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.skill_adoption import LockedSkillSources
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -109,6 +110,8 @@ class DeploymentMaterializationSession:
         )
         self._installation: str | None = None
         self._state_present = False
+        # Update-only locked-version sources for receipt-less skill adoption (#3625).
+        self.locked_sources: LockedSkillSources | None = None
         self._load()
 
     def _validate_paths(self) -> None:
