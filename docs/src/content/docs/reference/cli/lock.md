@@ -33,7 +33,7 @@ This mirrors the ergonomics of `cargo generate-lockfile` and `pnpm lock`.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--verbose`, `-v` | off | Show per-dependency resolution details. |
-| `--global`, `-g` | off | Operate on `~/.apm/apm.yml` instead of the current project (mirrors `apm install -g`). |
+| `--global`, `-g` | off | Operate on `$APM_HOME/apm.yml` (default `~/.apm/apm.yml`) and write the lockfile beside it instead of using the current project (mirrors `apm install -g`). `apm lock` never deploys files; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract). |
 | `--update` | off | Re-resolve deps to their latest matching SHAs from upstream before writing the lockfile. Stale local bare-repository refs are not accepted. |
 | `--no-policy` | off | Skip policy enforcement during resolution. |
 | `--target TARGET`, `-t TARGET` | none | Agent target for policy enforcement during resolution. No files are deployed or deleted regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
@@ -86,7 +86,7 @@ apm lock export [OPTIONS]
 | --- | --- | --- |
 | `--format FORMAT`, `-f FORMAT` | `cyclonedx` | SBOM output format: `cyclonedx` (1.5) or `spdx` (2.3). |
 | `--output FILE`, `-o FILE` | stdout | Write the SBOM to a file instead of stdout. |
-| `--global`, `-g` | off | Read the user-scope (`~/.apm/`) lockfile instead of the current project. |
+| `--global`, `-g` | off | Read `$APM_HOME/apm.lock.yaml` (default `~/.apm/apm.lock.yaml`) instead of the current project lockfile. |
 | `--timestamp TS` | auto | Pin the SBOM timestamp for reproducible output. The value must be ISO 8601 with a timezone (e.g. `2024-06-01T00:00:00+00:00`); malformed or timezone-naive values fail. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's legacy `generated_at`, then the Unix epoch. |
 
 Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. Diagnostics and update notifications route to stderr from process startup, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.

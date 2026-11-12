@@ -328,6 +328,35 @@ def test_preview_cannot_bypass_offline_graph_authority(path: str, old: str, new:
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/policy/_constraint_pinning.py",
+            "name = git_semver_package_name(dep)",
+            'name = (dep.virtual_path or dep.repo_url).rstrip("/").rsplit("/", 1)[-1]',
+        ),
+        (
+            "src/apm_cli/install/helpers/ref_reuse.py",
+            "def git_semver_package_name(",
+            "def git_semver_package_label(",
+        ),
+    ],
+)
+def test_pinned_constraint_tag_name_must_use_resolver_owner(path: str, old: str, new: str) -> None:
+    """The policy recognises release tags with the resolver's package-name owner (#3224)."""
+    rule_id = "transport-platform-git-semver-preflight"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
             "src/apm_cli/integration/hook_ownership.py",
             "def canonicalize_hook_sidecar(",
             "def canonicalize_hook_sidecar_disabled(",
@@ -1100,6 +1129,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="validate_apm_package(path, read_only=True)",
         new="validate_apm_package(path, read_only=False)",
         intent="Discovery allows package admission to mutate the source it is inventorying.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-apm-home-resolution",
+        rule_id="registry_delegation.apm_home_resolution",
+        path="src/apm_cli/core/scope.py",
+        old='configured = os.environ.get("APM_HOME")',
+        new='configured = os.environ.get("APM_ROOT")',
+        intent="APM user metadata stops reading its canonical environment variable.",
     ),
     MutationCase(
         guard_id="registry-delegation-audit-target-selection",

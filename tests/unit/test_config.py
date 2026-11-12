@@ -6,10 +6,55 @@ bugs on Windows when ``open()`` is called without an explicit encoding.
 """
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from apm_cli import config as config_mod
+
+
+def test_apm_home_selects_config_path_in_fresh_process(tmp_path):
+    """Process-level APM_HOME redirects config without touching ~/.apm."""
+    home = tmp_path / "home"
+    apm_home = tmp_path / "isolated-metadata"
+    home.mkdir()
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "APM_HOME": str(apm_home),
+        }
+    )
+    script = """\
+import json
+from apm_cli import config
+
+config.ensure_config_exists()
+print(json.dumps({"dir": config.CONFIG_DIR, "file": config.CONFIG_FILE}))
+"""
+
+    result = subprocess.run(
+        (sys.executable, "-c", script),
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    paths = json.loads(result.stdout)
+    assert paths == {
+        "dir": str(apm_home),
+        "file": str(apm_home / "config.json"),
+    }
+    assert (apm_home / "config.json").is_file()
+    assert not (home / ".apm").exists()
 
 
 @pytest.fixture

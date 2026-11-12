@@ -187,14 +187,16 @@ dependencies:
 
 ### `require_pinned_constraint`
 
-Default: `false`. When `true`, every APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (e.g. `v1.5.3`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+Default: `false`. When `true`, every direct APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (`v1.5.3`, or `pkg-a-v1.5.3` / `pkg-a--v1.5.3` for a package named `pkg-a`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+
+The check judges the constraint as declared in `apm.yml`, not the tag a range resolves to; fresh installs, locked reinstalls, updates, and `apm audit` agree. A dependency redirected by a [`replace:` rule](../../consumer/manage-dependencies/#replace-a-source-candidate) is judged by the ref the rule selects.
 
 ```yaml
 dependencies:
   require_pinned_constraint: true
 ```
 
-Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
+Only direct dependencies are evaluated; a transitive package's own manifest is not something the consumer can rewrite. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -431,7 +433,7 @@ There are 21 policy checks.
 | `required-executable-untrusted` | Required executable packages are present and trusted |
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
-| `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
+| `dependency-pinned-constraint` | Every direct dep declares a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
 | `registry-source` | Dependencies come from required registries when `registry_source` is configured |
 
 **Integrity:**
