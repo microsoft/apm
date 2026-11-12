@@ -270,7 +270,9 @@ def should_force_ref_recheck(
     callback. The resolver reads a package's ``apm.yml`` from whatever path this
     gate leaves in place, so returning False means "the materialized copy is
     current". A normal install rechecks local packages (their source can change
-    without any ref moving) and manifest/lock drift. An explicit update also
+    without any ref moving) and manifest/lock drift; *update_keys* scopes both
+    the local recheck and the update rechecks to a targeted run's selected
+    subtree. An explicit update also
     rechecks mutable Git refs, semver ranges and hook-only packages. Hook
     replacements must pass staged admission before any live content is replaced.
 
@@ -283,8 +285,10 @@ def should_force_ref_recheck(
         return True
     if dep_ref.is_local:
         # #3401 / #3501: the apm_modules copy is from the previous install, so
-        # reading it would resolve transitive deps from a stale manifest.
-        return True
+        # reading it would resolve transitive deps from a stale manifest. A
+        # targeted run re-reads only its selected subtree; an unselected local
+        # package keeps its locked state, even mid-edit (#3649).
+        return update_keys is None or dep_ref.get_unique_key() in update_keys
     if getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:

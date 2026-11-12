@@ -133,8 +133,9 @@ class APMDependencyResolver:
                 even when its install path already exists, at any depth -- see that
                 method's docstring for why this can't be scoped to direct
                 deps only.
-            update_keys: Shared selected-package keys for scoped updates.
-                Selected descendants are added before download callbacks run.
+            update_keys: Shared selected-package keys for targeted installs and
+                scoped updates. Selected descendants are added before download
+                callbacks run.
             existing_lockfile: Existing resolved dependency state used by the
                 canonical ref-drift owner to decide whether a plain install
                 must re-enter the download callback.
