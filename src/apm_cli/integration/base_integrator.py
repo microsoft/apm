@@ -6,7 +6,7 @@ import re
 import shutil
 import stat
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -1029,6 +1029,25 @@ class BaseIntegrator:
                     )
         except Exception:
             self.link_resolver = None
+
+    def projected_resolve_links(self, package_info) -> Callable[..., tuple] | None:
+        """Render another source of the current package into its deployment frame.
+
+        Used to reproduce what an earlier version deployed at the same
+        location (#3625). Returns ``None`` without an initialized resolver.
+        """
+        current = self.link_resolver
+        if current is None or package_info is None:
+            return None
+        renderer = BaseIntegrator()
+        renderer.init_link_resolver(
+            replace(
+                package_info,
+                deployment_package_root=current.deployment_package_root or current.package_root,
+            ),
+            current.base_dir,
+        )
+        return renderer.resolve_links if renderer.link_resolver is not None else None
 
     def resolve_links(
         self,

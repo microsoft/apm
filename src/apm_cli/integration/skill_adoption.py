@@ -158,29 +158,10 @@ class LockedSkillSources:
         materialized = self._plans[owner]
         return materialized[0] if materialized is not None else None
 
-    def resolve_links(self, owner: str, current: Any) -> ResolveLinks | None:
-        """Render locked members as the deployment of that version rendered them.
-
-        Links resolve against the locked package but project into *current*'s
-        deployment frame, where the previous version was installed.
-        """
+    def package(self, owner: str) -> Any | None:
+        """Return the materialized locked package info, once planned."""
         materialized = self._plans.get(owner)
-        if materialized is None or current is None:
-            return None
-        from dataclasses import replace
-
-        from apm_cli.integration.base_integrator import BaseIntegrator
-
-        package = materialized[1]
-        renderer = BaseIntegrator()
-        renderer.init_link_resolver(
-            replace(
-                package,
-                deployment_package_root=current.deployment_package_root or current.package_root,
-            ),
-            current.base_dir,
-        )
-        return renderer.resolve_links if renderer.link_resolver is not None else None
+        return materialized[1] if materialized is not None else None
 
     def _materialize(
         self, owner: str, current: DeployableSourcePlan, targets: Sequence[Any]
@@ -285,8 +266,8 @@ def skill_tree_baselines(
     locked_source = locked.source_root / relative if locked is not None else None
     if locked_source is None or locked_source.is_symlink() or not locked_source.is_dir():
         return {}
-    current = integrator.link_resolver
-    resolve_links = locked_sources.resolve_links(owner, current) if current is not None else None
+    # Render as the earlier deployment did: locked links, current deployment frame.
+    resolve_links = integrator.projected_resolve_links(locked_sources.package(owner))
     return compare(
         locked_source,
         destination,

@@ -118,16 +118,19 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     locked = locked_skill_sources(ctx) if session is not None else None
     if session is not None:
         session.locked_sources = locked
-    with (
-        contextlib.closing(locked) if locked is not None else contextlib.nullcontext(),
-        contextlib.nullcontext()
-        if ctx.lockfile_only
-        else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
-            materialization_session=session,
-        ),
-    ):
-        _run_phase("integrate", _integrate_phase, ctx)
+    try:
+        with (
+            contextlib.nullcontext()
+            if ctx.lockfile_only
+            else ctx.integrators["skill"].ownership_snapshot(
+                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                materialization_session=session,
+            )
+        ):
+            _run_phase("integrate", _integrate_phase, ctx)
+    finally:
+        if locked is not None:
+            locked.close()
     return session
 
 
