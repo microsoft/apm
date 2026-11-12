@@ -64,6 +64,41 @@ all of them share one user lockfile.
 """
 
 
+def _posix_shell_host() -> bool:
+    """Return whether documented macOS/Linux hook shell execution applies here."""
+    import os
+
+    return os.name != "nt"
+
+
+@dataclass(frozen=True)
+class UserHookHomeReference:
+    """How a harness runs user-scope hook commands, and the home reference it expands.
+
+    Set on a profile only when the harness's current official documentation
+    states that its user-scope hook commands run through a POSIX shell on
+    macOS and Linux. The shell then expands :attr:`reference` at invocation,
+    so a user config tracked in a dotfiles repo stays valid on every machine.
+    Exec-form handlers (``args``), fields the harness hands to another shell,
+    single-quoted references and Windows hosts keep absolute paths.
+    """
+
+    shell_selectors: tuple[str, ...]
+    """Command fields (or Claude ``shell`` values) run through a POSIX shell."""
+
+    evidence: str
+    """Official documentation URL that states the shell execution."""
+
+    reference: str = "$HOME"
+    """Home reference the harness expands; ``$HOME`` unless a native placeholder exists."""
+
+    def reference_for(self, selector: str, *, quote: str, exec_form: bool) -> str | None:
+        """Return the home reference for one command field, or ``None`` to stay absolute."""
+        if exec_form or quote == "'" or selector not in self.shell_selectors:
+            return None
+        return self.reference if _posix_shell_host() else None
+
+
 @dataclass(frozen=True)
 class PrimitiveMapping:
     """Where a single primitive type is deployed in a target tool."""
@@ -266,6 +301,13 @@ class TargetProfile:
     from :attr:`root_dir`.  Override only when the target deploys to multiple
     top-level directories (e.g. Codex deploys both ``.codex/`` and
     ``.agents/``).
+    """
+
+    user_hook_home_reference: UserHookHomeReference | None = None
+    """Verified shell execution that lets user-scope hook commands anchor to home.
+
+    ``None`` keeps today's absolute user-scope hook paths. Enable only with a
+    citation to the harness's current official hook documentation.
     """
 
     hooks_config_display: str | None = None
@@ -662,6 +704,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
+        # Shell form runs through ``sh -c`` on macOS/Linux; exec form (``args``)
+        # and ``shell: "powershell"`` do not expand ``$HOME``.
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("command", "bash"),
+            evidence="https://code.claude.com/docs/en/hooks",
+        ),
         hooks_config_display=".claude/settings.json",
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
@@ -715,10 +763,17 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         # "partial": instructions deploy modularly under
         # ~/.copilot/instructions/ (restored above), but prompts/agents/
-        # skills/hooks/canvas have no documented Copilot CLI user-scope
+        # skills/canvas have no documented Copilot CLI user-scope
         # surface yet, so the target is not "True" (fully) supported.
         user_supported="partial",
         user_root_dir=".copilot",
+        # Copilot CLI loads ~/.copilot/hooks/*.json; ``bash`` is the Unix shell
+        # command. ``command`` is also copied to ``powershell``, and
+        # ``exec``/``args`` bypass the shell, so both stay absolute.
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("bash",),
+            evidence="https://docs.github.com/en/copilot/reference/hooks-reference",
+        ),
         generated_files=("copilot-instructions.md",),
     ),
     # GitHub Copilot desktop App -- experimental, user-scope only.
@@ -847,6 +902,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".gemini",
+        # Hook ``command`` is "the shell command to execute".
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("command",),
+            evidence="https://geminicli.com/docs/hooks/reference/",
+        ),
         hooks_config_display=".gemini/settings.json",
     ),
     # Grok Bot -- stable, explicit-only, skills-only target for the Grok Bot
@@ -957,6 +1017,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".kiro",
+        # Kiro CLI loads ~/.kiro/hooks/; command actions "run a shell command".
+        # Only command/bash sources become that action without PowerShell.
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("command", "bash"),
+            evidence="https://kiro.dev/docs/hooks/actions/",
+        ),
     ),
     # OpenClaw -- experimental, skills-only target for the OpenClaw agent
     # runtime (github.com/openclaw/openclaw).  OpenClaw reads SKILL.md

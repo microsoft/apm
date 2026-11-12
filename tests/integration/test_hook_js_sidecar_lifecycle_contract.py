@@ -741,14 +741,18 @@ def test_required_global_copilot_sidecar_lifecycle(
 
     descriptor = copilot_root.joinpath(*_GLOBAL_DESCRIPTOR.parts)
     payload = json.loads(descriptor.read_text(encoding="utf-8"))
-    command = tuple(shlex.split(payload["hooks"]["preToolUse"][0]["bash"]))
-    # POSIX user-scope commands anchor to $HOME so `~/.copilot` config stays
-    # portable across hosts. The real harness runs hooks through a shell, which
-    # expands it; mirror that here because the runner executes directly.
-    hook_argv = [arg.replace("$HOME", str(scenario.isolated.home)) for arg in command[1:]]
-    assert Path(hook_argv[0]).is_absolute()
+    bash_command = payload["hooks"]["preToolUse"][0]["bash"]
+    if os.name == "nt":
+        command = tuple(shlex.split(bash_command))
+        assert Path(command[1]).is_absolute()
+        launcher, hook_argv = (command[0],), command[1:]
+    else:
+        # Copilot CLI runs `bash` as a Unix shell command, so the user-scope
+        # path is anchored to $HOME and must expand through a real shell.
+        assert bash_command.startswith(f"node $HOME/.copilot/{_GLOBAL_SCRIPT.as_posix()} ")
+        launcher, hook_argv = ("sh", "-c"), (bash_command,)
     hook_result = ApmLifecycleRunner(
-        (command[0],),
+        launcher,
         timeout_seconds=30,
         scenario_timeout_seconds=30,
     ).run(

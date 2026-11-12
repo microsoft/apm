@@ -15,7 +15,6 @@ Script path handling:
 
 import json
 import logging
-import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -85,10 +84,9 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import TargetProfile, UserHookHomeReference
 
 _log = logging.getLogger(__name__)
-
-_POSIX_USER_HOOK_PATHS = os.name != "nt"
 
 # Testability seam: tests can patch deprecated filename routing without
 # replacing the imported helper for every call site.
@@ -102,6 +100,17 @@ def _wrapping_quote(command: str, match: re.Match[str]) -> str:
         if quote in "\"'" and command[match.end()] == quote:
             return quote
     return ""
+
+
+def _splice(text: str, edits: list[tuple[int, int, str]]) -> str:
+    """Replace each matched span on its own so repeated references keep their quoting."""
+    parts: list[str] = []
+    position = 0
+    for start, end, replacement in sorted(edits):
+        parts.extend((text[position:start], replacement))
+        position = end
+    parts.append(text[position:])
+    return "".join(parts)
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -593,28 +602,31 @@ class HookIntegrator(BaseIntegrator):
         deploy_root: Path | None,
         source_key: str | None = None,
         path_quote: str = "",
+        home_reference: "UserHookHomeReference | None" = None,
+        exec_form: bool = False,
     ) -> str:
         """Return a target-native script reference without sacrificing portability."""
         if deploy_root is not None:
             target_path = (deploy_root / target_rel).resolve()
-            # A shell expands $HOME outside single quotes only, so a
-            # single-quoted reference keeps the previous absolute form instead
-            # of becoming a literal path the target would never expand.
-            if _POSIX_USER_HOOK_PATHS and path_quote != "'":
+            reference = (
+                home_reference.reference_for(
+                    source_key or "command", quote=path_quote, exec_form=exec_form
+                )
+                if home_reference is not None
+                else None
+            )
+            if reference is not None:
                 try:
-                    relative_path = target_path.relative_to(deploy_root.resolve())
+                    relative_path = target_path.relative_to(Path.home().resolve())
                 except ValueError:
-                    # A dynamic target root such as CLAUDE_CONFIG_DIR may live
-                    # outside the deploy root. Keep that explicit absolute path
-                    # rather than emitting a misleading $HOME-relative command.
+                    # A custom root such as CLAUDE_CONFIG_DIR outside home
+                    # keeps its explicit absolute path.
                     pass
                 else:
-                    # User-scope configs live in files people track in dotfiles
-                    # repos, so anchor the path to $HOME instead of embedding
-                    # the installing host's home prefix. Hooks run through a
-                    # shell, which expands $HOME at invocation time and keeps
-                    # the #1310 / #1354 cwd-independence intact.
-                    return f"$HOME/{relative_path.as_posix()}"
+                    # The harness shell expands the reference at invocation,
+                    # so dotfiles-synced user configs stay host-independent
+                    # while keeping #1310 / #1354 cwd-independence.
+                    return f"{reference}/{relative_path.as_posix()}"
             return str(target_path)
         if target != "claude":
             return target_rel
@@ -640,11 +652,13 @@ class HookIntegrator(BaseIntegrator):
         root_dir: str | None = None,
         deploy_root: Path | None = None,
         source_key: str | None = None,
+        home_reference: "UserHookHomeReference | None" = None,
+        exec_form: bool = False,
     ) -> tuple[str, list[tuple[Path, str]]]:
         """Rewrite plugin-root and relative script references for a target."""
         scripts_to_copy = []
         command = normalize_quoted_plugin_root(command)
-        new_command = command
+        edits: list[tuple[int, int, str]] = []
 
         if target == "vscode":
             base_root = root_dir or ".github"
@@ -687,8 +701,10 @@ class HookIntegrator(BaseIntegrator):
                     deploy_root,
                     source_key,
                     _wrapping_quote(command, match),
+                    home_reference,
+                    exec_form,
                 )
-                new_command = new_command.replace(full_var, resolved_cmd)
+                edits.append((match.start(), match.end(), resolved_cmd))
             else:
                 # File absent: always warn so a misconfigured hook is never
                 # silently deployed.  For user-scope (deploy_root set) also
@@ -703,8 +719,9 @@ class HookIntegrator(BaseIntegrator):
                     f"{printable_ascii_text(str(source_file))}"
                 )
                 if deploy_root is not None:
-                    new_command = new_command.replace(full_var, str(source_file))
+                    edits.append((match.start(), match.end(), str(source_file)))
 
+        new_command = _splice(command, edits)
         # Keep matcher misses visible instead of silently deploying them.
         for residual in unresolved_plugin_root_references(new_command):
             if residual in handled_plugin_root_refs:
@@ -719,6 +736,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             warn_unresolved_plugin_root(new_command, residual, package_label)
 
+        edits = []
         for match in iter_relative_script_paths(new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
@@ -736,9 +754,11 @@ class HookIntegrator(BaseIntegrator):
                     target_rel,
                     deploy_root,
                     source_key,
-                    _wrapping_quote(command, match),
+                    _wrapping_quote(new_command, match),
+                    home_reference,
+                    exec_form,
                 )
-                new_command = new_command.replace(rel_ref, resolved_cmd)
+                edits.append((*match.span(1), resolved_cmd))
             else:
                 # File absent: always warn (see ${PLUGIN_ROOT} branch above
                 # for the project-scope vs user-scope rationale).
@@ -748,9 +768,9 @@ class HookIntegrator(BaseIntegrator):
                     f"{printable_ascii_text(str(source_file))}"
                 )
                 if deploy_root is not None:
-                    new_command = new_command.replace(rel_ref, str(source_file))
+                    edits.append((*match.span(1), str(source_file)))
 
-        return new_command, scripts_to_copy
+        return _splice(new_command, edits), scripts_to_copy
 
     def _rewrite_hooks_data(
         self,
@@ -761,6 +781,7 @@ class HookIntegrator(BaseIntegrator):
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
         deploy_root: Path | None = None,
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> tuple[dict, list[tuple[Path, str]]]:
         """Rewrite all command paths in a hooks JSON structure.
 
@@ -777,6 +798,8 @@ class HookIntegrator(BaseIntegrator):
                 all rewritten script paths are pinned to the deploy root so the
                 target can locate scripts regardless of the working directory.
                 When *None*, paths remain relative (backward-compatible behaviour).
+            home_reference: The target's verified user-scope home reference;
+                shell-form commands under home use it instead of an absolute path.
 
         Returns:
             Tuple of (rewritten_data_copy, list of (source_file, target_rel_path))
@@ -806,6 +829,8 @@ class HookIntegrator(BaseIntegrator):
                             root_dir=root_dir,
                             deploy_root=deploy_root,
                             source_key=key,
+                            home_reference=home_reference,
+                            exec_form="args" in matcher,
                         )
                         if scripts:
                             _log.debug(
@@ -834,6 +859,8 @@ class HookIntegrator(BaseIntegrator):
                                 root_dir=root_dir,
                                 deploy_root=deploy_root,
                                 source_key=key if key != "command" else hook.get("shell"),
+                                home_reference=home_reference,
+                                exec_form="args" in hook,
                             )
                             if scripts:
                                 _log.debug(
@@ -1021,6 +1048,19 @@ class HookIntegrator(BaseIntegrator):
         # User scope needs cwd-independent paths; project scope stays portable.
         return project_root if user_scope else None
 
+    @staticmethod
+    def _home_reference_for_hook_rewrite(
+        target: "TargetProfile | None", profile_name: str, user_scope: bool
+    ) -> "UserHookHomeReference | None":
+        """Return the profile's verified home reference for user-scope hook rewrites."""
+        if not user_scope:
+            return None
+        if target is None:
+            from apm_cli.integration.targets import KNOWN_TARGETS
+
+            target = KNOWN_TARGETS.get(profile_name)
+        return getattr(target, "user_hook_home_reference", None)
+
     def integrate_package_hooks(
         self,
         package_info,
@@ -1066,6 +1106,7 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
+        home_reference = self._home_reference_for_hook_rewrite(target, "copilot", user_scope)
 
         hooks_integrated = 0
         scripts_copied = 0
@@ -1088,6 +1129,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
                 deploy_root=deploy_root_for_rewrite,
+                home_reference=home_reference,
             )
 
             # Generate target filename (clean, no -apm suffix)
@@ -1245,6 +1287,9 @@ class HookIntegrator(BaseIntegrator):
             return _empty
 
         _deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
+        _home_reference = self._home_reference_for_hook_rewrite(
+            target, config.target_key, user_scope
+        )
 
         package_name = self._get_package_name(package_info, project_root)
         hook_sources = self.select_hook_sources_for_target(
@@ -1368,6 +1413,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
                 deploy_root=_deploy_root_for_rewrite,
+                home_reference=_home_reference,
             )
 
             # Merge hooks into config (additive)

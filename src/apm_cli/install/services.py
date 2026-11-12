@@ -509,8 +509,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Hook integrator alone needs the scope signal: project-scope
             # deploys keep ``command`` paths repo-relative (#1394), user-scope
             # deploys make them cwd-independent (#1310 / #1354), anchored to
-            # ``$HOME`` on POSIX hosts. Sibling integrators don't accept this
-            # kwarg, so include it only for hooks.
+            # home where the target declares a verified home reference.
+            # Sibling integrators don't accept this kwarg, so include it only
+            # for hooks.
             if _prim_name == "hooks":
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
                 _call_kwargs["dep_targets_active"] = dep_targets_active
