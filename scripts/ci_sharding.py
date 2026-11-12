@@ -86,8 +86,9 @@ def affinity_units(
     """Keep each xdist group, and each module, together; fail on duplicates.
 
     Modules stay whole so a shard runs files in their usual order next to
-    their usual neighbours. A module heavier than ``split_over`` is split
-    into single tests so one large file cannot become the long pole.
+    their usual neighbours. A module heavier than ``split_over`` is cut into
+    the fewest contiguous chunks under that weight, so one large file cannot
+    become the long pole.
     """
     node_ids = {item.nodeid for item in items}
     if len(node_ids) != len(items):
@@ -99,14 +100,36 @@ def affinity_units(
         units[key].append(item)
     result: list[list[pytest.Item]] = []
     for (kind, _name), unit in units.items():
-        too_heavy = (
-            kind == "module"
-            and weights is not None
-            and split_over is not None
-            and sum(weights[item.nodeid] for item in unit) > split_over
-        )
-        result.extend([[item] for item in unit] if too_heavy else [unit])
+        if kind != "module" or weights is None or not split_over:
+            result.append(unit)
+            continue
+        result.extend(_contiguous_chunks(unit, weights, split_over))
     return result
+
+
+def _contiguous_chunks(
+    unit: list[pytest.Item], weights: Mapping[str, float], limit: float
+) -> list[list[pytest.Item]]:
+    """Split a module into as few in-order chunks as keep each under limit.
+
+    Per-process warm-up (module fixtures, caches) is paid once per worker
+    that runs a module, so a heavy module is cut into a few large chunks
+    rather than scattered test by test.
+    """
+    total = sum(weights[item.nodeid] for item in unit)
+    count = max(1, math.ceil(total / limit))
+    if count == 1:
+        return [unit]
+    share = total / count
+    chunks: list[list[pytest.Item]] = [[]]
+    filled = 0.0
+    for item in unit:
+        if chunks[-1] and filled >= share and len(chunks) < count:
+            chunks.append([])
+            filled = 0.0
+        chunks[-1].append(item)
+        filled += weights[item.nodeid]
+    return chunks
 
 
 def item_weights(items: Sequence[pytest.Item], durations: Mapping[str, float]) -> dict[str, float]:
@@ -151,8 +174,8 @@ def partition(
     if shard_count < 1:
         raise pytest.UsageError("Shard count must be at least 1.")
     weights = item_weights(items, durations or {})
-    # A module bigger than half of one shard's share is split per test.
-    split_over = sum(weights.values()) / (shard_count * 2)
+    # A module bigger than a quarter of one shard's share is cut into chunks.
+    split_over = sum(weights.values()) / (shard_count * 4)
     units = affinity_units(items, weights, split_over)
     representatives = [unit[0] for unit in units]
     members = {unit[0].nodeid: unit for unit in units}
@@ -196,7 +219,7 @@ def plan_shard_count(
     if not items:
         raise pytest.UsageError("Cannot plan shards for an empty selection.")
     weights = item_weights(items, durations)
-    units = affinity_units(items, weights, sum(weights.values()) / (max_shards * 2))
+    units = affinity_units(items, weights, sum(weights.values()) / (max_shards * 4))
     # Only an xdist group (or one test) runs serially on one worker; a module's
     # tests spread across the shard's workers.
     serial: dict[str, float] = defaultdict(float)

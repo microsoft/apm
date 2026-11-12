@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections import Counter
 from pathlib import Path
@@ -55,8 +56,15 @@ def test_modules_stay_whole_unless_too_heavy_for_one_shard() -> None:
             shard for shard in result.shards if any(i.nodeid.startswith(prefix) for i in shard)
         ]
         assert len(owners) == 1, prefix
+    # 40 heavy tests over an 8.75-test limit: five contiguous chunks of eight.
+    runs = 0
+    for shard in result.shards:
+        indexes = [heavy.index(i) for i in shard if i.nodeid.startswith("tests/test_heavy.py")]
+        runs += sum(1 for a, b in itertools.pairwise([-2, *indexes]) if b != a + 1)
+    assert runs <= 5
     assert all(any(i.nodeid.startswith("tests/test_heavy.py") for i in s) for s in result.shards)
-    assert sorted(len(shard) for shard in result.shards) == [35, 35]
+    sizes = sorted(len(shard) for shard in result.shards)
+    assert sum(sizes) == 70 and sizes[1] - sizes[0] <= 8
 
 
 def test_durations_balance_shards_within_target_ratio() -> None:

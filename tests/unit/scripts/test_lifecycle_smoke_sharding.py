@@ -32,7 +32,9 @@ def test_partition_retains_every_node_once_and_whole_affinity_groups() -> None:
 
     first, second = sharding.partition_items(items)
 
-    assert sorted([len(first), len(second)]) == [205, 206]
+    # The 394-test module is cut into contiguous chunks of at most an eighth
+    # of the selection, so the shards differ by less than one chunk.
+    assert abs(len(first) - len(second)) < 52
     assert Counter(item.nodeid for item in first + second) == Counter(item.nodeid for item in items)
     grouped_ids = {item.nodeid for item in grouped}
     assert grouped_ids <= {item.nodeid for item in first} or grouped_ids <= {
