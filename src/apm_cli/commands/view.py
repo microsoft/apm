@@ -674,16 +674,17 @@ _VIEW_HELP = (
     "    apm view org/repo versions --registry myreg  # From a named registry\n"
     "    apm view https://github.com/org/repo versions  # Force the git path\n"
     "    apm view org/repo -g                    # From user scope\n"
-    "    apm view --file .github/skills/x/SKILL.md  # Who deployed this file?\n\n"
+    "    apm view --file .agents/skills/x/SKILL.md  # Who deployed this file?\n\n"
     "With --file PATH, reports the recorded owner(s) of one deployed file from\n"
-    "the lockfile (read-only, exact path). Exit 1 when no provenance is recorded."
+    "the lockfile (read-only, exact path). Exit 0 when provenance is recorded,\n"
+    "1 when it is unrecorded or an owner is unresolved, 2 on usage or state errors."
 )
 
 
 @click.command(
     name="view",
     help=_VIEW_HELP,
-    short_help="View package metadata or list remote versions",
+    short_help="View package metadata, list remote versions, or trace a file's owner",
 )
 @click.argument("package", required=False, default=None)
 @click.argument("field", required=False, default=None)
