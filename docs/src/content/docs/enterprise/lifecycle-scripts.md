@@ -130,6 +130,10 @@ If both `bash` and `command` are present, `bash` takes priority.
 Timeouts must be positive. A zero or negative `timeoutSec` (or `timeout`) is
 ignored with a warning naming the script, and the default applies.
 
+Interrupting the APM command (Ctrl+C) also stops a running command script and
+the background jobs in its process group, so the script does not keep running
+after the command exits.
+
 ### Generating sources before compile
 
 A `pre-compile` script can generate instructions from the project's own
