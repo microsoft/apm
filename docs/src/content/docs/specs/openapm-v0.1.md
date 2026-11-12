@@ -1045,7 +1045,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `source`                  | `local` for path deps, `registry` for registry deps; absent for git.            |
 | `resolved_url`            | Registry archive download URL (advisory; see [req-rs-009](#req-rs-009)).        |
 | `resolved_hash`           | Hash envelope (`sha256:<hex>`) of the registry archive bytes. Trust anchor.     |
-| `local_path`              | Original path for local deps.                                                   |
+| `local_path`              | Original path for local deps. See proposed [Section 5.2.2](#522-uninstall-reachability-preservation-proposed) for a pending amendment also affecting this field together with `resolved_by`. |
 | `content_hash`            | Hash envelope (`sha256:<hex>`) of a local package's source tree.                |
 | `is_dev`                  | True when declared under `devDependencies`.                                     |
 | `constraint`              | git-semver discriminator: the original semver range from the manifest (verbatim). |
