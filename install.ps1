@@ -289,7 +289,7 @@ function Test-PythonRequirement {
                     $parts = $verStr.Split('.')
                     $major = [int]$parts[0]
                     $minor = [int]$parts[1]
-                    if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 9)) {
+                    if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 11)) {
                         return $cmd
                     }
                 }
@@ -303,7 +303,7 @@ function Test-PythonRequirement {
 function Install-ViaPip {
     $pythonCmd = Test-PythonRequirement
     if (-not $pythonCmd) {
-        Write-ErrorText "Python 3.9+ is not available - cannot fall back to pip."
+        Write-ErrorText "Python 3.11+ is not available - cannot fall back to pip."
         return $false
     }
     Write-Info "Attempting installation via pip ($pythonCmd)..."
