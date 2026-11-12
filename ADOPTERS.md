@@ -18,7 +18,8 @@ is not publicly specified, not that usage is absent.
 
 ## Add or update an entry
 
-Submit a pull request with one row per organization or project:
+Submit a pull request with one row per organization or project, sorted
+alphabetically by the Organization column:
 
 - **Organization:** the name approved for public listing. An approved industry
   description may be used instead when the organization needs to remain anonymous.
@@ -33,8 +34,6 @@ Submit a pull request with one row per organization or project:
 Confirm that the organization permits the proposed public name and wording.
 Do not include private correspondence, contact details, internal system names,
 customer identities, or deployment details without permission.
-
-Keep the adopter list sorted alphabetically by organization.
 
 List direct adopters, not a service provider's customers solely because they
 indirectly benefit from APM. Keep entries accurate as usage changes.
