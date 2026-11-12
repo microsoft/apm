@@ -140,50 +140,23 @@ def _build_repo_with_out_of_cone_symlink_target(tmp_path: Path) -> tuple[Path, s
     return bare, sha
 
 
-def test_dangling_symlink_in_cone_is_repaired(tmp_path: Path, monkeypatch):
-    """#2707: a symlink whose target sits outside the requested cone must
-    still resolve after ``materialize_from_bare`` returns.
+def test_out_of_cone_link_resolves_without_widening(tmp_path: Path) -> None:
+    """#2707/#3457: an out-of-cone link target comes from Git objects."""
+    from tests.utils.git_link_fixture import (
+        EXPECTED_PKG,
+        bare_clone,
+        build_link_origin,
+        neutral_git_env,
+        tree_bytes,
+    )
 
-    This box can't create a real symlink (WinError 1314) and a real
-    checkout here writes a mode-120000 entry as a plain file (verified:
-    ``core.symlinks`` defaults to false on this filesystem), so the
-    ``ref.md`` stand-in above is monkeypatched to LOOK dangling the way
-    a real symlink pointing at ``../../shared/ref.md`` would on a
-    filesystem that honors ``core.symlinks`` -- see
-    tests/unit/utils/test_git_sparse.py for the same technique applied
-    to the detection helper in isolation.
-    """
-    bare, sha = _build_repo_with_out_of_cone_symlink_target(tmp_path)
+    origin, sha = build_link_origin(tmp_path)
+    bare = bare_clone(origin, tmp_path / "bare.git")
     consumer = tmp_path / "consumer"
 
-    fake_link = consumer / "plugins" / "skill" / "ref.md"
-    real_islink = os.path.islink
-
-    def fake_islink(path):
-        return True if Path(path) == fake_link else real_islink(path)
-
-    def fake_exists(path):
-        if Path(path) == fake_link:
-            return (consumer / "shared" / "ref.md").exists()
-        return os.path.lexists(path)
-
-    monkeypatch.setattr(os.path, "islink", fake_islink)
-    monkeypatch.setattr(os.path, "exists", fake_exists)
-    monkeypatch.setattr(
-        "apm_cli.utils.git_sparse._tracked_symlinks",
-        lambda *args, **kwargs: [fake_link],
-    )
-
     materialize_from_bare(
-        bare,
-        consumer,
-        ref=None,
-        env=os.environ.copy(),
-        known_sha=sha,
-        sparse_paths=["plugins/skill"],
+        bare, consumer, ref=None, env=neutral_git_env(), known_sha=sha, sparse_paths=["pkg"]
     )
 
-    # The would-be symlink's target must be reachable: the fallback
-    # widened the tree instead of leaving it dangling.
-    assert (consumer / "shared" / "ref.md").is_file()
-    assert (consumer / "shared" / "ref.md").read_text() == "the real target content\n"
+    assert tree_bytes(consumer / "pkg") == EXPECTED_PKG
+    assert not (consumer / "shared").exists()

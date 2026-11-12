@@ -232,13 +232,14 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
-For Claude, APM wraps flat command entries in `{ "matcher", "hooks": [...] }`
-groups in `.claude/settings.json` and adds the required `"type": "command"`
-when a flat command entry omits `type`. Explicit handler types are kept.
-Handlers already inside nested Claude groups and other targets are unchanged.
-
-For Codex, APM wraps flat command entries in hook groups containing a
-nested `hooks` array in `.codex/hooks.json`.
+For Claude and Codex, APM wraps flat command entries in hook groups with a
+nested `hooks` array: `{ "matcher", "hooks": [...] }` in
+`.claude/settings.json`, and the equivalent groups in `.codex/hooks.json`.
+For both targets, a flat command entry that omits `type` receives the required
+`"type": "command"`; explicit handler types are kept and other targets are
+unchanged. This default applies only to flat command entries in the source
+file, not to handlers already inside nested source groups, so supply `type`
+yourself when authoring nested groups.
 Claude, Codex, Gemini, and Antigravity preserve nested handler and
 hook-group metadata, including `env` objects and arrays, in native JSON.
 
@@ -302,8 +303,14 @@ merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
 sidecar, so clones, contributors, and CI runners do not see the installer's
 machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
-references to absolute paths because the user-scope config is read
-without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+references so the user-scope config resolves without a fixed cwd. Where the
+harness documents POSIX shell execution, the path is anchored to `$HOME` on
+macOS/Linux (for example `$HOME/.claude/hooks/<pkg>/run.sh`) so the file stays
+identical across machines: Claude Code shell-form `command` (not `args` exec
+form or `shell: "powershell"`), Copilot CLI `bash`, Gemini CLI `command`, and
+Kiro command actions. Cursor, Codex, and Windsurf keep absolute paths, as do
+Windows hosts, single-quoted references, and config roots outside the home
+directory such as `CLAUDE_CONFIG_DIR`. If a manifest in `hooks/` or `.apm/hooks/` uses
 `./hooks/<script>`, APM first resolves it from the hook file directory,
 then falls back to the package root to avoid deploying a doubled
 `hooks/hooks/` path. If a referenced hook script is missing at install

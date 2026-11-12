@@ -173,6 +173,22 @@ def test_codex_native_edge_preserves_nested_entries() -> None:
     assert _to_codex_hook_entries(source) == source
 
 
+def test_codex_native_edge_types_untyped_flat_commands() -> None:
+    """Codex handlers are type-tagged, so flat commands need ``type`` (#3249)."""
+    from apm_cli.integration.hook_native_formats import (
+        _legacy_hook_entries,
+        _to_codex_hook_entries,
+    )
+
+    source = [{"command": "echo check", "matcher": "Bash"}]
+    untyped = [{"matcher": "Bash", "hooks": [{"command": "echo check"}]}]
+
+    assert _to_codex_hook_entries(source) == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo check"}]}
+    ]
+    assert _legacy_hook_entries(source, "codex") == [*source, *untyped]
+
+
 _NESTED_HOOK_METADATA = {
     "env": {"APM_TEST": "value", "PATHS": ["a", "b"]},
     "x-extension": {"tags": [{"name": "t"}], "enabled": True, "weight": 1.5, "note": None},

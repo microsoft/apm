@@ -88,6 +88,41 @@ def test_org_deny_all_suppresses_even_trusted(
     )
 
 
+def test_org_deny_all_reaches_runner_through_real_chain_discovery(
+    apm_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """deny_all holds through the real discover_policy_with_chain with a str root.
+
+    Only the leaf fetch is stubbed. The chain entry point, which joins
+    ``apm.yml`` onto the root, runs for real: a str root used to raise a
+    TypeError there that the runner swallowed, so deny_all never applied.
+    """
+    project = _project(tmp_path)
+    trust_project_scripts(project / "apm.yml")
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    monkeypatch.setattr(
+        "apm_cli.core.lifecycle_scripts._get_policy_scripts_dir",
+        lambda: tmp_path / "no_policy_dir",
+    )
+    leaf = SimpleNamespace(
+        policy=SimpleNamespace(extends=None, executables=SimpleNamespace(deny_all=True)),
+        cached=False,
+    )
+    roots: list[object] = []
+
+    def _leaf(root, **_kwargs):
+        roots.append(root)
+        return leaf
+
+    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy", _leaf)
+
+    runner = build_runner_from_context(project_root=str(project))
+    assert runner.scripts_for_event("post-install") == [], (
+        "deny_all must suppress a trusted project script through real chain discovery"
+    )
+    assert roots == [project]
+
+
 @pytest.mark.usefixtures("hermetic_sources")
 def test_lifecycle_test_execute_bypasses_gate_by_design(
     apm_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
