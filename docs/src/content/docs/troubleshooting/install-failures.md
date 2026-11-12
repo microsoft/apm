@@ -392,7 +392,7 @@ downloads:**
    apm --version
    ```
 
-   Requires Python 3.10+. See [pip install](../../getting-started/installation/#pip-install).
+   Requires Python 3.11+. See [pip install](../../getting-started/installation/#pip-install).
 
 3. **Submit the binary to Microsoft** if your organisation needs the detection
    cleared for an older release: use the
