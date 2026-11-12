@@ -228,11 +228,15 @@ class PolicyFetchResult:
     raw_bytes_hash: str | None = None
     expected_hash: str | None = None  # The pin that was checked, if any
 
-    # -- Discovery-provenance fields (#2753) --
-    # True when GitLab subgroup discovery resolved a policy BELOW the
-    # top-level group (closest-wins diverged from the legacy top-level
-    # probe). Surfaced at info even in non-verbose warn mode so a dev can
-    # see which subgroup's policy applied without needing --verbose.
+    # -- GitLab ancestry composition fields (#2753) --
+    # ancestry_parents: discovered ancestor-namespace policies (nearest first)
+    # that the chain owner composes under this leaf; None outside a nested
+    # GitLab discovery walk. chain_sources: ordered (root first), redacted
+    # sources of the composed effective policy. subgroup_scoped: a policy
+    # below the top-level group participates, so the resolved chain is
+    # surfaced at default verbosity.
+    ancestry_parents: list[PolicyFetchResult] | None = field(default=None, repr=False)
+    chain_sources: list[str] = field(default_factory=list)
     subgroup_scoped: bool = False
 
     @property
@@ -323,10 +327,10 @@ def discover_policy_with_chain(
     )
 
     # -- Chain resolution if leaf has extends: -------------------------
-    if (
-        fetch_result.policy is not None
-        and fetch_result.policy.extends is not None
-        and not fetch_result.cached  # Don't re-resolve if served from cache
+    if fetch_result.policy is not None and (
+        fetch_result.ancestry_parents is not None
+        # Don't re-resolve if served from cache
+        or (fetch_result.policy.extends is not None and not fetch_result.cached)
     ):
         _resolve_and_persist_chain(
             fetch_result,
@@ -595,10 +599,17 @@ def _resolve_and_persist_chain(
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
     Walks the ``extends:`` chain depth-first, fetching each parent via the
-    single-policy ``discover_policy`` (so each fetch still hits the
-    well-tested fetch path).  Cycle detection on normalized ``extends:``
+    single-policy fetch path.  Cycle detection on normalized ``extends:``
     refs and ``MAX_CHAIN_DEPTH`` enforcement protect against runaway or
     self-referential chains.
+
+    GitLab ancestry composition (#2753) seeds ``ancestry_parents``: after the
+    leaf's own ``extends:`` chain, every discovered ancestor (nearest first)
+    joins with its own ``extends:`` chain, so an ancestor restriction applies
+    even when a closer policy omits ``extends:``. An ``extends:`` naming a
+    policy already in the composed chain is a duplicate ancestor: reused,
+    never refetched, and not a cycle. ``MAX_CHAIN_DEPTH`` counts distinct
+    policies across the whole composed chain.
 
     If any parent fetch fails, mark the chain incomplete and clear the
     partial policy so enforcement cannot proceed with weaker constraints.
@@ -609,117 +620,105 @@ def _resolve_and_persist_chain(
     """
     from . import inheritance as _inheritance_mod
 
-    leaf_policy = fetch_result.policy
     leaf_source = fetch_result.source
     leaf_cache_ref = fetch_result.cache_ref or _strip_source_prefix(leaf_source)
-
     leaf_host, leaf_port = _derive_leaf_identity(leaf_source, project_root)
+    ancestry = fetch_result.ancestry_parents
+    # Composition levels run farthest ancestor first, so the chain is root-first.
+    levels = [*reversed(ancestry or ()), fetch_result]
+    discovered = {level.source: level for level in levels}
+    # Composed (policy, source, fetch result) entries, root first.
+    composed: list[tuple[ApmPolicy, str, PolicyFetchResult]] = []
 
-    # Ordered ancestors collected as we walk parents.  Built leaf-first
-    # for traversal convenience; reversed before merging.
-    chain_policies: list[ApmPolicy] = [leaf_policy]
-    chain_sources: list[str] = [leaf_source]
-
-    # Track normalized refs we've already followed to break cycles.
-    # We seed with the leaf's source so an extends pointing back at the
-    # leaf is also detected.
-    visited: list[str] = [leaf_cache_ref] if leaf_source else []
-
-    current = leaf_policy
-    incomplete_chain: tuple[str, int, int] | None = None
-    stale_ancestor: PolicyFetchResult | None = None
-
-    while current.extends:
-        next_ref = current.extends
-
-        # Host pin enforcement: must validate BEFORE any fetch so we never
-        # call git credential fill against an attacker-controlled host.
-        _validate_extends_host(leaf_host, next_ref)
-
-        if _inheritance_mod.detect_cycle(visited, next_ref):
-            safe_visited = [_redact_policy_ref(ref) for ref in visited]
-            safe_next_ref = _redact_policy_ref(next_ref)
-            raise _inheritance_mod.PolicyInheritanceError(
-                f"Cycle detected in policy extends chain: "
-                f"{' -> '.join(safe_visited)} -> {safe_next_ref}"
-            )
-
-        # Depth check: chain_policies already has len() entries; next fetch
-        # would push us to len()+1.  resolve_policy_chain enforces this
-        # afterwards, but failing here gives a clearer error.
-        if len(chain_policies) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
-            safe_visited = [_redact_policy_ref(ref) for ref in visited]
-            safe_next_ref = _redact_policy_ref(next_ref)
-            raise _inheritance_mod.PolicyInheritanceError(
+    def _chain_error(kind: str, refs: list[str], next_ref: str) -> Exception:
+        trail = " -> ".join(_redact_policy_ref(ref) for ref in [*refs, next_ref])
+        if kind == "cycle":
+            message = f"Cycle detected in policy extends chain: {trail}"
+        else:
+            message = (
                 f"Policy chain depth exceeds maximum of "
-                f"{_inheritance_mod.MAX_CHAIN_DEPTH} "
-                f"(chain: {' -> '.join(safe_visited)} -> {safe_next_ref})"
+                f"{_inheritance_mod.MAX_CHAIN_DEPTH} (chain: {trail})"
             )
+        return _inheritance_mod.PolicyInheritanceError(message)
 
-        parent_result = _fetch_chain_parent(
-            next_ref,
-            current_source=chain_sources[-1],
-            leaf_host=leaf_host,
-            leaf_port=leaf_port,
-            project_root=project_root,
-            no_cache=no_cache,
-            cache_only=cache_only,
-        )
-        fetch_result.warnings.extend(parent_result.warnings)
+    def _segment(level: PolicyFetchResult, nearer: set[str]):
+        """Return *level* plus its ``extends:`` ancestors (leaf-first) or a failure."""
+        seed_ref = _strip_source_prefix(level.source) if ancestry is not None else leaf_cache_ref
+        # Refs followed in this segment; seeded so a self-reference is a cycle.
+        visited: list[str] = [seed_ref] if level.source else []
+        segment = [(level.policy, level.source, level)]
+        composed_sources = {source for _, source, _ in composed}
+        current = level.policy
+        while current.extends:
+            next_ref = current.extends
+            # Host pin enforcement: must validate BEFORE any fetch so we never
+            # call git credential fill against an attacker-controlled host.
+            _validate_extends_host(leaf_host, next_ref)
+            if _inheritance_mod.detect_cycle(visited, next_ref):
+                raise _chain_error("cycle", visited, next_ref)
+            parent_result = None
+            if ancestry is not None and leaf_host:
+                coordinates = _gitlab._gitlab_parent_coordinates(
+                    next_ref, current_source=segment[-1][1], leaf_host=leaf_host, port=leaf_port
+                )
+                if coordinates is not None:
+                    source = _gitlab._gitlab_source_label(leaf_host, leaf_port, *coordinates)
+                    # An ancestor extending itself or a nearer namespace is a cycle.
+                    if source in nearer or any(source == item[1] for item in segment):
+                        raise _chain_error("cycle", visited, next_ref)
+                    if source in composed_sources:
+                        break  # duplicate ancestor, already composed
+                    parent_result = discovered.get(source)
+            if len(composed) + len(segment) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
+                raise _chain_error("depth", visited, next_ref)
+            if parent_result is None:
+                parent_result = _fetch_chain_parent(
+                    next_ref,
+                    current_source=segment[-1][1],
+                    leaf_host=leaf_host,
+                    leaf_port=leaf_port,
+                    project_root=project_root,
+                    no_cache=no_cache,
+                    cache_only=cache_only,
+                )
+                fetch_result.warnings.extend(parent_result.warnings)
+            if parent_result.policy is None:
+                # Parent fetch failed -- never enforce the weaker partial chain.
+                resolved = len(composed) + len(segment)
+                return next_ref, resolved, resolved + 1
+            segment.append((parent_result.policy, parent_result.source, parent_result))
+            visited.append(next_ref)
+            current = parent_result.policy
+        return segment
 
-        if parent_result.policy is None:
-            # Parent fetch failed -- never enforce the weaker partial chain.
-            attempted = len(chain_policies) + 1
-            resolved = len(chain_policies)
-            incomplete_chain = (next_ref, resolved, attempted)
+    incomplete_chain = None
+    for index, level in enumerate(levels):
+        if any(level.source == source for _, source, _ in composed):
+            continue
+        if len(composed) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
+            raise _chain_error("depth", [src for _, src, _ in composed], level.source)
+        if level is not fetch_result:
+            fetch_result.warnings.extend(level.warnings)
+        outcome = _segment(level, {nearer.source for nearer in levels[index + 1 :]})
+        if isinstance(outcome, tuple):
+            incomplete_chain = outcome
             break
+        composed.extend(reversed(outcome))
 
-        # Keep the nearest stale ancestor's refresh diagnostic. Continue
-        # merging its usable cached policy, but never relabel that ancestry
-        # as fresh or replace a nearer failure with a farther one.
-        if parent_result.outcome == "cached_stale" and stale_ancestor is None:
-            stale_ancestor = parent_result
-
-        chain_policies.append(parent_result.policy)
-        chain_sources.append(parent_result.source)
-        visited.append(next_ref)
-        current = parent_result.policy
-
-    # No actual ancestors fetched -- nothing to merge or re-cache.
-    if len(chain_policies) == 1:
-        if incomplete_chain is not None:
-            ref, resolved, attempted = incomplete_chain
-            fetch_result.outcome = "incomplete_chain"
-            fetch_result.error = (
-                f"Policy chain incomplete: {_redact_policy_ref(ref)} unreachable "
-                f"({resolved} of {attempted} policies resolved)"
-            )
-            fetch_result.policy = None
-        return
-
-    # Merge in [root, ..., leaf] order.  We collected leaf-first, so reverse.
-    ordered = list(reversed(chain_policies))
-    ordered_sources = list(reversed(chain_sources))
-
-    try:
-        merged = _inheritance_mod.resolve_policy_chain(ordered)
-    except _inheritance_mod.PolicyInheritanceError:
-        # Re-raise depth errors from the canonical validator so callers
-        # see a single consistent error type.
-        raise
-
-    chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
-
-    cache_key = leaf_cache_ref if leaf_source else ""
-    if cache_key and incomplete_chain is None and stale_ancestor is None:
-        _write_cache(
-            cache_key,
-            merged,
-            project_root,
-            chain_refs=chain_refs,
-            raw_bytes_hash=fetch_result.raw_bytes_hash,
-            warnings=fetch_result.warnings,
-        )
+    # Keep the nearest stale policy's refresh diagnostic. Continue merging its
+    # usable cached policy, but never relabel that ancestry as fresh or replace
+    # a nearer failure with a farther one. The leaf counts only when composed.
+    stale_ancestor = next(
+        (
+            result
+            for _, _, result in reversed(composed)
+            if result.outcome == "cached_stale"
+            and (result is not fetch_result or ancestry is not None)
+        ),
+        None,
+    )
+    chain_policies = [policy for policy, _, _ in composed]
+    chain_sources = [source for _, source, _ in composed]
 
     if incomplete_chain is not None:
         ref, resolved, attempted = incomplete_chain
@@ -730,6 +729,27 @@ def _resolve_and_persist_chain(
         )
         fetch_result.policy = None
         return
+    # No actual ancestors fetched -- nothing to merge or re-cache.
+    if len(chain_policies) == 1 and ancestry is None:
+        return
+
+    # chain_policies is already ordered [root, ..., leaf].
+    merged = _inheritance_mod.resolve_policy_chain(chain_policies)
+    chain_refs = [_strip_source_prefix(src) for src in chain_sources if src]
+    if ancestry is not None:
+        fetch_result.chain_sources = [_redact_policy_ref(ref) for ref in chain_refs]
+        fetch_result.subgroup_scoped = _gitlab._gitlab_subgroup_scoped(chain_refs)
+
+    cache_key = leaf_cache_ref if leaf_source else ""
+    if cache_key and stale_ancestor is None:
+        _write_cache(
+            cache_key,
+            merged,
+            project_root,
+            chain_refs=chain_refs,
+            raw_bytes_hash=fetch_result.raw_bytes_hash,
+            warnings=fetch_result.warnings,
+        )
 
     fetch_result.policy = merged
     if stale_ancestor is not None:
@@ -897,8 +917,7 @@ def _auto_discover(
        - Found -> return (first match wins)
     5. All candidates exhausted -> outcome="absent"
     """
-    # Read origin once and reuse it for both identity and the GitLab namespace
-    # walk so discovery never invokes ``git remote get-url`` more than once.
+    # Read origin once: identity and GitLab ancestry share the same remote.
     remote_url = _git_remote_origin_url(project_root)
     identity = _extract_org_host_port_from_git_remote(project_root, remote_url=remote_url)
     if identity is None:
@@ -913,11 +932,6 @@ def _auto_discover(
     except ValueError as exc:
         return PolicyFetchResult(error=str(exc), outcome="cache_miss_fetch_fail")
     is_ado = is_azure_devops_hostname(host)
-    is_gitlab = is_gitlab_hostname(host)
-    # GitLab discovery walks the subgroup tree from the deepest subgroup up to
-    # the top-level group (closest policy wins, see #2753). Fall back to the
-    # single top-level org when the namespace cannot be derived.
-    gitlab_namespaces = (_gitlab_namespace_descending(remote_url) or [org]) if is_gitlab else []
 
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
@@ -931,10 +945,11 @@ def _auto_discover(
                 expected_hash=expected_hash,
                 cache_only=cache_only,
             )
-        elif is_gitlab:
-            result = _gitlab_walk_candidate(
+        elif is_gitlab_hostname(host):
+            result = _gitlab._fetch_gitlab_ancestry(
                 candidate_repo=candidate_repo,
-                namespaces=gitlab_namespaces,
+                remote_url=remote_url,
+                org=org,
                 host=host,
                 port=port,
                 project_root=project_root,
@@ -981,83 +996,6 @@ def _auto_discover(
     if cache_only and expected_hash is not None:
         return _unverifiable_cache_pin(expected_hash, "")
     return PolicyFetchResult(error=None, outcome="absent")
-
-
-def _gitlab_namespace_descending(remote_url: str | None) -> list[str] | None:
-    """Return GitLab policy namespaces from the deepest subgroup to the top.
-
-    Probe order is closest-first. For a project remote
-    ``gitlab.com/acme/dept-a/team-x/my-project`` this returns
-    ``["acme/dept-a/team-x", "acme/dept-a", "acme"]``; a flat
-    ``acme/my-project`` returns ``["acme"]`` (identical to top-level-only
-    discovery). Returns ``None`` when the origin remote is missing or has no
-    namespace segment (a degenerate remote with no owner), so callers can fall
-    back to their existing single-org behaviour. Takes the already-read
-    ``origin`` URL so discovery reads the remote exactly once.
-    """
-    if not remote_url:
-        return None
-    parts = _remote_url_parts(remote_url)
-    if parts is None:
-        return None
-    _host, segments = parts
-    # The final segment is the project; everything before it is the namespace.
-    namespace_segments = segments[:-1]
-    if not namespace_segments:
-        return None
-    return ["/".join(namespace_segments[:n]) for n in range(len(namespace_segments), 0, -1)]
-
-
-def _gitlab_walk_candidate(
-    *,
-    candidate_repo: str,
-    namespaces: list[str],
-    host: str,
-    port: int | None,
-    project_root: Path,
-    no_cache: bool,
-    expected_hash: str | None,
-    cache_only: bool,
-) -> PolicyFetchResult:
-    """Probe one GitLab policy repo up the subgroup tree (closest wins, #2753).
-
-    Fetches ``<namespace>/<candidate_repo>/apm-policy.yml`` for each namespace
-    in *namespaces* (already ordered deepest-first). The first non-``absent``
-    outcome wins; an ``absent`` level continues to the next-shallower group.
-    When every level is absent the last ``absent`` result is returned so the
-    caller's candidate cascade can proceed unchanged.
-
-    A GitLab ``absent`` is a 404, which GitLab returns both for a missing
-    project and for a private one the token cannot read -- the same
-    "404 == no policy at this level" ambiguity GitHub/ADO discovery already
-    accept. A closer policy the token cannot read is therefore skipped in
-    favour of the next ancestor (documented as a GitLab-platform limitation).
-    """
-    result = PolicyFetchResult(error=None, outcome="absent")
-    for namespace in namespaces:
-        result = _gitlab._fetch_from_gitlab_repo(
-            org=namespace,
-            repo=candidate_repo,
-            host=host,
-            port=port,
-            project_root=project_root,
-            no_cache=no_cache,
-            expected_hash=expected_hash,
-            cache_only=cache_only,
-        )
-        if result.outcome != "absent":
-            # A namespace with more than one segment is a subgroup below the
-            # top-level group, so closest-wins diverged from the legacy
-            # top-level-only probe; flag it so the resolved level is surfaced
-            # to the user even at default verbosity (#2753).
-            result.subgroup_scoped = "/" in namespace
-            return result
-        logger.debug(
-            "GitLab policy absent at %s/%s; trying parent group",
-            namespace,
-            candidate_repo,
-        )
-    return result
 
 
 def _fetch_from_url(

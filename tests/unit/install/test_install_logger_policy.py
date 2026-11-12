@@ -10,7 +10,9 @@ Covers W1-logger deliverables from issue #827:
 - _render_policy_group renders blocked vs warn items correctly
 """
 
+import re
 from unittest.mock import call, patch  # noqa: F401
+from urllib.parse import urlsplit
 
 import pytest  # noqa: F401
 
@@ -347,22 +349,39 @@ class TestPolicyResolved:
         )
         mock_info.assert_not_called()
 
+    @staticmethod
+    def _coordinate(ref):
+        """Return the (host, path) of an ``org:host/namespace/repo`` source."""
+        parts = urlsplit(f"//{ref.removeprefix('org:')}")
+        return parts.hostname, parts.path
+
     @patch("apm_cli.core.command_logger._rich_info")
     def test_subgroup_scoped_visible_non_verbose_warn(self, mock_info):
-        """#2753: a GitLab subgroup policy (closest-wins below the top-level
-        group) names the resolved level at info even in non-verbose warn mode,
-        so the dev sees which subgroup applied without --verbose."""
+        """#2753: a composed GitLab subgroup policy names its ordered source
+        chain at info even in non-verbose warn mode."""
+        chain = [
+            "gitlab.com/acme/apm-policy",
+            "gitlab.com/acme/dept-a/apm-policy",
+        ]
         logger = InstallLogger(verbose=False)
         logger.policy_resolved(
             source="org:gitlab.com/acme/dept-a/apm-policy",
             cached=False,
             enforcement="warn",
             subgroup_scoped=True,
+            chain=chain,
         )
         mock_info.assert_called_once()
         msg = mock_info.call_args[0][0]
-        assert "org:gitlab.com/acme/dept-a/apm-policy" in msg
-        assert "enforcement=warn" in msg
+        match = re.fullmatch(
+            r"Policy: (?P<source>\S+) \(chain: (?P<chain>[^)]*)\) -- enforcement=warn", msg
+        )
+        assert match is not None, msg
+        assert self._coordinate(match["source"]) == ("gitlab.com", "/acme/dept-a/apm-policy")
+        assert [self._coordinate(ref) for ref in match["chain"].split(" -> ")] == [
+            ("gitlab.com", "/acme/apm-policy"),
+            ("gitlab.com", "/acme/dept-a/apm-policy"),
+        ]
         assert mock_info.call_args[1].get("symbol") == "info"
 
     @patch("apm_cli.core.command_logger._rich_info")

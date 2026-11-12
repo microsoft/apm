@@ -15,6 +15,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ._remote import _remote_url_parts
 from .parser import PolicyValidationError, load_policy
 from .schema import ApmPolicy
 
@@ -110,6 +111,61 @@ def _gitlab_project_state_via_git(
         return None
 
 
+def _gitlab_parent_coordinates(
+    parent_ref: str,
+    *,
+    current_source: str,
+    leaf_host: str,
+    port: int | None,
+) -> tuple[str, str] | None:
+    """Return the ``(namespace, repo)`` a GitLab ``extends:`` ref fetches.
+
+    ``None`` means the reference is invalid or names another host. This is
+    the single parser for GitLab parent references, shared by the fetch
+    below and by ancestry composition's duplicate-ancestor detection.
+    """
+    if parent_ref == "org":
+        try:
+            repo = _gitlab_policy_repo_candidates()[0]
+        except ValueError:
+            return None
+        current_parts = current_source.removeprefix("org:").split("/")
+        current_org = current_parts[1] if len(current_parts) >= 3 else ""
+        return (current_org, repo) if current_org else None
+    parts = [p for p in parent_ref.strip("/").split("/") if p]
+    # A host-like first segment (FQDN or ``host:port``) MUST match the leaf
+    # host and port exactly, then it is stripped so ``host/namespace/.../repo``
+    # and ``namespace/.../repo`` are treated the same. A host-like segment
+    # that does not match the leaf -- or carries a malformed port -- is a
+    # cross-host/invalid ref and is rejected, never silently folded into the
+    # namespace. A bare single-label first segment is a namespace segment
+    # (GitLab nested subgroups, see #2753) and is left in place.
+    if len(parts) >= 3 and ("." in parts[0] or ":" in parts[0]):
+        try:
+            explicit = urlsplit(f"//{parts[0]}")
+            same_leaf = (
+                explicit.hostname is not None
+                and explicit.hostname.lower() == leaf_host.lower()
+                and explicit.port == port
+            )
+        except ValueError:
+            same_leaf = False
+        if not same_leaf:
+            return None
+        parts = parts[1:]
+    # A GitLab namespace may be nested (subgroups): everything before the
+    # final segment is the namespace, the final segment is the policy repo.
+    if len(parts) < 2:
+        return None
+    return "/".join(parts[:-1]), parts[-1]
+
+
+def _gitlab_source_label(host: str, port: int | None, namespace: str, repo: str) -> str:
+    """Return the canonical ``org:`` source label of one GitLab policy project."""
+    host_label = f"{host}:{port}" if port is not None else host
+    return f"org:{host_label}/{namespace}/{repo}"
+
+
 def _fetch_gitlab_chain_parent(
     parent_ref: str,
     *,
@@ -123,52 +179,16 @@ def _fetch_gitlab_chain_parent(
     """Fetch one GitLab policy parent through this adapter."""
     from .discovery import PolicyFetchResult
 
-    current_parts = current_source.removeprefix("org:").split("/")
-    current_org = current_parts[1] if len(current_parts) >= 3 else ""
-    if parent_ref == "org":
-        try:
-            repo = _gitlab_policy_repo_candidates()[0]
-        except ValueError:
-            return PolicyFetchResult(
-                source=f"org:{parent_ref}",
-                error=f"Invalid GitLab policy reference: {parent_ref}",
-                outcome="cache_miss_fetch_fail",
-            )
-        org = current_org
-    else:
-        parts = [p for p in parent_ref.strip("/").split("/") if p]
-        invalid = PolicyFetchResult(
+    coordinates = _gitlab_parent_coordinates(
+        parent_ref, current_source=current_source, leaf_host=leaf_host, port=port
+    )
+    if coordinates is None:
+        return PolicyFetchResult(
             source=f"org:{parent_ref}",
             error=f"Invalid GitLab policy reference: {parent_ref}",
             outcome="cache_miss_fetch_fail",
         )
-        # A host-like first segment (FQDN or ``host:port``) MUST match the leaf
-        # host and port exactly, then it is stripped so ``host/namespace/.../repo``
-        # and ``namespace/.../repo`` are treated the same. A host-like segment
-        # that does not match the leaf -- or carries a malformed port -- is a
-        # cross-host/invalid ref and is rejected, never silently folded into the
-        # namespace. A bare single-label first segment is a namespace segment
-        # (GitLab nested subgroups, see #2753) and is left in place.
-        if len(parts) >= 3 and ("." in parts[0] or ":" in parts[0]):
-            try:
-                explicit = urlsplit(f"//{parts[0]}")
-                same_leaf = (
-                    explicit.hostname is not None
-                    and explicit.hostname.lower() == leaf_host.lower()
-                    and explicit.port == port
-                )
-            except ValueError:
-                same_leaf = False
-            if not same_leaf:
-                return invalid
-            parts = parts[1:]
-        # A GitLab namespace may be nested (subgroups): everything before the
-        # final segment is the namespace, the final segment is the policy repo.
-        # Requires at least ``namespace/repo``.
-        if len(parts) < 2:
-            return invalid
-        org = "/".join(parts[:-1])
-        repo = parts[-1]
+    org, repo = coordinates
     return _fetch_from_gitlab_repo(
         org=org,
         repo=repo,
@@ -178,6 +198,196 @@ def _fetch_gitlab_chain_parent(
         no_cache=no_cache,
         cache_only=cache_only,
     )
+
+
+def _gitlab_namespace_descending(remote_url: str | None) -> list[str] | None:
+    """Return GitLab policy namespaces from the deepest subgroup to the top.
+
+    For ``gitlab.com/acme/dept-a/team-x/my-project`` this returns
+    ``["acme/dept-a/team-x", "acme/dept-a", "acme"]``; a flat
+    ``acme/my-project`` returns ``["acme"]``. ``None`` means the origin
+    remote is missing or has no namespace segment.
+    """
+    if not remote_url:
+        return None
+    parts = _remote_url_parts(remote_url)
+    if parts is None:
+        return None
+    _host, segments = parts
+    namespace_segments = segments[:-1]
+    if not namespace_segments:
+        return None
+    return ["/".join(namespace_segments[:n]) for n in range(len(namespace_segments), 0, -1)]
+
+
+def _gitlab_subgroup_scoped(refs: list[str]) -> bool:
+    """Return whether any ``host/namespace/.../repo`` ref sits below a top-level group."""
+    return any(len(ref.removeprefix("org:").split("/")) > 3 for ref in refs)
+
+
+def _gitlab_ancestry_cache_ref(host: str, port: int | None, namespace: str, repo: str) -> str:
+    """Return the cache key of one project's composed ancestry policy.
+
+    Distinct from every per-project key so the composed effective policy
+    never overwrites the raw policy of the deepest namespace.
+    """
+    return f"{_gitlab_source_label(host, port, namespace, repo).removeprefix('org:')}#ancestry"
+
+
+def _gitlab_ancestry_cached_result(
+    cache_entry: _CacheEntry,
+    *,
+    ancestry_ref: str,
+    expected_hash: str | None,
+    stale_error: str | None = None,
+) -> PolicyFetchResult:
+    """Serve a composed ancestry cache entry with its ordered source chain."""
+    from .discovery import PolicyFetchResult, _is_policy_empty
+
+    chain = list(cache_entry.chain_refs) or [ancestry_ref]
+    result = PolicyFetchResult(
+        policy=cache_entry.policy,
+        source=f"org:{chain[-1]}",
+        cache_ref=ancestry_ref,
+        cached=True,
+        cache_age_seconds=cache_entry.age_seconds,
+        raw_bytes_hash=cache_entry.raw_bytes_hash or None,
+        expected_hash=expected_hash,
+        warnings=cache_entry.warnings,
+        chain_sources=chain,
+        subgroup_scoped=_gitlab_subgroup_scoped(chain),
+    )
+    if cache_entry.stale or stale_error is not None:
+        result.outcome = "cached_stale"
+        result.cache_stale = True
+        result.fetch_error = stale_error
+    else:
+        result.outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
+    return result
+
+
+def _fetch_gitlab_ancestry(
+    *,
+    candidate_repo: str,
+    remote_url: str | None,
+    org: str,
+    host: str,
+    port: int | None,
+    project_root: Path,
+    no_cache: bool = False,
+    expected_hash: str | None = None,
+    cache_only: bool = False,
+) -> PolicyFetchResult:
+    """Discover the policy project at every namespace of the GitLab ancestry.
+
+    Flat projects keep single-namespace discovery unchanged. For nested
+    projects every ancestor namespace is probed (bounded by the ancestry);
+    the nearest discovered policy is the leaf (the ``policy.hash`` subject)
+    and the farther ones are returned as ``ancestry_parents`` so the chain
+    owner composes them company-to-team with the tighten-only merger (#2753).
+
+    A 404 is absence. GitLab also answers 404 for a private project the
+    token cannot read, so governed CI needs read access to every
+    applicable policy namespace. Any other failure must never yield a
+    weaker partial policy: a complete composed cache follows stale-cache
+    rules; otherwise a discovered policy turns the failure into an
+    ``incomplete_chain`` that always fails closed.
+    """
+    from .discovery import (
+        PolicyFetchResult,
+        _cache_entry_files_exist,
+        _cache_only_policy_result,
+        _read_cache_entry,
+    )
+
+    namespaces = _gitlab_namespace_descending(remote_url) or [org]
+    if len(namespaces) == 1:
+        return _fetch_from_gitlab_repo(
+            org=namespaces[0],
+            repo=candidate_repo,
+            host=host,
+            port=port,
+            project_root=project_root,
+            no_cache=no_cache,
+            expected_hash=expected_hash,
+            cache_only=cache_only,
+        )
+
+    ancestry_ref = _gitlab_ancestry_cache_ref(host, port, namespaces[0], candidate_repo)
+    composed = (
+        None
+        if no_cache
+        else _read_cache_entry(ancestry_ref, project_root, expected_hash=expected_hash)
+    )
+    if composed is not None and not composed.stale:
+        return _gitlab_ancestry_cached_result(
+            composed, ancestry_ref=ancestry_ref, expected_hash=expected_hash
+        )
+    if cache_only:
+        # Offline discovery serves only the complete composed chain written by
+        # the last online run; per-namespace entries could silently drop a layer.
+        if composed is not None:
+            return _gitlab_ancestry_cached_result(
+                composed, ancestry_ref=ancestry_ref, expected_hash=expected_hash
+            )
+        return _cache_only_policy_result(
+            None,
+            source_label=_gitlab_source_label(host, port, namespaces[0], candidate_repo),
+            expected_hash=expected_hash,
+            cache_entry_persisted=_cache_entry_files_exist(ancestry_ref, project_root),
+        )
+
+    discovered: list[PolicyFetchResult] = []
+    failure: PolicyFetchResult | None = None
+    pin = expected_hash
+    for namespace in namespaces:
+        result = _fetch_from_gitlab_repo(
+            org=namespace,
+            repo=candidate_repo,
+            host=host,
+            port=port,
+            project_root=project_root,
+            no_cache=no_cache,
+            expected_hash=pin,
+        )
+        if result.outcome == "absent":
+            continue
+        # The nearest non-absent namespace is the leaf: only it is pinned.
+        pin = None
+        if result.outcome == "hash_mismatch":
+            return result
+        if result.policy is None:
+            failure = failure or result
+        else:
+            discovered.append(result)
+
+    if failure is not None:
+        failure_error = failure.error or failure.fetch_error or failure.outcome
+        if composed is not None:
+            return _gitlab_ancestry_cached_result(
+                composed,
+                ancestry_ref=ancestry_ref,
+                expected_hash=expected_hash,
+                stale_error=failure_error,
+            )
+        if discovered:
+            return PolicyFetchResult(
+                source=failure.source,
+                error=(
+                    f"Policy chain incomplete: {failure.source.removeprefix('org:')} "
+                    f"could not be resolved ({failure_error})"
+                ),
+                fetch_error=failure_error,
+                outcome="incomplete_chain",
+            )
+        return failure
+    if not discovered:
+        return PolicyFetchResult(outcome="absent")
+
+    leaf = discovered[0]
+    leaf.ancestry_parents = discovered[1:]
+    leaf.cache_ref = ancestry_ref
+    return leaf
 
 
 def _fetch_from_gitlab_repo(

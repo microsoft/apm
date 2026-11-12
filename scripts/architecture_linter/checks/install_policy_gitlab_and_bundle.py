@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 from scripts.architecture_linter.checks.install_policy_shared import (
     _APM_RESOLVER,
+    _ELSE_TERMINATOR,
     _POLICY_DISCOVERY,
     _banned,
     _configured,
@@ -58,14 +59,16 @@ _POLICY_TREE = "src/apm_cli/policy/"
 
 _GITLAB_ADAPTER_DEFS = re.compile(
     r"^def (_fetch_from_gitlab_repo|_fetch_gitlab_contents"
-    r"|_gitlab_project_state_via_git|_fetch_gitlab_chain_parent)\("
+    r"|_gitlab_project_state_via_git|_fetch_gitlab_chain_parent|_fetch_gitlab_ancestry)\("
 )
 
 
-_GITLAB_FACADE_CALL = re.compile(r"_gitlab\._fetch_(from_gitlab_repo|gitlab_chain_parent)\(")
+_GITLAB_FACADE_CALL = re.compile(
+    r"_gitlab\._fetch_(from_gitlab_repo|gitlab_chain_parent|gitlab_ancestry)\("
+)
 
 
-_GITLAB_ADAPTER_DEF_COUNT = 4
+_GITLAB_ADAPTER_DEF_COUNT = 5
 
 
 _GITLAB_FACADE_CALL_COUNT = 2
@@ -196,13 +199,7 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
     return tuple(findings)
 
 
-# The facade delegation now lives in ``_gitlab_walk_candidate`` (the GitLab
-# branch of ``_auto_discover`` calls it; see #2753). Scope the orchestration
-# scan to that helper's body -- from its ``def`` to the next top-level ``def``.
-_GITLAB_WALK_START = re.compile(r"^def _gitlab_walk_candidate\(")
-
-
-_TOP_LEVEL_DEF = re.compile(r"^def ")
+_GITLAB_BRANCH_START = re.compile(r"^[ \t]*elif is_gitlab_hostname\(host\):")
 
 
 _NON_WHITESPACE = re.compile(r"[^\s]")
@@ -223,8 +220,8 @@ def check_gitlab_facade_orchestration(provider: FactsProvider) -> tuple[Violatio
 
     branch = _indent_scoped_branch(
         lines,
-        start=_GITLAB_WALK_START,
-        terminator=_TOP_LEVEL_DEF,
+        start=_GITLAB_BRANCH_START,
+        terminator=_ELSE_TERMINATOR,
         probe=_NON_WHITESPACE,
         include_start=False,
         restart_skips=True,

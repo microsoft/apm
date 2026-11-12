@@ -195,6 +195,7 @@ def route_discovery_outcome(
                     enforcement=policy.enforcement,
                     age_seconds=fetch_result.cache_age_seconds,
                     subgroup_scoped=fetch_result.subgroup_scoped,
+                    chain=fetch_result.chain_sources,
                 )
             logger.policy_discovery_miss(
                 outcome="cached_stale",
@@ -220,6 +221,7 @@ def route_discovery_outcome(
                 enforcement=policy.enforcement,
                 age_seconds=fetch_result.cache_age_seconds,
                 subgroup_scoped=fetch_result.subgroup_scoped,
+                chain=fetch_result.chain_sources,
             )
         return policy
 

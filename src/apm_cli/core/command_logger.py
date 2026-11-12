@@ -616,18 +616,20 @@ class InstallLogger(CommandLogger):
         enforcement: str,
         age_seconds: int | None = None,
         subgroup_scoped: bool = False,
+        chain: list[str] | None = None,
     ):
         """Log policy discovery outcome.
 
         Verbose by default; always shown when ``enforcement == "block"``
         (users must know blocking is active) or when ``subgroup_scoped``
-        is set -- a GitLab subgroup policy that closest-wins resolved
-        BELOW the top-level group is surprising enough that the resolved
-        level must name itself even at default verbosity (#2753).
+        is set -- a GitLab subgroup policy composed with its ancestors must
+        name the ordered source chain even at default verbosity (#2753).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
         parts = [f"Policy: {source}"]
+        if chain and len(chain) > 1:
+            parts.append(f"(chain: {' -> '.join(chain)})")
 
         if cached:
             cache_detail = "cached"
@@ -648,8 +650,8 @@ class InstallLogger(CommandLogger):
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
         elif self.verbose or subgroup_scoped:
-            # Subgroup-scoped GitLab policy: show at info even in non-verbose
-            # warn mode so the dev sees which subgroup level applied (#2753).
+            # GitLab subgroup composition: show the chain even in non-verbose
+            # warn mode so the dev sees which namespaces applied (#2753).
             _rich_info(message, symbol="info")
         # Non-verbose + non-block + top-level: silent (no noise for warn/off)
 
