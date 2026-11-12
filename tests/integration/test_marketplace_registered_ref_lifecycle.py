@@ -18,7 +18,8 @@ Two existing routes are covered:
 
 Git transport is rewritten to owned local bare repositories; no real host is
 contacted. Explicit plugin source pins and ``plugin@marketplace#ref`` install
-overrides keep their existing precedence over the registered ref.
+overrides keep their existing precedence over the registered ref, and a
+registration without ``--ref`` keeps installing the default branch.
 """
 
 from __future__ import annotations
@@ -275,14 +276,15 @@ def test_github_registered_branch_installs_pilot_artifacts(
 def test_gitlab_registered_branch_installs_pilot_artifacts(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """GitLab structured git+path: inherited ref deploys pilot bytes and persists the ref."""
+    """GitLab structured git+path: inherited ref deploys pilot bytes; no ref keeps default."""
     catalog_plugins: list[dict[str, object]] = [{"name": "alpha", "source": "./plugins/alpha"}]
     isolated = IsolatedApmEnvironment.create(tmp_path / "gitlab", base_env=dict(os.environ))
-    repositories, repository, _default, pilot_sha = _publish_default_and_pilot(
+    repositories, repository, default, pilot_sha = _publish_default_and_pilot(
         isolated, catalog_plugins
     )
     env = repositories.url_rewrite_subprocess_env(repository, _GITLAB_REMOTE)
     project = _consumer(isolated, "consumer")
+    default_project = _consumer(isolated, "default-consumer")
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=240)
 
     _run(
@@ -318,3 +320,26 @@ def test_gitlab_registered_branch_installs_pilot_artifacts(
     assert alpha["resolved_commit"] == pilot_sha
     assert alpha["discovered_via"] == _MARKETPLACE
     assert alpha["marketplace_plugin_name"] == "alpha"
+
+    # Registration without --ref keeps the default branch: no ref is injected.
+    _run(
+        runner,
+        ("marketplace", "add", _GITLAB_REMOTE, "--name", "default-catalog"),
+        cwd=default_project,
+        env=env,
+        scenario_id="gitlab-marketplace-add-default",
+    )
+    _run(
+        runner,
+        (*_INSTALL, "alpha@default-catalog"),
+        cwd=default_project,
+        env=env,
+        scenario_id="gitlab-install-default-branch",
+    )
+    assert _deployed_skill(default_project, "alpha") == _skill("alpha", "main").encode("utf-8")
+    (default_dependency,) = _manifest_dependencies(default_project)
+    assert isinstance(default_dependency, dict), default_dependency
+    assert set(default_dependency) == {"git", "path"}
+    default_alpha = _locked(default_project, "plugins/alpha")
+    assert "resolved_ref" not in default_alpha
+    assert default_alpha["resolved_commit"] == default.sha
