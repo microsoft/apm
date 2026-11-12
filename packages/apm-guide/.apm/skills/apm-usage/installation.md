@@ -45,7 +45,7 @@ scoop install apm
 ```
 
 ```bash
-# pip (all platforms, requires Python 3.10+)
+# pip (all platforms, requires Python 3.11+)
 python3 -m pip install apm-cli
 ```
 

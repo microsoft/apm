@@ -218,14 +218,14 @@ EOF
 
 # -- Python version guard -------------------------------------------------------
 
-@test "continues when Python is exactly 3.10 (minimum boundary)" {
+@test "continues when Python is exactly 3.11 (minimum boundary)" {
     setup_happy_path
     /bin/cat > "$STUB_BIN/python3" <<'EOF'
 #!/bin/sh
 case "$*" in
-    *version_info.minor*) echo "10"    ;;
+    *version_info.minor*) echo "11"    ;;
     *version_info.major*) echo "3"     ;;
-    *version_info*3*)     echo "3.10.0" ;;
+    *version_info*3*)     echo "3.11.0" ;;
     *)                    exit 0       ;;
 esac
 EOF
@@ -591,17 +591,17 @@ EOF
     refute_output --partial "apm-cli=="
 }
 
-# -- Python 3.9 boundary -------------------------------------------------------
+# -- Python 3.10 boundary ------------------------------------------------------
 
-@test "exits 1 when Python is 3.9 (one below minimum)" {
+@test "exits 1 when Python is 3.10 (one below minimum)" {
     setup_happy_path
-    make_old_python3_stub 3 9
+    make_old_python3_stub 3 10
 
     run_with_stubs
 
     assert_failure
-    assert_output --partial "requires Python 3.10+"
-    assert_output --partial "3.9"
+    assert_output --partial "requires Python 3.11+"
+    assert_output --partial "3.10"
 }
 
 # -- VERSION validation --------------------------------------------------------

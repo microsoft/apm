@@ -1,7 +1,7 @@
 """Lockfile enrichment for pack-time metadata."""
 
 import posixpath
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..deps.lockfile import LockFile
 from ..integration.targets import KNOWN_TARGETS
@@ -251,9 +251,7 @@ def enrich_lockfile_for_pack(
     pack_meta: dict = {
         "format": bundle_format.lock_value,
         "target": target_str,
-        "packed_at": (
-            packed_at if packed_at is not None else datetime.now(timezone.utc).isoformat()
-        ),
+        "packed_at": (packed_at if packed_at is not None else datetime.now(UTC).isoformat()),
     }
     if all_mappings:
         # Record the source prefixes that were remapped so consumers know the
