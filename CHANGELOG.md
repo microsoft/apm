@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm install -g` reconciles a `marketplaces:` list in the user manifest (`~/.apm/apm.yml`): it registers missing entries, updates changed ones and removes only the ones it added, never touching marketplaces registered with `apm marketplace add` (name conflicts are reported). Each entry is a `name` plus any `apm marketplace add` source form. A project or package `apm.yml` with `marketplaces:` fails with an error pointing to the user manifest. (#PR_TBD)
+- `apm install -g` reconciles a `marketplaces:` list in the user manifest (`~/.apm/apm.yml`): it registers missing entries, updates changed ones and removes only the ones it added, never touching marketplaces registered with `apm marketplace add` (name conflicts are reported). Each entry is a `name` plus any `apm marketplace add` source form. A project or package `apm.yml` with `marketplaces:` fails with an error pointing to the user manifest. (#3610)
 - OpenCode targets write native OpenCode 2 MCP entries under `mcp.servers` when `opencode.json` already declares that map, translating `enabled` to `disabled` and keeping `codemode` and other extra fields; files without it keep the OpenCode 1 layout. -- by @RamsesJM (#3414)
 
 ### Changed
