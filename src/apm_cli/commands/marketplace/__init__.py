@@ -13,8 +13,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import click
 
@@ -39,6 +38,12 @@ from ...marketplace.migration import (
     migrate_marketplace_yml,
 )
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
+from ...marketplace.registration import (
+    ALIAS_PATTERN,
+    is_valid_alias,
+    local_source_points_to_file,
+    split_source_fragment_ref,
+)
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
 from ...utils.console import STATUS_SYMBOLS
@@ -48,23 +53,17 @@ from ...utils.path_security import (
 )
 from .._helpers import _get_console, _is_interactive
 
-if TYPE_CHECKING:
-    from ...marketplace.models import MarketplaceSource
-
 logger = logging.getLogger(__name__)
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
 
 
-# Marketplace alias must satisfy this pattern so it can appear on the right of
-# ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
-_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
-
-
-def _is_valid_alias(value: str) -> bool:
-    """Return True when ``value`` is a legal marketplace alias."""
-    return bool(value) and _ALIAS_PATTERN.match(value) is not None
+# Compatibility exports: the canonical owner is ``marketplace.registration``.
+_ALIAS_PATTERN = ALIAS_PATTERN
+_is_valid_alias = is_valid_alias
+_split_source_fragment_ref = split_source_fragment_ref
+_local_source_points_to_file = local_source_points_to_file
 
 
 # ---------------------------------------------------------------------------
@@ -338,11 +337,11 @@ def add(source, name, ref, branch, host, verbose):
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
-        from ...marketplace.client import (
-            _auto_detect_path_with_payload,
-            fetch_marketplace,
-        )
         from ...marketplace.models import MarketplaceSource
+        from ...marketplace.registration import (
+            MarketplaceManifestNotFoundError,
+            probe_registration,
+        )
         from ...marketplace.registry import add_marketplace
         from ...marketplace.source_identity import parse_marketplace_source
 
@@ -436,42 +435,16 @@ def add(source, name, ref, branch, host, verbose):
             logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
-        # placeholder -- _auto_detect_path_with_payload only consults url/ref/path/kind.
+        # placeholder -- the probe only consults url/ref/path/kind.
         probe_name = provisional_label
-        probe_source = MarketplaceSource(
-            name=probe_name,
-            url=url,
-            ref="" if is_direct_url else effective_ref,
-            path="" if is_direct_url else "marketplace.json",
-        )
-        if is_direct_url or _local_source_points_to_file(probe_source):
-            detected_path = ""
-            discovered_manifest = None
-        else:
-            detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
-
-        if detected_path is None:
-            logger.error(
-                f"No marketplace.json found in '{probe_source.display_source}'. "
-                f"Checked: marketplace.json, .github/plugin/marketplace.json, "
-                f".claude-plugin/marketplace.json",
-                symbol="error",
+        try:
+            fetch_source, manifest = probe_registration(
+                probe_name, url, effective_ref, is_direct_url=is_direct_url
             )
+        except MarketplaceManifestNotFoundError as exc:
+            logger.error(str(exc), symbol="error")
             sys.exit(1)
-
-        fetch_source = MarketplaceSource(
-            name=probe_name,
-            url=url,
-            ref="" if is_direct_url else effective_ref,
-            path=detected_path,
-        )
-        manifest = fetch_marketplace(
-            fetch_source,
-            force_refresh=True,
-            # Reuse the catalog response the probe above just fetched from
-            # the same url/ref/path instead of re-fetching it (apm#3283).
-            discovery_payload=discovered_manifest,
-        )
+        detected_path = fetch_source.path
         plugin_count = len(manifest.plugins)
 
         manifest_name = (manifest.name or "").strip()
@@ -547,20 +520,6 @@ def add(source, name, ref, branch, host, verbose):
         sys.exit(1)
 
 
-def _split_source_fragment_ref(source: str) -> tuple[str, str]:
-    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
-    raw = (source or "").strip()
-    if raw.lower().startswith("ssh://") and "#" in raw:
-        raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
-    if not raw.lower().startswith("https://"):
-        return raw, ""
-    parsed = urlsplit(raw)
-    if not parsed.fragment:
-        return raw, ""
-    clean_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
-    return clean_url, parsed.fragment
-
-
 def _is_remote_marketplace_json_url(url: str) -> bool:
     """Return True when *url* names a hosted marketplace.json document.
 
@@ -587,16 +546,6 @@ def _should_warn_unpinned_git_url(
     from ...marketplace.source_identity import parse_marketplace_source
 
     return parse_marketplace_source(source).transport in {"https", "ssh", "scp"}
-
-
-def _local_source_points_to_file(source: MarketplaceSource) -> bool:
-    """Return True when a local marketplace source points directly to a file."""
-    if source.kind != "local":
-        return False
-    try:
-        return Path(source.local_path).expanduser().is_file()
-    except OSError:
-        return False
 
 
 def _display_source_kind(kind: str, is_direct_url: bool) -> str:

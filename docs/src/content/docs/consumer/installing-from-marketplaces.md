@@ -255,6 +255,47 @@ dependencies. Remote `marketplace.json` installs record `source_url` and
 `source_digest` provenance. See
 [lockfile reference](../../reference/lockfile-spec/).
 
+## Declare marketplaces in your user manifest
+
+Instead of running `apm marketplace add` on every machine, list your
+marketplaces in the user manifest (`~/.apm/apm.yml`) and run
+`apm install -g`:
+
+```yaml
+# ~/.apm/apm.yml
+name: me
+version: 1.0.0
+marketplaces:
+  - name: acme
+    source: https://github.com/acme-org/agent-marketplace#v1.2.0
+  - name: internal
+    source: git@gitea.example.com:platform/marketplace.git
+    ref: v3.0.0
+```
+
+Each entry takes a `name` and a `source` in any form `apm marketplace add`
+accepts, plus an optional `ref` that works like `--ref`. `apm install -g`
+then:
+
+- registers declared marketplaces that are missing, and re-registers
+  entries whose `source` or `ref` changed;
+- removes marketplaces it registered earlier that you deleted from the
+  list;
+- keeps marketplaces you added with `apm marketplace add`. If a declared
+  `name` matches one of them, APM reports the conflict and leaves your
+  manual registration alone. Run `apm marketplace remove NAME` to hand it
+  over to the manifest.
+
+The output lists each marketplace registered, updated, removed or kept.
+`apm install -g --dry-run` previews the changes without fetching or
+writing. Registering a marketplace only makes it searchable with
+`apm search QUERY@NAME` and installable with `apm install PKG@NAME`. It
+installs nothing and grants no trust.
+
+Only the user manifest may declare marketplaces. A project or package
+`apm.yml` that contains `marketplaces:` fails with an error pointing to the
+user manifest.
+
 ## Where next
 
 - [Install packages](../install-packages/) -- the full `apm install`

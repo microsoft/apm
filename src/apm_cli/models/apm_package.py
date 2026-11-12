@@ -299,6 +299,8 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "compilation",
         "policy",
         "marketplace",
+        # User-manifest only; rejected elsewhere by marketplace.user_manifest.
+        "marketplaces",
         "allowExecutables",
         "executables",
         "lifecycle",
@@ -712,6 +714,10 @@ class APMPackage:
             )
 
         extensions = _collect_manifest_extensions(data, source_manifest, warning_handler)
+
+        from ..marketplace.user_manifest import validate_marketplaces_declaration
+
+        validate_marketplaces_declaration(data, source_manifest)
 
         # Parse root-owned ``replace:`` block.  Only present in the consumer
         # root manifest; dependency manifests should not declare it (enforced

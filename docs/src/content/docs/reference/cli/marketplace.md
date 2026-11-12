@@ -146,6 +146,11 @@ APM rejects `/tfs/` prefixes. APM tries the Azure DevOps Items API first,
 then subprocess git. See
 [Authentication](../../../getting-started/authentication/#azure-devops).
 
+**Declare instead of add.** To register the same marketplaces on every
+machine, list them under `marketplaces:` in `~/.apm/apm.yml` and run
+`apm install -g`. Manual registrations always win a name conflict. See
+[Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+
 ### `apm marketplace list`
 
 List every registered marketplace with its source URL and tracked
@@ -176,7 +181,9 @@ apm marketplace update awesome-agents  # refresh one
 
 ### `apm marketplace remove NAME`
 
-Unregister a marketplace.
+Unregister a marketplace. A marketplace declared in the user manifest's
+`marketplaces:` list is registered again by the next `apm install -g`;
+remove its entry from `~/.apm/apm.yml` to drop it for good.
 
 | Flag | Description |
 |---|---|

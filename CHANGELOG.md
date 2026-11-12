@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm install -g` reconciles a `marketplaces:` list in the user manifest (`~/.apm/apm.yml`): it registers missing entries, updates changed ones and removes only the ones it added, never touching marketplaces registered with `apm marketplace add` (name conflicts are reported). Each entry is a `name` plus any `apm marketplace add` source form. A project or package `apm.yml` with `marketplaces:` fails with an error pointing to the user manifest. (#PR_TBD)
+
 ### Changed
 
 - Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)

@@ -7,8 +7,8 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-from .errors import MarketplaceNotFoundError
-from .models import MarketplaceSource
+from .errors import ManualMarketplaceConflictError, MarketplaceNotFoundError
+from .models import ORIGIN_MANIFEST, MarketplaceSource
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,45 @@ def remove_marketplace(name: str) -> None:
             raise MarketplaceNotFoundError(name, host=default_host())
         _save(after)
     logger.debug("Removed marketplace '%s'", name)
+
+
+def register_manifest_marketplace(source: MarketplaceSource) -> None:
+    """Add or replace a manifest-origin registration.
+
+    The ownership check and the write happen in one locked transaction, so a
+    manual registration of the same name is never overwritten.
+
+    Raises:
+        ManualMarketplaceConflictError: A manual registration owns the name.
+    """
+    if source.origin != ORIGIN_MANIFEST:
+        raise ValueError("register_manifest_marketplace requires a manifest-origin source")
+    lower = source.name.lower()
+    with _marketplace_mutation():
+        current = _load()
+        for existing in current:
+            if existing.name.lower() == lower and existing.origin != ORIGIN_MANIFEST:
+                raise ManualMarketplaceConflictError(existing.name)
+        sources = [s for s in current if s.name.lower() != lower]
+        sources.append(source)
+        _save(sources)
+    logger.debug("Registered manifest marketplace '%s'", source.name)
+
+
+def unregister_manifest_marketplace(name: str) -> bool:
+    """Remove a manifest-origin registration; manual entries are never removed.
+
+    Returns True when an entry was removed.
+    """
+    lower = name.lower()
+    with _marketplace_mutation():
+        before = _load()
+        after = [s for s in before if not (s.name.lower() == lower and s.origin == ORIGIN_MANIFEST)]
+        if len(after) == len(before):
+            return False
+        _save(after)
+    logger.debug("Removed manifest marketplace '%s'", name)
+    return True
 
 
 def marketplace_names() -> list[str]:
