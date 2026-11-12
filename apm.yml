@@ -27,10 +27,6 @@ targets:
 #  - autopilot-pr-review-scheduler -> autopilot-pr-review-worker
 #  - autopilot-pr-merge-worker is summoned by name (never by
 #    the PR review scheduler)
-#
-# preflight-gate is repo-local tooling: a preflight runner plus a
-# preToolUse hook that denies git push / gh pr create|ready until a
-# fresh, green preflight receipt matches HEAD.
 dependencies:
   apm:
     - ./packages/autopilot/autopilot-issue-triage-scheduler
@@ -38,14 +34,6 @@ dependencies:
     - ./packages/autopilot/autopilot-pr-triage-scheduler
     - ./packages/autopilot/autopilot-pr-review-scheduler
     - ./packages/autopilot/autopilot-pr-merge-worker
-    - ./packages/preflight-gate
   mcp: []
 
 scripts: {}
-
-# Hooks are executable primitives and deploy only once approved.
-# The grant is pinned to the package version: bump both together.
-executables:
-  allow:
-    ./packages/preflight-gate#0.1.0:
-      hooks: true
