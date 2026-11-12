@@ -1466,9 +1466,10 @@ def write_project_executables(
     sub-blocks are omitted; an empty ``executables: {}`` is still written when
     the gate was already opted-in so the signal is not lost.
     """
-    from ..utils.yaml_io import dump_yaml, load_yaml
+    from ..utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
 
-    data = load_yaml(manifest_path)
+    # Round-trip keeps the user's comments and layout (#2000, #2012).
+    data = load_yaml_roundtrip(manifest_path)
     if not isinstance(data, dict):
         return
 
@@ -1481,4 +1482,4 @@ def write_project_executables(
 
     if block or had_alias or "executables" in data:
         data["executables"] = block
-    dump_yaml(data, manifest_path)
+    dump_yaml_roundtrip(data, manifest_path)

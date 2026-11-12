@@ -63,13 +63,14 @@ def add_mcp_to_apm_yml(
       the CLI exits with code 2.
     - New entry: append, return ``("added", None)``.
     """
-    from ...utils.yaml_io import dump_yaml, load_yaml
+    from ...utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
 
     log = logger if logger is not None else NullCommandLogger()
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
     if not apm_yml_path.exists():
         raise click.UsageError(f"{apm_yml_path}: no apm.yml found. Run 'apm init' first.")
-    data = load_yaml(apm_yml_path) or {}
+    # Round-trip keeps the user's comments and layout (#2000, #2012).
+    data = load_yaml_roundtrip(apm_yml_path) or {}
 
     section_name = "devDependencies" if dev else "dependencies"
     if section_name not in data or not isinstance(data[section_name], dict):
@@ -123,7 +124,7 @@ def add_mcp_to_apm_yml(
         mcp_list.append(entry)
 
     data[section_name]["mcp"] = mcp_list
-    dump_yaml(data, apm_yml_path)
+    dump_yaml_roundtrip(data, apm_yml_path)
     return status, diff
 
 
