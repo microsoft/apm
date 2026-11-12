@@ -76,7 +76,6 @@ class _Fixture:
 
     isolated: IsolatedApmEnvironment
     environment: dict[str, str]
-    runner: ApmLifecycleRunner
     repositories: LocalGitRepositoryFactory
     catalog_root: Path
     old_commits: dict[str, GitCommit]
@@ -150,7 +149,7 @@ def _seed_two_commits(
     return old, new
 
 
-def _create_fixture(root: Path, binary: Path) -> _Fixture:
+def _create_fixture(root: Path) -> _Fixture:
     """Create one repo per source shape, each with an old and a newer commit."""
     isolated = IsolatedApmEnvironment.create(root / "isolated", base_env=dict(os.environ))
     environment = isolated.subprocess_env()
@@ -224,9 +223,6 @@ def _create_fixture(root: Path, binary: Path) -> _Fixture:
     return _Fixture(
         isolated=isolated,
         environment=environment,
-        runner=ApmLifecycleRunner(
-            (str(binary),), timeout_seconds=120, scenario_timeout_seconds=300
-        ),
         repositories=repositories,
         catalog_root=catalog_root,
         old_commits=old,
@@ -235,16 +231,19 @@ def _create_fixture(root: Path, binary: Path) -> _Fixture:
 
 
 @pytest.fixture(scope="module")
-def fixture(
-    tmp_path_factory: pytest.TempPathFactory,
-    apm_binary_path: Path,
-) -> _Fixture:
+def fixture(tmp_path_factory: pytest.TempPathFactory) -> _Fixture:
     """Build the shared hermetic repositories and catalog once per module."""
-    return _create_fixture(tmp_path_factory.mktemp("sha-pin"), apm_binary_path)
+    return _create_fixture(tmp_path_factory.mktemp("sha-pin"))
+
+
+def _runner(binary: Path) -> ApmLifecycleRunner:
+    """Run the injected apm binary with this module's timeouts."""
+    return ApmLifecycleRunner((str(binary),), timeout_seconds=120, scenario_timeout_seconds=300)
 
 
 def _install(
     fx: _Fixture,
+    runner: ApmLifecycleRunner,
     plugin: str,
     *,
     marketplace_dir: Path,
@@ -257,7 +256,7 @@ def _install(
         # Offline stand-in for github.com: owner/repo sources resolve on this host.
         env["GITHUB_HOST"] = _HOST
     consumer = LocalPackageFactory(fx.isolated.work_root).create(project_name, targets=("copilot",))
-    add = fx.runner.run(
+    add = runner.run(
         ("marketplace", "add", str(marketplace_dir), "--name", marketplace_name),
         scenario_id=f"sha-pin-add-{project_name}",
         cwd=consumer.root,
@@ -265,7 +264,7 @@ def _install(
     )
     assert add.returncode == 0, _command_evidence(add)
     before = ArtifactSnapshot.capture(consumer.root)
-    install = fx.runner.run(
+    install = runner.run(
         (
             "install",
             f"{plugin}@{marketplace_name}",
@@ -313,6 +312,7 @@ def _assert_installed(
 @pytest.mark.parametrize("mode", ["sha-only", "ref-and-sha"])
 def test_sha_bearing_entry_installs_pinned_commit(
     fixture: _Fixture,
+    apm_binary_path: Path,
     shape_id: str,
     mode: str,
 ) -> None:
@@ -320,6 +320,7 @@ def test_sha_bearing_entry_installs_pinned_commit(
     shape = _SHAPE_BY_ID[shape_id]
     root, install, _ = _install(
         fixture,
+        _runner(apm_binary_path),
         f"{shape_id}-{mode}",
         marketplace_dir=fixture.catalog_root,
         marketplace_name=_MARKETPLACE_NAME,
@@ -338,12 +339,14 @@ def test_sha_bearing_entry_installs_pinned_commit(
 @pytest.mark.parametrize("shape_id", [shape.id for shape in _SHAPES])
 def test_ref_only_entry_still_resolves_branch_head(
     fixture: _Fixture,
+    apm_binary_path: Path,
     shape_id: str,
 ) -> None:
     """A ref-only entry keeps resolving the branch head."""
     shape = _SHAPE_BY_ID[shape_id]
     root, install, _ = _install(
         fixture,
+        _runner(apm_binary_path),
         f"{shape_id}-ref-only",
         marketplace_dir=fixture.catalog_root,
         marketplace_name=_MARKETPLACE_NAME,
@@ -363,12 +366,14 @@ def test_ref_only_entry_still_resolves_branch_head(
 @pytest.mark.parametrize("shape_id", [shape.id for shape in _SHAPES])
 def test_malformed_sha_fails_before_project_writes(
     fixture: _Fixture,
+    apm_binary_path: Path,
     shape_id: str,
     label: str,
 ) -> None:
     """A malformed sha fails install without touching the project."""
     root, install, before = _install(
         fixture,
+        _runner(apm_binary_path),
         f"{shape_id}-bad-{label}",
         marketplace_dir=fixture.catalog_root,
         marketplace_name=_MARKETPLACE_NAME,
@@ -418,9 +423,7 @@ def test_pack_copilot_commit_pin_round_trips_through_install(
     }
     dump_yaml(manifest, producer.manifest_path)
 
-    runner = ApmLifecycleRunner(
-        (str(apm_binary_path),), timeout_seconds=120, scenario_timeout_seconds=300
-    )
+    runner = _runner(apm_binary_path)
     pack = runner.run(("pack",), scenario_id="sha-pin-pack", cwd=producer.root, env=environment)
     assert pack.returncode == 0, _command_evidence(pack)
     emitted = producer.root / ".github" / "plugin" / "marketplace.json"
@@ -433,7 +436,6 @@ def test_pack_copilot_commit_pin_round_trips_through_install(
     fx = _Fixture(
         isolated=isolated,
         environment=environment,
-        runner=runner,
         repositories=repositories,
         catalog_root=producer.root,
         old_commits={},
@@ -441,6 +443,7 @@ def test_pack_copilot_commit_pin_round_trips_through_install(
     )
     root, install, _ = _install(
         fx,
+        runner,
         shape.skill,
         marketplace_dir=producer.root,
         marketplace_name="sha-pin-packed",
