@@ -1335,7 +1335,8 @@ def _run_compilation(
         "Write AGENTS.md / CLAUDE.md outputs under DIR instead of $PWD; "
         "sources (apm.yml, .apm/, project tree for placement scoring) "
         "continue resolving from $PWD. Pairs with 'apm install --root' "
-        "for scratch-dir verification. Cannot be combined with --watch."
+        "for scratch-dir verification. Cannot be combined with --watch. "
+        "Pre-compile lifecycle scripts do not run."
     ),
 )
 @click.option(

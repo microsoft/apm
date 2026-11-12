@@ -180,7 +180,7 @@ download -> authorize deploy set -> scan selected files -> block or deploy -> re
 
 Content scanning extends beyond install:
 
-- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth for dependency sources, which were already scanned at install, and the first scan of content a `pre-compile` [lifecycle script](/apm/enterprise/lifecycle-scripts/#generating-sources-before-compile) generated, since compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
+- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing. This is defense-in-depth for dependency sources, which were already scanned at install, and the first scan of content a `pre-compile` [lifecycle script](/apm/enterprise/lifecycle-scripts/#generating-sources-before-compile) generated, since compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
 - **`apm compile --global`** scans user-scope root context files assembled from
   globally installed instructions before writing them. Critical findings stop
   the write and exit with code 1. Existing hand-authored root context files are

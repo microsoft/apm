@@ -145,7 +145,7 @@ lifecycle:
       run: "./scripts/generate-guidelines.sh"
 ```
 
-A failure does not stop the compile. The script runs while compile holds
+A failure prints a warning and the compile continues with what is under `.apm/`. The script runs while compile holds
 APM's lifecycle lock, so an `apm` command it starts that changes state waits
 for that lock and fails after its timeout.
 
@@ -220,6 +220,9 @@ POST body.
   "working_directory": "/path/to/project"
 }
 ```
+
+For `pre-compile`, `packages` lists the dependencies declared in `apm.yml`
+(not resolved versions) and `scope` is `project`.
 
 ## Trust model
 
@@ -314,8 +317,9 @@ trends -- without any changes to individual project configurations.
 - Scripts have configurable timeouts (10s for HTTP, 30s for commands by
   default). HTTP scripts dispatch in the background; command scripts run
   synchronously and can delay the operation up to their timeout.
-- A script failure never aborts the CLI operation; failures are logged in
-  verbose mode (`--verbose`).
+- A script failure never aborts the CLI operation. A command script that
+  exits non-zero or times out prints a warning naming the event; output is in
+  `~/.apm/logs/scripts.log`. Other failures are logged in verbose mode (`--verbose`).
 
 ## Script output log
 

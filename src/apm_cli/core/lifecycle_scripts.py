@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from apm_cli.core.command_logger import CommandLogger
+    from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class LifecycleEvent:
 
 def event_for_dependencies(
     event_name: str,
-    dependencies: Iterable[object],
+    dependencies: Iterable[DependencyReference],
     *,
     scope: str,
     working_directory: str | None,
@@ -529,7 +530,7 @@ class LifecycleScriptRunner:
         self._skip_notice_emitted = True
         count = self._skipped_project_scripts
         msg = (
-            f"[!] Skipped {count} untrusted project script(s). "
+            f"Skipped {count} untrusted project script(s). "
             "Run 'apm lifecycle trust' to enable them."
         )
         if self._logger is not None:
@@ -672,7 +673,11 @@ def build_runner_from_context(
     try:
         from apm_cli.policy.discovery import discover_policy_with_chain
 
-        fetch_result = discover_policy_with_chain(project_root)
+        # Discovery joins paths onto the root, so a str root would raise
+        # TypeError here and the except below would silently skip deny_all.
+        fetch_result = discover_policy_with_chain(
+            Path(project_root) if project_root else Path.cwd()
+        )
         if fetch_result and fetch_result.policy:
             org_deny_all = bool(fetch_result.policy.executables.deny_all)
     except Exception:
@@ -682,7 +687,7 @@ def build_runner_from_context(
         if logger is not None:
             emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if emit is not None:
-                emit("[!] Lifecycle scripts suppressed by org policy (executables.deny_all).")
+                emit("Lifecycle scripts suppressed by org policy (executables.deny_all).")
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )

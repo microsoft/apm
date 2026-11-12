@@ -21,6 +21,7 @@ from apm_cli.core.lifecycle_scripts import (
     _get_policy_scripts_dir,
     build_runner_from_context,
     discover_scripts,
+    event_for_dependencies,
     parse_apm_yml_lifecycle,
     parse_project_script_file,
     parse_script_file,
@@ -54,6 +55,30 @@ class TestLifecycleEvent:
         assert event.event == "pre-install"
         assert event.cli_version == "0.14.1"
         assert event.timestamp
+
+
+class TestEventForDependencies:
+    def test_maps_dependency_references_to_packages(self) -> None:
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        deps = [
+            DependencyReference.parse("acme/guidelines#v1.2.0"),
+            DependencyReference.parse("acme/tools"),
+        ]
+        event = event_for_dependencies(
+            "pre-compile", deps, scope="project", working_directory="/tmp/project"
+        )
+        assert event.event == "pre-compile"
+        assert event.scope == "project"
+        assert event.working_directory == "/tmp/project"
+        assert [(p.name, p.reference) for p in event.packages] == [
+            ("acme/guidelines", "v1.2.0"),
+            ("acme/tools", None),
+        ]
+
+    def test_no_dependencies_gives_an_empty_package_list(self) -> None:
+        event = event_for_dependencies("pre-compile", [], scope="project", working_directory=None)
+        assert event.packages == []
 
 
 class TestScriptEntry:

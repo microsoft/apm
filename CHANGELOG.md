@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3459)
+- `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
+- A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 
 ### Changed
 
@@ -26,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- A `lifecycle:` block that names `pre-compile` asks for fresh `apm lifecycle trust` after upgrading, because a trust record given while the key had no meaning would otherwise start running it. Trust for other blocks is unchanged. -- by @Ryangr0 (#3459)
+- A `lifecycle:` block that names `pre-compile` asks for fresh `apm lifecycle trust` after upgrading, because a trust record given while the key had no meaning would otherwise start running it. Trust for other blocks is unchanged. -- by @Ryangr0 (#3596)
+- Org policy `executables.deny_all: true` now suppresses lifecycle scripts on `apm install`, `apm update`, `apm uninstall` and `apm compile` as documented; the policy lookup for lifecycle scripts failed silently before, so they ran. (#3596)
 
 ## [0.35.1] - 2026-11-11
 

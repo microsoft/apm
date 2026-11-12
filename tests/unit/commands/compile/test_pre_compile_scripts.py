@@ -20,6 +20,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.policy.discovery import discover_policy_with_chain as _REAL_DISCOVER_WITH_CHAIN
 
 pytestmark = pytest.mark.component
 
@@ -139,6 +140,7 @@ def test_failing_script_does_not_stop_compile(isolated: Path, monkeypatch) -> No
     result = _compile(project, monkeypatch)
     assert result.exit_code == 0, result.output
     assert (project / "AGENTS.md").is_file()
+    assert "Lifecycle pre-compile command script exited with code 3; continuing" in _output(result)
 
 
 def test_untrusted_script_is_skipped_with_notice(isolated: Path, monkeypatch) -> None:
@@ -166,6 +168,30 @@ def test_org_deny_all_suppresses_scripts(isolated: Path, monkeypatch) -> None:
         result = _compile(project, monkeypatch)
     assert result.exit_code == 0, result.output
     assert not (project / "generator-ran").exists()
+
+
+def test_org_deny_all_suppresses_scripts_through_real_policy_discovery(
+    isolated: Path, monkeypatch
+) -> None:
+    """The shared runner hands policy discovery a root it can join paths onto."""
+    project = _project(isolated)
+    _commit_instruction(project)
+    monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
+    leaf = SimpleNamespace(
+        policy=SimpleNamespace(extends=None, executables=SimpleNamespace(deny_all=True)),
+        cached=False,
+    )
+    with (
+        patch("apm_cli.policy.discovery.discover_policy_with_chain", _REAL_DISCOVER_WITH_CHAIN),
+        patch("apm_cli.policy.discovery.discover_policy", return_value=leaf) as discover,
+    ):
+        result = _compile(project, monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert not (project / "generator-ran").exists()
+    root = discover.call_args.args[0]
+    assert isinstance(root, Path)
+    assert root.resolve() == project.resolve()
+    assert "suppressed by org policy (executables.deny_all)" in _output(result)
 
 
 def test_trust_record_from_before_pre_compile_needs_fresh_trust(
