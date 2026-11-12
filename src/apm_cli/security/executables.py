@@ -303,8 +303,9 @@ _GLOB_PLACEHOLDERS = (("*", "apmglobstar"), ("?", "apmglobqmark"))
 def canonical_exec_identity(package_key: object) -> str:
     """Return the version-blind package identity used for deny matching.
 
-    Shorthand, host-qualified, and URL spellings of one package (and case
-    variants on case-insensitive hosts) map to its lockfile identity. Glob
+    Shorthand, host-qualified, and URL spellings of one package map to its
+    lockfile identity; GitHub-family and Azure DevOps identities are
+    case-folded because those hosts resolve owner/repo case-insensitively. Glob
     wildcards survive normalization; content-bound keys and spellings that do
     not parse are returned unchanged.
     """
@@ -316,10 +317,15 @@ def canonical_exec_identity(package_key: object) -> str:
         probe = probe.replace(char, token)
     try:
         from apm_cli.models.apm_package import DependencyReference
+        from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
-        canonical = DependencyReference.parse(probe).get_unique_key()
+        reference = DependencyReference.parse(probe)
+        canonical = reference.get_unique_key()
     except ValueError:
         return name
+    if is_github_hostname(reference.host) or is_azure_devops_hostname(reference.host):
+        # GitHub-family and Azure DevOps hosts resolve owner/repo case-insensitively.
+        canonical = canonical.lower()
     for char, token in _GLOB_PLACEHOLDERS:
         canonical = canonical.replace(token, char)
     return canonical

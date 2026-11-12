@@ -981,3 +981,52 @@ class TestDenyIdentitySpellings:
 
         key = "bundle@sha256:abc"
         assert canonical_exec_identity(key) == key
+
+
+class TestCanonicalExecIdentityHostCase:
+    """Identity case folding follows the host classification."""
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [
+            ("contoso.ghe.com/Evil/Pkg", "contoso.ghe.com/evil/pkg"),
+            ("https://dev.azure.com/Org/Proj/_git/Repo", "dev.azure.com/org/proj/repo"),
+            ("dev.azure.com/org/proj/_git/repo#main", "dev.azure.com/org/proj/repo"),
+            ("gitlab.com/Evil/Pkg", "gitlab.com/Evil/Pkg"),
+        ],
+    )
+    def test_case_folding_by_host(self, key: str, expected: str) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        assert canonical_exec_identity(key) == expected
+
+    def test_ghes_host_from_environment_is_case_folded(self, monkeypatch) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        monkeypatch.setenv("GITHUB_HOST", "ghe.corp.example.com")
+        assert canonical_exec_identity("ghe.corp.example.com/Evil/Pkg") == (
+            "ghe.corp.example.com/evil/pkg"
+        )
+
+    def test_ado_deny_matches_case_variant(self) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import build_exec_trust_context, resolve_exec_decision
+
+        key = "dev.azure.com/Org/Proj/Repo"
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False,
+                deny=["dev.azure.com/org/proj/repo"],
+                require=(),
+                recommend=(),
+                enforce=(),
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={"executables": {"allow": {key: {"hooks": True}}}},
+            migrate_user_legacy=False,
+        )
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
