@@ -118,6 +118,11 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--verbose`, `-v` | Show detailed output. |
 
+For git-backed sources without a direct file path, APM looks for the catalog
+at `marketplace.json`, `.github/plugin/marketplace.json`, then
+`.claude-plugin/marketplace.json`, and registers the first one found without
+downloading it again.
+
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
 marketplace host is classified as GitHub, GitLab, or Azure DevOps.
