@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.core.deployment_state import MaterializationResult
+from apm_cli.utils.path_security import has_symlink_component, safe_rmtree
 
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
@@ -117,7 +118,15 @@ def clean_orphaned_skills(
     get_lockfile_owned_agent_skills: Callable[[Path], set[str]],
     removed_paths: list[Path] | None = None,
 ) -> dict[str, int]:
-    """Remove legacy-orphan skill directories without touching foreign agents."""
+    """Remove legacy-orphan skill directories without touching foreign agents.
+
+    Only regular directories directly inside an unlinked *skills_dir* are
+    removed, and each removal stays contained in *project_root*: a linked
+    skills root or skill entry is left untouched.
+    """
+    containment_root = project_root if project_root is not None else skills_dir
+    if has_symlink_component(containment_root, skills_dir):
+        return {"files_removed": 0, "errors": 0}
     protected_names = set(installed_skill_names)
     if project_root is not None:
         from apm_cli.integration.lsp_integrator import LSPIntegrator
@@ -130,12 +139,14 @@ def clean_orphaned_skills(
         lockfile_owned_skills = get_lockfile_owned_agent_skills(project_root)
 
     for skill_subdir in skills_dir.iterdir():
-        if not skill_subdir.is_dir() or skill_subdir.name in protected_names:
+        if skill_subdir.is_symlink() or not skill_subdir.is_dir():
+            continue
+        if skill_subdir.name in protected_names:
             continue
         if lockfile_owned_skills is not None and skill_subdir.name not in lockfile_owned_skills:
             continue
         try:
-            shutil.rmtree(skill_subdir)
+            safe_rmtree(skill_subdir, containment_root)
             files_removed += 1
             if removed_paths is not None:
                 removed_paths.append(skill_subdir)

@@ -1941,7 +1941,6 @@ class SkillIntegrator(BaseIntegrator):
 
         if managed_files is not None:
             # Manifest-based removal -- only remove tracked skill directories
-            project_root_resolved = project_root.resolve()
 
             # Lazy-resolve cowork root at most once per invocation
             # (mirrors the pattern in cleanup.py and sync_remove_files).
@@ -1977,15 +1976,17 @@ class SkillIntegrator(BaseIntegrator):
                         stats["errors"] += 1
                         continue
                 else:
-                    target = project_root / rel_path
-                    if not str(target.resolve()).startswith(str(project_root_resolved)):
+                    if not self.validate_deploy_path(
+                        rel_path, project_root, allowed_prefixes=skill_prefix_tuple
+                    ):
                         continue
+                    target = project_root / rel_path
 
-                if not target.exists():
+                if not target.exists() and not target.is_symlink():
                     continue
 
                 try:
-                    if target.is_dir():
+                    if target.is_dir() and not target.is_symlink():
                         shutil.rmtree(target)
                     else:
                         target.unlink()
