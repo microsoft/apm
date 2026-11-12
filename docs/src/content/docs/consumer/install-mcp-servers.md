@@ -109,6 +109,16 @@ For every selected target that passes its scope and adapter prerequisites,
 `apm install` writes a runtime-specific MCP config file. The schemas differ;
 the `apm.yml` source of truth does not.
 
+Self-defined servers (`registry: false`) are written under their exact
+declared `name`, including names with a slash such as `com.example/server`.
+Registry servers such as `io.github.github/github-mcp-server` keep the short
+`github-mcp-server` key in every target except VS Code. If an older APM release
+wrote a self-defined server under its final segment, `apm install` removes that
+entry only when APM's recorded ownership proves it wrote it (and, for Claude
+Code and Codex, that it is unchanged); otherwise it leaves the entry and prints
+its name and config path so you can remove it yourself. OpenCode entries are
+not checked.
+
 Registry-declared environment variables honor the registry's
 `required` flag. Servers with optional auth install without token
 prompts until you choose to configure one. See the
@@ -117,7 +127,8 @@ for the full required-vs-optional runtime config rule.
 
 MCP Registry v0.1 container packages use `registryType: oci`. APM
 selects Docker automatically, keeps Docker run options before the image,
-and places package arguments after the image. Copilot, Codex, Gemini,
+and places package arguments after the image. When `runtimeArguments`
+list only Docker options, APM adds `run -i --rm` ahead of them. Copilot, Codex, Gemini,
 and related adapters prefer packages in `npm`, OCI, then PyPI order.
 VS Code prefers `npm`, PyPI, then OCI. OCI packages require Docker to be
 available when the harness starts the server; no per-target launcher
@@ -133,6 +144,25 @@ variables as target-native secret-input references instead, so secret bytes
 never enter `mcp.json`. A required variable without a collected value or
 default declines that target configuration; VS Code treats `workspaceFolder`
 as its built-in `${workspaceFolder}` token.
+
+For a self-defined Codex stdio connection at project scope (`.codex/config.toml`),
+an `env` value written as exactly `KEY: ${KEY}` or `KEY: ${env:KEY}` under the
+same key becomes `env_vars = ["KEY"]`. Codex reads those variables from the
+environment that launches it, so APM never resolves, prompts for, or writes the
+value into `env`, whether or not `KEY` is set during install. An `args`
+reference to the same variable is still resolved. Any other reference, such as
+`TOKEN: ${OTHER}` or `AUTH: Bearer ${TOKEN}`, is still resolved at install time
+and written to `.codex/config.toml`; APM warns with the key names only and
+suggests declaring `KEY: ${KEY}` to forward instead. User scope (`-g`) is
+unchanged: values are resolved and written as before.
+
+When a reinstall finds a value APM wrote earlier for a key that is now
+forwarded, and the entry still matches its recorded baseline, APM replaces it
+with `env_vars` and warns. If the entry was edited or cannot be verified, APM
+keeps it and exits `1` with the same
+[manual reconciliation](#resolve-a-connection-name-conflict) steps. In both
+cases, if `.codex/config.toml` was ever shared or committed, rotate the
+credential because Git history still holds it.
 
 Claude Code updates self-defined connections only when the native entry matches
 its recorded APM baseline. Updates remove previously managed fields omitted
@@ -236,6 +266,16 @@ a warning, and OpenCode 2 uses the `mcp.servers` entry. Your own servers,
 `mcp.timeout` and other settings are preserved, and pruning removes only
 entries APM wrote. Remove `mcp.servers` before running OpenCode 1 against
 the same file, since OpenCode 1 cannot read it.
+
+## MCP servers from Claude plugins
+
+When a dependency is a Claude plugin, APM reads its MCP servers from inline
+`plugin.json` `mcpServers`, from JSON files that field names, or from an
+auto-discovered `mcp.json`, `.mcp.json` or `.github/.mcp.json`. Each file may
+wrap servers as `{"mcpServers": {...}}` or list them as a flat top-level map
+(`{"linear": {...}}`); a flat file counts only when every value is a server
+object. A file with no usable server is skipped with a warning naming the file
+and plugin. Servers then install like `apm.yml`-declared self-defined servers.
 
 ## Resolve a connection name conflict
 
@@ -468,8 +508,9 @@ credential value is not written into the generated config. Literal-only
 targets keep their existing automatic-token behavior. If none of the
 listed variables is set, no automatic header is added.
 
-Reinstalling the same declaration does not automatically repair credentials
-already written to runtime config. Follow
+Except for Claude Code's project `.mcp.json` (see below), reinstalling the
+same declaration does not automatically repair credentials already written to
+runtime config. Follow
 [Repairing existing credentials](#repairing-existing-credentials) to preserve
 custom settings and rotate exposed credentials.
 For other authenticated remote servers, set headers explicitly with
@@ -506,6 +547,17 @@ Preserve the authorization scheme, for example `Bearer ${env:GITHUB_TOKEN}`,
 and make the variable available to Cursor. Keep all other fields and servers,
 and inspect the diff. An ordinary reinstall of the same declaration does not
 perform this repair.
+
+For Claude Code at project scope, the next `apm install` replaces values in
+`.mcp.json` that APM wrote earlier, either because APM recorded writing that
+exact entry or because the entry matches the declaration expanded from the
+current environment. It prints the affected variable names. An entry APM
+cannot confirm it wrote is kept, and install exits with an error that names
+each field holding a value and the reference it should hold.
+Replace those yourself with `${NAME}` references, for example
+`Bearer ${GITHUB_TOKEN}`. Export the variables before starting `claude`.
+Claude Code still asks you to approve project servers; APM does not change
+that approval.
 
 If you instead regenerate an entry, save its custom fields first, remove only
 that server entry, reinstall, and restore those fields without restoring the

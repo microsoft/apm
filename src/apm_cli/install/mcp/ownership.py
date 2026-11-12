@@ -29,6 +29,20 @@ def mcp_native_hash(native: dict) -> str:
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _native_config_key(
+    client: Any,
+    name: str,
+    *,
+    requested_info: dict | None = None,
+    stored_config: dict | None = None,
+) -> str:
+    """Return the native key for *name*; self-defined servers keep their declared name."""
+    info = requested_info
+    if info is None and isinstance(stored_config, dict) and stored_config.get("registry") is False:
+        info = {"name": name, "is_self_defined": True}
+    return client._determine_config_key(name, None, info)
+
+
 def compare_native_mcp_connection(
     client: Any,
     name: str,
@@ -53,7 +67,9 @@ def compare_native_mcp_connection(
         if existing_configs is None
         else existing_configs
     )
-    key = client._determine_config_key(name, None)
+    key = _native_config_key(
+        client, name, requested_info=requested_info, stored_config=stored_config
+    )
     if key not in existing:
         return NativeMcpConnectionState.ABSENT
     native = existing[key]
@@ -71,10 +87,12 @@ def compare_native_mcp_connection(
     if managed and isinstance(stored_config, dict):
         try:
             dependency = MCPDependency.from_dict(stored_config)
+            legacy_baseline = requested
             if dependency.is_self_defined:
                 expected = client.render_server_config(
                     MCPIntegrator._build_self_defined_info(dependency)
                 )
+                legacy_baseline = expected
                 if requested is not None:
                     comparison = client.project_managed_server_config(
                         native, baseline=expected, requested=requested
@@ -87,6 +105,21 @@ def compare_native_mcp_connection(
                 matches_baseline = mcp_native_hash(comparable) == native_hash
                 if matches_baseline and managed_fields is not None:
                     managed_fields.update(comparable)
+            # An entry an earlier APM release rendered differently (expanded
+            # references, values later moved to env_vars) is still managed when
+            # the adapter can prove that release wrote it.
+            if not matches_baseline and legacy_baseline is not None:
+                recorded_write = (
+                    None
+                    if native_hash is None or not isinstance(native, dict)
+                    else mcp_native_hash(client.managed_server_config(native)) == native_hash
+                )
+                if client.matches_legacy_managed_server_config(
+                    native, legacy_baseline, recorded_write=recorded_write
+                ):
+                    matches_baseline = True
+                    if managed_fields is not None:
+                        managed_fields.update(client.managed_server_config(native))
         except (TypeError, ValueError):
             logger.debug("Unusable MCP baseline for %s on %s", name, client.target_name)
     if requested is not None:
@@ -144,7 +177,9 @@ def require_removable_mcp_connections(
             "only the entries you intend to retire), then retry the same command. "
             "--force does not take ownership of user connections."
         )
-    return {client._determine_config_key(name, None) for name in names}
+    return {
+        _native_config_key(client, name, stored_config=stored_configs.get(name)) for name in names
+    }
 
 
 def retain_deferred_mcp_claims(

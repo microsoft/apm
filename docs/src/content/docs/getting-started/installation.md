@@ -330,8 +330,9 @@ Update with `winget upgrade --id Microsoft.APM --exact --source winget`, not `ap
 
 **Scoop (Windows):**
 
+APM is in the default Scoop `main` bucket.
+
 ```powershell
-scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 ```
 
@@ -611,9 +612,9 @@ manager, or use [self-update](../../reference/cli/self-update/) for standalone i
 
 For existing installations, follow [ownership and migration](#unix-install-ownership-and-migration). Fresh destinations, including `--prefix`, must be writable, absolute paths without dot segments.
 
-### Binary install fails on older Linux (devcontainers, Debian-based images)
+### Binary install fails on older Linux (glibc below 2.28)
 
-Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.38+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or [pip with a working Python 3.10+](#pip-install). This glibc floor applies to prebuilt binaries, not your system Python. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
+Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.28+ (for example, RHEL/Rocky/Alma Linux 8+, Debian 10+, Ubuntu 20.04+). On older systems, use a newer base image or [pip with a working Python 3.10+](#pip-install). This glibc floor applies to prebuilt binaries, not your system Python. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
 
 ### Authentication errors when installing packages
 

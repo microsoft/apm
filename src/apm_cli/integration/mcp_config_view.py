@@ -343,6 +343,20 @@ def _fallback_manifest_path(
     return (modules_root / dependency.repo_url / "apm.yml").resolve()
 
 
+def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Path) -> bool:
+    """Return whether a local source directory is a Claude plugin without apm.yml."""
+    from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
+
+    if dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value:
+        return False
+    if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
+        return False
+    package_type, selected_manifest = detect_package_type(package_dir)
+    return package_type is PackageType.MARKETPLACE_PLUGIN and not (
+        is_codex_compatibility_manifest(package_dir, selected_manifest)
+    )
+
+
 def _package_manifest_path(
     dependency: LockedDependency,
     lockfile: LockFile,
@@ -386,6 +400,10 @@ def _package_manifest_path(
             )
             package_dir = Path(stage) / "package"
             materialize_virtual_file_package(dep_ref, package_dir, source.path.name, source.content)
+        elif _is_local_claude_plugin_source(dependency, package_dir):
+            # A Claude plugin has no authored apm.yml; install synthesizes the
+            # canonical manifest (with its MCP servers) under apm_modules/_local.
+            package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
     else:
         package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
     return (package_dir / "apm.yml").resolve()
@@ -529,6 +547,23 @@ def _collect_locked_dependencies(
             )
             continue
 
+        if (
+            allow_pending
+            and dependency.source == "local"
+            and not manifest_path.parent.exists()
+            and manifest_path.is_relative_to(modules_root.resolve())
+        ):
+            # A local Claude plugin's synthesized manifest is rebuilt from its
+            # verified source during install; strict post-restoration checks
+            # still compare it with the lockfile.
+            pending_packages.add(package_key)
+            if logger is not None:
+                logger.verbose_detail(
+                    f"Deferring cold-cache MCP verification for '{package_key}' "
+                    "until its local plugin is restored."
+                )
+            continue
+
         if allow_pending and not manifest_path.parent.exists() and dependency.source != "local":
             from apm_cli.drift import build_download_ref
 
@@ -570,14 +605,26 @@ def _collect_locked_dependencies(
                 strict=allow_pending is not None,
             ):
                 continue
+            message = (
+                f"package manifest not found at {manifest_path}; re-run 'apm install' to restore it"
+            )
+            if (
+                dependency.source == "local"
+                and dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
+            ):
+                warning = (
+                    f"MCP servers from local plugin '{dependency.name or package_key}' "
+                    f"were not collected: {message}"
+                )
+                if diagnostics is not None:
+                    diagnostics.warn(warning)
+                elif logger is not None:
+                    logger.warning(warning)
             problems.append(
                 McpSourceProblem(
                     package_key=package_key,
                     manifest_path=manifest_path,
-                    message=(
-                        f"package manifest not found at {manifest_path}; "
-                        "re-run 'apm install' to restore it"
-                    ),
+                    message=message,
                 )
             )
             continue

@@ -503,7 +503,11 @@ class DiagnosticCollector:
             _rich_info(f"    {fix}")
 
     def _render_error_group(self, items: list[Diagnostic]) -> None:
-        count = len(items)
+        # One package can record several errors; count each attributed
+        # package once and each unattributed error on its own.
+        count = len({d.package for d in items if d.package}) + sum(
+            1 for d in items if not d.package
+        )
         noun = "package" if count == 1 else "packages"
         _rich_echo(f"  [x] {count} {noun} failed:", color="red")
         for d in items:

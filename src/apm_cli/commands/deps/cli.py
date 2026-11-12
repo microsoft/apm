@@ -16,6 +16,7 @@ from ...core.command_logger import CommandLogger
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
+from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
 from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
 from ...utils.path_security import PathTraversalError
@@ -769,38 +770,16 @@ def _build_dep_tree(apm_dir):
                         result["unresolved"] = list(unresolved_by_key.values())
                         return result
                     result["direct"] = [d for d in lockfile_deps if d.depth <= 1]
-                    transitive = [d for d in lockfile_deps if d.depth > 1]
+                    placement = place_legacy_lock_parents(
+                        lockfile_deps, installed_manifest_children(apm_modules_path)
+                    )
                     children_map = {}
-                    unresolved = []
-                    parents_by_unique_key: dict[tuple[int, str], list[LockedDependency]] = {}
-                    parents_by_repo_url: dict[tuple[int, str], list[LockedDependency]] = {}
-                    for candidate in lockfile_deps:
-                        parents_by_unique_key.setdefault(
-                            (candidate.depth, candidate.get_unique_key()), []
-                        ).append(candidate)
-                        parents_by_repo_url.setdefault(
-                            (candidate.depth, candidate.repo_url), []
-                        ).append(candidate)
-                    for dep in transitive:
-                        parent_key = dep.resolved_by or ""
-                        parent_depth = dep.depth - 1
-                        parent_candidates = parents_by_unique_key.get(
-                            (parent_depth, parent_key), []
-                        )
-                        if not parent_candidates:
-                            parent_candidates = parents_by_repo_url.get(
-                                (parent_depth, parent_key), []
-                            )
-                        if len(parent_candidates) == 1:
-                            parent_key = parent_candidates[0].get_unique_key()
-                        else:
-                            unresolved.append(dep)
-                            continue
-                        if parent_key not in children_map:
-                            children_map[parent_key] = []
-                        children_map[parent_key].append(dep)
+                    for dep in lockfile_deps:
+                        parent = placement.parents.get(dep.get_unique_key())
+                        if parent is not None:
+                            children_map.setdefault(parent.get_unique_key(), []).append(dep)
                     result["children_map"] = children_map
-                    result["unresolved"] = unresolved
+                    result["unresolved"] = list(placement.unresolved)
                     return result
     except Exception:
         pass

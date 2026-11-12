@@ -29,10 +29,13 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
             "source_plan.paths",
             "integrator._target_skill_dir(",
             "BaseIntegrator.check_collision(",
+            "def preflight_skill_selection(",
+            "SkillIntegrator._skill_filter_misses_available(",
         ),
         "src/apm_cli/integration/skill_integrator.py": (
             "selected_skill_sources = staticmethod(selected_skill_sources)",
             "selection = self.selected_skill_sources(package_info)",
+            "preflight_skill_selection = staticmethod(_preflight_selection)",
         ),
         "src/apm_cli/install/template.py": (
             "def preflight_skill_materializations(",
@@ -40,7 +43,10 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
             "skill.find_unmanaged_conflicts(",
             "deployment_plan=deployment_plan",
         ),
-        "src/apm_cli/install/services.py": ("source_plan = deployment_plan.source_plan",),
+        "src/apm_cli/install/services.py": (
+            "source_plan = deployment_plan.source_plan",
+            'getattr(integrators.skill, "preflight_skill_selection", None)',
+        ),
         "src/apm_cli/install/deployment_plan.py": ("source_plan = DeployableSourcePlan.create(",),
     }
     failures: list[Violation] = []
@@ -89,7 +95,9 @@ def check_skill_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             rule_id=GUARD_SKILL_PREFLIGHT,
             prefix="src/apm_cli/",
-            pattern=re.compile(r"^def (selected_skill_sources|find_unmanaged_conflicts)\("),
+            pattern=re.compile(
+                r"^def (selected_skill_sources|find_unmanaged_conflicts|preflight_skill_selection)\("
+            ),
             owner=_OWNER,
             message="Skill source selection and unmanaged collision planning have one owner",
             respect_exempt=False,

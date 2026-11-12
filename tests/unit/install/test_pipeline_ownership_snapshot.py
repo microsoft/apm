@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import shutil
+import sys
 import tempfile
 from collections import Counter
 from collections.abc import Callable
@@ -554,3 +556,83 @@ def test_lockfile_only_runs_real_integrate_without_targets_or_skill_lookup(
     assert dependency.deployed_files == []
     installed = dep_ref.get_install_path(ctx.apm_modules_dir)
     assert (installed / "SKILL.md").read_bytes() == (fixture.source / "SKILL.md").read_bytes()
+
+
+def _install(fixture: LocalInstall) -> Any:
+    return pipeline.run_install_pipeline(
+        fixture.package,
+        scope=fixture.scope,
+        target="copilot",
+        parallel_downloads=0,
+        no_policy=True,
+        audit_override="off",
+    )
+
+
+def _only_receipt() -> Path:
+    receipts = list((Path.home() / ".apm" / "deployment-receipts").glob("*.json"))
+    assert len(receipts) == 1
+    return receipts[0]
+
+
+@pytest.mark.parametrize("birth_time", [None, 1767225600.5], ids=["linux-stat", "macos-stat"])
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_install_after_device_only_root_change_succeeds_and_rebinds(
+    monkeypatch: pytest.MonkeyPatch,
+    local_install_factory: Callable[..., LocalInstall],
+    scope: InstallScope,
+    birth_time: float | None,
+) -> None:
+    """A reboot/remount that renumbers st_dev alone keeps the root's receipt usable."""
+    from types import SimpleNamespace
+
+    from apm_cli.core import deployment_ledger
+
+    def root_stat(dev: int, ino: int) -> SimpleNamespace:
+        values: dict[str, float] = {"st_dev": dev, "st_ino": ino}
+        if birth_time is not None:
+            values["st_birthtime"] = birth_time
+        return SimpleNamespace(**values)
+
+    current = {"stat": root_stat(56, 257)}
+    monkeypatch.setattr(deployment_ledger, "_ROOT_DEVICE_REBIND_SUPPORTED", True)
+    monkeypatch.setattr(
+        deployment_ledger.DeploymentMaterializationSession,
+        "_root_stat",
+        lambda self: current["stat"],
+    )
+    fixture = local_install_factory(scope)
+    assert _install(fixture).exit_code == 0
+    receipt = _only_receipt()
+    assert json.loads(receipt.read_text(encoding="utf-8"))["root_identity"] == [56, 257]
+
+    current["stat"] = root_stat(30, 257)
+    result = _install(fixture)
+    assert result.disposition is InstallDisposition.SUCCESS
+    assert result.exit_code == 0
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    assert data["root_identity"] == [30, 257]
+    assert data.get("root_birth_time") == birth_time
+
+    current["stat"] = root_stat(31, 258)
+    with pytest.raises(RuntimeError, match="installation binding does not match"):
+        _install(fixture)
+    assert json.loads(receipt.read_text(encoding="utf-8")) == data
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows root identity is not rebound")
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_install_rebinds_native_receipt_whose_device_number_drifted(
+    local_install_factory: Callable[..., LocalInstall], scope: InstallScope
+) -> None:
+    """Reproduces #3421 without a reboot: edit only root_identity[0] in the receipt."""
+    fixture = local_install_factory(scope)
+    assert _install(fixture).exit_code == 0
+    receipt = _only_receipt()
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    actual = data["root_identity"]
+    data["root_identity"] = [actual[0] + 1, actual[1]]
+    receipt.write_text(json.dumps(data), encoding="utf-8")
+    result = _install(fixture)
+    assert result.exit_code == 0
+    assert json.loads(receipt.read_text(encoding="utf-8"))["root_identity"] == actual
