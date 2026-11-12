@@ -724,6 +724,10 @@ my-skill/
   resource2.md
 ```
 
+APM never prefixes or renames skills; same-named skills are told apart by
+native plugin namespacing (`<plugin>:<skill>`). Use
+`apm view --file <deployed-path>` to see which package deployed a skill file.
+
 ### 7. Marketplace Plugin (`plugin.json`)
 
 For loose skill deployment, a differing unmanaged destination file refuses the
