@@ -899,3 +899,85 @@ def test_registrable_exec_statuses_excludes_every_untrusted_value() -> None:
     assert TRUST_GATED not in REGISTRABLE_EXEC_STATUSES
     assert "some-future-status" not in REGISTRABLE_EXEC_STATUSES
     assert frozenset({None, TRUST_ABSENT, TRUST_DEPLOYED}) == REGISTRABLE_EXEC_STATUSES
+
+
+class TestDenyIdentitySpellings:
+    """Deny rules match every spelling of one package identity."""
+
+    @staticmethod
+    def _ctx(*, org_deny=(), project_allow=None, project_deny=None, user_deny=None):
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import ExecTrustContext, build_exec_trust_context
+
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False, deny=list(org_deny), require=(), recommend=(), enforce=()
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={
+                "executables": {"allow": project_allow or {}, "deny": project_deny or {}}
+            },
+            migrate_user_legacy=False,
+        )
+        if user_deny:
+            from dataclasses import replace
+
+            ctx = replace(ctx, user_deny=user_deny)
+        assert isinstance(ctx, ExecTrustContext)
+        return ctx
+
+    @pytest.mark.parametrize(
+        "deny",
+        [
+            "contoso/pkg-hook",
+            "Contoso/Pkg-Hook",
+            "github.com/contoso/pkg-hook",
+            "https://github.com/Contoso/Pkg-Hook.git",
+            "contoso/*",
+            "Contoso/*",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "key", ["github.com/contoso/pkg-hook#v1.0.0", "contoso/pkg-hook", "Contoso/Pkg-Hook"]
+    )
+    def test_org_deny_matches_any_spelling(self, deny: str, key: str) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        ctx = self._ctx(org_deny=[deny], project_allow={key.split("#")[0]: {"hooks": True}})
+        decision = resolve_exec_decision(ctx, key, "hooks")
+        assert decision.allowed is False
+        assert decision.trust_state == "denied"
+
+    def test_org_deny_covers_sub_packages(self) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "github.com/contoso/pkg-hook/skills/review"
+        ctx = self._ctx(org_deny=["contoso/pkg-hook"], project_allow={key: {"hooks": True}})
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_denied_prefix_does_not_cover_sibling_names(self) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "contoso/pkg-hooks"
+        ctx = self._ctx(org_deny=["contoso/pkg-hook"], project_allow={key: {"hooks": True}})
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is True
+
+    @pytest.mark.parametrize("layer", ["project", "user"])
+    def test_project_and_user_deny_match_any_spelling(self, layer: str) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "github.com/contoso/pkg-hook#v1.0.0"
+        deny = {"contoso/pkg-hook#1.0.0": {"hooks": True}}
+        kwargs = {"project_deny": deny} if layer == "project" else {"user_deny": deny}
+        ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_content_bound_keys_stay_exact(self) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        key = "bundle@sha256:abc"
+        assert canonical_exec_identity(key) == key

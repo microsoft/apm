@@ -480,7 +480,9 @@ first-match-wins ladder:
 - **Org** (`apm-policy.yml` `executables:`) is the ceiling on deny. It can
   `deny_all`, `deny` packages, `require` packages be present and trusted, and
   `recommend` a vetted set. See [executables](../../reference/policy-schema/#executables) in the policy
-  schema.
+  schema. Deny entries match the package identity, whatever its spelling
+  (shorthand, host-qualified, URL, or letter case on GitHub hosts), and cover
+  sub-packages below the denied path.
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest

@@ -295,6 +295,34 @@ def _is_content_bound_key(package_key: str) -> bool:
     return "@sha256:" in package_key
 
 
+_GLOB_PLACEHOLDERS = (("*", "apmglobstar"), ("?", "apmglobqmark"))
+
+
+def canonical_exec_identity(package_key: object) -> str:
+    """Return the version-blind package identity used for deny matching.
+
+    Shorthand, host-qualified, and URL spellings of one package (and case
+    variants on case-insensitive hosts) map to its lockfile identity. Glob
+    wildcards survive normalization; content-bound keys and spellings that do
+    not parse are returned unchanged.
+    """
+    name = _strip_version(str(package_key or "").strip())
+    if not name or _is_content_bound_key(name):
+        return name
+    probe = name
+    for char, token in _GLOB_PLACEHOLDERS:
+        probe = probe.replace(char, token)
+    try:
+        from apm_cli.models.apm_package import DependencyReference
+
+        canonical = DependencyReference.parse(probe).get_unique_key()
+    except ValueError:
+        return name
+    for char, token in _GLOB_PLACEHOLDERS:
+        canonical = canonical.replace(token, char)
+    return canonical
+
+
 def normalize_bin_deploy_deny_key(value: object) -> str:
     """Normalize package identity for ``bin_deploy.deny`` storage and lookup."""
     raw = str(value or "").strip()
@@ -336,10 +364,31 @@ def _map_grants(
     return False
 
 
-def _deny_glob_match(name: str, patterns: Any) -> bool:
-    """Return True if *name* matches any DENY *pattern* (exact or glob).
+def _map_denies(
+    deny_map: dict[str, dict[str, bool]] | None,
+    package_key: str,
+    exec_type: str,
+) -> bool:
+    """Return True if *deny_map* denies *exec_type* for any spelling of the package."""
+    if _map_grants(deny_map, package_key, exec_type):
+        return True
+    if not deny_map or _is_content_bound_key(package_key):
+        return False
+    identity = canonical_exec_identity(package_key)
+    return any(
+        isinstance(entry, dict)
+        and bool(entry.get(exec_type, False))
+        and not _is_content_bound_key(stored_key)
+        and canonical_exec_identity(stored_key) == identity
+        for stored_key, entry in deny_map.items()
+    )
 
-    Deny is the org ceiling, so in v1 it supports ``fnmatch`` globs such as
+
+def _deny_glob_match(name: str, patterns: Any) -> bool:
+    """Return True if *name* matches any DENY *pattern* (exact, glob, or parent).
+
+    A pattern also covers sub-packages below it (``owner/repo`` covers
+    ``owner/repo/skills/x``). Deny is the org ceiling, so in v1 it supports ``fnmatch`` globs such as
     ``evil/*`` to block a whole publisher fleet-wide. Allow / recommend /
     require remain exact-match only -- widening the GRANT side with a glob is
     a larger blast radius (a typo over-trusts), whereas broad denial is
@@ -347,7 +396,9 @@ def _deny_glob_match(name: str, patterns: Any) -> bool:
     """
     if name in patterns:
         return True
-    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+    return any(
+        fnmatch.fnmatchcase(name, p) or name.startswith(f"{str(p).rstrip('/')}/") for p in patterns
+    )
 
 
 def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool, str | None]:
@@ -356,7 +407,9 @@ def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool,
         return True, LAYER_ORG_DENY_ALL
     if exec_type == EXEC_TYPE_BIN and ctx.org_bin_deny_all:
         return True, LAYER_ORG_DENY_ALL
-    if _deny_glob_match(name, ctx.org_deny):
+    if _deny_glob_match(name, ctx.org_deny) or _deny_glob_match(
+        canonical_exec_identity(name), ctx.org_deny
+    ):
         return True, LAYER_ORG_DENY
     if exec_type == EXEC_TYPE_BIN:
         normalized_name = normalize_bin_deploy_deny_key(name)
@@ -397,11 +450,11 @@ def resolve_exec_decision(
         return ExecDecision(False, layer, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type))
 
     # 2. USER deny / PROJECT deny (narrowing; both win over any grant).
-    if _map_grants(ctx.user_deny, package_key, exec_type):
+    if _map_denies(ctx.user_deny, package_key, exec_type):
         return ExecDecision(
             False, LAYER_USER_DENY, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type)
         )
-    if _map_grants(ctx.project_deny, package_key, exec_type):
+    if _map_denies(ctx.project_deny, package_key, exec_type):
         return ExecDecision(
             False, LAYER_PROJECT_DENY, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type)
         )
@@ -1406,7 +1459,10 @@ def build_exec_trust_context(
         execs = getattr(policy, "executables", None)
         if execs is not None:
             org_deny_all = bool(getattr(execs, "deny_all", False))
-            org_deny = frozenset(getattr(execs, "deny", ()) or ())
+            raw_deny = tuple(getattr(execs, "deny", ()) or ())
+            org_deny = frozenset(raw_deny) | frozenset(
+                canonical_exec_identity(entry) for entry in raw_deny
+            )
             org_require = frozenset(getattr(execs, "require", ()) or ())
             org_recommend = frozenset(getattr(execs, "recommend", ()) or ())
             org_enforce = frozenset(getattr(execs, "enforce", ()) or ())
