@@ -45,13 +45,13 @@ For git packages, output is a table with name, type (`tag` or `branch`), and sho
 
 ### `apm view --file PATH`
 
-Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`~/.apm/apm.lock.yaml` with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. Unlike [`apm find`](../find/), which lists package names from `deployed_files`, it reports the active writer, the source and the current file status, with exit codes for scripting.
+Read-only reverse lookup for one deployed file, such as an installed `SKILL.md` or a file bundled next to it. It reads the deployment records in `apm.lock.yaml` (`~/.apm/apm.lock.yaml` with `-g`) and matches `PATH` exactly. It never guesses from skill names, directory prefixes or substrings. Unlike [`apm find`](../find/), which lists package names (and optionally sources) from `deployed_files`, it reports the active writer, ref and commit, and the current file status, with exit codes for scripting.
 
 For each matching record it prints:
 
 - **Owner** -- every recorded owner. On a shared path, the last writer is marked `active writer` and the others `surviving owner`.
 - **Kind** -- this project (project-self), a local bundle, a direct dependency, or a transitive dependency and its parent.
-- **Source, Ref, Commit** -- for dependencies, as recorded in the lockfile. A replaced dependency shows the replacement source it installs from. Credentials and control characters are removed.
+- **Source, Ref, Commit** -- for dependencies, as recorded in the lockfile. A replaced dependency shows the replacement source it installs from. Credentials are redacted; control and non-ASCII characters print as `?`.
 - **Current file** -- kept separate from provenance: `matches the recorded deployed hash`, `modified since deployment`, `missing`, or `unverifiable` (for example no recorded hash, not a regular file, or a path through a symlink, including a symlinked home or project root, which is not followed).
 
 A modified or missing file still shows its recorded owner. That is recorded provenance, not proof of what upstream ships today.
