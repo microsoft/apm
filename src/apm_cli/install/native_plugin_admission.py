@@ -225,8 +225,9 @@ def verify_native_plugin_cache(
     package digest; a pin marker alone cannot prove their file contents.
     """
     from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+    from apm_cli.deps.carried_license import verify_locked_package
     from apm_cli.install.phases.local_content import _copy_tree_dereferencing_validated
-    from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash
+    from apm_cli.utils.content_hash import compute_package_hash
     from apm_cli.utils.path_security import ensure_path_within
 
     candidate = lock_dep.to_dependency_ref().get_install_path(live_modules)
@@ -245,7 +246,8 @@ def verify_native_plugin_cache(
                 f"Native Agent Plugin {lock_dep.get_unique_key()} has no content hash; "
                 "run 'apm install' to regenerate its integrity baseline"
             )
-    if not candidate.is_dir() or not verify_package_hash(candidate, expected_hash):
+    carried = () if lock_dep.is_local_source else lock_dep.carried_licenses
+    if not candidate.is_dir() or not verify_locked_package(candidate, expected_hash, carried):
         raise AgentPluginDeploymentBoundaryError(
             f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
             "run 'apm install' to restore the package"
