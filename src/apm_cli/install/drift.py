@@ -532,6 +532,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_modules_root, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
+    from apm_cli.install.phases.local_content import _project_has_root_primitives
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_audit_targets
@@ -547,6 +548,15 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         raise CacheMissError(f"lockfile at {config.lockfile_path} is empty or unreadable")
 
     project_root = config.project_root.resolve()
+    if (
+        not config.user_scope
+        and _SELF_KEY not in lock.dependencies
+        and _project_has_root_primitives(project_root)
+    ):
+        # Install integrates root .apm/ content whenever the directory exists,
+        # even when it only merges hooks into shared configs and so records no
+        # local_deployed_files (#3369). Replay the same root package in memory.
+        lock.dependencies[_SELF_KEY] = lock.project_self_entry()
     scratch_root = (
         config.scratch_root.resolve()
         if config.scratch_root is not None
