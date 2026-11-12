@@ -242,3 +242,29 @@ def test_duration_recorder_registers_only_on_the_controller(
     ci_sharding.pytest_configure(config)
 
     assert config.pluginmanager.register.called is registered
+
+
+def test_module_totals_spread_over_tests_without_own_entries() -> None:
+    items = [_item("tests/a.py::slow"), _item("tests/a.py::x"), _item("tests/a.py::y")]
+    items.append(_item("tests/b.py::z"))
+
+    weights = ci_sharding.item_weights(items, {"tests/a.py::slow": 5.0, "tests/a.py": 1.0})
+
+    assert weights["tests/a.py::slow"] == 5.0
+    assert weights["tests/a.py::x"] == weights["tests/a.py::y"] == 0.5
+    assert weights["tests/b.py::z"] == pytest.approx(6.0 / 3)
+
+
+def test_compaction_keeps_slow_tests_and_folds_the_rest(tmp_path: Path) -> None:
+    durations = {"tests/a.py::slow": 2.0, "tests/a.py::x": 0.1, "tests/a.py::y": 0.2}
+    assert ci_sharding.compact_durations(durations) == {"tests/a.py": 0.3, "tests/a.py::slow": 2.0}
+
+    first, second, out = tmp_path / "1.json", tmp_path / "2.json", tmp_path / "out.json"
+    first.write_text(json.dumps({"tests/a.py::slow": 2.0}), encoding="utf-8")
+    second.write_text(json.dumps({"tests/b.py::q": 0.1}), encoding="utf-8")
+    assert ci_sharding.main(["compact", str(out), str(first), str(second)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8")) == {
+        "tests/a.py::slow": 2.0,
+        "tests/b.py": 0.1,
+    }
+    assert ci_sharding.main(["merge"]) == 2

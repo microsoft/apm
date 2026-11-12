@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -109,10 +110,36 @@ def affinity_units(
 
 
 def item_weights(items: Sequence[pytest.Item], durations: Mapping[str, float]) -> dict[str, float]:
-    """Weight every item by its measured duration or the mean known duration."""
-    known = [durations[item.nodeid] for item in items if item.nodeid in durations]
-    default = sum(known) / len(known) if known else 1.0
-    return {item.nodeid: durations.get(item.nodeid, default) for item in items}
+    """Weight every item by its measured duration.
+
+    A key without ``::`` is a module total (see compact_durations): it is
+    shared equally by that module's selected tests that have no own entry.
+    Anything still unknown weighs the mean known duration (1.0 with no data).
+    """
+    weights: dict[str, float] = {
+        item.nodeid: durations[item.nodeid] for item in items if item.nodeid in durations
+    }
+    residual: dict[str, list[pytest.Item]] = defaultdict(list)
+    for item in items:
+        module = item.nodeid.split("::", 1)[0]
+        if item.nodeid not in weights and module in durations:
+            residual[module].append(item)
+    for module, members in residual.items():
+        for item in members:
+            weights[item.nodeid] = durations[module] / len(members)
+    default = sum(weights.values()) / len(weights) if weights else 1.0
+    return {item.nodeid: weights.get(item.nodeid, default) for item in items}
+
+
+def compact_durations(durations: Mapping[str, float], min_seconds: float = 0.5) -> dict[str, float]:
+    """Keep tests slower than min_seconds; fold the rest into module totals."""
+    compact: dict[str, float] = defaultdict(float)
+    for node, seconds in durations.items():
+        if "::" not in node or seconds >= min_seconds:
+            compact[node] += seconds
+        else:
+            compact[node.split("::", 1)[0]] += seconds
+    return {node: round(value, 2) for node, value in sorted(compact.items())}
 
 
 def partition(
@@ -273,3 +300,21 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             f"[ci-sharding] shard {index}/{count}: {len(items)} tests; "
             f"estimated serial seconds per shard: {seconds}"
         )
+
+
+def main(argv: Sequence[str]) -> int:
+    """``python -m scripts.ci_sharding compact OUT IN...``: merge, then compact."""
+    if len(argv) < 3 or argv[0] != "compact":
+        print("usage: python -m scripts.ci_sharding compact OUT IN...", file=sys.stderr)
+        return 2
+    merged: dict[str, float] = {}
+    for path in argv[2:]:
+        merged.update(load_durations(path))
+    compact = compact_durations(merged)
+    Path(argv[1]).write_text(json.dumps(compact, indent=0) + "\n", encoding="utf-8")
+    print(f"[i] {len(merged)} test durations -> {len(compact)} entries in {argv[1]}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

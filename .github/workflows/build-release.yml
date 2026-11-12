@@ -346,6 +346,11 @@ jobs:
     runs-on: macos-15-intel
     env:
       MACOS_BINARY: apm-darwin-x86_64
+      # Python unit tests are architecture-agnostic: macOS arm64 runs them.
+      MACOS_RUN_UNIT: "false"
+      # Intel keeps the filesystem/shell/path-sensitive slice; arm64 also
+      # runs the lifecycle family on macOS.
+      MACOS_MARK_EXPR: "(windows_compat or platform_sensitive) and not live and not requires_github_token and not requires_network_integration and not architecture_contract"
     permissions:
       contents: read
 
@@ -385,7 +390,7 @@ jobs:
         run: uv sync --frozen --extra dev --extra build
 
       - name: Run unit tests
-        if: needs.release-plan.outputs.run_unit == 'true'
+        if: needs.release-plan.outputs.run_unit == 'true' && env.MACOS_RUN_UNIT == 'true'
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
       # PHASE 1: BUILD BINARY
@@ -485,8 +490,9 @@ jobs:
           ./test-release-validation.sh
         timeout-minutes: 20
 
-  # Consolidated macOS ARM build + validation. Same single-job shape and
-  # reduced platform-sensitive scope as Intel; never runs on push.
+  # Consolidated macOS ARM build + validation. Same single-job shape as
+  # Intel; never runs on push. It is the macOS authority for unit tests and
+  # the lifecycle family.
   build-and-validate-macos-arm:
     name: Build & Validate (macOS arm64)
     needs: [release-plan]
@@ -494,6 +500,7 @@ jobs:
     runs-on: macos-latest
     env:
       MACOS_BINARY: apm-darwin-arm64
+      MACOS_RUN_UNIT: "true"
     permissions:
       contents: read
     steps: *macos-steps

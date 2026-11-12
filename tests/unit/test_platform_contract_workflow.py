@@ -47,6 +47,7 @@ MACOS_JOBS = {
     "build-and-validate-macos-intel": ("macos-15-intel", "apm-darwin-x86_64"),
     "build-and-validate-macos-arm": ("macos-latest", "apm-darwin-arm64"),
 }
+MACOS_RUN_UNIT = {"build-and-validate-macos-intel": "false", "build-and-validate-macos-arm": "true"}
 MACOS_SUBSET_STEP = "Run platform-sensitive integration tests"
 HERMETIC = "not live and not requires_github_token and not requires_network_integration"
 NETWORK = "(requires_github_token or requires_network_integration) and not live"
@@ -55,6 +56,11 @@ MACOS = (
     "(lifecycle_smoke or windows_compat or platform_sensitive) and "
     f"{HERMETIC} and not architecture_contract"
 )
+MACOS_INTEL = f"(windows_compat or platform_sensitive) and {HERMETIC} and not architecture_contract"
+MACOS_SUBSETS = {
+    "build-and-validate-macos-intel": MACOS_INTEL,
+    "build-and-validate-macos-arm": MACOS,
+}
 LANES = {
     # job id: (step, marker expression, own build job)
     "integration-linux-x86": ("Run integration tests (Unix)", HERMETIC, "build-linux-x86"),
@@ -103,7 +109,8 @@ def _assert_macos_startup_steps(workflow: dict) -> None:
         assert "strategy" not in job, "macOS capacity: one job per architecture, no matrix"
         assert_unconditional(step, label=f"{job_id} startup step")
         assert job["runs-on"] == runner
-        assert job["env"] == {"MACOS_BINARY": binary}
+        assert job["env"]["MACOS_BINARY"] == binary
+        assert job["env"]["MACOS_RUN_UNIT"] == MACOS_RUN_UNIT[job_id]
         assert effective_env(workflow, job, step).get("GITHUB_TOKEN") is None
         assert step["env"] == {
             "APM_E2E_TESTS": "1",
@@ -188,7 +195,7 @@ def _assert_lane_selection(workflow: dict) -> None:
         job = workflow_job(workflow, job_id)
         step = workflow_step(job, MACOS_SUBSET_STEP)
         assert step.get("if") == FULL
-        assert effective_env(workflow, job, step)["PYTEST_MARK_EXPR"] == MACOS
+        assert effective_env(workflow, job, step)["PYTEST_MARK_EXPR"] == MACOS_SUBSETS[job_id]
         assert step["env"]["PYTEST_EXTRA_ARGS"] == "-n 4 --dist loadgroup"
         assert step["timeout-minutes"] == 60
         assert_exact_command(
@@ -199,7 +206,7 @@ def _assert_lane_selection(workflow: dict) -> None:
         hermetic, network = _selects(HERMETIC, markers), _selects(NETWORK, markers)
         assert not (hermetic and network), markers
         assert (hermetic or network) == ("live" not in markers), markers
-        for subset in (ARM, MACOS):
+        for subset in (ARM, MACOS, MACOS_INTEL):
             assert not _selects(subset, markers) or hermetic, (subset, markers)
             assert not _selects(subset, markers) or "architecture_contract" not in markers
 
@@ -356,9 +363,15 @@ def test_lane_selection_drift_is_rejected(job_id: str, expression: str) -> None:
 
 
 @pytest.mark.parametrize("expression", ["not live", HERMETIC, "lifecycle_smoke and not live"])
-def test_macos_subset_widening_or_narrowing_is_rejected(expression: str) -> None:
+@pytest.mark.parametrize("scope", ["workflow", "intel"])
+def test_macos_subset_widening_or_narrowing_is_rejected(expression: str, scope: str) -> None:
     workflow = deepcopy(_workflow())
-    workflow["env"]["MACOS_MARK_EXPR"] = expression
+    if scope == "workflow":
+        workflow["env"]["MACOS_MARK_EXPR"] = expression
+    else:
+        workflow_job(workflow, "build-and-validate-macos-intel")["env"]["MACOS_MARK_EXPR"] = (
+            expression
+        )
 
     with pytest.raises(AssertionError):
         _assert_lane_selection(workflow)
