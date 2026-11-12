@@ -165,7 +165,7 @@ apm pack --archive --dry-run -v
 
 A Claude Code plugin directory under `--output`. Contains:
 
-- `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them.
+- `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them. Its `version` always comes from `apm.yml`, matching the bundle directory name, even when an authored `plugin.json` declares another version; `apm pack` warns and names that file but does not edit it.
 - Plugin-native subdirs populated from local source and installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
   - When `.apm/` exists, local primitives and hooks are sourced from `.apm/`. Root convention sources are skipped with actionable warnings.
   - Without `.apm/`, supported plugin-native root directories remain pack sources, including after `apm init` writes [`includes: auto`](../../manifest-schema/#39-includes).

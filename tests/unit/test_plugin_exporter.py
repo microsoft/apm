@@ -681,83 +681,118 @@ class TestUpdatePluginJsonPaths:
         assert captured == []
 
 
-class _NullLogger:
-    """Absorb pack diagnostics so tests do not print to the console."""
+class _CapturingLogger:
+    """Record pack warnings; absorb info/debug so tests stay quiet."""
 
-    def warning(self, _msg):
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, msg, *_args, **_kwargs):
+        self.warnings.append(msg)
+
+    def info(self, _msg, *_args, **_kwargs):
         pass
 
-    def info(self, _msg):
+    def debug(self, _msg, *_args, **_kwargs):
         pass
 
-    def debug(self, _msg):
+    def success(self, _msg, *_args, **_kwargs):
         pass
+
+
+def _write_stale_release_project(tmp_path: Path, *, with_hooks: bool) -> Path:
+    """Project bumped to 1.0.3 whose authored manifest and old build say 1.0.2."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_apm_yml(project, name="demo-pkg", version="1.0.3")
+    _write_lockfile(project)
+    _make_apm_dir(project, skills={"demo": ["SKILL.md"]})
+    if with_hooks:
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps({"preCommit": ["lint"]}), encoding="utf-8")
+    authored = project / ".claude-plugin" / "plugin.json"
+    authored.parent.mkdir()
+    authored.write_text(
+        json.dumps({"name": "demo-pkg", "version": "1.0.2", "homepage": "https://x.test"}),
+        encoding="utf-8",
+    )
+    old_bundle = tmp_path / "build" / "demo-pkg-1.0.2"
+    old_bundle.mkdir(parents=True)
+    (old_bundle / "plugin.json").write_text(
+        json.dumps({"name": "demo-pkg", "version": "1.0.2"}), encoding="utf-8"
+    )
+    return project
 
 
 class TestReconcilePluginJsonVersion:
-    """``plugin.json`` inside a bundle must agree with the apm.yml version."""
+    """Every ``plugin.json`` inside a bundle must agree with the apm.yml version (#3351)."""
 
     def test_forces_apm_yml_version_when_authored_is_stale(self):
-        captured = []
-
-        class _StubLogger:
-            def warning(self, msg):
-                captured.append(msg)
+        logger = _CapturingLogger()
 
         result = _reconcile_plugin_json_version(
-            {"name": "pkg", "version": "1.0.2"}, "1.0.3", logger=_StubLogger()
+            {"name": "pkg", "version": "1.0.2"},
+            "1.0.3",
+            source_label=".claude-plugin/plugin.json",
+            logger=logger,
         )
 
-        assert result["version"] == "1.0.3"
-        assert result["name"] == "pkg"
-        assert len(captured) == 1
-        assert "1.0.2" in captured[0]
-        assert "1.0.3" in captured[0]
+        assert result == {"name": "pkg", "version": "1.0.3"}
+        assert len(logger.warnings) == 1
+        assert ".claude-plugin/plugin.json declares version 1.0.2" in logger.warnings[0]
+        assert "apm.yml declares 1.0.3" in logger.warnings[0]
 
     def test_matching_version_is_untouched_and_silent(self):
-        captured = []
-
-        class _StubLogger:
-            def warning(self, msg):
-                captured.append(msg)
+        logger = _CapturingLogger()
 
         result = _reconcile_plugin_json_version(
-            {"name": "pkg", "version": "1.0.3"}, "1.0.3", logger=_StubLogger()
+            {"name": "pkg", "version": "1.0.3"}, "1.0.3", logger=logger
         )
 
         assert result["version"] == "1.0.3"
-        assert captured == []
+        assert logger.warnings == []
 
-    def test_missing_version_is_filled(self):
-        result = _reconcile_plugin_json_version({"name": "pkg"}, "1.0.3", logger=_NullLogger())
+    def test_missing_version_is_filled_silently(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version({"name": "pkg"}, "1.0.3", logger=logger)
 
         assert result["version"] == "1.0.3"
+        assert logger.warnings == []
 
     def test_input_is_not_mutated(self):
         authored = {"name": "pkg", "version": "1.0.2"}
 
-        _reconcile_plugin_json_version(authored, "1.0.3", logger=_NullLogger())
+        _reconcile_plugin_json_version(authored, "1.0.3", logger=_CapturingLogger())
 
         assert authored["version"] == "1.0.2"
 
-    def test_bundle_manifest_matches_bundle_directory(self, tmp_path):
-        """Regression: a stale authored plugin.json used to ship 1.0.2 inside build/<pkg>-1.0.3."""
-        project = tmp_path / "project"
-        project.mkdir()
-        _write_apm_yml(project, name="demo-pkg", version="1.0.3")
-        _write_lockfile(project)
-        _make_apm_dir(project, skills={"demo": ["SKILL.md"]})
+    @pytest.mark.windows_compat
+    @pytest.mark.parametrize("with_hooks", [False, True], ids=["root-only", "with-native-copy"])
+    def test_stale_build_and_manifest_pack_with_apm_yml_version(self, tmp_path, with_hooks):
+        """Regression #3351: build/<pkg>-1.0.3 used to ship plugin.json declaring 1.0.2."""
+        project = _write_stale_release_project(tmp_path, with_hooks=with_hooks)
         authored = project / ".claude-plugin" / "plugin.json"
-        authored.parent.mkdir()
-        authored.write_text(json.dumps({"name": "demo-pkg", "version": "1.0.2"}), encoding="utf-8")
+        authored_bytes = authored.read_bytes()
+        old_manifest = tmp_path / "build" / "demo-pkg-1.0.2" / "plugin.json"
+        old_bytes = old_manifest.read_bytes()
+        logger = _CapturingLogger()
 
-        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as mock_warn:
-            result = export_plugin_bundle(project, tmp_path / "build")
+        result = export_plugin_bundle(project, tmp_path / "build", logger=logger)
 
         assert result.bundle_path.name == "demo-pkg-1.0.3"
-        packed = json.loads((result.bundle_path / "plugin.json").read_text())
-        assert packed["version"] == "1.0.3"
-        assert any("1.0.2" in str(c) for c in mock_warn.call_args_list)
+        bundled = ["plugin.json"] + ([".claude-plugin/plugin.json"] if with_hooks else [])
+        for rel in bundled:
+            packed = json.loads((result.bundle_path / rel).read_text(encoding="utf-8"))
+            assert packed["version"] == "1.0.3", rel
+            assert packed["homepage"] == "https://x.test", rel
+        assert (result.bundle_path / ".claude-plugin" / "plugin.json").exists() is with_hooks
+        assert authored.read_bytes() == authored_bytes
+        assert old_manifest.read_bytes() == old_bytes
+        version_warnings = [w for w in logger.warnings if "declares version" in w]
+        assert len(version_warnings) == 1
+        assert version_warnings[0].startswith(".claude-plugin/plugin.json declares version 1.0.2")
 
 
 # ---------------------------------------------------------------------------

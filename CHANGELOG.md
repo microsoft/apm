@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `apm pack` writes the `apm.yml` version into the bundled `plugin.json` instead of reusing a stale authored version, so a release no longer names its bundle `build/<pkg>-1.0.3` while the manifest inside declares an older version. Authored manifests are otherwise preserved, and a warning names the version that was reconciled. (#3351)
 ### Added
 
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
@@ -33,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm pack` writes the `apm.yml` version into every `plugin.json` in the bundle (root and `.claude-plugin/`), so `build/<pkg>-1.0.3/` no longer ships a manifest that still says `1.0.2` from a stale authored `plugin.json`; source manifests are not edited, and a warning names the authored file to update. -- by @abhishekacharya200 (#3408)
 - Registry dependencies with a stable semver range (for example `owner/repo#^1.2.3`) no longer resolve to a pre-release; a pre-release is selected only when the range names one on the same `major.minor.patch`, per OpenAPM v0.1 section 7.3.1, and builds differing only in metadata resolve to the highest version string. Credit to @xubenqiang for the approach in #3469. (#3601)
 - `apm install -g` now writes hook commands as `$HOME/...` for harnesses documented to run them in a POSIX shell (Claude Code, Copilot CLI `bash`, Gemini CLI, Kiro), so dotfiles-tracked user configs stop churning between machines; reinstalling migrates absolute entries in place, and other harnesses and forms keep absolute paths. -- by @Bronyal-lzx (#2944)
 - `apm install <pkg>` (including `-g` and `-g --mcp`) no longer writes your `git config user.name` as `author` when it auto-creates `apm.yml`; the field is omitted. `apm init` still fills it in. (#3630)
