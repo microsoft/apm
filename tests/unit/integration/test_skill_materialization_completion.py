@@ -18,6 +18,7 @@ from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.models.dependency import DependencyReference
+from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
 
@@ -154,6 +155,7 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
     destination = project / ".agents/skills/s"
     shutil.copytree(source, destination)
     written = []
+    diagnostics = DiagnosticCollector()
     with patch("apm_cli.integration.base_integrator.shutil.copy2", wraps=shutil.copy2) as copy:
         copied = BaseIntegrator().copy_directory_files(
             source,
@@ -172,8 +174,10 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
             on_member_written=written.append,
             requires_write=lambda _path: True,
             unchanged=True,
+            diagnostics=diagnostics,
         )
     assert copy.call_count == (2 if baseline == "valid" else 0)
+    assert diagnostics.error_count == (2 if baseline == "missing" else 0)
     assert written == copied
     assert len(written) == copy.call_count
     assert {path.name: path.read_bytes() for path in destination.iterdir()} == {
@@ -281,7 +285,8 @@ def test_copy_failure_only_rolls_back_new_empty_destination(
         source_plan=plan,
         managed_files=set(),
     )
-    assert result.complete is (not existing and not partial)
+    # #3441: a surviving empty destination tree holds no user content and is deployed into.
+    assert result.complete is (not partial)
     if result.complete:
         assert (target / "SKILL.md").read_bytes() == (
             package.install_path / "skills/s/SKILL.md"

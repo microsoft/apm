@@ -278,7 +278,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             if server_info is None:
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name)
+            config_key = self._determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if self.update_config({config_key: server_config}) is False:

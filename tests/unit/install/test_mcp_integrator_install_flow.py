@@ -459,7 +459,7 @@ class TestRunMcpInstallSelfDefined:
             ("codex", ".codex", ".codex/config.toml"),
         ],
     )
-    def test_self_defined_stdio_env_placeholders_resolve_from_process_env(
+    def test_self_defined_stdio_env_placeholders_follow_target_support(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -493,14 +493,20 @@ class TestRunMcpInstallSelfDefined:
 
         assert result == 1
         config_path = tmp_path / config_relpath
+        content = config_path.read_text(encoding="utf-8")
         if runtime == "claude":
-            env_block = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"][
-                "env-demo"
-            ]["env"]
-        else:
-            env_block = toml.load(config_path)["mcp_servers"]["env-demo"]["env"]
-        assert env_block["MY_TOKEN"] == "repro-secret-not-a-real-token"
-        assert env_block["LITERAL_VALUE"] == "literal-value"
+            # Claude Code expands ${VAR} in .mcp.json at server start (#3252).
+            env_block = json.loads(content)["mcpServers"]["env-demo"]["env"]
+            assert env_block["MY_TOKEN"] == "${MY_TOKEN}"
+            assert "repro-secret-not-a-real-token" not in content
+            assert env_block["LITERAL_VALUE"] == "literal-value"
+            return
+        # Codex forwards a ``${VAR}`` written under its own key from the
+        # launching environment, so the resolved secret never reaches the file.
+        server = toml.loads(content)["mcp_servers"]["env-demo"]
+        assert server["env_vars"] == ["MY_TOKEN"]
+        assert server["env"] == {"LITERAL_VALUE": "literal-value"}
+        assert "repro-secret-not-a-real-token" not in content
 
     def test_self_defined_non_stdio_env_remains_env_overrides(self) -> None:
         from apm_cli.integration.mcp_integrator import MCPIntegrator

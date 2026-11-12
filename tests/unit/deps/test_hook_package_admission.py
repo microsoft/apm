@@ -101,8 +101,16 @@ def test_hook_updates_reenter_staged_admission(tmp_path: Path, layout: str) -> N
         ref, locked, update_refs=True, package_path=tmp_path, update_keys={ref.get_unique_key()}
     )
 
+    # Once the package is no longer hook-only, admission does not force a recheck.
+    # Pin a full commit so the mutable-ref update rule (#3392) is not what decides.
     (tmp_path / "SKILL.md").write_text("---\nname: control\n---\n# Skill\n", encoding="utf-8")
-    assert not should_force_ref_recheck(ref, locked, update_refs=True, package_path=tmp_path)
+    pinned = DependencyReference(repo_url="acme/hooks", reference="a" * 40)
+    pinned_lock = LockedDependency(
+        repo_url="acme/hooks", resolved_ref="a" * 40, resolved_commit="a" * 40
+    )
+    assert not should_force_ref_recheck(
+        pinned, pinned_lock, update_refs=True, package_path=tmp_path
+    )
 
 
 @pytest.mark.parametrize("evidence", ["valid", "missing", "wrong-path", "tampered", "stale-sha"])

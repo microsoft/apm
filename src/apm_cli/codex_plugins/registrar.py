@@ -31,6 +31,13 @@ from apm_cli.utils.content_hash import compute_native_bundle_hash
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component, safe_rmtree
 
 
+def is_codex_source_pin(value: object) -> bool:
+    """Return whether a value is a full commit identity, the only valid source pin."""
+    return (
+        isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is not None
+    )
+
+
 def marketplace_name(modules_dir: Path, dependency_key: str) -> str:
     """Namespace an owned marketplace by APM home and canonical dependency identity."""
     identity = f"{modules_dir.resolve().as_posix()}\0{dependency_key}".encode()
@@ -111,10 +118,7 @@ class _Record:
             or not isinstance(data.get("pending"), bool)
             or (
                 data.get("source_commit") is not None
-                and (
-                    not isinstance(data["source_commit"], str)
-                    or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", data["source_commit"]) is None
-                )
+                and (not is_codex_source_pin(data["source_commit"]))
             )
             or any(
                 data.get(key) is not None and not isinstance(data[key], str)
@@ -180,7 +184,7 @@ def verify_codex_source_identity(
         records = _read_records(ledger_path_for(modules_dir))
     record = records.get(dependency_key)
     if source_commit is not None:
-        if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source_commit) is None:
+        if not is_codex_source_pin(source_commit):
             raise CodexNativeError(
                 f"Invalid original Codex source pin for {dependency_key}; "
                 "restore the pinned dependency before retrying."

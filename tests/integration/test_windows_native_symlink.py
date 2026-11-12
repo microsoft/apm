@@ -20,56 +20,38 @@ pytestmark = [pytest.mark.component, pytest.mark.requires_windows_native_standar
 
 
 @pytest.fixture
-def native_precedence_guard(
+def native_pin_guard(
     monkeypatch: pytest.MonkeyPatch, record_property: Callable[[str, object], None]
 ) -> Iterator[None]:
-    """Remove only the local-over-inherited guard for the explicit negative run."""
+    """Invert only the canonical symlink pin for the explicit negative run."""
     mode = os.environ.get("APM_WINDOWS_NATIVE_MUTATION", "")
-    if mode not in {"", "drop-local-precedence"}:
+    if mode not in {"", "drop-symlink-pin"}:
         raise ValueError("Unknown native symlink mutation")
     calls = 0
-    changes: list[tuple[str, str, str, str, bool, bool]] = []
-    original_selection = git_env._symlink_entry_wins
     if mode:
+        original = git_env._materialize_git_config_snapshot
 
-        def without_local_precedence(
-            current: git_env.GitConfigEntry | None, candidate: git_env.GitConfigEntry
-        ) -> bool:
+        def counted(*args: object, **kwargs: object) -> None:
             nonlocal calls
             calls += 1
-            mutant = current is None or candidate.scope == "command"
-            correct = original_selection(current, candidate)
-            if current is not None and mutant != correct:
-                changes.append(
-                    (
-                        current.scope,
-                        current.value,
-                        candidate.scope,
-                        candidate.value,
-                        correct,
-                        mutant,
-                    )
-                )
-            return mutant
+            original(*args, **kwargs)
 
-        monkeypatch.setattr(git_env, "_symlink_entry_wins", without_local_precedence)
+        monkeypatch.setattr(git_env, "_SYMLINK_PIN_VALUE", "false")
+        monkeypatch.setattr(git_env, "_materialize_git_config_snapshot", counted)
     yield
     if mode:
-        assert calls > 0, "The native mutation did not reach the production selection helper"
-        record_property("mutation_decisions", json.dumps(changes))
-        assert ("global", "true", "local", "false", True, False) in changes, (
-            "The mutation must actually reject native local false over inherited global true"
-        )
+        record_property("mutation_materializations", calls)
+        assert calls > 0, "The native mutation did not reach the production config materializer"
 
 
-@pytest.mark.usefixtures("native_precedence_guard")
-def test_native_standard_user_symlink_fallback(
+@pytest.mark.usefixtures("native_pin_guard")
+def test_native_standard_user_symlink_diagnostic(
     tmp_path: Path,
     config_env: dict[str, str],
     symlink_source: Path,
     record_property: Callable[[str, object], None],
 ) -> None:
-    """Match native Git with global true, actual local false and no create privilege."""
+    """Without link privilege, APM fails with the diagnostic instead of link text."""
     context = probe_native_context(
         tmp_path / "capability", os.environ["APM_WINDOWS_NATIVE_EXPECTED_SID"]
     )
@@ -88,17 +70,14 @@ def test_native_standard_user_symlink_fallback(
 
     try:
         git_env.clone_git_worktree(str(symlink_source), target, env=config_env)
-    except subprocess.CalledProcessError as error:
-        if "unable to create symlink AGENTS.md" not in (error.stderr or ""):
-            raise
-        pytest.fail(f"{MUTATION_FAILURE}; Git exit {error.returncode}")
+    except git_env.GitSymlinkCapabilityError as error:
+        record_property("diagnostic", str(error))
+        assert "symbolic links" in str(error)
+        assert "Developer Mode" in str(error)
+        assert isinstance(error.__cause__, subprocess.CalledProcessError)
+        assert "unable to create symlink AGENTS.md" in (error.__cause__.stderr or "")
+    else:
+        pytest.fail(f"{MUTATION_FAILURE}; AGENTS.md bytes {(target / 'AGENTS.md').read_bytes()!r}")
 
-    assert not (target / "AGENTS.md").is_symlink()
-    assert (target / "AGENTS.md").read_bytes() == (native / "AGENTS.md").read_bytes()
-    assert (target / "CLAUDE.md").read_bytes() == (native / "CLAUDE.md").read_bytes()
-    assert (target / "CLAUDE.md").read_text(encoding="utf-8") == "Package instructions\n"
-    assert _git(config_env, "-C", str(target), "ls-files", "--stage", "AGENTS.md").startswith(
-        "120000 "
-    )
     assert global_path.read_bytes() == original_global
     assert _git(config_env, "config", "--global", "--bool", "core.symlinks") == "true"

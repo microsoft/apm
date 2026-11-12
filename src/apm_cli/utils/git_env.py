@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -490,6 +491,83 @@ def git_no_templates_args() -> tuple[str]:
     return ("--template=",)
 
 
+_SYMLINK_PIN_KEY = "core.symlinks"
+_SYMLINK_PIN_VALUE = "true"
+_SYMLINK_CREATE_FAILURE = "unable to create symlink"
+
+
+def git_symlink_pin_entry() -> tuple[str, str]:
+    """Return the canonical ``(key, value)`` that APM pins for package links."""
+    return _SYMLINK_PIN_KEY, _SYMLINK_PIN_VALUE
+
+
+def git_symlink_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin that materializes real symlinks.
+
+    Dependency Git children never see user or system config, so Git for
+    Windows records ``core.symlinks=false`` and writes each in-repo link as a
+    text file holding its target path. The package hash then differs from
+    POSIX for the same commit (#3457). ``-c`` outranks every config file and
+    ``GIT_CONFIG_KEY_n`` entry, so the pin holds regardless of caller config.
+    """
+    key, value = git_symlink_pin_entry()
+    return "-c", f"{key}={value}"
+
+
+class GitSymlinkCapabilityError(RuntimeError):
+    """A dependency contains symbolic links that this host cannot create."""
+
+    def __init__(self, package: str) -> None:
+        self.package = package
+        super().__init__(
+            f"Package {package} contains symbolic links, but this host cannot create them. "
+            "APM checks out package links as real symlinks so the content hash is the "
+            "same on every platform. On Windows, enable Developer Mode or grant the "
+            "'Create symbolic links' privilege, then retry."
+        )
+
+
+def raise_for_symlink_capability(
+    error: BaseException | subprocess.CompletedProcess, package: str
+) -> None:
+    """Raise :class:`GitSymlinkCapabilityError` when Git could not create a link.
+
+    Accepts a failed exception or a completed process: ``git checkout``
+    reports ``unable to create symlink`` but still exits 0, so callers must
+    pass successful checkout results too. Walks the exception chain so
+    wrapped subprocess failures are recognized. An already classified error
+    is re-raised unchanged. Any other outcome returns to the caller.
+    """
+    seen: set[int] = set()
+    current: BaseException | subprocess.CompletedProcess | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, GitSymlinkCapabilityError):
+            raise current
+        for stream in (getattr(current, "stderr", None), getattr(current, "stdout", None)):
+            if isinstance(stream, bytes):
+                stream = stream.decode("utf-8", errors="replace")
+            if isinstance(stream, str) and _SYMLINK_CREATE_FAILURE in stream:
+                cause = error if isinstance(error, BaseException) else None
+                raise GitSymlinkCapabilityError(package) from cause
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+
+def git_autocrlf_pin_args() -> tuple[str, str]:
+    """Return the canonical per-command pin against host CRLF conversion.
+
+    ``core.autocrlf`` snapshots frozen into ``GIT_CONFIG_KEY_n`` by
+    :func:`git_clone_env` (apm#2971) outrank repository-local config, so on a
+    host whose system gitconfig sets ``core.autocrlf=true`` a working-tree
+    clone rewrites LF-committed blobs as CRLF. A checkout that runs without
+    the snapshot then compares that CRLF worktree against the LF index and
+    refuses the switch with "local changes would be overwritten" (apm#3368).
+    ``-c`` outranks the snapshots, so clone and checkout agree and the
+    materialized bytes are the committed bytes.
+    """
+    return "-c", "core.autocrlf=false"
+
+
 class _GitProgress(Protocol):
     """Git progress callback consumed by the clone subprocess adapter."""
 
@@ -751,6 +829,95 @@ def configured_git_url_policy(
     return snapshot.rewrites, snapshot.http_headers
 
 
+# issue #2545: the only keys inherited from the ambient (non-isolated) git
+# config into APM's isolated github.com environments. Deliberately narrow --
+# credential.helper and other auth-bearing config are never read here, so the
+# credential-leakage boundary the isolated environment exists for is
+# unaffected.
+_TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset(
+    {"http.sslbackend", "http.sslcainfo", "http.sslcapath"}
+)
+
+# Module-level cache for the ambient (env=None) TLS probe -- see
+# real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
+# cached "no ambient TLS config" answer, not a retry signal. Guarded by
+# _real_git_tls_config_lock: parallel installs call this once per
+# dependency, and the probe spawns a `git config` child with its own
+# 10s/30s retry budget, so an unguarded check-then-probe race could let
+# several workers pay that cost concurrently before either stores a result.
+_real_git_tls_config_cache: dict[str, str] | None = None
+_real_git_tls_config_lock = threading.Lock()
+
+
+def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
+    """Return the ambient ``http.sslBackend``/``sslCAInfo``/``sslCAPath`` config.
+
+    Reads the *non-isolated* config a plain ``git clone`` would see -- the
+    settings that let it succeed behind a TLS-inspecting proxy whose
+    intercepting CA chain carries no revocation info, while APM's
+    anonymous-first isolated environment (``GIT_CONFIG_NOSYSTEM=1`` + empty
+    ``GIT_CONFIG_GLOBAL``) cannot complete the same handshake. Keys are
+    returned lower-cased, matching Git's own ``--list`` normalization and
+    this codebase's existing indexed-config convention (see
+    ``AuthResolver._append_git_config`` callers using ``credential.helper``
+    / ``http.extraheader``).
+
+    Best-effort: any probe failure (missing ``git``, malformed output,
+    timeout) yields an empty mapping rather than raising, so a broken
+    ambient config never blocks the anonymous attempt it is meant to help.
+
+    ``entries`` is ordered lowest-to-highest precedence (system, global,
+    local, worktree, command/env), matching Git's own resolution. An
+    explicit higher-precedence empty value (``git config --unset``-like
+    override) must win over an earlier non-empty one, so every value for a
+    tracked key is recorded during the scan and only the final, possibly
+    empty, values are filtered out afterward.
+
+    Cached for the default ``env=None`` case after the first probe: the
+    ambient config a plain ``git clone`` sees is stable for the life of the
+    process, and both ``AuthResolver.build_public_github_anonymous_git_env``
+    and ``AuthResolver.git_env_for_context`` call this once per attempt, so
+    an uncached probe would spawn one extra ``git config`` child process
+    (with its own retry/timeout budget) per dependency in a large install.
+    Callers that pass an explicit ``env`` (tests) always re-probe. Use
+    :func:`reset_git_cache` to clear it (tests only).
+
+    Parallel installs call this from multiple worker threads: the cache is
+    populated under ``_real_git_tls_config_lock`` with a double-checked read
+    (fast, lock-free hit once warm; re-checked inside the lock before
+    probing) so concurrent workers racing the very first call share one
+    probe instead of each paying its own retry/timeout budget.
+    """
+    global _real_git_tls_config_cache
+    if env is None and _real_git_tls_config_cache is not None:
+        return dict(_real_git_tls_config_cache)
+
+    def _probe() -> dict[str, str]:
+        try:
+            snapshot = _read_effective_git_config(git_subprocess_env(env))
+            values: dict[str, str] = {}
+            for entry in snapshot.entries:
+                # Defense in depth: repository config is never a trust source.
+                if entry.scope in {"local", "worktree"}:
+                    continue
+                normalized = entry.key.lower()
+                if normalized in _TLS_TRANSPORT_CONFIG_KEYS:
+                    values[normalized] = entry.value
+            return {key: value for key, value in values.items() if value}
+        except (GitUrlRewriteProbeError, OSError):
+            return {}
+
+    if env is not None:
+        return _probe()
+
+    with _real_git_tls_config_lock:
+        if _real_git_tls_config_cache is not None:
+            return dict(_real_git_tls_config_cache)
+        result = _probe()
+        _real_git_tls_config_cache = result
+        return dict(result)
+
+
 def validate_resolved_git_url_rewrite(
     remote_url: str,
     effective_url: str,
@@ -985,15 +1152,6 @@ def _merge_parent_git_config_snapshot(
     )
 
 
-def _symlink_entry_wins(current: GitConfigEntry | None, candidate: GitConfigEntry) -> bool:
-    """Decide whether ``candidate`` should replace the retained core.symlinks entry.
-
-    Command-scope intent always wins over any other scope; otherwise the
-    last entry seen wins, matching Git's own scope-precedence ordering.
-    """
-    return current is None or current.scope != "command" or candidate.scope == "command"
-
-
 def _materialize_git_config_snapshot(
     env: dict[str, str],
     snapshot: _GitConfigSnapshot,
@@ -1014,14 +1172,11 @@ def _materialize_git_config_snapshot(
         else None
     )
     retained: list[tuple[str, str]] = []
-    symlinks: GitConfigEntry | None = None
     for entry in snapshot.entries:
         normalized = entry.key.lower()
-        if normalized == "core.symlinks":
-            # Parent command entries can precede child file entries after
-            # merging. Keep command intent above Git init's capability result.
-            if _symlink_entry_wins(symlinks, entry):
-                symlinks = entry
+        if normalized == git_symlink_pin_entry()[0]:
+            # Replaced by the pin below; Git init's capability result and
+            # inherited values must not turn package links into link text.
             continue
         if entry.scope in {"local", "worktree"} and not _is_scope_sensitive_network_config(entry):
             continue
@@ -1046,8 +1201,7 @@ def _materialize_git_config_snapshot(
                 continue
         retained.append((entry.key, entry.value))
 
-    if symlinks is not None:
-        retained.append(("core.symlinks", symlinks.value))
+    retained.append(git_symlink_pin_entry())
 
     if auth_fence is not None:
         if auth_fence.suppress_helpers:
@@ -1395,6 +1549,7 @@ def clone_git_worktree(
     args = [
         get_git_executable(),
         *git_no_hooks_args(),
+        *git_autocrlf_pin_args(),
         "clone",
         *git_no_templates_args(),
     ]
@@ -1421,6 +1576,9 @@ def clone_git_worktree(
             )
         except subprocess.TimeoutExpired:
             raise subprocess.TimeoutExpired([get_git_executable(), "clone"], 300) from None
+        except subprocess.CalledProcessError as exc:
+            raise_for_symlink_capability(exc, redact_git_diagnostic(url))
+            raise
         return
 
     from git.cmd import handle_process_output
@@ -1454,12 +1612,14 @@ def clone_git_worktree(
         process.wait()
         raise subprocess.TimeoutExpired([get_git_executable(), "clone"], 300) from None
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(
+        failure = subprocess.CalledProcessError(
             process.returncode,
             args,
             output="".join(stdout),
             stderr="".join(stderr),
         )
+        raise_for_symlink_capability(failure, redact_git_diagnostic(url))
+        raise failure
 
 
 def checkout_git_worktree(
@@ -1467,23 +1627,32 @@ def checkout_git_worktree(
     ref: str,
     *,
     env: dict[str, object] | None = None,
+    package: str | None = None,
 ) -> None:
-    """Check out a ref in an explicitly located worktree."""
-    subprocess.run(
-        [
-            get_git_executable(),
-            *git_no_hooks_args(),
-            "-C",
-            str(worktree),
-            "checkout",
-            ref,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=git_subprocess_env(env),
-    )
+    """Check out a ref in an explicitly located worktree with real symlinks."""
+    label = package or str(worktree)
+    try:
+        result = subprocess.run(
+            [
+                get_git_executable(),
+                *git_no_hooks_args(),
+                *git_symlink_pin_args(),
+                *git_autocrlf_pin_args(),
+                "-C",
+                str(worktree),
+                "checkout",
+                ref,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=git_subprocess_env(env),
+        )
+    except subprocess.CalledProcessError as exc:
+        raise_for_symlink_capability(exc, label)
+        raise
+    raise_for_symlink_capability(result, label)
 
 
 def git_worktree_head(
@@ -1539,10 +1708,11 @@ def git_current_branch(
 
 
 def reset_git_cache() -> None:
-    """Reset the cached git executable (for testing purposes only)."""
-    global _gh_executable, _git_executable
+    """Reset the cached git executable and TLS config probe (tests only)."""
+    global _gh_executable, _git_executable, _real_git_tls_config_cache
     _git_executable = None
     _gh_executable = None
+    _real_git_tls_config_cache = None
 
 
 def git_long_paths_args() -> list[str]:

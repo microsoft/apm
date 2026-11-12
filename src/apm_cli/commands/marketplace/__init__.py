@@ -338,7 +338,10 @@ def add(source, name, ref, branch, host, verbose):
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
-        from ...marketplace.client import _auto_detect_path, fetch_marketplace
+        from ...marketplace.client import (
+            _auto_detect_path_with_payload,
+            fetch_marketplace,
+        )
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
         from ...marketplace.source_identity import parse_marketplace_source
@@ -433,7 +436,7 @@ def add(source, name, ref, branch, host, verbose):
             logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
-        # placeholder -- _auto_detect_path only consults url/ref/path/kind.
+        # placeholder -- _auto_detect_path_with_payload only consults url/ref/path/kind.
         probe_name = provisional_label
         probe_source = MarketplaceSource(
             name=probe_name,
@@ -443,8 +446,9 @@ def add(source, name, ref, branch, host, verbose):
         )
         if is_direct_url or _local_source_points_to_file(probe_source):
             detected_path = ""
+            discovered_manifest = None
         else:
-            detected_path = _auto_detect_path(probe_source)
+            detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
 
         if detected_path is None:
             logger.error(
@@ -461,7 +465,13 @@ def add(source, name, ref, branch, host, verbose):
             ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
-        manifest = fetch_marketplace(fetch_source, force_refresh=True)
+        manifest = fetch_marketplace(
+            fetch_source,
+            force_refresh=True,
+            # Reuse the catalog response the probe above just fetched from
+            # the same url/ref/path instead of re-fetching it (apm#3283).
+            discovery_payload=discovered_manifest,
+        )
         plugin_count = len(manifest.plugins)
 
         manifest_name = (manifest.name or "").strip()

@@ -756,6 +756,7 @@ def reconcile_target_deployed_files(
     retained_selected_paths: set[str] | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
+    preserved_selected_values: frozenset[str] = frozenset(),
 ) -> bool:
     """Prune undeclared-target file ownership from every lockfile deployment block.
 
@@ -766,6 +767,10 @@ def reconcile_target_deployed_files(
     *logger* is supplied, each deletion pass is surfaced at default verbosity
     (deletion count + user-edit skips) so the destructive workspace change is
     never silent.
+
+    With *remove_selected_ownership*, *preserved_selected_values* lists rows
+    of the selected dependencies that must stay on disk, such as rows a
+    selected-profile uninstall keeps for another profile.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import DeploymentLedger
@@ -822,6 +827,14 @@ def reconcile_target_deployed_files(
             continue
         prior_files = list(dependency.deployed_files)
         prior_hashes = dict(dependency.deployed_file_hashes)
+        if selected_owner_removal and preserved_selected_values:
+            # Preserved rows never enter reconciliation, so they cannot be swept.
+            prior_files = [path for path in prior_files if path not in preserved_selected_values]
+            prior_hashes = {
+                path: value
+                for path, value in prior_hashes.items()
+                if path not in preserved_selected_values
+            }
         current_files = _retained(prior_files)
         current_hashes = {
             path: value for path, value in prior_hashes.items() if path in current_files

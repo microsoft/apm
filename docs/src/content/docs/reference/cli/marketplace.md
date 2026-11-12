@@ -118,6 +118,11 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--verbose`, `-v` | Show detailed output. |
 
+For git-backed sources without a direct file path, APM looks for the catalog
+at `marketplace.json`, `.github/plugin/marketplace.json`, then
+`.claude-plugin/marketplace.json`, and registers the first one found without
+downloading it again.
+
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
 marketplace host is classified as GitHub, GitLab, or Azure DevOps.
@@ -220,6 +225,14 @@ DevOps `sourceBase` ending in `/_git`, package names are appended without
 a `.git` suffix. Services uses `ADO_APM_PAT`, then the Azure CLI bearer.
 Server hosts registered through `ADO_HOST` or `APM_ADO_HOSTS` use
 `ADO_APM_PAT` only.
+
+A `ref` that names a tag or branch must exist on the remote. A `ref` that
+is a full 40-character lowercase commit SHA passes when the remote serves
+that commit: a branch tip passes directly, any other commit is
+confirmed with a shallow fetch. Unreachable commits fail with
+`Commit '<sha>' not reachable on remote`. Abbreviated or uppercase SHAs
+are not commit pins and fail with a hint to use the full SHA. `--offline`
+cannot confirm a commit that is not a cached branch tip.
 
 | Flag | Description |
 |---|---|

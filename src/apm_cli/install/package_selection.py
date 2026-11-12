@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 
 from apm_cli.models.dependency.reference import DependencyReference
@@ -10,6 +10,7 @@ from apm_cli.models.dependency.reference import DependencyReference
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import _ValidationOutcome
     from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
+    from apm_cli.deps.lockfile import LockFile
 
 
 def _selected_dependency_reference(
@@ -93,6 +94,48 @@ def only_packages_from_validation(
             seen.add(canonical)
             selected.append(canonical)
     return selected
+
+
+def previous_selected_subtree_keys(
+    packages: Sequence[str],
+    declarations: Sequence[DependencyReference],
+    lockfile: LockFile,
+    complete_dep_keys: Collection[str],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Split the selected packages' previously locked descendants for a partial install.
+
+    Returns ``(dropped, rescued)``: descendants the complete graph resolved
+    this run no longer contains, and those it still reaches through another
+    retained package. Unrelated lock entries are never candidates. Both
+    sets are empty when a candidate carries replacement evidence, whose
+    recorded parent requests only a complete install may rewrite.
+    """
+    from apm_cli.commands.uninstall.engine import _collect_orphan_candidates
+    from apm_cli.deps.lockfile import _SELF_KEY
+
+    # Children record their parent's spelling at lock time; scan from both the
+    # interpreted declaration and the selected package's own lock entry so a
+    # canonical selector still reaches entries recorded under declared casing.
+    roots: list[object] = []
+    for package in packages:
+        try:
+            selected = _selected_dependency_reference(package, declarations)
+        except (ValueError, TypeError):
+            roots.append(package)
+            continue
+        roots.append(selected)
+        locked = lockfile.dependencies.get(selected.get_unique_key())
+        if locked is not None:
+            roots.append(locked.to_dependency_ref())
+    candidates, _ = _collect_orphan_candidates(lockfile, roots)
+    candidates.discard(_SELF_KEY)
+    if any(
+        (entry := lockfile.dependencies.get(key)) is not None and entry.replacement is not None
+        for key in candidates
+    ):
+        return frozenset(), frozenset()
+    complete = frozenset(complete_dep_keys)
+    return frozenset(candidates - complete), frozenset(candidates & complete)
 
 
 def selected_dependency_keys(

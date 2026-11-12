@@ -9,11 +9,13 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
+from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.install.mcp.ownership import (
     NativeMcpConnectionState,
     adopt_legacy_mcp_target_servers,
     compare_native_mcp_connection,
+    mcp_native_hash,
     migrate_legacy_project_target_servers,
     require_removable_mcp_connections,
 )
@@ -427,3 +429,198 @@ def test_legacy_adoption_inspects_intellij_obsolete_config(tmp_path) -> None:
         )
 
     assert adopted == {"intellij": {"managed"}}
+
+
+# --- Claude entries expanded by releases before #3252 -----------------------
+
+_EXPANDED_STORED = {
+    "name": "managed",
+    "registry": False,
+    "transport": "stdio",
+    "command": "uvx",
+    "args": ["fixture-server", "--token=${OWN_TOKEN}"],
+    "env": {"TOKEN": "${OWN_TOKEN}", "MODE": "${OWN_MODE:-safe}", "STATIC": "debug"},
+}
+
+
+def _expanded_native(client: ClaudeClientAdapter, value: str) -> dict:
+    """Render the declaration, then expand ${OWN_TOKEN} like earlier releases did."""
+    rendered = client.render_server_config(
+        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_EXPANDED_STORED))
+    )
+    return json.loads(json.dumps(rendered).replace("${OWN_TOKEN}", value))
+
+
+def test_expanded_entry_from_earlier_release_is_managed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OWN_TOKEN", "own-sentinel")
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "own-sentinel")
+
+    result = _compare_managed_claude(client, _EXPANDED_STORED, native, _EXPANDED_STORED)
+
+    assert result is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+@pytest.mark.parametrize("environment_value", [None, "rotated-sentinel"])
+def test_expanded_entry_without_proof_is_a_conflict(
+    tmp_path, monkeypatch, environment_value: str | None
+) -> None:
+    monkeypatch.delenv("OWN_TOKEN", raising=False)
+    if environment_value is not None:
+        monkeypatch.setenv("OWN_TOKEN", environment_value)
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "own-sentinel")
+
+    result = _compare_managed_claude(client, _EXPANDED_STORED, native, _EXPANDED_STORED)
+
+    assert result is NativeMcpConnectionState.CONFLICT
+
+
+def test_recorded_write_hash_proves_expanded_entry(tmp_path, monkeypatch) -> None:
+    from apm_cli.install.mcp.ownership import mcp_native_hash
+
+    monkeypatch.delenv("OWN_TOKEN", raising=False)
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "typed-at-a-prompt")
+    Path(client.get_config_path()).write_text(
+        json.dumps({"mcpServers": {"managed": native}}), encoding="utf-8"
+    )
+
+    result = compare_native_mcp_connection(
+        client,
+        "managed",
+        requested_info=MCPIntegrator._build_self_defined_info(
+            MCPDependency.from_dict(_EXPANDED_STORED)
+        ),
+        stored_config=_EXPANDED_STORED,
+        managed=True,
+        native_hash=mcp_native_hash(native),
+    )
+
+    assert result is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+def test_unmanaged_expanded_entry_is_never_adopted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OWN_TOKEN", "own-sentinel")
+    client = ClaudeClientAdapter(project_root=tmp_path)
+    native = _expanded_native(client, "own-sentinel")
+
+    result = _compare_managed_claude(
+        client, _EXPANDED_STORED, native, _EXPANDED_STORED, managed=False
+    )
+
+    assert result is NativeMcpConnectionState.CONFLICT
+
+
+def test_user_scope_expanded_entry_is_not_migrated(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OWN_TOKEN", "own-sentinel")
+    project = ClaudeClientAdapter(project_root=tmp_path)
+    expected = project.render_server_config(
+        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_EXPANDED_STORED))
+    )
+    native = _expanded_native(project, "own-sentinel")
+
+    assert project.matches_legacy_managed_server_config(native, expected) is True
+    assert (
+        ClaudeClientAdapter(user_scope=True).matches_legacy_managed_server_config(native, expected)
+        is False
+    )
+
+
+_FORWARDED_STDIO = {
+    "name": "managed",
+    "registry": False,
+    "transport": "stdio",
+    "command": "python",
+    "args": ["-m", "fixture_server"],
+    "env": {"MY_TOKEN": "${MY_TOKEN}"},
+}
+
+
+def _compare_codex(
+    tmp_path: Path, written_value: str, recorded_value: str | None = None
+) -> NativeMcpConnectionState:
+    """Compare a Codex entry the older formatter wrote with its current rendering.
+
+    ``recorded_value`` simulates the lockfile fingerprint of the earlier write.
+    """
+    client = CodexClientAdapter(project_root=tmp_path)
+    requested = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_FORWARDED_STDIO))
+    native = deepcopy(client.render_server_config(requested))
+    native.pop("env_vars")
+    native["env"] = {"MY_TOKEN": written_value}
+    native_hash = None
+    if recorded_value is not None:
+        native_hash = mcp_native_hash({**native, "env": {"MY_TOKEN": recorded_value}})
+    return compare_native_mcp_connection(
+        client,
+        "managed",
+        requested_info=requested,
+        stored_config=_FORWARDED_STDIO,
+        managed=True,
+        existing_configs={"managed": native},
+        native_hash=native_hash,
+    )
+
+
+def test_codex_entry_with_recorded_write_upgrades_after_variable_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "rotated-value")
+    state = _compare_codex(tmp_path, "previous-value", recorded_value="previous-value")
+    assert state is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+def test_codex_entry_edited_after_recorded_write_stays_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "resolved-value")
+    state = _compare_codex(tmp_path, "resolved-value", recorded_value="previous-value")
+    assert state is NativeMcpConnectionState.CONFLICT
+
+
+@pytest.mark.parametrize("written_value", ["${MY_TOKEN}", "resolved-value"])
+def test_codex_entry_from_older_formatter_upgrades_as_managed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, written_value: str
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "resolved-value")
+    assert _compare_codex(tmp_path, written_value) is NativeMcpConnectionState.UPDATE_MANAGED
+
+
+def test_codex_entry_with_manual_edit_stays_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "resolved-value")
+    assert _compare_codex(tmp_path, "edited-by-hand") is NativeMcpConnectionState.CONFLICT
+
+
+def test_codex_user_scope_entry_never_takes_the_legacy_upgrade_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MY_TOKEN", "resolved-value")
+    client = CodexClientAdapter(project_root=tmp_path, user_scope=True)
+    requested = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(_FORWARDED_STDIO))
+    native = deepcopy(client.render_server_config(requested))
+    assert "env_vars" not in native
+    state = compare_native_mcp_connection(
+        client,
+        "managed",
+        requested_info=requested,
+        stored_config=_FORWARDED_STDIO,
+        managed=True,
+        existing_configs={"managed": native},
+    )
+    assert state is NativeMcpConnectionState.MATCHING_MANAGED
+
+
+def test_codex_expanded_env_names_lists_forwarded_names_stored_as_values(
+    tmp_path: Path,
+) -> None:
+    client = CodexClientAdapter(project_root=tmp_path)
+    requested = {"env_vars": ["A", "B"], "env": {}}
+    assert client.expanded_env_names({"env": {"A": "x", "C": "y"}}, requested) == ["A"]
+    assert client.expanded_env_names({"command": "x"}, requested) == []
+    assert client.expanded_env_names(None, requested) == []
+    # A stored reference never held a secret, so it needs no rotation note.
+    stored_refs = {"env": {"A": "${A}", "B": "${env:B}"}}
+    assert client.expanded_env_names(stored_refs, requested) == []
