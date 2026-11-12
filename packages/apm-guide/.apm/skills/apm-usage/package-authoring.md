@@ -212,9 +212,12 @@ APM used to route `*-<harness>-hooks.json` and `hooks-<harness>.json` only to
 the named target and skipped generic files for a target that had its own
 file. That routing is removed. If removing it would give a target a hook file
 the old names kept from it, `apm install` fails for that package, names the
-target and files, and installs no hooks from it. APM never guesses targets.
+target and files, and writes nothing from it. Until it is migrated,
+`apm uninstall` of another package stops with the same message before it
+changes hook settings.
 
-Migrate by moving each target's hooks into a package that declares it:
+Package authors migrate by splitting each target's hooks into a package that
+declares it:
 
 ```yaml
 name: codex-hooks
@@ -222,9 +225,11 @@ version: "1.0.0"
 target: codex
 ```
 
-Or narrow the dependency in the consumer's `apm.yml` with object-form
-`targets: [codex]`. A file whose old name already matched every effective
-target keeps installing unchanged.
+A consumer can instead narrow the dependency with object-form
+`targets: [codex]` only when the package ships hook files for that one
+target; a generic `hooks.json` beside them still needs the split. A file
+whose old name already matched every effective target keeps installing
+unchanged.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude; see the alias table below) and rewrites path variables
@@ -271,8 +276,9 @@ configuration compatibility does not guarantee equivalent behavior.
 | `postToolUseFailure` | unchanged | `PostToolUseFailure` |
 | `preCompact` | unchanged | `PreCompact` |
 
-Claude Code rejects unknown events, so a lower-case event with no Claude
-equivalent (for example `errorOccurred`, `subagentStart`, or `stop`) fails
+Claude Code rejects unknown events, so a lower-case event without a
+documented Claude alias (for example `errorOccurred`, `subagentStart`, or
+`stop`) fails
 the install for that package before `.claude/settings.json` changes; limit
 the package to targets that support it. PascalCase names absent from the
 table pass to Claude unchanged. For Copilot, names absent from the table are

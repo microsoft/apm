@@ -59,8 +59,9 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 The Claude column follows the alias pairs in the
 [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference)
 and the [Claude Code hook events](https://code.claude.com/docs/en/hooks).
-Claude Code rejects unknown events, so a lower-case event with no Claude
-equivalent (for example `errorOccurred`, `subagentStart`, or `stop`) fails
+Claude Code rejects unknown events, so a lower-case event without a
+documented Claude alias (for example `errorOccurred`, `subagentStart`, or
+`stop`) fails
 the install for that package before `.claude/settings.json` changes. Limit
 such a package to targets that support the event with `target:` or
 dependency `targets:`. PascalCase names absent from the table pass to Claude
@@ -231,15 +232,19 @@ that had its own file. That routing is removed.
 
 If removing it would give a target a hook file the old names kept from it,
 `apm install` fails for that package with a message naming the target and
-files, and installs no hooks from it. APM does not guess the intended target.
+files, and writes nothing from it. APM does not guess the intended target.
 Until the package is migrated, `apm uninstall` of another package also stops
-with the same message before it changes any hook settings. To migrate:
+with the same message before it changes any hook settings.
 
-1. Move each target's hook files into a package whose `apm.yml` declares
-   that target, for example `target: codex`.
-2. Or narrow the dependency in your own `apm.yml` with object-form
-   `targets: [codex]`.
-3. Reinstall.
+- **Package authors:** split the package so each target set has its own
+  package whose `apm.yml` declares it (for example `target: codex`) with an
+  ordinary `hooks/hooks.json`. Keep shared hooks in a common package.
+- **Consumers:** if the package ships hook files for one target only, narrow
+  the dependency in your `apm.yml` with object-form `targets: [codex]`.
+  Narrowing does not help when the package also ships a generic `hooks.json`
+  or files for other targets; ask its author to split it.
+
+Then reinstall.
 
 A file whose old name already matched every effective target keeps
 installing unchanged; renaming it to `hooks.json` is optional.
@@ -398,7 +403,7 @@ agent a procedure" fits a skill -- and reaches every harness.
 
 - **Hook event names.** Use the documented
   [event aliases](#session-lifecycle-event-aliases) for Copilot
-  and Claude. Claude rejects lower-case names without a Claude equivalent
+  and Claude. Claude rejects lower-case names without a documented Claude alias
   before writing settings. For Copilot, unknown names are preserved; an
   install warning appears only when an unmapped name's casing conflicts with
   the target convention. Cursor
