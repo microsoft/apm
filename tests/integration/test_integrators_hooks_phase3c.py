@@ -30,11 +30,13 @@ import pytest
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_downloader_validation import _ssh_attempt_allowed
+from apm_cli.integration.hook_file_routing import (
+    legacy_hook_file_selection as _filter_hook_files_for_target,
+)
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
     HookIntegrationResult,
     HookIntegrator,
-    _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
 )
 from apm_cli.integration.hook_native_formats import (
