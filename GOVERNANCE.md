@@ -156,10 +156,10 @@ and their milestone history, including completed work in the active release.
 
 ### Native Project settings
 
-Project 2304 uses public visibility, the saved views below with Horizon
-columns, Pillar swimlanes, and Milestone grouping, and native issue-only
-auto-add. Maintainers keep the existing-issue intake current and preserve
-completed issue history.
+Configure Project 2304 with public visibility, the saved views below
+(Horizon columns, Pillar swimlanes, Milestone grouping), and native
+issue-only auto-add. Maintainers keep the existing-issue intake current and
+preserve completed issue history.
 
 In Project settings, use public visibility and these single-select fields:
 `Horizon` (Now, Next, Later, Exploring), `Pillar` (Consume, Produce, Govern,
