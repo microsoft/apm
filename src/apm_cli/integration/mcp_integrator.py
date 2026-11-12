@@ -817,12 +817,19 @@ class MCPIntegrator:
             )
 
         # Build an expanded set that includes both the full reference and the
-        # last-segment short name so we match config keys in every runtime.
+        # native key the adapters write (registry ``owner/name`` -> ``name``).
+        # Self-defined servers keep their declared key (#3493); their older
+        # truncated keys are reconciled only under ownership proof at install
+        # time, so a short-name entry here may belong to the user.
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
         expanded_stale: builtins.set = builtins.set()
         for n in stale_names:
             expanded_stale.add(n)
-            if "/" in n:
-                expanded_stale.add(n.rsplit("/", 1)[-1])
+            stored = (stored_configs or {}).get(n)
+            self_defined = isinstance(stored, dict) and stored.get("registry") is False
+            info = {"name": n, "is_self_defined": True} if self_defined else None
+            expanded_stale.add(MCPClientAdapter._determine_config_key(n, None, info))
 
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
