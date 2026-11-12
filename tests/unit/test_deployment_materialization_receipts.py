@@ -661,6 +661,39 @@ def test_identical_unowned_members_do_not_create_local_authority(
     assert not session.state_path.exists()
 
 
+def test_repeated_identical_unowned_delivery_does_not_create_local_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same-run shortcut hashes are not lockfile claims for cold adoption (#3391)."""
+    import shutil
+
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from tests.unit.integration.test_skill_materialization_completion import (
+        _fixture as skill_fixture,
+    )
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    package, root, plan = skill_fixture(tmp_path)
+    shutil.copytree(package.install_path / "skills/s", root / ".claude/skills/s")
+    session = _session(root, LockFile())
+    integrator = SkillIntegrator()
+    with integrator.ownership_snapshot(materialization_session=session):
+        for _ in range(2):
+            result = integrator.integrate_package_skill(
+                package,
+                root,
+                targets=[TARGET],
+                source_plan=plan,
+                managed_files=set(),
+                skip_bin=True,
+            )
+            assert result.deployed_files
+    session.flush()
+    assert not session.state_path.exists()
+
+
 _LINUX_STYLE = None
 _MACOS_STYLE = 1767225600.123456
 _PLATFORM_STYLES = pytest.mark.parametrize(
