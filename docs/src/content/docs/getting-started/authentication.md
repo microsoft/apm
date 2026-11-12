@@ -521,6 +521,8 @@ APM tries unauthenticated access first for public repos to conserve rate limits 
 export GITHUB_TOKEN=ghp_any_valid_token
 ```
 
+For subdirectory packages in public github.com repositories (for example nested Claude plugins), APM checks package markers through `raw.githubusercontent.com`, which does not count against the REST API limit. It calls the Contents API only when no marker is found that way, for example in a private repository.
+
 ### SSO-protected organizations
 
 Authorize your PAT for SSO at [github.com/settings/tokens](https://github.com/settings/tokens) — click **Configure SSO** next to the token.
