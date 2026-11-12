@@ -356,3 +356,31 @@ def test_profile_uninstall_does_not_redeploy_retained_package(tmp_path: Path) ->
     assert env.state(env.profile_b) == (set(), set())
     assert env.state(env.default) == ({"shared"}, {"shared"})
     assert len(_declared(env.manifest_path)) == 1
+
+
+def test_relative_codex_home_does_not_block_claude_global_lifecycle(tmp_path: Path) -> None:
+    """A relative CODEX_HOME fails Codex writes only, not Claude-only global commands (#3483)."""
+    env = _ProfileSkills(tmp_path, "home")
+    package = env.package("codex-home-isolation", "demo")
+    subprocess_env = {**env.isolated.subprocess_env(), "CODEX_HOME": "relative/codex"}
+
+    def run(*args: str) -> CommandResult:
+        return env.runner.run(
+            args, scenario_id="relative-codex-home", cwd=env.cwd, env=subprocess_env
+        )
+
+    installed = run("install", "--global", str(package), "--target", "claude", "--no-policy")
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert env.state(env.default) == ({"demo"}, {"demo"})
+
+    codex = run("install", "--global", str(package), "--target", "codex", "--no-policy")
+    assert codex.returncode != 0
+    output = " ".join((codex.stdout + codex.stderr).split())
+    assert "CODEX_HOME is set to a non-absolute path" in output
+    assert not (env.cwd / "relative").exists()
+    assert not (env.isolated.home / ".codex").exists()
+
+    removed = run("uninstall", "--global", str(package))
+    assert removed.returncode == 0, removed.stdout + removed.stderr
+    assert env.state(env.default) == (set(), set())
+    assert _declared(env.manifest_path) == []

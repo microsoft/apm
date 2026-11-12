@@ -6,7 +6,7 @@ import re
 import shutil
 import stat
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,7 @@ def _managed_absolute_target_root(
     allow_final_symlink: bool = False,
 ) -> Path | None:
     """Return the managed root for *candidate*, or ``None`` if unmanaged."""
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     source = targets
     if source is None:
@@ -42,7 +42,7 @@ def _managed_absolute_target_root(
         for profile in KNOWN_TARGETS.values():
             if not profile.user_supported or profile.user_root_resolver is not None:
                 continue
-            scoped = profile.for_scope(user_scope=True)
+            scoped = scoped_profile_or_none(profile, user_scope=True)
             if scoped is not None:
                 source.append(scoped)
     try:
@@ -152,6 +152,14 @@ def _read_bytes_no_follow(path: Path) -> bytes:
         return b"".join(chunks)
     finally:
         os.close(fd)
+
+
+def untrusted_baseline_message(entry: str) -> str:
+    """Refuse to replace an existing file that has no trustworthy deployment baseline."""
+    return (
+        f"Skipped {entry}: no trustworthy local deployment baseline. Move the conflicting "
+        "file aside and retry; use --force only to intentionally overwrite it."
+    )
 
 
 class BaseIntegrator:
@@ -350,19 +358,11 @@ class BaseIntegrator:
                         or (expected is not None and compute_file_hash(target_file) != expected)
                     )
                 ):
-                    reason = (
-                        "no trustworthy local deployment baseline"
-                        if expected is None
-                        else "modified since deployment"
-                    )
                     if expected is None:
-                        message = (
-                            f"Skipped {entry}: {reason}. Move the conflicting file aside "
-                            "and retry; use --force only to intentionally overwrite it."
-                        )
+                        message = untrusted_baseline_message(entry)
                     else:
                         message = (
-                            f"Skipped {entry}: {reason}. "
+                            f"Skipped {entry}: modified since deployment. "
                             "Preserve your changes before reinstalling with --force."
                         )
                     if diagnostics is not None:
@@ -1029,6 +1029,25 @@ class BaseIntegrator:
                     )
         except Exception:
             self.link_resolver = None
+
+    def projected_resolve_links(self, package_info) -> Callable[..., tuple] | None:
+        """Render another source of the current package into its deployment frame.
+
+        Used to reproduce what an earlier version deployed at the same
+        location (#3625). Returns ``None`` without an initialized resolver.
+        """
+        current = self.link_resolver
+        if current is None or package_info is None:
+            return None
+        renderer = BaseIntegrator()
+        renderer.init_link_resolver(
+            replace(
+                package_info,
+                deployment_package_root=current.deployment_package_root or current.package_root,
+            ),
+            current.base_dir,
+        )
+        return renderer.resolve_links if renderer.link_resolver is not None else None
 
     def resolve_links(
         self,

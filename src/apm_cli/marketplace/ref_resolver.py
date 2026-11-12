@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..deps.git_remote_ops import tag_commit_shas
-from ..utils.git_env import redact_git_diagnostic
+from ..utils.git_env import redact_git_diagnostic, run_git_text
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
@@ -758,7 +758,7 @@ class RefResolver:
                 timeout=timeout,
             )
             fetch_env = git_network_env(url, env, git_dir=bare)
-            fetch = subprocess.run(
+            fetch = run_git_text(
                 [
                     git_exe,
                     "--git-dir",
@@ -771,14 +771,13 @@ class RefResolver:
                     sha,
                 ],
                 capture_output=True,
-                text=True,
                 env=fetch_env,
                 stdin=subprocess.DEVNULL,
                 timeout=timeout,
             )
             if fetch.returncode != 0:
                 return False
-            verify = subprocess.run(
+            verify = run_git_text(
                 [
                     git_exe,
                     "--git-dir",
@@ -789,7 +788,6 @@ class RefResolver:
                     sha + "^{commit}",
                 ],
                 capture_output=True,
-                text=True,
                 env=git_subprocess_env(env),
                 stdin=subprocess.DEVNULL,
                 timeout=timeout,

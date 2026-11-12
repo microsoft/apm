@@ -16,7 +16,7 @@ repository references with the normal host authentication chain.
 
 ## User config trust boundary
 
-`~/.apm/config.json` is user-scoped state, not org policy. Keep durable config
+`$APM_HOME/config.json` (default `~/.apm/config.json`) is user-scoped state, not org policy. Keep durable config
 additive and narrow: `apm config` may persist non-secret defaults such as
 install targets, transport preferences, and self-update installer preferences
 (`self-update.channel`, `self-update.install-dir`). Do not use self-update
@@ -46,7 +46,7 @@ dependencies:
   require: []                           # required packages
   require_resolution: project-wins      # project-wins | policy-wins | block
   max_depth: 50                         # transitive depth limit
-  require_pinned_constraint: false      # when true, ban unbounded dep ranges (NO_REF, '*', bare branch, '>=X' without upper bound)
+  require_pinned_constraint: false      # when true, direct deps must declare a bounded ref (bans NO_REF, '*', bare branch, '>=X' without upper bound)
 
 mcp:
   allow: []                             # allowed server patterns
@@ -90,6 +90,31 @@ executables:                            # org ceiling for executable-primitive t
   require: []                           # packages whose executables MUST be present and trusted
   recommend: []                         # org-vetted set; default-allow unless locally denied
 ```
+
+## Host-qualified dependency patterns
+
+`dependencies.allow` / `dependencies.deny` patterns may start with a host.
+Each dependency (direct and transitive) is checked against its effective
+host: the written host, or `GITHUB_HOST` / `github.com` when none is written.
+
+```yaml
+dependencies:
+  allow:
+    - "ghes.corp.example/**"         # any org on the GHES host
+    - "github.com/example-org/**"    # only example-org on github.com
+```
+
+- A first segment containing a dot (and not starting with one) is a host;
+  dotted GitLab groups need their host (`gitlab.com/my.group/**`; a bare
+  `my.group/**` now matches nothing, so as a deny it no longer blocks), and
+  `./` or `../` local-path patterns stay hostless.
+- Hosts match exactly (case, port and trailing dot ignored, also in
+  `GITHUB_HOST`); no lookalike or subdomain matches. Wildcards are not
+  expanded in the host: `*.corp.example/**` matches nothing.
+- Shorthand, HTTPS and SSH forms of a package give the same result.
+- Hostless patterns (`contoso/**`) keep matching every host.
+- Enforced at install and by `apm audit` (direct deps incl. dev deps and
+  `replace` sources, plus lockfile transitives).
 
 ## Registry source governance (experimental)
 
@@ -437,9 +462,18 @@ may use. This section covers how that contract is enforced at `apm install` time
 APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
-`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab uses
-`<top-level-group>/apm-policy/apm-policy.yml`, derived from the first remote
-path segment; nested subgroup scopes are not searched. Configure a self-managed host with
+`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab looks for `apm-policy`
+at every namespace from the top-level group down to the project's own subgroup
+(e.g. `acme/apm-policy`, `acme/dept-a/apm-policy`, `acme/dept-a/team-x/apm-policy`)
+and combines them in that order with the tighten-only merge: a team policy can add
+restrictions but never drop an ancestor's, even without `extends:`. The nearest
+discovered policy is the leaf that `policy.hash` pins; a non-404 failure at any
+level while another level has a policy fails closed instead of applying a partial
+chain (a complete cached chain follows the stale-cache rules). A flat `<group>/<project>`
+remote probes only `<group>/apm-policy`. GitLab 404s a private project the token
+cannot read, so an unreadable `apm-policy` is left out of the chain -- grant the
+token read access to every ancestor `apm-policy`.
+Configure a self-managed host with
 `GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
 another project name. Repositories with no detectable git remote (unpacked
 bundles, temp dirs) emit an explicit "could not determine org" line and skip
@@ -674,7 +708,7 @@ Violation classes:
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
 | `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
-| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal `vX.Y.Z` tag, or a full SHA. Roll out enforcement with `warn` before `block`. |
+| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal tag (`vX.Y.Z`, or `{name}-vX.Y.Z` / `{name}--vX.Y.Z` for the dep's own package name), or a full SHA. The constraint is judged as declared in `apm.yml` (a `replace:` rule by the ref it selects), not the tag a range resolved to. Roll out enforcement with `warn` before `block`. |
 | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |
@@ -689,7 +723,8 @@ as `[x]` errors and exit `1`.
 Checklist to publish a policy:
 
 1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
-   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the top-level GitLab group).
+   project and `apm-policy` repository on Azure DevOps, or an `apm-policy` project under the GitLab
+   group you want it to govern -- policies at every ancestor namespace combine).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

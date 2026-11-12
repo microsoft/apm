@@ -68,9 +68,9 @@ _TRUST_STORE_THREAD_LOCK = threading.Lock()
 
 def _trust_store_path() -> Path:
     """Return the path to the script trust store."""
-    apm_home = os.environ.get("APM_HOME")
-    base = Path(apm_home) if apm_home else Path.home() / ".apm"
-    return base / "scripts-trust.json"
+    from apm_cli.core.scope import get_apm_home
+
+    return get_apm_home() / "scripts-trust.json"
 
 
 def script_file_fingerprint(path: Path) -> str | None:
@@ -172,6 +172,24 @@ def _is_fingerprint_safe(obj: object) -> bool:
     return _walk(obj, 0, frozenset())
 
 
+# Events APM learned after trust records already existed, with the fingerprint
+# domain each one introduced. A record made before APM understood an event
+# covered that key while it was inert; a block that names such an event is
+# hashed under a new domain, so the old record no longer matches and the
+# user is asked again. Blocks without these events keep their fingerprint.
+_EVENT_FINGERPRINT_DOMAINS = {"pre-compile": 2}
+
+
+def _fingerprint_domain(lifecycle: object) -> int:
+    """Return the highest fingerprint domain an event in the block introduced.
+
+    1 is the original domain, used when the block names no later event.
+    """
+    if not isinstance(lifecycle, dict):
+        return 1
+    return max((_EVENT_FINGERPRINT_DOMAINS.get(key, 1) for key in lifecycle), default=1)
+
+
 def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
     """Return the SHA-256 of a canonicalised lifecycle: subtree.
 
@@ -200,6 +218,9 @@ def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
             type(e).__name__,
         )
         return None
+    domain = _fingerprint_domain(lifecycle)
+    if domain > 1:
+        canonical = f"apm-lifecycle-v{domain}:{canonical}"
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

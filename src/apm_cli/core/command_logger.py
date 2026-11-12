@@ -22,6 +22,7 @@ from apm_cli.utils.console import (
 
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
+    from apm_cli.install.failure_residue import FailedInstallResidue
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -113,7 +114,7 @@ class CommandLogger:
         noun = "server" if count == 1 else "servers"
         _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
 
-    def info(self, message: str, symbol: str = "info"):
+    def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
 
         Distinct from :meth:`progress` only at the semantic level:
@@ -124,6 +125,10 @@ class CommandLogger:
         split exists so future quiet-mode policy can drop ``progress``
         without dropping advisory context.
         """
+        # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
+        if soft_wrap:
+            _rich_info(message, symbol=symbol, soft_wrap=True)
+            return
         _rich_info(message, symbol=symbol)
 
     def success(self, message: str, symbol: str = "sparkles"):
@@ -243,6 +248,45 @@ class InstallLogger(CommandLogger):
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        self._failed_install_residue_note = ""
+
+    def failed_install_residue(self, residue: FailedInstallResidue) -> None:
+        """List native target output a failed install left behind, with one next step.
+
+        Native target integrations are outside the install transaction, so
+        this output is neither removed nor tracked by apm.lock.yaml.
+        """
+        files, entries = residue.files, residue.entries
+        if not files and not entries:
+            return
+        if files:
+            noun = "file" if len(files) == 1 else "files"
+            self.warning(
+                f"This failed install left {len(files)} native target {noun} on disk "
+                "that apm.lock.yaml does not track:"
+            )
+            for path in files:
+                self.error_detail(f"  {path}")
+        if entries:
+            noun = "entry" if len(entries) == 1 else "entries"
+            lead = "also wrote" if files else "wrote"
+            self.warning(
+                f"This failed install {lead} {len(entries)} native target {noun} "
+                "that apm.lock.yaml does not track (not plain files):"
+            )
+            for entry in entries:
+                self.error_detail(f"  {entry}")
+        command = "apm install -g" if residue.user_scope else "apm install"
+        force_hint = "(add --force if it skips them as not managed by APM)."
+        if files:
+            self.info(f"Remove these files, or re-run '{command}' {force_hint}")
+        else:
+            self.info(f"Re-run '{command}' {force_hint}")
+        total = len(files) + len(entries)
+        self._failed_install_residue_note = (
+            f"{total} native target {'item' if total == 1 else 'items'} listed above "
+            f"{'remains' if total == 1 else 'remain'} in place."
+        )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -611,15 +655,23 @@ class InstallLogger(CommandLogger):
         cached: bool,
         enforcement: str,
         age_seconds: int | None = None,
+        subgroup_scoped: bool = False,
+        chain: list[str] | None = None,
     ):
         """Log policy discovery outcome.
 
         Verbose by default; always shown when ``enforcement == "block"``
-        (users must know blocking is active).
+        (users must know blocking is active) or when ``subgroup_scoped``
+        is set and enforcement is not ``off`` -- a GitLab subgroup policy
+        composed with its ancestors names its ordered extends chain even at
+        default verbosity (#2753).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
         parts = [f"Policy: {source}"]
+        if chain and len(chain) > 1:
+            # The leaf is already the source; show its ancestors root first.
+            parts.append(f"(extends chain: {' -> '.join(chain[:-1])})")
 
         if cached:
             cache_detail = "cached"
@@ -639,9 +691,12 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose:
+        elif self.verbose or (subgroup_scoped and enforcement != "off"):
+            # GitLab subgroup composition: show the chain even in non-verbose
+            # warn mode so the dev sees which namespaces applied (#2753);
+            # an ``off`` policy needs no action and stays silent.
             _rich_info(message, symbol="info")
-        # Non-verbose + non-block: silent (no noise for warn/off)
+        # Non-verbose + non-block + top-level: silent (no noise for warn/off)
 
     def policy_discovery_miss(
         self,
@@ -942,10 +997,12 @@ class InstallLogger(CommandLogger):
             )
         elif disposition is InstallDisposition.FAILED:
             error_suffix = f" with {errors} error(s)" if errors > 0 else ""
+            state_note = (
+                self._failed_install_residue_note
+                or "No install transaction changes were committed."
+            )
             _rich_error(
-                "Installation failed"
-                f"{error_suffix}{timing_suffix}. "
-                "No install transaction changes were committed.",
+                f"Installation failed{error_suffix}{timing_suffix}. {state_note}",
                 symbol="error",
             )
         elif parts:

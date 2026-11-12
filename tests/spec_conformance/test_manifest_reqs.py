@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
-req-tg-001..009, req-tg-014..015, req-cf-001..002.
+req-tg-001..009, req-tg-014..015, req-tg-018, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -853,6 +853,39 @@ def test_consumer_emits_antigravity_rule_exact_bytes(source, expected_bytes):
     assert rendered == expected_bytes
 
 
+@pytest.mark.req("req-tg-018")
+@pytest.mark.parametrize(
+    ("apply_to", "expected_rule_key"),
+    [
+        ("applyTo: '**'\n", "alwaysApply: true\n"),
+        ("applyTo: '  **  '\n", "alwaysApply: true\n"),
+        ("applyTo:\n  - '**'\n", "alwaysApply: true\n"),
+        ("applyTo: 'src/**/*.py'\n", "globs: src/**/*.py\n"),
+        ("applyTo: 'src/**/*.py, tests/**/*.py'\n", "globs: src/**/*.py, tests/**/*.py\n"),
+        ("applyTo:\n  - '**'\n  - 'src/**/*.py'\n", "globs: **, src/**/*.py\n"),
+        ("", ""),
+        ("applyTo: ''\n", ""),
+        ("applyTo:\n", ""),
+    ],
+    ids=["scalar", "padded", "list", "scoped", "multi", "mixed", "absent", "empty", "null"],
+)
+def test_consumer_maps_cursor_universal_instruction_to_always_apply(
+    apply_to: str, expected_rule_key: str
+) -> None:
+    from apm_cli.integration.instruction_integrator import InstructionIntegrator
+
+    rendered = InstructionIntegrator._convert_to_cursor_rules(
+        f"---\ndescription: Rule\n{apply_to}---\n\nBody\n"
+    )
+
+    assert rendered == f"---\ndescription: Rule\n{expected_rule_key}---\n\nBody\n"
+    assert_spec_contains(
+        "MUST contain `alwaysApply: true` and MUST NOT contain a `globs`\nfield",
+        "`**` with scoped patterns, the emitted frontmatter MUST NOT contain\n`alwaysApply`",
+        "MUST omit both\n`alwaysApply` and `globs`",
+    )
+
+
 @pytest.mark.req("req-tg-006")
 def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
     source = tmp_path / "scoped.agent.md"
@@ -1418,6 +1451,31 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
         "the diagnostic MUST NOT include the dropped field's value",
         "existing capability-restriction diagnostic\nis unaffected and continues to apply on its own terms",
     )
+
+
+@pytest.mark.req("req-tg-015")
+@pytest.mark.parametrize("model", ["opus", "sonnet", "haiku", "inherit", "claude-sonnet-4-5"])
+def test_codex_claude_model_value_preserved_verbatim(tmp_path: Path, model: str) -> None:
+    """req-tg-015: a Claude model string is still preserved verbatim for Codex.
+
+    The string values are opaque to the spec, so the implementation's
+    non-normative Claude-model warning (#3477) must not drop or rewrite them.
+    """
+    source = tmp_path / "shared.agent.md"
+    source.write_text(
+        f"---\n{yaml_to_str({'name': 'shared', 'model': model})}---\nReview changes.\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "shared.toml"
+    diagnostics = DiagnosticCollector()
+    AgentIntegrator._write_codex_agent(
+        source, target, diagnostics=diagnostics, package_name="spec-fixture"
+    )
+    doc = tomllib.loads(target.read_text(encoding="utf-8"))
+    assert doc["model"] == model
+    assert "model_reasoning_effort" not in doc
+    for warning in diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, []):
+        assert model not in f"{warning.message} {warning.detail}"
 
 
 # --- req-cf-001..002 --------------------------------------------------

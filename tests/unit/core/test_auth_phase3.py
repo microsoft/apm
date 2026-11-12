@@ -546,8 +546,11 @@ class TestEmitStalePATDiagnosticWithLogger:
 class TestNotifyAuthSource:
     def test_empty_host_is_noop(self) -> None:
         resolver = AuthResolver()
-        resolver.notify_auth_source("", None)
-        # No exception; host_key was empty so early return
+        resolver.set_logger(MagicMock(verbose=True))
+        ctx = MagicMock(source="env", auth_scheme=None)
+        with patch("apm_cli.utils.console._rich_echo") as echo:
+            resolver.notify_auth_source("", ctx)
+        echo.assert_not_called()
 
     def test_source_none_is_noop(self) -> None:
         resolver = AuthResolver()

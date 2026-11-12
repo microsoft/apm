@@ -68,6 +68,7 @@ _RID_GIT_DIAGNOSTIC_OWNER = "transport-platform-git-diagnostic-sanitizer-ownersh
 _RID_GIT_DIAGNOSTIC_DELEGATE = "transport-platform-git-diagnostic-sanitizer-ownership-downloader"
 _RID_GIT_DIAGNOSTIC_TOKENS = "transport-platform-git-diagnostic-token-shapes"
 _RID_GIT_DIAGNOSTIC_JWT = "transport-platform-git-diagnostic-token-shapes-jwt"
+_RID_GIT_OUTPUT_DECODING = "transport-platform-git-output-decoding"
 _RID_GIT_SINGLE_REMOTE = "transport-platform-git-single-remote-fetch"
 _RID_GIT_URL_CREDENTIALS = "transport-platform-git-url-credentials-out-of-argv"
 _RID_GIT_URL_HEADER = "transport-platform-git-url-header-specificity"
@@ -840,8 +841,10 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 'return ("--template=",)',
                 "def validate_git_url_rewrite_safety(",
                 "def git_symlink_pin_args(",
-                "retained.append(git_symlink_pin_entry())",
-                "def raise_for_symlink_capability(",
+                "pinned = (git_symlink_pin_entry(), *git_line_ending_pin_entries())",
+                "retained.extend(pinned)",
+                "def git_line_ending_pin_args(",
+                '_SYMLINK_PIN_VALUE = "false"',
             ),
             "utils/git_env.py must own repository-state and URL rewrite safety",
         )
@@ -1061,11 +1064,22 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
     for path, needles in (
         (
             "src/apm_cli/cache/git_cache.py",
-            ("git_symlink_pin_args(", "git_symlink_pin_entry(", "raise_for_symlink_capability("),
+            (
+                "git_symlink_pin_args(",
+                "git_symlink_pin_entry(",
+                "git_line_ending_pin_args(",
+                "git_line_ending_pin_entries(",
+                "materialize_tracked_symlinks(",
+            ),
         ),
         (
             "src/apm_cli/deps/bare_cache.py",
-            ("git_symlink_pin_args(", "raise_for_symlink_capability("),
+            (
+                "git_symlink_pin_args(",
+                "git_line_ending_pin_args(",
+                "git_line_ending_pin_entries(",
+                "materialize_tracked_symlinks(",
+            ),
         ),
     ):
         findings.extend(
@@ -1075,7 +1089,8 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 _RID_GIT_CHILD_ENV,
                 path,
                 needles,
-                "Dependency checkouts must pin real symlinks and name capability failures",
+                "Dependency checkouts must write link text, materialize it from Git objects,"
+                " and pin deterministic line endings",
             )
         )
     findings.extend(
@@ -1086,6 +1101,17 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
             _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
             re.compile(r"core\.symlinks=|[\"']core\.symlinks[\"']"),
             "The core.symlinks pin must route through utils/git_env.git_symlink_pin_*",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(r"core\.eol=|[\"']core\.eol[\"']"),
+            "The core.eol pin must route through utils/git_env.git_line_ending_pin_*",
             exempt=False,
         )
     )
@@ -1359,6 +1385,54 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
                 "except (GitUrlRewriteError, GitUrlRewriteProbeError):",
             ),
             "Positional validation must reuse canonical transport and rewrite policy",
+        )
+    )
+    findings.extend(_check_git_output_decoding(provider, inv))
+    return tuple(findings)
+
+
+_GIT_TEXT_OUTPUT_CONSUMERS: tuple[str, ...] = (
+    "src/apm_cli/cache/git_cache.py",
+    "src/apm_cli/deps/bare_cache.py",
+    "src/apm_cli/deps/git_file_transport.py",
+    "src/apm_cli/deps/github_downloader.py",
+    "src/apm_cli/deps/github_downloader_validation.py",
+    "src/apm_cli/deps/tiered_ref_resolver.py",
+    "src/apm_cli/marketplace/ref_resolver.py",
+    "src/apm_cli/utils/git_sparse.py",
+)
+
+
+def _check_git_output_decoding(
+    provider: FactsProvider, inv: frozenset[str]
+) -> tuple[Violation, ...]:
+    """Install-path Git text output decodes as UTF-8 via run_git_text (#3056)."""
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            "src/apm_cli/utils/git_env.py",
+            (
+                'GIT_OUTPUT_ENCODING = "utf-8"',
+                "def run_git_text(",
+                'errors="surrogateescape",',
+                "result.stdout = _strict_git_text(command, result.stdout)",
+                'errors="backslashreplace",',
+            ),
+            "utils/git_env.py must own locale-independent Git output decoding",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _GIT_TEXT_OUTPUT_CONSUMERS,
+            re.compile(r"\b(?:text|universal_newlines)\s*=\s*True\b"),
+            "Install-path Git text output must use run_git_text, not the locale codec",
+            exempt=False,
         )
     )
     return tuple(findings)
@@ -1778,6 +1852,7 @@ RULES: tuple[Rule, ...] = (
             _RID_GIT_DIAGNOSTIC_DELEGATE,
             _RID_GIT_DIAGNOSTIC_TOKENS,
             _RID_GIT_DIAGNOSTIC_JWT,
+            _RID_GIT_OUTPUT_DECODING,
             _RID_GIT_SINGLE_REMOTE,
             _RID_GIT_URL_CREDENTIALS,
             _RID_GIT_URL_HEADER,

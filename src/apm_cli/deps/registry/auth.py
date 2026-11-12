@@ -252,10 +252,13 @@ def resolve_for_url(target_url: str, registries: dict[str, str]) -> RegistryAuth
 
 def remediation_message(target_url: str) -> str:
     """The standard 401/403 remediation per §6.2 rule 3."""
+    from ...core.scope import get_apm_home
+
     return (
         f"error: this project depends on a package from\n"
         f"  {target_url}\n"
         f"but no credentials for that registry are configured on this machine.\n"
-        f"Add a registry entry whose URL matches (in apm.yml or ~/.apm/config.json)\n"
+        f"Add a registry entry whose URL matches (in apm.yml or "
+        f"{get_apm_home() / 'config.json'})\n"
         f"and set APM_REGISTRY_TOKEN_<NAME>=<token> in your environment."
     )

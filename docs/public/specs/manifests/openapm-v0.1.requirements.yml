@@ -320,7 +320,7 @@ requirements:
     keyword: MUST
     section: "6.3.1"
     conformance_class: governance
-    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged"
+    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged; clause (g): a first pattern segment containing a dot and not beginning with one names a host matched exactly (ASCII case-folded, numeric port and one trailing dot ignored on both sides) against the written or implementation-default effective host, while hostless patterns (including ./ and ../ local-path patterns) match every host; dependencies.require is not host-qualified"
   - id: req-pl-019
     keyword: MUST
     section: "6.8.1"
@@ -499,6 +499,11 @@ requirements:
     section: "8.5.9"
     conformance_class: consumer
     notes: "a Cursor-native hook installation implementation detects, before writing, an observable overlap with an in-effect Claude-settings hook import for either install order, and rejects the write with an actionable diagnostic rather than merging, redirecting, or broadening accepted input, without altering the Claude import's own settings"
+  - id: req-tg-018
+    keyword: MUST
+    section: "8.5.10"
+    conformance_class: consumer
+    notes: "a Cursor instruction whose normalized applyTo is exactly one universal ** pattern (scalar, padded, or single-item list) emits alwaysApply: true with no globs at project and user scope; other non-empty sets, including ** mixed with scoped patterns, keep globs; absent, empty, or null applyTo emits neither key"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"

@@ -42,11 +42,13 @@ from apm_cli.integration.hook_command_paths import (
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
     plugin_root_relative_path,
+    splice_references,
     unresolved_plugin_root_references,
+    wrapping_quote,
 )
 from apm_cli.integration.hook_command_warnings import warn_unresolved_plugin_root
 from apm_cli.integration.hook_cursor_preflight import preflight_cursor_hooks
-from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
+from apm_cli.integration.hook_file_routing import hook_package_label
 from apm_cli.integration.hook_native_formats import (
     _legacy_hook_entries,
     _to_antigravity_hook_entries,
@@ -54,6 +56,7 @@ from apm_cli.integration.hook_native_formats import (
     _to_codex_hook_entries,
     _to_cursor_hook_entries,
     _to_gemini_hook_entries,
+    require_claude_native_events,
 )
 from apm_cli.integration.hook_ownership import (
     dependency_hook_source_marker,
@@ -84,12 +87,11 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import UserHookHomeReference
 
 _log = logging.getLogger(__name__)
 
-# Testability seam: tests can patch deprecated filename routing without
-# replacing the imported helper for every call site.
-_filter_hook_files_for_target = filter_hook_files_for_target
+_DOT_NAMED_HOOK_ROOTS = frozenset({"cursor", "codex", "windsurf", "kiro"})
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -158,11 +160,16 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postTaskExecution": "postTaskExecution",
     },
     "claude": {
-        # Copilot camelCase and portable lifecycle aliases -> Claude PascalCase
+        # Copilot hooks-reference alias pairs -> documented Claude events.
         "preToolUse": "PreToolUse",
         "postToolUse": "PostToolUse",
+        "postToolUseFailure": "PostToolUseFailure",
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
+        "sessionEnd": "SessionEnd",
+        **dict.fromkeys(("userPromptSubmitted", "userPromptSubmit"), "UserPromptSubmit"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
+        "subagentStop": "SubagentStop",
+        "preCompact": "PreCompact",
     },
     "cursor": {  # Values must stay within CURSOR_NATIVE_EVENTS.
         "PreToolUse": "preToolUse",
@@ -388,11 +395,6 @@ class HookIntegrator(BaseIntegrator):
     #   Claude Code:      https://code.claude.com/docs/en/hooks
     HOOK_COMMAND_KEYS: tuple[str, ...] = _HOOK_COMMAND_KEYS
 
-    def __init__(self) -> None:
-        """Initialize per-install hook integration state."""
-        super().__init__()
-        self._deprecated_hook_routing_warnings: set[str] = set()
-
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
         """Flatten hook payloads into (event_name, entry_dict) pairs."""
@@ -513,17 +515,14 @@ class HookIntegrator(BaseIntegrator):
         package_path: Path,
         target_names: Iterable[str],
         *,
-        package_name: str = "",
-        package_identity: str = "",
-        warned_packages: set[str] | None = None,
         hook_files: list[Path] | None = None,
     ) -> HookSourceSelection:
         """Select hook inputs that each resolved target will materialize.
 
-        This is the sole hook source-selection algorithm.  It applies
-        filename routing before discovering referenced script bundles, excludes
-        Copilot's recursively-scanned JSON assets, and enumerates each source
-        root once per target.
+        This is the sole hook source-selection algorithm.  Filenames never
+        route (#3226); it records retired-routing widening, excludes Copilot's
+        recursively-scanned JSON assets, and enumerates each source root once
+        per target.
         """
         integrator = cls()
         discovered_files = (
@@ -532,12 +531,8 @@ class HookIntegrator(BaseIntegrator):
         return select_hook_sources(
             package_path,
             target_names,
-            package_name=package_name,
-            package_identity=package_identity,
-            warned_packages=warned_packages,
             hook_files=discovered_files,
             parse_hook_json=integrator._parse_hook_json,
-            filter_hook_files=_filter_hook_files_for_target,
             iter_bundle_files=iter_deployable_hook_bundle_files,
             merge_target_names=_MERGE_HOOK_TARGETS,
         )
@@ -549,18 +544,15 @@ class HookIntegrator(BaseIntegrator):
         *,
         source_plan=None,
     ) -> HookSourceSelection:
-        """Read the plan's selection or build the same selection for direct use."""
+        """Read the plan's selection or build it; refuse retired-routing widening."""
         selection = getattr(source_plan, "hook_source_selection", None)
-        if selection is not None:
-            return selection
-        package_name = self._get_package_name(package_info, None)
-        return self.select_deployable_hook_sources(
-            package_info.install_path,
-            (target_name,),
-            package_name=package_name,
-            package_identity=package_info.get_canonical_dependency_string(),
-            warned_packages=self._deprecated_hook_routing_warnings,
-        )
+        if selection is None:
+            selection = self.select_deployable_hook_sources(
+                package_info.install_path, (target_name,)
+            )
+        # Routing only; Claude events are checked at preflight and the Claude write.
+        selection.require_configured_routing(hook_package_label(package_info))
+        return selection
 
     @staticmethod
     def _referenced_hook_source_files(
@@ -580,11 +572,15 @@ class HookIntegrator(BaseIntegrator):
         target_rel: str,
         deploy_root: Path | None,
         source_key: str | None = None,
-        path_is_quoted: bool = False,
+        path_quote: str = "",
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> str:
         """Return a target-native script reference without sacrificing portability."""
         if deploy_root is not None:
-            return str((deploy_root / target_rel).resolve())
+            path = (deploy_root / target_rel).resolve()
+            if home_reference is None:
+                return str(path)
+            return home_reference.anchor(path, source_key, quote=path_quote)
         if target != "claude":
             return target_rel
 
@@ -597,7 +593,7 @@ class HookIntegrator(BaseIntegrator):
         ):
             return f"$env:{project_dir}/{target_rel}"
         path = f"${{{project_dir}}}/{target_rel}"
-        return path if path_is_quoted else f'"{path}"'
+        return path if path_quote else f'"{path}"'
 
     def _rewrite_command_for_target(
         self,
@@ -609,30 +605,23 @@ class HookIntegrator(BaseIntegrator):
         root_dir: str | None = None,
         deploy_root: Path | None = None,
         source_key: str | None = None,
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> tuple[str, list[tuple[Path, str]]]:
         """Rewrite plugin-root and relative script references for a target."""
         scripts_to_copy = []
         command = normalize_quoted_plugin_root(command)
-        new_command = command
+        edits: list[tuple[int, int, str]] = []
 
         if target == "vscode":
-            base_root = root_dir or ".github"
-            scripts_base = f"{base_root}/hooks/scripts/{package_name}"
-        elif target == "cursor":
-            base_root = root_dir or ".cursor"
-            scripts_base = f"{base_root}/hooks/{package_name}"
-        elif target == "codex":
-            base_root = root_dir or ".codex"
-            scripts_base = f"{base_root}/hooks/{package_name}"
-        elif target == "windsurf":
-            base_root = root_dir or ".windsurf"
-            scripts_base = f"{base_root}/hooks/{package_name}"
-        elif target == "kiro":
-            base_root = root_dir or ".kiro"
-            scripts_base = f"{base_root}/hooks/{package_name}"
+            scripts_base = f"{root_dir or '.github'}/hooks/scripts/{package_name}"
         else:
-            base_root = root_dir or ".claude"
-            scripts_base = f"{base_root}/hooks/{package_name}"
+            default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
+            scripts_base = f"{root_dir or default_root}/hooks/{package_name}"
+
+        def scoped(target_rel: str, quote: str) -> str:
+            return self._project_scoped_command_path(
+                command, target, target_rel, deploy_root, source_key, quote, home_reference
+            )
 
         handled_plugin_root_refs: set[str] = set()
         traversal_plugin_root_refs: set[str] = set()
@@ -649,18 +638,8 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                resolved_cmd = self._project_scoped_command_path(
-                    command,
-                    target,
-                    target_rel,
-                    deploy_root,
-                    source_key,
-                    match.start() > 0
-                    and match.end() < len(command)
-                    and command[match.start() - 1] in "\"'"
-                    and command[match.end()] == command[match.start() - 1],
-                )
-                new_command = new_command.replace(full_var, resolved_cmd)
+                resolved_cmd = scoped(target_rel, wrapping_quote(command, match))
+                edits.append((match.start(), match.end(), resolved_cmd))
             else:
                 # File absent: always warn so a misconfigured hook is never
                 # silently deployed.  For user-scope (deploy_root set) also
@@ -675,8 +654,9 @@ class HookIntegrator(BaseIntegrator):
                     f"{printable_ascii_text(str(source_file))}"
                 )
                 if deploy_root is not None:
-                    new_command = new_command.replace(full_var, str(source_file))
+                    edits.append((match.start(), match.end(), str(source_file)))
 
+        new_command = splice_references(command, edits)
         # Keep matcher misses visible instead of silently deploying them.
         for residual in unresolved_plugin_root_references(new_command):
             if residual in handled_plugin_root_refs:
@@ -691,6 +671,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             warn_unresolved_plugin_root(new_command, residual, package_label)
 
+        edits = []
         for match in iter_relative_script_paths(new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
@@ -702,18 +683,8 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                resolved_cmd = self._project_scoped_command_path(
-                    command,
-                    target,
-                    target_rel,
-                    deploy_root,
-                    source_key,
-                    match.start() > 0
-                    and match.end() < len(command)
-                    and command[match.start() - 1] in "\"'"
-                    and command[match.end()] == command[match.start() - 1],
-                )
-                new_command = new_command.replace(rel_ref, resolved_cmd)
+                resolved_cmd = scoped(target_rel, wrapping_quote(new_command, match))
+                edits.append((*match.span(1), resolved_cmd))
             else:
                 # File absent: always warn (see ${PLUGIN_ROOT} branch above
                 # for the project-scope vs user-scope rationale).
@@ -723,9 +694,9 @@ class HookIntegrator(BaseIntegrator):
                     f"{printable_ascii_text(str(source_file))}"
                 )
                 if deploy_root is not None:
-                    new_command = new_command.replace(rel_ref, str(source_file))
+                    edits.append((*match.span(1), str(source_file)))
 
-        return new_command, scripts_to_copy
+        return splice_references(new_command, edits), scripts_to_copy
 
     def _rewrite_hooks_data(
         self,
@@ -736,6 +707,7 @@ class HookIntegrator(BaseIntegrator):
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
         deploy_root: Path | None = None,
+        home_reference: "UserHookHomeReference | None" = None,
     ) -> tuple[dict, list[tuple[Path, str]]]:
         """Rewrite all command paths in a hooks JSON structure.
 
@@ -749,7 +721,7 @@ class HookIntegrator(BaseIntegrator):
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
             deploy_root: Absolute root of the deployment directory.  When provided,
-                all rewritten script paths are resolved to absolute paths so the
+                all rewritten script paths are pinned to the deploy root so the
                 target can locate scripts regardless of the working directory.
                 When *None*, paths remain relative (backward-compatible behaviour).
 
@@ -781,6 +753,7 @@ class HookIntegrator(BaseIntegrator):
                             root_dir=root_dir,
                             deploy_root=deploy_root,
                             source_key=key,
+                            home_reference=home_reference and home_reference.for_handler(matcher),
                         )
                         if scripts:
                             _log.debug(
@@ -809,6 +782,7 @@ class HookIntegrator(BaseIntegrator):
                                 root_dir=root_dir,
                                 deploy_root=deploy_root,
                                 source_key=key if key != "command" else hook.get("shell"),
+                                home_reference=home_reference and home_reference.for_handler(hook),
                             )
                             if scripts:
                                 _log.debug(
@@ -996,6 +970,14 @@ class HookIntegrator(BaseIntegrator):
         # User scope needs cwd-independent paths; project scope stays portable.
         return project_root if user_scope else None
 
+    @staticmethod
+    def _home_reference_for_hook_rewrite(target, user_scope: bool):
+        """Return the target's verified home reference for user-scope hook rewrites."""
+        from apm_cli.integration.targets import UserHookHomeReference
+
+        reference = getattr(target, "user_hook_home_reference", None) if user_scope else None
+        return reference if isinstance(reference, UserHookHomeReference) else None
+
     def integrate_package_hooks(
         self,
         package_info,
@@ -1018,8 +1000,8 @@ class HookIntegrator(BaseIntegrator):
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
-            user_scope: If True, rewrite hook script commands to absolute paths
-                so global hooks resolve from any working directory
+            user_scope: If True, rewrite hook script commands so global hooks
+                resolve from any working directory
 
         Returns:
             HookIntegrationResult: Results of the integration operation
@@ -1041,6 +1023,7 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
+        home_reference = self._home_reference_for_hook_rewrite(target, user_scope)
 
         hooks_integrated = 0
         scripts_copied = 0
@@ -1063,6 +1046,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
                 deploy_root=deploy_root_for_rewrite,
+                home_reference=home_reference,
             )
 
             # Generate target filename (clean, no -apm suffix)
@@ -1220,6 +1204,7 @@ class HookIntegrator(BaseIntegrator):
             return _empty
 
         _deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
+        _home_reference = self._home_reference_for_hook_rewrite(target, user_scope)
 
         package_name = self._get_package_name(package_info, project_root)
         hook_sources = self.select_hook_sources_for_target(
@@ -1230,6 +1215,10 @@ class HookIntegrator(BaseIntegrator):
         hook_files = hook_sources.descriptors_for(config.target_key)
         if not hook_files:
             return _empty
+        if config.target_key == "claude":  # write-boundary re-check, as for Cursor
+            require_claude_native_events(
+                hook_files, self._parse_hook_json, _HOOK_EVENT_MAP, hook_package_label(package_info)
+            )
 
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
@@ -1343,6 +1332,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
                 deploy_root=_deploy_root_for_rewrite,
+                home_reference=_home_reference,
             )
 
             # Merge hooks into config (additive)
@@ -1640,9 +1630,10 @@ class HookIntegrator(BaseIntegrator):
         user_scope: bool = False,
         retiring_targets: frozenset[str] = frozenset(),
     ) -> None:
-        """Check authorized Cursor/import sources before any primitive is written."""
+        """Check routing, Claude events and Cursor imports before any primitive write."""
         selection = source_plan.hook_source_selection
         if selection is not None:
+            selection.require_deployable(package_info, _HOOK_EVENT_MAP)
             preflight_cursor_hooks(
                 self,
                 package_info,
@@ -2000,6 +1991,8 @@ class HookIntegrator(BaseIntegrator):
                 list(target_selection.targets),
                 getattr(apm_package, "allow_executables", None),
             )
+            if source_plan.hook_source_selection is not None:
+                source_plan.hook_source_selection.require_deployable(pkg_info, _HOOK_EVENT_MAP)
             rebuild_plan.append((dep_ref, pkg_info, target_selection, source_plan))
 
         # Empty managed_files (not None) skips file-level deletion while

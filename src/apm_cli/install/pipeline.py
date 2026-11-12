@@ -61,6 +61,8 @@ from .errors import (
     FrozenInstallError,
     InstallFailureAlreadyRendered,
 )
+from .failure_residue import record_install_outcome
+from .finalization import close_pipeline_attempt
 from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
 from .transaction import InstallTransaction, transactional_pipeline
 
@@ -106,6 +108,7 @@ def _run_phase(name: str, phase, ctx):
 def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.integration.skill_adoption import locked_skill_sources
 
     from .phases import integrate as _integrate_phase
 
@@ -114,15 +117,22 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
         if ctx.lockfile_only or ctx.dry_run
         else DeploymentMaterializationSession(ctx.project_root, ctx.scope, ctx.existing_lockfile)
     )
-    with (
-        contextlib.nullcontext()
-        if ctx.lockfile_only
-        else ctx.integrators["skill"].ownership_snapshot(
-            replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
-            materialization_session=session,
-        )
-    ):
-        _run_phase("integrate", _integrate_phase, ctx)
+    locked = locked_skill_sources(ctx) if session is not None else None
+    if session is not None:
+        session.locked_sources = locked
+    try:
+        with (
+            contextlib.nullcontext()
+            if ctx.lockfile_only
+            else ctx.integrators["skill"].ownership_snapshot(
+                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                materialization_session=session,
+            )
+        ):
+            _run_phase("integrate", _integrate_phase, ctx)
+    finally:
+        if locked is not None:
+            locked.close()
     return session
 
 
@@ -504,6 +514,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # ------------------------------------------------------------------
     # Build InstallContext from function args + computed state
     # ------------------------------------------------------------------
+    from ..policy._constraint_pinning import collect_manifest_declarations
     from .context import InstallContext
 
     ctx = InstallContext(
@@ -530,6 +541,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
         all_apm_deps=all_apm_deps,
+        declared_direct_refs=collect_manifest_declarations(apm_package),
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,
@@ -767,6 +779,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             package="lockfile",
                         )
 
+        from .local_edits import hint_local_edits_before_install
+
+        hint_local_edits_before_install(ctx, existing_lockfile)
+
         # Normalize path separators once for O(1) lookups in check_collision
         from ..integration.base_integrator import BaseIntegrator
 
@@ -944,7 +960,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from .phases import finalize as _finalize_phase
 
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
-        return _run_phase("finalize", _finalize_phase, ctx)
+        return record_install_outcome(ctx, _run_phase("finalize", _finalize_phase, ctx))
 
     except (AgentPluginError, CodexNativeError):
         # Preserve schema-routing and native-boundary diagnostics verbatim.
@@ -980,7 +996,4 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
-        from .phases import copilot_plugins as _copilot_plugins_cleanup
-
-        _copilot_plugins_cleanup.deactivate(ctx)
-        ctx.tui.__exit__()
+        close_pipeline_attempt(ctx)

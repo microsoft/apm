@@ -108,7 +108,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
-| `require_pinned_constraint` | boolean        | `false`          | When `true`, every APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Transitive deps are also classified and pass when their parent manifests pinned them. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
+| `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag such as `v1.2.3` or `pkg-a-v1.2.3` for a package named `pkg-a`, or SHA). The declared constraint is judged, not the tag a range resolved to; transitive deps are not evaluated. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
 
 ### `require_pinned_constraint` reference
 
@@ -128,6 +128,8 @@ dependencies:
     - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
     - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
     - seventh/lib#v1.5.3       # OK: literal tag
+    - acme/mono/packages/pkg-a#pkg-a-v1.5.3  # OK: this package's own release tag
+    - acme/mono/packages/pkg-a#pkg-b-v1.5.3  # FAIL: another package's tag (BARE_BRANCH)
     - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
     - ./packages/local         # OK: local-path dep (no version surface)
 ```
@@ -144,7 +146,9 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
     - acme/lib: bare branch 'main' tracks a moving tip
 ```
 
-Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
+A range is classified as the author wrote it: `fourth/lib#^1.2.0` stays `OK` after the install selects `v1.4.0` for it, and `acme/lib#main` stays `FAIL` whatever commit it resolves to. The package name used for `{name}-v{version}` and `{name}--v{version}` tags is the final path segment of a subdirectory dependency, otherwise the repository name.
+
+Patterns are matched against `<owner>/<repo>` (hostless, any host) or `<host>/<owner>/<repo>` (that host only; see [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns)). Wildcards via shell-style globs, e.g. `contoso/*`.
 
 ## mcp
 
@@ -332,7 +336,7 @@ For every `allow:` field, the three states are distinct:
 
 `allow`, `deny`, and exact `require` patterns match on each dependency's canonical identity casing, not the pattern's literal case. GitHub owner/repository identities, and registry-backed identities (already canonicalized that way), compare case-insensitively -- `Contoso/Repo` and `contoso/repo` are the same package. Non-GitHub git hosts, ADO, local paths, marketplace identities, virtual in-repository subpaths (the path segment after `owner/repo`), Git refs/version strings (after `#`), MCP server names, and registry *names* stay case-sensitive.
 
-Dependency patterns use host-blind package names, so write `owner/repo` rather than `github.com/owner/repo`. Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
+A hostless pattern such as `owner/repo` matches that package on any host; a host-qualified pattern such as `github.com/owner/**` matches only dependencies whose effective host (written, or `GITHUB_HOST`/`github.com` by default) is that host. Hosts compare case-insensitively and exactly. See [Host-qualified patterns](../../enterprise/policy-reference/#host-qualified-patterns). Put the owner/repository segments before recursive `**`; when a leading or fused `**` makes their position ambiguous, later literal segments remain case-sensitive. `deny` takes precedence whenever a pattern matches.
 
 For example, a mixed-case `deny` written as `**/Secure-Baseline` does not fire against the canonical lowercase repository name; write the owner/repository prefix first. A mixed-case owner-prefix deny that older releases failed to match can correctly surface new violations after upgrade.
 

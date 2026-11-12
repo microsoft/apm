@@ -22,7 +22,9 @@ from ...models.apm_package import APMPackage
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
+    _build_expected_install_paths,
     _expand_with_ancestors,
+    _find_orphaned_packages,
     _standalone_installed_packages,
     resolve_requested_packages,
 )
@@ -239,10 +241,12 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
     declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
     physical_to_logical: dict[str, str] = {}
+    declared_deps = []
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():
             project_package = APMPackage.from_apm_yml(apm_yml_path)
+            declared_deps = project_package.get_all_apm_dependencies()
             for dep in project_package.get_apm_dependencies():
                 # Build the expected installed package name
                 repo_parts = dep.repo_url.split("/")
@@ -384,6 +388,28 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     declared_with_ancestors = _expand_with_ancestors(
         declared_sources.keys(), standalone_installed_for_check
     )
+    # Content bundled inside an expected install path belongs to that package,
+    # exactly as prune keeps it (#2926), so the shared selector decides it. The
+    # stricter warning for a real package above a declared subdirectory stays,
+    # at every depth (unlike the depth-capped suppression set above).
+    try:
+        expected_paths = _build_expected_install_paths(
+            declared_deps, lockfile_for_check, apm_modules_path, preserve_installed_case=True
+        )
+        selected_orphans = set(
+            _find_orphaned_packages(
+                [name for _c, name, _h, _s in scanned_candidates], expected_paths
+            )
+        )
+        expected_ancestors = {
+            "/".join(parts[:depth])
+            for parts in (path.replace("\\", "/").split("/") for path in expected_paths)
+            for depth in range(1, len(parts))
+        }
+    except PathTraversalError:
+        raise
+    except Exception:
+        selected_orphans, expected_ancestors = None, set()
 
     installed_packages = []
     orphaned_packages = []
@@ -396,7 +422,11 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         # orphans have their physical hash redacted; declared remote identities
         # that happen to match the slot shape remain unchanged.
         logical_name = physical_to_logical.get(org_repo_name, org_repo_name)
-        is_orphaned = logical_name not in declared_with_ancestors
+        is_orphaned = logical_name not in declared_with_ancestors and (
+            selected_orphans is None
+            or org_repo_name in selected_orphans
+            or org_repo_name in expected_ancestors
+        )
         display_name = _logical_local_display(logical_name) if is_orphaned else logical_name
         try:
             version = "unknown"
@@ -620,7 +650,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
     "global_",
     is_flag=True,
     default=False,
-    help="List user-scope dependencies (~/.apm/) instead of project",
+    help="List dependencies in the APM user home instead of the project",
 )
 @click.option(
     "--all",
@@ -822,7 +852,7 @@ def _build_dep_tree(apm_dir):
     "global_",
     is_flag=True,
     default=False,
-    help="Show user-scope dependency tree (~/.apm/)",
+    help="Show the dependency tree in the APM user home",
 )
 def tree(global_):
     """Display dependencies in hierarchical tree format using lockfile."""
@@ -1013,7 +1043,7 @@ def clean(dry_run: bool, yes: bool):
     "global_",
     is_flag=True,
     default=False,
-    help="Update user-scope dependencies (~/.apm/)",
+    help="Update dependencies in the APM user home",
 )
 @click.option(
     "--legacy-skill-paths",
@@ -1075,7 +1105,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     apm_yml_path = project_root / APM_YML_FILENAME
 
     if not apm_yml_path.exists():
-        scope_hint = "~/.apm/" if global_ else "current directory"
+        scope_hint = str(project_root) if global_ else "current directory"
         logger.error(f"No {APM_YML_FILENAME} found in {scope_hint}")
         sys.exit(1)
 

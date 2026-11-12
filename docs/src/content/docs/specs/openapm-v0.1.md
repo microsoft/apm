@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **137 normative statements (132 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **138 normative statements (133 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -896,8 +896,9 @@ including alias, skill and target selections and every incoming request,
 while using the selected source for transport, authentication, ref
 resolution, cache acquisition, content scanning, integrity and policy
 evaluation. Replacement MUST NOT grant executable consent or bypass
-existing security checks. Existing host-blind policy matching remains
-host-blind, but evaluates the selected package, not the original package.
+existing security checks. Policy matching, including the effective host
+under [req-pl-018](#req-pl-018) clause (g), evaluates the selected package,
+not the original package.
 Original ref constraints are provenance, not constraints on the fully
 substituted source; immutable obligations introduced by the selected
 source's own dependencies still apply.
@@ -1707,8 +1708,8 @@ The `dependencies` policy block governs APM dependency declarations.
 
 | Field                  | Semantic                                                                                  |
 |------------------------|-------------------------------------------------------------------------------------------|
-| `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
-| `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
+| `allow`                | List of patterns matched against the canonical dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded; a host-qualified pattern also requires the effective host per [req-pl-018](#req-pl-018) clause (g). Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
+| `deny`                 | Always wins over `allow`; host-qualified pattern matching per [req-pl-018](#req-pl-018) clause (g); case treatment per [req-pl-018](#req-pl-018). |
 | `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
@@ -1735,9 +1736,11 @@ range (containing an upper bound); (d) a dependency with
 **[req-pl-018]** A conforming **governance** implementation MUST apply
 the following dependency-policy identity rules:
 
-(a) The match subject is the canonical, host-blind dependency package
-path: its repository coordinate plus any virtual in-repository path,
-with any `#` reference suffix excluded. A registry name is never part
+(a) The match subject is the canonical dependency package path, which
+omits the host: its repository coordinate plus any virtual
+in-repository path, with any `#` reference suffix excluded. A
+host-qualified pattern additionally constrains the host under clause
+(g); a hostless pattern matches the path on every host. A registry name is never part
 of this match subject and is compared literally wherever it appears in
 policy operands. This
 statement governs glob matching for `dependencies.allow` and
@@ -1798,6 +1801,33 @@ pattern-bearing policy field named in
 [Section 6.5](#65-allow-list--deny-list-tri-state-semantics) under that
 section's pattern grammar. It MUST NOT add character-class, brace, or
 escape expansion.
+
+(g) A `dependencies.allow` or `dependencies.deny` pattern whose first
+U+002F-separated segment contains U+002E and does not begin with
+U+002E is host-qualified; a pattern beginning with `./` or `../` is
+therefore a hostless local-path pattern. That segment, with any
+trailing colon followed by one to five ASCII digits (U+0030 through
+U+0039) removed, and any single trailing U+002E removed, names a host;
+the remaining segments are the path pattern matched under clauses (a)
+through (f). A host-qualified pattern matches a dependency only when
+the dependency's effective host equals the named host after mapping
+only U+0041 through U+005A to U+0061 through U+007A. The effective
+host is the host written in the dependency reference or, when none is
+written, the implementation-default host
+([Section 1.4](#14-terminology-preliminaries)), with any trailing colon
+followed by one to five ASCII digits (U+0030 through U+0039) removed,
+and any single trailing U+002E removed. Ports are ignored on both
+sides; the host segment is compared literally with no wildcard
+expansion, and no other host (including a subdomain or a longer name
+sharing a prefix) matches. Local-path dependencies have no host and
+never match a host-qualified pattern. Shorthand, HTTPS and SSH
+references to the same repository MUST yield the same result. This
+clause applies to direct and transitive dependencies wherever
+`dependencies.allow` and `dependencies.deny` are evaluated. This
+clause does not apply to `dependencies.require`. A `require` entry
+whose first segment resembles a host is compared literally under
+clause (a) and matches no dependency whose canonical path omits the
+host.
 
 #### 6.3.2 `mcp`
 
@@ -3480,6 +3510,30 @@ comparison.
 > `hooks` as top-level keys but does not itself document the top-level shape
 > as closed to extension.
 
+#### 8.5.10 Cursor universal instruction intent
+
+<a id="req-tg-018"></a>
+**[req-tg-018]** A conforming **consumer** implementation that deploys an
+instruction primitive for the `cursor` target at project or user scope MUST
+write the target-native rule as `<name>.mdc` under the target's `rules/`
+directory. When the source instruction's normalized `applyTo` value resolves
+to exactly one universal `**` pattern (whether written as a scalar, a
+whitespace-padded scalar, or a single-item YAML sequence), the emitted
+frontmatter MUST contain `alwaysApply: true` and MUST NOT contain a `globs`
+field. For any other non-empty `applyTo` set, including a set that combines
+`**` with scoped patterns, the emitted frontmatter MUST NOT contain
+`alwaysApply` and MUST encode the source patterns in `globs`. When `applyTo`
+is absent, empty, or null, the emitted frontmatter MUST omit both
+`alwaysApply` and `globs`.
+
+> **Editorial note.** This requirement pins when a Cursor rule applies, not
+> how scoped patterns are serialized; the `globs` representation remains the
+> deliberate comma-joined Cursor form. It adds no source frontmatter field and
+> does not infer always-on intent from mixed or missing patterns. Native
+> semantics follow Cursor's rules documentation
+> (`https://cursor.com/docs/rules`): `alwaysApply: true` includes a rule in
+> every chat, while `globs` attaches it to matching files.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -3501,7 +3555,8 @@ without a spec revision. The current matrix is in the companion
   [req-pr-006](#req-pr-006),
   [req-pr-007](#req-pr-007), [req-pr-008](#req-pr-008),
   [req-tg-016](#req-tg-016),
-  [req-tg-017](#req-tg-017).
+  [req-tg-017](#req-tg-017),
+  [req-tg-018](#req-tg-018).
 
 ---
 
@@ -3827,10 +3882,11 @@ they intend to deny. The same normalization widens `dependencies.allow`
 matching on a case-insensitive source, so an upgrade can admit a
 case-variant spelling that previously missed. Clause (d) of
 [req-pl-018](#req-pl-018) leaves segments at and after recursive-glob
-ambiguity byte-exact, including on a case-insensitive source. The
-match subject is host-blind, so one policy entry governs the same
-repository path on every reachable host; governance authors relying
-on host separation need an independent host-level control.
+ambiguity byte-exact, including on a case-insensitive source. A
+hostless pattern governs the same repository path on every reachable
+host; clause (g) of [req-pl-018](#req-pl-018) lets governance authors
+bind a pattern to one exact host, including the default host used for
+references written without one.
 
 ### 10.9 Archive path-traversal (zip-slip / symlink escape)
 
@@ -4154,6 +4210,7 @@ conformance statement identifying:
 [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
 [req-tg-014](#req-tg-014), [req-tg-015](#req-tg-015),
 [req-tg-016](#req-tg-016), [req-tg-017](#req-tg-017),
+[req-tg-018](#req-tg-018),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -4662,6 +4719,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-tg-015](#req-tg-015)                | MUST    | 8.5.1   | consumer    |
 | [req-tg-016](#req-tg-016)                | MUST    | 8.5.9   | consumer    |
 | [req-tg-017](#req-tg-017)                | MUST    | 8.5.9   | consumer    |
+| [req-tg-018](#req-tg-018)                | MUST    | 8.5.10  | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -4685,7 +4743,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 137** (132 MUST, 5 SHOULD).
+**Total normative statements: 138** (133 MUST, 5 SHOULD).
 
 ---
 
@@ -4749,11 +4807,15 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.55 (proposed) | 2026-10-21 | Spec-citation fold for PR #3230 (closes #3195 Mode-B silent-extension gate on policy discovery). Added [req-pl-021](#req-pl-021) (Section 6.1, governance MUST): when an explicit `--policy <ref>` names a concrete policy source that cannot be resolved, fetched, or parsed into a valid policy, the governance operation terminates non-zero with a diagnostic naming the ref and cause; it does not fall back to discovery, proceed without policy, or honour a relaxing `fetch_failure` default. A valid stale-cache policy still counts as resolved; an operator-level enforcement-disable switch is out of scope but must be disclosed in diagnostics. Under Section 9.2 this defines previously unspecified failure behaviour for the existing [req-pl-001](#req-pl-001) explicit-ref path: explicit refs that previously passed with enforcement skipped now fail; discovery, `fetch_failure` semantics for discovered policy, and install behaviour are unchanged. Sections 6.1, 6.9, 11.3.2 and Appendix C are updated. Section 9.3 reviewer approvals and public comment remain pending; this proposal is not adopted. Adds one MUST. |
 | 0.1.56 (proposed) | 2026-11-10 | Amendment for accepted issue #3472. Revised [req-tg-005](#req-tg-005) (Section 8.5, consumer MUST) to match Antigravity's documented rule schema: `globs` is now one double-quoted, comma-separated string for one or many `applyTo` patterns (never a YAML sequence, which Antigravity rejects), and an instruction without `applyTo` now carries `trigger: always_on` frontmatter instead of no frontmatter (Antigravity discards rule files without a valid `trigger`). This intentionally replaces the 0.1.11 scalar-versus-sequence and no-frontmatter representations; it is not behavior-neutral errata. Deployed-rule filenames and compile-time deduplication scope are unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row and the requirements manifest entry are unchanged; no new normative statement, count remains 136 (131 MUST, 5 SHOULD). Other targets' rule formats are unaffected. The revision also pins the zero-pattern boundary, the per-pattern re-encoding and the frontmatter byte layout. Under Section 9.2 this changes an already-defined emitted target representation, not a manifest, lockfile or policy field; the replaced representations were refused or discarded by the target, so no working deployment relied on them. Migration: deployed bytes, and therefore [req-lk-012] deployed_file_hashes, change for `.agents/rules/*.md` files whose `applyTo` resolves to zero patterns or to two or more patterns, and for single-pattern rules containing a literal backslash or a top-level literal comma; other single-pattern rules are byte-identical. One non-frozen `apm install` re-renders affected files and re-records their hashes; [req-lk-006] and [req-lk-017] are unchanged by this amendment. Section 9.3 review/public comment and applicable Section 9.5 migration remain pending, not waived. |
 | 0.1.57 (proposed) | 2026-11-12 | Spec-citation fold for PR #3377 (closes the #3252 Mode-B silent-extension gate on MCP install and ownership). Added [req-mf-026](#req-mf-026) (Section 4.5, consumer MUST): a project-scoped Claude Code `.mcp.json` keeps `${VAR}` references (with `${env:VAR}` written as `${VAR}`) in `command`, `args`, `env`, `url` and `headers` instead of resolved values, and keeps static values and `${VAR:-default}` as declared. An existing entry holding values where the rendered server has references is replaced only when the consumer can show it wrote it (recorded native write hash, or exact expansion of the declared references from the current environment); otherwise it is left unchanged, the install fails, and the diagnostic names the affected fields. Diagnostics name variables and fields, never values. User scope keeps install-time resolution. The Section 4.5 dispatch matrix rows for `${VAR}` and `${env:VAR}` point to the new requirement. Under Section 9.2 this changes generated bytes for the Claude Code project target only. Sections 4.5, 4.9, 11.3.2 and Appendix C are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. Statement count: 136 -> 137 (132 MUST, 5 SHOULD). |
+| 0.1.58 (proposed) | 2026-11-12 | Amendment for accepted issue #1744 in PR #2030. Added [req-tg-018](#req-tg-018) (Section 8.5.10, consumer MUST): at project and user scope, a Cursor instruction whose normalized `applyTo` is exactly one universal `**` pattern (scalar, padded scalar, or single-item sequence) emits `alwaysApply: true` with no `globs`; every other non-empty set, including `**` mixed with scoped patterns, keeps `globs` and never `alwaysApply`; absent, empty, or null `applyTo` emits neither key. Under Section 9.2 this changes generated bytes for the Cursor target only: rules previously emitted as `globs: **` are replaced on reinstall. No source frontmatter field, scoped-glob serialization, or other target changes. Sections 1.3, 8.7, 11.3.2 and Appendix C, the requirements manifest and conformance test binding are updated. Section 9.3 review and public comment remain pending; this proposal is not adopted. Adds one MUST. |
+| 0.1.59 (proposed) | 2026-11-12 | Amendment for accepted issue #3509 in PR #3606. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place with clause (g): a `dependencies.allow` or `dependencies.deny` pattern whose first segment contains U+002E and does not begin with it is host-qualified and matches only when the dependency's effective host (written host, or the implementation-default host), after port and trailing-dot removal and ASCII case folding, equals the named host. Hostless patterns still match every host; `dependencies.require` is unchanged. Updated the Section 6.3.1 table, the source-replacement policy sentence, the Section 10.8 note and the requirements-manifest notes. No new normative statement; count unchanged at 138 (133 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 
-The independently drafted 0.1.52, 0.1.53, 0.1.55 and 0.1.57 proposals each
-add one MUST; 0.1.54 adds four; 0.1.56 revises [req-tg-005](#req-tg-005) in
-place and adds none. Together, this working draft contains 137 statements
-(132 MUST, 5 SHOULD). Combining the proposals does not establish
+The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57 and 0.1.58
+proposals each add one MUST; 0.1.54 adds four; 0.1.56 revises
+[req-tg-005](#req-tg-005) in place and 0.1.59 revises
+[req-pl-018](#req-pl-018) in place; neither adds a statement. Together, this
+working draft
+contains 138 statements (133 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release.
 
 Errata (none at publication).

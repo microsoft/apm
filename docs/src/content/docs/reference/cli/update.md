@@ -19,7 +19,7 @@ apm update [OPTIONS] [PACKAGES...]
 
 When every ref is already current but the locked `apm_modules/` cache is empty, `apm update` restores the cache from the same resolved refs without prompting. It uses the normal dependency materialization path without changing `apm.yml` or `apm.lock.yaml`. `--dry-run` remains read-only and does not restore files.
 
-Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
+Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under the APM home (`$APM_HOME`, default `~/.apm`) instead of the current project. Target files do not move; see the [`APM_HOME` path contract](../../environment-variables/#apm_home-path-contract). With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
 Partial updates retain deployment targets in `apm.lock.yaml` for both refreshed
 and untouched packages, including skills deployed under the shared
@@ -36,6 +36,8 @@ The interactive prompt for ref changes defaults to **No**. In non-interactive co
 
 For a read-only install that pins to whatever is already in `apm.lock.yaml` -- the right command for CI -- use [`apm install --frozen`](../install/).
 
+On a fresh clone or CI runner without local deployment receipts (for example a scheduled update), `apm update --yes` replaces committed skill files that match what the currently locked version renders, fetched from its locked commit. Lockfile hashes are never that proof. If any of those files was edited locally, the update exits nonzero before writing any deployed file or `apm.lock.yaml`; move the file aside and retry.
+
 ## Arguments
 
 | Argument | Description |
@@ -49,7 +51,7 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--yes`, `-y` | off | Skip the interactive prompt and accept the plan. Required for non-interactive use. |
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the manifest, lockfile, or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
-| `--global`, `-g` | off | Refresh user-scope dependencies under `~/.apm/` instead of the current project (mirrors `apm install -g`). |
+| `--global`, `-g` | off | Refresh user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the current project (mirrors `apm install -g`). |
 | `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 | `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |

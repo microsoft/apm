@@ -17,7 +17,8 @@ in the contribution guide.
 The [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
 separates priorities from scope approval and release targets. Follow the public
 [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) for current
-Now / Next / Later priorities.
+Now / Next / Later priorities, organized by pillar (Consume, Produce, Govern,
+Open ecosystem, Foundations) and epic.
 Those root documents own contribution policy; this guide covers technical work
 within the approved scope. Reporting and investigation need no prior permission.
 
@@ -62,6 +63,10 @@ uses `triage/recommended` after the canonical label is provisioned and
 this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
+PR triage may recommend deferral in its advisory comment, but applying
+`status/deferred` remains a human decision. Issue-triage and PR-review workers
+also stop and report missing active companion personas under
+`.github/agents/` rather than silently omitting a required lens.
 
 The scheduled Triage Panel (also used by a blank manual dispatch) fetches
 labels and complete comments before selecting at most five issues. It
@@ -129,7 +134,10 @@ node scripts/governance/eligibility.cjs --help
 The tool reads current policy from the default branch. Until the new roster
 format is deployed there, it deliberately reports a policy error rather than
 using a feature branch as authority. A snapshot cannot recover deleted
-withdrawals, so manual automation still requires fresh responsible-human
+withdrawals. The issue delivery worker may treat a current unedited
+roster-authored record as its grant when no review-contact confirmation
+is pending.
+Other manual automation still requires fresh responsible-human
 confirmation of the bounded issue scope. No historical acceptance is restored.
 
 Each assessment is bounded: 25 visible unique issue references per PR, 10

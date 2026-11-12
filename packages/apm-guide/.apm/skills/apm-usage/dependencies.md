@@ -79,12 +79,24 @@ See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-se
 
 ### Packages with symbolic links
 
-APM checks out in-repo links in a dependency as real symlinks
-(`core.symlinks=true` on its own Git commands only), so the `content_hash` is
-the same on every platform. A host that cannot create symlinks fails the
-install with a diagnostic naming the package; on Windows enable Developer
-Mode or the "Create symbolic links" privilege. See [Install packages: when
-things go wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
+A link inside a dependency whose target stays in the same commit installs as
+a copy of the target's content (directory links copy the directory). APM
+resolves it from the locked commit's Git objects, so no host needs symlink
+privileges and the `content_hash` is the same on every platform. Links that
+escape the repository, are broken or loop fail the install with an error
+naming the link. See [Install packages: when things go
+wrong](https://microsoft.github.io/apm/consumer/install-packages/#when-things-go-wrong).
+
+### Line endings in dependency checkouts
+
+APM checks out dependencies with `core.autocrlf=false` and `core.eol=lf` on
+its own Git commands only, so `text` / `text=auto` files keep their committed
+LF bytes on every platform and the `content_hash` matches. Explicit
+`.gitattributes` `eol=` attributes, binary files and blobs committed with CRLF
+keep their repository bytes. A lockfile written by an older APM on Windows may
+hold a CRLF hash that `--frozen` refuses; see [Content hash
+mismatch](https://microsoft.github.io/apm/troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b)
+to recover.
 
 ### Custom git ports
 
@@ -201,6 +213,13 @@ Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
 source identity or local `../sibling` source anchors. After upgrading an older
 aliased install, run `apm install` and review the updated lockfile; use the
 updated CLI for subsequent replay and cleanup.
+
+Licence files travel with `path:` subdirectories: APM copies the nearest
+`LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` (subdirectory up to repo root)
+into the package and next to each deployed skill lacking one, byte-for-byte,
+and records each copy under `carried_licenses` in `apm.lock.yaml`. Whole-repo
+skills below the root get the root licence the same way. Uninstall removes the
+copies; `apm audit` flags missing or edited ones.
 
 Git [skill collections](../../../../../docs/src/content/docs/reference/package-types.md)
 with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or `SKILL.md`.
@@ -426,7 +445,7 @@ Object-form fields:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `id` | yes | `owner/repo` identity at the registry |
-| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry. Ranges skip pre-releases unless the range names a pre-release on the same `major.minor.patch` |
 | `registry` | no | Name from the merged registry map; defaults to the effective default |
 | `path` | no | Sub-path to a file or directory within the published package |
 | `alias` | no | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |

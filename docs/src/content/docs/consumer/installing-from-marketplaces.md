@@ -33,6 +33,15 @@ Most read `.claude-plugin/marketplace.json` (Anthropic-compatible
 schema); Codex reads `.agents/plugins/marketplace.json`. Producers
 who enable both outputs reach every runtime from one repo.
 
+## Local authoring previews through APM
+
+To preview an author's catalog before it is published, run
+`apm marketplace add ./apm.yml --name alice-dev`, then
+`apm install my-tool@alice-dev`. APM rereads the file on each command;
+registration does not install its inventory or publish anything. See
+[Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
+for offline and locked-replay rules.
+
 ## Codex compatibility bundles through APM
 
 APM recognizes a compatibility-only `.codex-plugin/plugin.json` without
@@ -246,6 +255,20 @@ the local SSH key or agent in non-interactive mode; APM does not forward HTTP
 tokens, authorization headers, askpass programs, or registry credentials to
 that subprocess. See
 [Authentication](../../getting-started/authentication/).
+
+**Several catalogs in one repository.** To register a catalog stored outside
+the default locations, pass its repository-relative path:
+
+```bash
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json --name acme-backend
+```
+
+APM saves the path with the registration, so `browse`, `update`, and
+`apm install pkg@acme-frontend` keep reading that catalog. See
+[`marketplace add --path`](../../reference/cli/marketplace/) for the default
+discovery order and path rules. Separate catalogs are not access control:
+repository read access covers all of them.
 
 **Lockfile note.** Relative package sources from a local marketplace record a
 local-path source in `apm.lock.yaml`; lockfiles produced this way are

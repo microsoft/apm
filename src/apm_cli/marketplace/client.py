@@ -432,8 +432,11 @@ def _try_proxy_fetch(
 def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
     """Build the GitHub Contents API URL for a file (GitHub / GHES / generic)."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(source.ref, safe="")
-    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={encoded_ref}"
+    return (
+        f"{api_base}/repos/{source.owner}/{source.repo}/contents/{encoded_path}?ref={encoded_ref}"
+    )
 
 
 def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -> str:
@@ -1060,8 +1063,9 @@ _FETCHERS: dict[str, Callable] = {
 def _github_raw_contents_url(host_info, owner: str, repo: str, file_path: str, ref: str) -> str:
     """Build the GitHub Contents API URL for an arbitrary file."""
     api_base = host_info.api_base.rstrip("/")
+    encoded_path = quote(file_path, safe="/")
     encoded_ref = quote(ref, safe="")
-    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={encoded_ref}"
+    return f"{api_base}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
 
 
 def fetch_raw(
@@ -1216,12 +1220,18 @@ def _auto_detect_path(
 # ---------------------------------------------------------------------------
 
 
+def is_local_authoring_source(source: MarketplaceSource) -> bool:
+    """Only explicitly selected local apm.yml files use authoring semantics."""
+    return source.kind == "local" and Path(source.local_path).name == "apm.yml"
+
+
 def fetch_marketplace(
     source: MarketplaceSource,
     *,
     force_refresh: bool = False,
     auth_resolver: object | None = None,
     discovery_payload: dict | None = None,
+    offline: bool = False,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -1239,6 +1249,8 @@ def fetch_marketplace(
             and the discovery response is parsed and cached instead.  The
             payload MUST come from the same source URL and ref; callers
             that cannot guarantee that must pass ``None``.
+        offline: For an explicitly selected local apm.yml, forbid network ref
+            resolution. Other source kinds reject this option.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -1246,6 +1258,16 @@ def fetch_marketplace(
     Raises:
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
+    if is_local_authoring_source(source):
+        from .authoring_source import load_authoring_catalog
+
+        return load_authoring_catalog(source, offline=offline, auth_resolver=auth_resolver)
+    if offline:
+        raise MarketplaceFetchError(
+            source.name,
+            "--offline is supported here only for explicitly selected local apm.yml catalogs",
+            retry_hint="Omit --offline to use the existing JSON or repository workflow.",
+        )
     cache_name = _cache_key(source)
     use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
 

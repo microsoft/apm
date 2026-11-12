@@ -7,7 +7,7 @@ the commands two clearly-scoped destinations:
   block -- committed to source control so the whole team inherits the trust
   decision. This is where a maintainer pins the dependencies their project
   trusts.
-* ``--user`` (personal UX): ``~/.apm/config.json`` ``executables: {allow,
+* ``--user`` (personal UX): ``$APM_HOME/config.json`` ``executables: {allow,
   deny}`` -- never committed, lowest authority, a personal override on the
   current machine only.
 
@@ -83,7 +83,11 @@ def _save_store(
 
 
 def _store_label(user_scope: bool) -> str:
-    return "~/.apm/config.json" if user_scope else "apm.yml executables block"
+    if user_scope:
+        from .. import config
+
+        return config.CONFIG_FILE
+    return "apm.yml executables block"
 
 
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
@@ -111,7 +115,7 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     return _load_org_policy(project_root, logger=logger)
 
 
-@click.command("approve")
+@click.command("approve", short_help="Approve executable primitives for packages")
 @click.argument("packages", nargs=-1)
 @click.option("--pending", is_flag=True, help="List packages with unapproved executables.")
 @click.option("--all", "approve_all", is_flag=True, help="Approve every package with executables.")
@@ -130,7 +134,7 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     "--user",
     "user_scope",
     is_flag=True,
-    help="Persist to your personal ~/.apm/config.json (lowest authority) "
+    help="Persist to your personal APM user config (lowest authority) "
     "instead of the shared project apm.yml.",
 )
 @serialized_lifecycle
@@ -145,8 +149,8 @@ def approve_cmd(
     """Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.
 
     By default writes to the project ``apm.yml`` ``executables.allow`` block
-    (committed). Use ``--user`` to record a personal grant in
-    ``~/.apm/config.json`` instead.
+    (committed). Use ``--user`` to record a personal grant in your APM user
+    config instead.
 
     Examples:
 
@@ -189,20 +193,20 @@ def approve_cmd(
         logger.render_summary()
 
 
-@click.command("deny")
+@click.command("deny", short_help="Deny executable primitives for packages")
 @click.argument("packages", nargs=-1, required=True)
 @click.option(
     "--user",
     "user_scope",
     is_flag=True,
-    help="Record the deny in your personal ~/.apm/config.json instead of apm.yml.",
+    help="Record the deny in your personal APM user config instead of apm.yml.",
 )
 @serialized_lifecycle
 def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     """Deny executable primitives for packages (a narrowing override).
 
     Writes a deny entry to the project ``executables.deny`` (default) or your
-    personal ``~/.apm/config.json`` (``--user``). Deny always wins.
+    personal APM user config (``--user``). Deny always wins.
 
     Example:
 

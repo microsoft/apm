@@ -32,7 +32,7 @@ Flags
 * ``--verbose``/``-v`` -- show unchanged deps in the plan and pipeline
   diagnostics.
 * ``--global``/``-g`` -- refresh user-scope dependencies under
-  ``~/.apm/`` instead of the current project (mirrors
+  ``$APM_HOME`` (default ``~/.apm``) instead of the current project (mirrors
   ``apm install -g``).
 * ``[PACKAGES]...`` -- positional names to refresh only those
   dependencies; omit to refresh everything.
@@ -413,7 +413,7 @@ def _handle_service_only_update(
     "global_",
     is_flag=True,
     default=False,
-    help="Refresh user-scope dependencies (~/.apm/) instead of the current project",
+    help="Refresh dependencies in the APM user home instead of the current project",
 )
 @click.option(
     "--force",
@@ -477,13 +477,14 @@ def update(
     from apm_cli.core.scope import InstallScope, get_apm_dir
 
     if global_:
-        # User scope: operate on ~/.apm/apm.yml. The cwd manifest walk and
+        # User scope: operate on $APM_HOME/apm.yml. The cwd manifest walk and
         # the self-update back-compat shim apply only to project scope.
         scope = InstallScope.USER
         manifest_path = get_apm_dir(scope) / "apm.yml"
         if not manifest_path.is_file():
             _rich_error(
-                "No apm.yml found in ~/.apm/. Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. "
+                "Run 'apm install -g <org/repo>' to create one."
             )
             sys.exit(1)
         if check_only:
@@ -957,9 +958,8 @@ def _fire_update_scripts(
 
     with contextlib.suppress(Exception):
         from apm_cli.core.lifecycle_scripts import (
-            LifecycleEvent,
-            PackageInfo,
             build_runner_from_context,
+            event_for_dependencies,
         )
 
         project_root = None
@@ -973,15 +973,10 @@ def _fire_update_scripts(
             project_root=project_root,
         )
 
-        pkg_infos = []
-        for dep in apm_package.get_apm_dependencies():
-            pkg_infos.append(PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference))
-
-        scope_name = scope.value if hasattr(scope, "value") else str(scope)
-        event = LifecycleEvent.create(
-            event=event_name,
-            packages=pkg_infos,
-            scope=scope_name,
+        event = event_for_dependencies(
+            event_name,
+            apm_package.get_apm_dependencies(),
+            scope=scope.value if hasattr(scope, "value") else str(scope),
             working_directory=project_root,
         )
 

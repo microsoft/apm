@@ -1,17 +1,8 @@
-"""Tests for the sparse-cone dangling-symlink repair helper (#2707).
+"""Git-object link materialization owner (#3457, #2707).
 
-Sparse-cone checkout (perf #1433) only materializes the requested
-top-level paths. A repo whose payload contains a symlink pointing
-OUTSIDE those paths ends up with a dangling symlink once checked
-out on a filesystem that honors ``core.symlinks`` -- the entry itself
-is inside the cone (so it gets checked out) but its target is not, so
-any code that later dereferences it (a plain ``open()``,
-``shutil.copytree`` without ``symlinks=True``) fails with
-``FileNotFoundError``.
-
-The platform-neutral unit tests use a stand-in entry so they also run
-where Git has ``core.symlinks=false``. The real-symlink consumer path is
-covered in ``tests/integration/test_sparse_cone_symlink_repair.py``.
+Links are resolved against the checked-out commit's tree, never the host
+filesystem, so these tests run identically on hosts without OS symlink
+capability. Fixtures commit links as mode-120000 index entries.
 """
 
 from __future__ import annotations
@@ -19,108 +10,264 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
+
+from apm_cli.utils import git_sparse
 from apm_cli.utils.git_sparse import (
     apply_sparse_cone,
-    repair_dangling_cone_symlinks,
+    materialize_tracked_symlinks,
+    validate_materialized_symlinks,
+)
+from apm_cli.utils.path_security import PathTraversalError
+from tests.utils.git_link_fixture import (
+    EXPECTED_PKG,
+    EXPECTED_PKG_EXECUTABLE,
+    build_link_origin,
+    executable_files,
+    git,
+    neutral_git_env,
+    tree_bytes,
 )
 
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
-def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
-    """Repo shaped like the #2707 repro: a cone dir plus an outside sibling."""
-    work = tmp_path / "work"
-    work.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@e"], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
+_PIN = ["-c", "core.symlinks=false", "-c", "core.autocrlf=false"]
 
-    cone_dir = work / "skills" / "better-writing" / "references"
-    cone_dir.mkdir(parents=True)
-    (cone_dir / "genre-tells.md").write_text("stand-in for a symlink entry\n")
-    (work / "skills" / "better-writing" / "SKILL.md").write_text("skill\n")
 
-    outside_dir = work / "references"
-    outside_dir.mkdir()
-    (outside_dir / "genre-tells.md").write_text("the real target content\n")
+def _checkout(tmp_path: Path, extra_links: dict[str, str] | None = None, *, sparse: bool = False):
+    origin, _ = build_link_origin(tmp_path, extra_links)
+    checkout = tmp_path / "checkout"
+    git(*_PIN, "clone", "-q", "--no-checkout", str(origin), str(checkout))
+    if sparse:
+        apply_sparse_cone("git", checkout, ["pkg"], env=neutral_git_env())
+    git(*_PIN, "-C", str(checkout), "checkout", "-q", "main")
+    return checkout
 
-    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(work), "commit", "-q", "-m", "test: init fixture repo"], check=True
+
+def _materialize(checkout: Path, paths: list[str] | None = None, **kwargs: object) -> list[str]:
+    return materialize_tracked_symlinks(
+        "git", checkout, paths, env=neutral_git_env(), extra_git_args=_PIN, **kwargs
     )
-    sha = subprocess.run(
-        ["git", "-C", str(work), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    bare = tmp_path / "bare.git"
-    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
-    return bare, sha
 
 
-def _checkout_cone(tmp_path: Path, bare: Path, consumer_name: str) -> Path:
-    consumer = tmp_path / consumer_name
-    subprocess.run(
-        ["git", "clone", "-q", "--local", "--shared", "--no-checkout", str(bare), str(consumer)],
-        check=True,
-    )
-    apply_sparse_cone("git", consumer, ["skills/better-writing"], env=os.environ.copy())
-    subprocess.run(["git", "-C", str(consumer), "checkout", "-q", "HEAD"], check=True)
-    return consumer
+@pytest.mark.parametrize("sparse", [False, True], ids=["full", "sparse"])
+def test_contained_links_become_posix_content(tmp_path: Path, sparse: bool) -> None:
+    checkout = _checkout(tmp_path, sparse=sparse)
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"CLAUDE.md"
+
+    done = _materialize(checkout, ["pkg"])
+
+    assert done == [
+        "pkg/AGENTS.md",
+        "pkg/chain.md",
+        "pkg/notes.crlf",
+        "pkg/run",
+        "pkg/shared",
+    ]
+    assert tree_bytes(checkout / "pkg") == EXPECTED_PKG
+    if os.name != "nt":
+        assert executable_files(checkout / "pkg") == EXPECTED_PKG_EXECUTABLE
+    # Out-of-cone targets came from Git objects; the cone did not widen (#2707).
+    assert (checkout / "shared").exists() is not sparse
 
 
-class TestRepairDanglingConeSymlinks:
-    def test_no_dangling_symlink_leaves_cone_untouched(self, tmp_path: Path):
-        bare, _sha = _build_local_bare_repo(tmp_path)
-        consumer = _checkout_cone(tmp_path, bare, "consumer-clean")
+def test_scope_limits_materialization(tmp_path: Path) -> None:
+    checkout = _checkout(tmp_path)
 
-        result = repair_dangling_cone_symlinks(
-            "git", consumer, ["skills/better-writing"], env=os.environ.copy()
+    assert _materialize(checkout, ["shared"]) == ["shared/inner/up.md"]
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"CLAUDE.md"
+    assert _materialize(checkout, None)[-1] == "shared/inner/up.md"
+
+
+def test_package_without_links_costs_one_ls_tree(tmp_path: Path) -> None:
+    checkout = _checkout(tmp_path)
+    real_run = subprocess.run
+    calls: list[list[str]] = []
+
+    def run(args: list[str], *pargs: object, **kwargs: object) -> object:
+        calls.append(list(args))
+        return real_run(args, *pargs, **kwargs)
+
+    with patch.object(git_sparse.subprocess, "run", side_effect=run):
+        assert _materialize(checkout, [".gitattributes"]) == []
+
+    assert len(calls) == 1
+    assert "ls-tree" in calls[0]
+
+
+@pytest.mark.parametrize(
+    ("target", "error", "message"),
+    [
+        ("../../outside.md", PathTraversalError, "resolves outside the repository"),
+        ("/etc/passwd", PathTraversalError, "resolves outside the repository"),
+        ("C:/Windows/win.ini", PathTraversalError, "resolves outside the repository"),
+        ("../.git/config", RuntimeError, "is not a tracked file or directory"),
+        ("missing.md", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/child", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/../tool.sh", RuntimeError, "is not a tracked file or directory"),
+        ("CLAUDE.md/.", RuntimeError, "is not a tracked file or directory"),
+        (".", RuntimeError, "forms a cycle"),
+        ("..", RuntimeError, "forms a cycle"),
+        ("bad.md", RuntimeError, "forms a cycle"),
+    ],
+)
+def test_unresolvable_links_are_rejected(
+    tmp_path: Path, target: str, error: type[Exception], message: str
+) -> None:
+    checkout = _checkout(tmp_path, {"pkg/bad.md": target})
+
+    with pytest.raises(error, match=message) as raised:
+        validate_materialized_symlinks("git", checkout, ["pkg"], env=neutral_git_env())
+    assert "pkg/bad.md" in str(raised.value)
+    assert str(raised.value).isascii()
+    with pytest.raises(error, match=message):
+        _materialize(checkout, ["pkg"])
+    # Strict mode raises before writing anything.
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"CLAUDE.md"
+
+
+@pytest.mark.parametrize(
+    "links",
+    [
+        {"pkg/loop-a": "loop-b", "pkg/loop-b": "loop-a"},
+        {"pkg/dir/back": "../dir-link", "pkg/dir-link": "dir", "pkg/dir/file.md": "../CLAUDE.md"},
+    ],
+    ids=["mutual-file-links", "nested-directory-cycle"],
+)
+def test_cycles_are_bounded(tmp_path: Path, links: dict[str, str]) -> None:
+    checkout = _checkout(tmp_path, links)
+
+    with pytest.raises(RuntimeError, match="forms a cycle"):
+        validate_materialized_symlinks("git", checkout, ["pkg"], env=neutral_git_env())
+
+
+def test_lenient_mode_keeps_link_text_for_unresolvable_links(tmp_path: Path) -> None:
+    checkout = _checkout(tmp_path, {"pkg/bad.md": "../../outside.md"})
+
+    done = _materialize(checkout, ["pkg"], strict=False)
+
+    assert "pkg/bad.md" not in done
+    assert (checkout / "pkg" / "bad.md").read_bytes() == b"../../outside.md"
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"Package instructions\n"
+
+
+def test_materialization_is_idempotent(tmp_path: Path) -> None:
+    checkout = _checkout(tmp_path)
+    _materialize(checkout, ["pkg"])
+
+    _materialize(checkout, ["pkg"])
+
+    assert tree_bytes(checkout / "pkg") == EXPECTED_PKG
+
+
+def test_never_writes_through_a_linked_directory(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("Planting the hostile directory link needs OS symlink capability")
+    checkout = _checkout(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_pkg = checkout / "pkg"
+    real_pkg.rename(tmp_path / "moved")
+    real_pkg.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PathTraversalError):
+        _materialize(checkout, ["pkg"])
+    assert list(outside.iterdir()) == []
+
+
+def test_fan_out_expansion_is_rejected_by_a_shared_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Acyclic links that double per level must not grow exponentially."""
+    monkeypatch.setattr(git_sparse, "_MAX_LINK_WRITES", 200)
+    links = {"pkg/fan/l0/file.md": "../../CLAUDE.md"}
+    for level in range(1, 12):
+        links[f"pkg/fan/l{level}/a"] = f"../l{level - 1}"
+        links[f"pkg/fan/l{level}/b"] = f"../l{level - 1}"
+    checkout = _checkout(tmp_path, links)
+
+    with pytest.raises(RuntimeError, match="expands to more than 200 entries"):
+        validate_materialized_symlinks("git", checkout, ["pkg/fan/l11"], env=neutral_git_env())
+
+
+@pytest.mark.parametrize("name", ["..\\..\\..\\outside.txt", "c:stream.txt"])
+def test_entries_unsafe_on_windows_are_rejected_before_any_write(tmp_path: Path, name: str) -> None:
+    """A directory link must not copy a host-unsafe entry name (``..\\`` or ``:``)."""
+    origin, _ = build_link_origin(tmp_path, {"pkg/assets": "../evil"})
+
+    # mktree bypasses index path checks, so a POSIX-authored name can be
+    # committed even where Git for Windows refuses to stage it.
+    def mktree(listing: str) -> str:
+        # Bytes, not text: Windows text-mode stdin would append CR to names.
+        return (
+            subprocess.run(
+                ["git", "-C", str(origin), "mktree"],
+                input=listing.encode("utf-8"),
+                env=neutral_git_env(),
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+            .stdout.decode("ascii")
+            .strip()
         )
 
-        assert result is None
-        # Cone stays narrow: the outside sibling was never materialized.
-        assert not (consumer / "references").exists()
+    blob = git("-C", str(origin), "hash-object", "-w", "--stdin", input="payload")
+    evil = mktree(f"100644 blob {blob}\t{name}\n")
+    tree = mktree(git("-C", str(origin), "ls-tree", "HEAD") + f"\n040000 tree {evil}\tevil\n")
+    commit = git("-C", str(origin), "commit-tree", tree, "-p", "HEAD", "-m", "unsafe entry")
+    git("-C", str(origin), "update-ref", "refs/heads/main", commit)
+    # Planning reads only the commit tree, so no checkout is needed (Git for
+    # Windows would refuse to check this tree out at all).
+    checkout = tmp_path / "checkout"
+    git(*_PIN, "clone", "-q", "--no-checkout", str(origin), str(checkout))
 
-    def test_dangling_symlink_falls_back_to_full_checkout(self, tmp_path: Path, monkeypatch):
-        bare, _sha = _build_local_bare_repo(tmp_path)
-        consumer = _checkout_cone(tmp_path, bare, "consumer-dangling")
+    with pytest.raises(PathTraversalError, match="not portable to every host"):
+        _materialize(checkout, ["pkg"])
+    assert not (tmp_path / "outside.txt").exists()
 
-        fake_link = consumer / "skills" / "better-writing" / "references" / "genre-tells.md"
-        assert fake_link.is_file()  # the stand-in checked out fine
 
-        real_islink = os.path.islink
+def test_target_git_does_not_check_out_fails_instead_of_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An out-of-cone target Git leaves unwritten raises; nothing is guessed."""
+    checkout = _checkout(tmp_path, sparse=True)
+    real_output = git_sparse._git_output
 
-        def fake_islink(path):
-            return True if Path(path) == fake_link else real_islink(path)
+    def output(git_exe: str, repo_dir: Path, args: list[str], **kwargs: object) -> bytes:
+        if "checkout-index" in args:
+            return b""
+        return real_output(git_exe, repo_dir, args, **kwargs)
 
-        def fake_exists(path):
-            if Path(path) == fake_link:
-                return (consumer / "references" / "genre-tells.md").exists()
-            return os.path.lexists(path)
+    monkeypatch.setattr(git_sparse, "_git_output", output)
 
-        monkeypatch.setattr(os.path, "islink", fake_islink)
-        monkeypatch.setattr(os.path, "exists", fake_exists)
-        monkeypatch.setattr(
-            "apm_cli.utils.git_sparse._tracked_symlinks",
-            lambda *args, **kwargs: [fake_link],
-        )
+    with pytest.raises(RuntimeError, match=r"did not check out '.+' as a regular file"):
+        _materialize(checkout, ["pkg"])
+    assert (checkout / "pkg" / "AGENTS.md").read_bytes() == b"CLAUDE.md"
 
-        result = repair_dangling_cone_symlinks(
-            "git", consumer, ["skills/better-writing"], env=os.environ.copy()
-        )
 
-        assert result == fake_link
-        # The repair must have actually widened the tree, not just
-        # reported the problem: the previously cone-excluded sibling
-        # directory holding the symlink's target now exists.
-        assert (consumer / "references" / "genre-tells.md").is_file()
-        assert (
-            consumer / "references" / "genre-tells.md"
-        ).read_text() == "the real target content\n"
+def test_out_of_cone_checkout_scratch_honors_apm_temp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restricted hosts configure APM_TEMP_DIR; the scratch work tree uses it."""
+    checkout = _checkout(tmp_path, sparse=True)
+    configured = tmp_path / "apm-temp"
+    configured.mkdir()
+    monkeypatch.setenv("APM_TEMP_DIR", str(configured))
+    real_mkdtemp = git_sparse.tempfile.mkdtemp
+    used: list[str | None] = []
 
-    def test_empty_paths_is_a_noop(self, tmp_path: Path):
-        bare, _sha = _build_local_bare_repo(tmp_path)
-        consumer = _checkout_cone(tmp_path, bare, "consumer-empty-paths")
-        assert repair_dangling_cone_symlinks("git", consumer, [], env=os.environ.copy()) is None
+    def mkdtemp(*args: object, **kwargs: object) -> str:
+        used.append(kwargs.get("dir"))
+        return real_mkdtemp(*args, **kwargs)
+
+    monkeypatch.setattr(git_sparse.tempfile, "mkdtemp", mkdtemp)
+
+    _materialize(checkout, ["pkg"])
+
+    assert used == [str(configured)]
+    assert list(configured.iterdir()) == []
+    assert tree_bytes(checkout / "pkg") == EXPECTED_PKG

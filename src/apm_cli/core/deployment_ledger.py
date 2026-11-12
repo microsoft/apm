@@ -31,6 +31,7 @@ from apm_cli.utils.paths import portable_relpath
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.skill_adoption import LockedSkillSources
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -51,6 +52,8 @@ _LEGACY_USER_TARGET_PREFIXES = {
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 UNATTRIBUTED_TARGET = "legacy"
 DEPLOYMENT_OWNER_REMEDIATION = "Run 'apm prune', then rerun 'apm audit'."
+LOCAL_STATE_DIR = ".apm-local"
+"""Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
 _LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
@@ -89,9 +92,15 @@ class DeploymentMaterializationSession:
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
         self.scope = scope
+        from apm_cli.core.scope import get_apm_home
+
         key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
-        self.state_path = Path.home() / ".apm" / "deployment-receipts" / f"{key}.json"
-        self.identity_path = self.root / ".apm-local" / "installation"
+        apm_home = get_apm_home()
+        # Containment is anchored one level above APM_HOME (``$HOME`` by
+        # default); for a shallow custom root the symlink check is the guard.
+        self._receipts_base = apm_home.parent
+        self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
+        self.identity_path = self.root / LOCAL_STATE_DIR / "installation"
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
@@ -109,11 +118,13 @@ class DeploymentMaterializationSession:
         )
         self._installation: str | None = None
         self._state_present = False
+        # Update-only locked-version sources for receipt-less skill adoption (#3625).
+        self.locked_sources: LockedSkillSources | None = None
         self._load()
 
     def _validate_paths(self) -> None:
         for base, path in (
-            (Path.home(), self.state_path),
+            (self._receipts_base, self.state_path),
             (self.root, self.identity_path),
             (self.root, self.identity_path.parent / ".gitignore"),
         ):
@@ -254,7 +265,7 @@ class DeploymentMaterializationSession:
         record = self._records.get(key)
         if record is None:
             return None
-        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
         recorded_target = next(
             (target for target in targets if target.name == record.locator.target), None
@@ -262,7 +273,9 @@ class DeploymentMaterializationSession:
         if recorded_target is None:
             profile = KNOWN_TARGETS.get(record.locator.target)
             recorded_target = (
-                profile.for_scope(user_scope=self.scope.value == "user") if profile else None
+                scoped_profile_or_none(profile, user_scope=self.scope.value == "user")
+                if profile
+                else None
             )
         if recorded_target is None or self._locator(path, [recorded_target]) != record.locator:
             return None

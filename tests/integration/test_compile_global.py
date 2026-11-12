@@ -76,6 +76,53 @@ def test_install_global_supports_claude_config_dir_outside_home(tmp_path, monkey
     assert "[x]" not in result.output
 
 
+def test_apm_home_isolates_metadata_without_redirecting_target_deployment(tmp_path, monkeypatch):
+    """Global install and lifecycle state share APM_HOME; targets do not."""
+    from apm_cli.commands.install import install as install_cmd
+    from apm_cli.core.lifecycle_scripts import _get_user_apm_yml
+    from apm_cli.core.script_executors import _get_scripts_log_path
+    from apm_cli.core.script_trust import _trust_store_path
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    apm_home = tmp_path / "isolated-metadata"
+    package_dir = tmp_path / "global-package"
+    instruction_dir = package_dir / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (package_dir / "apm.yml").write_text(
+        "name: global-package\nversion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    (instruction_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global install instructions\n---\nUse integration tests.\n",
+        encoding="utf-8",
+    )
+
+    claude_config = tmp_path / "target-config" / "claude"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(
+        install_cmd,
+        ["-g", str(package_dir), "--target", "claude"],
+    )
+
+    clear_discovery_cache()
+    assert result.exit_code == 0, result.output
+    assert (apm_home / "apm.yml").is_file()
+    assert (apm_home / "apm.lock.yaml").is_file()
+    assert (apm_home / "apm_modules").is_dir()
+    assert not (home / ".apm").exists()
+    assert (claude_config / "rules" / "global.md").is_file()
+    assert not (apm_home / "rules" / "global.md").exists()
+
+    assert _get_user_apm_yml() == apm_home / "apm.yml"
+    assert _trust_store_path() == apm_home / "scripts-trust.json"
+    assert _get_scripts_log_path() == apm_home / "logs" / "scripts.log"
+
+
 def test_compile_global_writes_claude_md_from_real_fixtures(tmp_path, monkeypatch):
     """Run apm compile --global through real discovery and filesystem writes."""
     from apm_cli.commands.compile.cli import compile as compile_cmd
@@ -141,6 +188,67 @@ def test_compile_global_honors_user_manifest_targets(
     assert not (home / ".cursor").exists()
     assert not (home / ".gemini").exists()
     assert not (home / ".hermes").exists()
+
+
+def _seed_codex_global_home(home: Path) -> None:
+    apm_root = home / ".apm"
+    instruction_dir = apm_root / "apm_modules" / "demo" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global test instructions\n---\nUse Codex home.\n",
+        encoding="utf-8",
+    )
+    (apm_root / "apm.yml").write_text(
+        "name: global\nversion: 1.0.0\ntargets: [codex]\n",
+        encoding="utf-8",
+    )
+
+
+def test_compile_global_writes_codex_agents_md_under_codex_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-blank CODEX_HOME receives AGENTS.md; ~/.codex stays untouched (#3483)."""
+    from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    _seed_codex_global_home(home)
+    codex_home = home / "custom-codex"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(compile_cmd, ["--global"])
+
+    clear_discovery_cache()
+    assert result.exit_code == 0, result.output
+    assert "Use Codex home." in (codex_home / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (home / ".codex").exists()
+
+
+def test_compile_global_rejects_relative_codex_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative CODEX_HOME fails clearly before any Codex root file is written."""
+    from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    _seed_codex_global_home(home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", "relative/codex")
+    monkeypatch.chdir(tmp_path)
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(compile_cmd, ["--global"])
+
+    clear_discovery_cache()
+    assert result.exit_code != 0
+    assert "CODEX_HOME is set to a non-absolute path" in f"{result.output}{result.exception}"
+    assert not (home / ".codex").exists()
+    assert not (tmp_path / "relative").exists()
 
 
 @pytest.mark.parametrize(

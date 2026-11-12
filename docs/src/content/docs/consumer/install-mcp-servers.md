@@ -99,6 +99,11 @@ apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/serve
 apm install -g --target claude --mcp io.github.github/github-mcp-server
 ```
 
+Registry names resolve against one MCP registry, the curated GitHub MCP
+Registry by default. If a name is not found, APM names the registry it
+searched and never switches registries on its own; see
+[Choosing an MCP registry](../choosing-an-mcp-registry/).
+
 `apm mcp install NAME ...` is an alias that forwards to the same code
 path. The `apm mcp` group also provides `search`, `list`, and `show`
 for discovery -- see the [CLI reference](../../reference/cli/install/).
@@ -192,7 +197,7 @@ unresolved required entries fail closed.
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` (project, only if `.cursor/` exists) or `~/.cursor/mcp.json` (`-g`) | both | JSON `mcpServers` |
-| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
+| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank and absolute; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
@@ -376,8 +381,9 @@ user-scope MCP config (for example, Copilot CLI to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
 non-whitespace absolute path (both for installation and stale server cleanup). Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
-`$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or
-`~/.codex/config.toml` otherwise, Cursor to `~/.cursor/mcp.json`, OpenCode to
+`$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace absolute
+path, or `~/.codex/config.toml` when unset or blank (relative values are
+rejected), Cursor to `~/.cursor/mcp.json`, OpenCode to
 `~/.config/opencode/opencode.json`, Gemini CLI to `~/.gemini/settings.json`,
 Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
 `$HERMES_HOME/config.yaml` whenever selected explicitly (or

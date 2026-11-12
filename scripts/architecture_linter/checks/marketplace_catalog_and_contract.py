@@ -828,7 +828,57 @@ def _scan_agent_plugin_duplicates(
     return tuple(findings)
 
 
+def _check_authoring_source(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep direct YAML consumption on canonical parsing and composition."""
+    inv = frozenset(provider.inventory)
+    rule_id = "marketplace-integrations-authoring-source"
+    path = "src/apm_cli/marketplace/authoring_source.py"
+    findings = list(
+        _require_subs(
+            provider,
+            inv,
+            rule_id,
+            path,
+            (
+                "load_marketplace_from_apm_yml(path)",
+                "MarketplaceBuilder.from_config(",
+                "builder.resolve()",
+                "builder.compose_discovery_catalog(",
+                "resolve_local_plugin_path(",
+            ),
+            "Local authoring catalogs must reuse canonical parser, resolver and composer",
+        )
+    )
+    facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+    findings.extend(failures)
+    for call in facts.calls:
+        if call.qualname.rsplit(".", 1)[-1] in {
+            "build",
+            "write_output",
+            "write_text",
+            "write_bytes",
+            "safe_load",
+            "load_yaml_str",
+        }:
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "Authoring catalog reads must not parse YAML independently or invoke writing",
+                    line=call.line,
+                )
+            )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="marketplace-integrations-authoring-source",
+        group=GROUP,
+        guard_ids=("marketplace-integrations-authoring-source",),
+        description="Live local authoring catalogs reuse canonical owners without writing.",
+        check=_check_authoring_source,
+    ),
     Rule(
         id=_RID_CATALOG,
         group=GROUP,

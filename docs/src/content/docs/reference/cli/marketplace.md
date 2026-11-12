@@ -14,9 +14,9 @@ validating it, and preparing artifacts for consumer repositories).
 
 ```bash
 # Consume
-apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN]
+apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--path P] [--offline]
 apm marketplace list
-apm marketplace browse NAME
+apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
 apm marketplace remove NAME
 apm marketplace validate NAME
@@ -71,8 +71,44 @@ Register a marketplace from a source reference. Accepted forms:
   select a branch, tag, or commit.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
-  direct `marketplace.json` file.
+  direct `marketplace.json` file, or an explicitly selected local `apm.yml`.
 - `file://` URI -- `file:///srv/marketplaces/agent-forge.git`.
+
+#### Live local authoring catalogs
+
+```bash
+apm marketplace add ./apm.yml --name alice-dev
+apm marketplace browse alice-dev
+apm view my-tool@alice-dev
+apm install my-tool@alice-dev
+```
+
+SOURCE must be a path to a file named `apm.yml` that contains a valid
+`marketplace:` declaration; a directory is still probed for `marketplace.json`. APM uses
+the existing authoring parser, ref resolver and catalog composer in memory;
+it does not run `apm pack` or write generated catalogs. Relative package
+sources are anchored to the authoring file's directory, with the existing
+path containment checks. Native `metadata.pluginRoot` layout hints do not
+rebase authored package paths. Each invocation reads one configuration
+snapshot; later explicit browse, view, update or selected-install operations
+reread the file. A failed registration leaves an existing registration unchanged.
+
+Registration and browsing do not install inventory, activate plugins, execute
+package hooks or publish packages. APM does not download remote package
+manifests to fill in descriptions. Remote tags and version ranges need Git
+network access to resolve. `add --offline` and `browse --offline` work only for
+this source type: local entries and remote entries pinned to full commit SHAs
+resolve without network, and tags or ranges fail with an actionable error.
+JSON, Git and HTTPS catalog sources reject `--offline`.
+
+Installing a remote entry records its actual package dependency and existing
+locked resolution. Locked replay does not require the preview file or its
+registration. Local entries remain local filesystem dependencies: their
+paths and hashes do not distribute files to another machine. Publishing and
+selecting a distributed source remain explicit operations. Remote YAML
+catalog URLs, automatic watching and automatic source promotion are unsupported.
+
+Generated JSON catalogs and repository registration continue to work as before.
 
 ```bash
 # GitHub shorthand
@@ -108,6 +144,10 @@ apm marketplace add ./vendor/marketplace.json --name vendor
 
 # file:// URI
 apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
+
+# One catalog per audience from the same repository
+apm marketplace add acme/agent-skills --path catalogs/frontend/marketplace.json --name acme-frontend
+apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json --name acme-backend
 ```
 
 | Flag | Description |
@@ -116,12 +156,24 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. Applies only to git-backed sources. For HTTPS git URLs, a `#ref` fragment is equivalent and is stored as the ref. |
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
+| `--path` | Repository-relative path to the catalog JSON file, such as `catalogs/frontend/marketplace.json`. Skips auto-discovery. Applies to git-backed sources and local repository directories, not to hosted `marketplace.json` URLs or a direct local file. |
 | `--verbose`, `-v` | Show detailed output. |
 
-For git-backed sources without a direct file path, APM looks for the catalog
-at `marketplace.json`, `.github/plugin/marketplace.json`, then
-`.claude-plugin/marketplace.json`, and registers the first one found without
-downloading it again.
+Without `--path`, APM checks `marketplace.json`,
+`.github/plugin/marketplace.json`, then `.claude-plugin/marketplace.json`, and
+registers the first one found without downloading it again.
+
+With `--path`, APM reads only that file, like the `path` field of Claude Code's
+`github` and `git` marketplace sources. The path must stay inside the
+repository (no absolute paths, `..`, backslashes, `?`, or `#`) and name a
+`.json` file; an escaping or missing path fails before anything is registered.
+The path is saved in the registration, so `browse`, `search`, `update`, and
+`apm install` read the same catalog. Register several catalogs from one
+repository under different `--name` values; reusing a name for a different
+catalog replaces it with a warning. Relative plugin sources (`./plugins/x`) in
+any catalog resolve from the repository root, not from the catalog's folder.
+Separate catalogs help discovery but are not access control: anyone who can
+read the repository can read every catalog in it.
 
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
@@ -307,6 +359,7 @@ concrete SHA at write time.
 | `--ref` | Pin to a git ref (SHA, tag, or `HEAD`). |
 | `--subdir`, `-s` | Subdirectory inside the source repo. |
 | `--tag-pattern` | Tag pattern (e.g. `v{version}`). |
+| `--category` | Package category (e.g. `developer-tools`). Required for every package when outputs include `codex`. |
 | `--tags` | Comma-separated tags. |
 | `--include-prerelease` | Include prerelease versions. |
 | `--no-verify` | Skip the remote reachability check. |

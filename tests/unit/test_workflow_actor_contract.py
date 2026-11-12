@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,6 +46,7 @@ WORKER_CODE = (
 WORKER_PR = ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/worker-prompt.md"
 WORKER_PR_SKILL = ROOT / "packages/autopilot/autopilot-pr-merge-worker/SKILL.md"
 COMMENT_SKILL = ROOT / "packages/autopilot/autopilot-comment/SKILL.md"
+ACCEPT_SKILL = ROOT / "packages/autopilot/autopilot-issue-accept/SKILL.md"
 CANONICAL_AUTOPILOT_SKILLS = (
     SCHEDULER_TRIAGE,
     TRIAGE_SKILL,
@@ -55,6 +58,7 @@ CANONICAL_AUTOPILOT_SKILLS = (
     REVIEW_SKILL,
     WORKER_PR_SKILL,
     COMMENT_SKILL,
+    ACCEPT_SKILL,
 )
 
 
@@ -181,6 +185,128 @@ def test_review_panel_declares_origin_intent_contract() -> None:
     assert "Never convert a failed reviewer request into an assignee write" in skill
 
 
+def test_external_persona_preflight_fails_closed_for_clean_consumers(tmp_path: Path) -> None:
+    """Both workers name missing companion agents before running a panel."""
+    packages = (
+        (
+            "autopilot-issue-triage-worker",
+            "devx-ux-expert",
+            "supply-chain-security-expert",
+            "apm-ceo",
+        ),
+        ("autopilot-pr-review-worker", "test-coverage-expert", "apm-ceo"),
+    )
+    for package, *roles in packages:
+        package_root = ROOT / f"packages/autopilot/{package}"
+        script = package_root / "scripts/check_required_agents.py"
+        agents_dir = tmp_path / package / ".github/agents"
+        skill = (package_root / "SKILL.md").read_text(encoding="ascii")
+
+        assert "consumer-provided companion assets" in skill
+        assert ".github/agents/<agent-slug>.agent.md" in skill
+        assert "check_required_agents.py" in skill
+        assert "stop and report" in skill.lower()
+        assert "](../../agents/" not in skill
+        checklist = skill.split("## Execution checklist", 1)[1]
+        preflight_step = checklist.index("\n2b. ")
+        fan_out_step = checklist.index("\n3. ", preflight_step)
+        assert "check_required_agents.py" in checklist[preflight_step:fan_out_step]
+        if package == "autopilot-pr-review-worker":
+            assert "`.github/agents/apm-ceo.agent.md`" in skill
+            assert "`.apm/agents/apm-ceo.agent.md`" not in skill
+
+        help_result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert help_result.returncode == 0
+        assert "--agents-dir" in help_result.stdout
+
+        missing = subprocess.run(
+            [sys.executable, str(script), "--agents-dir", str(agents_dir), *roles],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert missing.returncode == 1
+        missing_report = json.loads(missing.stdout)
+        assert missing_report["missing_roles"] == sorted(roles)
+        assert missing_report["ready"] is False
+        assert "Missing required agent roles" in missing.stderr
+
+        agents_dir.mkdir(parents=True)
+        for role in roles:
+            (agents_dir / f"{role}.agent.md").write_text("role", encoding="ascii")
+        ready = subprocess.run(
+            [sys.executable, str(script), "--agents-dir", str(agents_dir), *roles],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert ready.returncode == 0
+        ready_report = json.loads(ready.stdout)
+        assert ready_report["available_roles"] == sorted(roles)
+        assert ready_report["missing_roles"] == []
+        assert ready_report["ready"] is True
+
+
+def test_pr_triage_never_writes_human_deferred_label() -> None:
+    """PR triage's write contract agrees with the shared human-label contract."""
+    worker = _ascii(WORKER_PR_TRIAGE)
+    template = _ascii(
+        ROOT / "packages/autopilot/autopilot-pr-triage-worker/.apm/skills/"
+        "autopilot-pr-triage-worker/assets/pr-triage-template.md"
+    )
+    contract_path = (
+        ROOT / "packages/autopilot/autopilot-pr-triage-worker/.apm/skills/"
+        "autopilot-pr-triage-worker/assets/label-contract.json"
+    )
+    contract = json.loads(contract_path.read_text(encoding="ascii"))
+    assert contract["human_decisions"]["status/deferred"]
+    assert "Never write `status/deferred`" in worker
+    assert "defer recommendation belongs only in the advisory comment" in worker
+    assert "add `status/deferred` when `write: on`" not in worker
+    assert "status/deferred" not in template
+    assert "awaiting maintainer review and acceptance of its scope" in template
+
+
+def test_pr_description_diagrams_are_conditional_and_cli_is_pinned() -> None:
+    """A diagram is optional for simple PRs and validated reproducibly when used."""
+    package = ROOT / "packages/pr-description-skill"
+    skill = _ascii(package / "SKILL.md")
+    template = _ascii(package / "assets/pr-body-template.md")
+    rubric = _ascii(package / "assets/section-rubric.md")
+    for text in (skill, template, rubric):
+        assert "simple" in text.lower()
+        assert "non-trivial" in text
+    assert "touches more than one file or alters control flow" not in skill
+    assert "@mermaid-js/mermaid-cli@12.0.0" in skill
+    assert "npx --yes -p @mermaid-js/mermaid-cli mmdc" not in skill
+    assert "1-3 mermaid blocks for any non-doc-only PR" not in rubric
+    assert "non-trivial structure or control flow MUST include 1-3 validated" in skill
+    assert "Required (1-3 validated mermaid blocks) when structure" in skill
+    assert "Diagrams is present only when" not in rubric
+    assert "verbatim quote from PROSE or Agent Skills" in skill
+
+
+def test_pr_review_schema_has_no_undeclared_rubric_path() -> None:
+    """The return schema keeps its principle vocabulary without a stale link."""
+    schema_path = (
+        ROOT / "packages/autopilot/autopilot-pr-review-worker/assets/panelist-return-schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="ascii"))
+    serialized = json.dumps(schema)
+    assert ".github/skills/pr-description-skill" not in serialized
+    assert "scenario-evidence-rubric.md" not in serialized
+    assert "taxonomy defined by the enum below" in serialized
+    principles = schema["definitions"]["finding"]["properties"]["evidence"]["properties"][
+        "principles"
+    ]
+    assert principles["items"]["enum"]
+
+
 def test_review_panel_requires_complete_paginated_context_and_watermark_noop() -> None:
     """Fresh advice is forbidden unless the full conversation was read."""
     skill = _ascii(REVIEW_SKILL)
@@ -294,10 +420,17 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "--repo microsoft/apm --issue N --approval-url URL" in worker
     assert "authorizes_implementation: false" in worker
     assert "deleted withdrawals" in worker
-    assert "ORIGIN `unattended` never claims to have obtained it" in worker
+    assert "ORIGIN `unattended` never claims a missing record is approval" in worker
+    assert "`contact_confirmation_needed: false`" in worker
+    assert "ORIGIN `unattended` STOPs (`blocked`)" in worker
+    assert '(.body | test("^\\\\s*<!-- apm-scope:v1 -->"))' in worker
+    assert '(.body | test("(?m)^Decision: approve\\\\r?$"))' in worker
+    assert "sort_by(.created_at, .id) | last" in worker
+    assert "Do not fall back to an older record when the latest one fails" in worker
     delivery = _ascii(SCHEDULER_CODE)
     assert "Workers re-check `scripts/governance/eligibility.cjs`" in delivery
-    assert "ORIGIN `unattended` never implements" in delivery
+    assert "ORIGIN `unattended` never implements without that current record" in delivery
+    assert "Never guess a URL." in delivery
     assert "Do not skip bot-authored issues that" in delivery
     assert "Human accept is the gate; author type is not." in delivery
     assert "Do not drop a bot-authored issue that already carries" in delivery
@@ -415,8 +548,8 @@ def test_schedulers_own_isolated_fanout_pools() -> None:
     assert "needs-issue" in worker_pr_triage
     assert "Never request reviewers" in worker_pr_triage
     assert "Do not run `autopilot-pr-review-worker`" in worker_pr_triage
-    assert "Write `status/deferred` only when this" in worker_pr_triage
-    assert "PR is not labelled `status/accepted`" in worker_pr_triage
+    assert "Never write `status/deferred`" in worker_pr_triage
+    assert "When neither this PR nor a same-repo linked issue is labelled" in worker_pr_triage
     assert "Neither this PR nor a linked same-repo issue" in worker_pr_triage
     assert "Start with an issue" in worker_pr_triage
     assert "Never write human decision labels" not in worker_pr_triage
@@ -456,3 +589,17 @@ def test_pr_review_lock_keeps_advisory_writers_only() -> None:
     assert configs
     for config in configs.values():
         assert not forbidden & set(config.keys())
+
+
+def test_issue_accept_posts_as_roster_human_and_rechecks_before_label() -> None:
+    """Issue Accept records exact-text human approval and labels only after eligibility."""
+    accept = _ascii(ACCEPT_SKILL)
+    assert "origin: actor-session" in accept
+    assert "This skill has no unattended path." in accept
+    assert "Posting without approval of that exact text is forbidden." in accept
+    assert "Do not use `autopilot-comment`." in accept
+    assert "`updated_at` equals `created_at`" in accept
+    assert "Require `state: record-present`." in accept
+    label = accept.index("--add-label status/accepted")
+    assert accept.index('--issue "$ISSUE" --approval-url "$COMMENT_URL"') < label
+    assert accept.index('gh issue comment "$ISSUE"') < label

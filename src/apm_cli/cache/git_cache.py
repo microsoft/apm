@@ -16,6 +16,9 @@ Resolution flow:
 On every cache HIT:
 - Run integrity check (verify HEAD == expected SHA)
 - Mismatch -> evict shard, fall through to fresh fetch, log warning
+- Sparse (promisor) shards with tracked files missing from the worktree
+  are rebuilt; a fresh promisor checkout that leaves files missing raises
+  ``IncompleteCheckoutError`` so the auth fallback can retry (#3071)
 - Refresh the SHA directory's access timestamp after successful validation
 
 Concurrency:
@@ -31,10 +34,12 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
-from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
+from ..utils.git_env import run_git_text
+from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
 from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
@@ -60,6 +65,19 @@ class CachePruneError(OSError):
         super().__init__(f"Pruned {pruned} SHA group(s); {len(failures)} failed.")
 
 
+class IncompleteCheckoutError(RuntimeError):
+    """A checkout exited 0 but left tracked files unmaterialized (#3071).
+
+    Git before 2.36 ignores a failed promisor blob fetch during a non-forced
+    checkout. ``stderr`` keeps Git's diagnostics so the anonymous-first auth
+    fallback can classify the rejection and retry with credentials.
+    """
+
+    def __init__(self, message: str, *, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
+
+
 def _safe_git_args() -> list[str]:
     """Return hardening ``-c`` args prepended to every git subprocess.
 
@@ -67,37 +85,53 @@ def _safe_git_args() -> list[str]:
       malicious upstream might ship, so clone and checkout stay inert.
     - ``submodule.recurse=false`` prevents any subcommand from
       recursing into attacker-controlled submodule URLs.
-    - ``core.autocrlf=false`` disables host autocrlf conversion so
-      LF-committed blobs are not rewritten as CRLF on checkout.
+    - ``git_line_ending_pin_args`` disables host autocrlf conversion
+      and sets ``core.eol`` to ``lf`` so ``text`` / ``text=auto`` paths are
+      written with the same bytes on every host (apm#2971, apm#3270).
       ``-c`` outranks host system / global config and
       ``GIT_CONFIG_KEY_n`` snapshots from ``git_network_env``, which
-      otherwise win over a repo-local pin (apm#2971). This pin does
-      not override ``core.eol`` or ``.gitattributes`` ``eol=crlf`` /
-      ``text=auto`` requests.
+      otherwise win over a repo-local pin. Explicit ``.gitattributes``
+      ``eol=`` requests and committed CRLF blobs are still honored.
 
-    - ``git_symlink_pin_args`` checks out in-repo links as real symlinks
-      so Windows hashes the same bytes as POSIX (#3457).
+    - ``git_symlink_pin_args`` writes in-repo links as link text on every
+      host, so checkout never needs OS symlink capability; the shard then
+      replaces them with their Git-object content (#3457).
 
     These flags are scoped per-invocation via ``-c`` and never mutate
     the user's gitconfig. The cache layer is the single source of
     truth for git subprocess invocation -- callers must use this
     helper rather than ad-hoc ``git`` argv construction.
     """
-    from ..utils.git_env import git_long_paths_args, git_no_hooks_args, git_symlink_pin_args
+    from ..utils.git_env import (
+        git_line_ending_pin_args,
+        git_long_paths_args,
+        git_no_hooks_args,
+        git_symlink_pin_args,
+    )
 
     return [
         *git_long_paths_args(),
         *git_no_hooks_args(),
         "-c",
         "submodule.recurse=false",
-        "-c",
-        "core.autocrlf=false",
+        *git_line_ending_pin_args(),
         *git_symlink_pin_args(),
     ]
 
 
-def _checkout_core_values(checkout_dir: Path) -> dict[str, str] | None:
-    """Return the first ``[core]`` values in a checkout's local gitconfig."""
+# Shards whose tracked links hold their Git-object content carry this local
+# key. Older shards hold OS symlinks or Git link text instead (#3457), and
+# ``git-objects`` shards may hold out-of-cone targets read without their
+# ``.gitattributes`` (e.g. LF for ``eol=crlf``), so the value is versioned.
+_LINK_MATERIALIZATION_PIN = ("apm.linkMaterialization", "git-objects-checkout")
+
+# Sparse (promisor) shards verified to hold every tracked file carry this
+# local key, so cache hits skip the ``ls-files`` probe (#3071).
+_SPARSE_COMPLETENESS_PIN = ("apm.sparseMaterialization", "complete")
+
+
+def _checkout_config_values(checkout_dir: Path) -> dict[str, str] | None:
+    """Return the first ``section.key`` values in a checkout's local gitconfig."""
     config = checkout_dir / ".git" / "config"
     if not config.is_file():
         return None
@@ -115,37 +149,103 @@ def _checkout_core_values(checkout_dir: Path) -> dict[str, str] | None:
             inner = line[1:-1].strip()
             section = inner.split(" ", 1)[0].strip().lower()
             continue
-        if section != "core" or "=" not in line:
+        if section is None or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        values.setdefault(key.strip().lower(), value.strip().strip("\"'").lower())
+        values.setdefault(f"{section}.{key.strip().lower()}", value.strip().strip("\"'").lower())
     return values
 
 
-def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
-    """Return whether the checkout's local gitconfig pins ``core.autocrlf=false``.
+def _checkout_materialization_pins() -> tuple[tuple[str, str], ...]:
+    """Return every byte-determinism ``(key, value)`` a cached shard must record."""
+    from ..utils.git_env import git_line_ending_pin_entries, git_symlink_pin_entry
 
-    Pre-fix shards materialized under host ``core.autocrlf=true`` omit this
-    pin and may contain CRLF working-tree bytes. Cache hits rematerialize
-    those shards so existing Windows caches heal without ``apm cache clean``.
-    """
-    values = _checkout_core_values(checkout_dir) or {}
-    return values.get("autocrlf") in {"false", "0", "no", "off"}
+    return (*git_line_ending_pin_entries(), git_symlink_pin_entry(), _LINK_MATERIALIZATION_PIN)
 
 
 def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     """Return whether a shard was materialized with every byte-determinism pin.
 
-    Shards written before the ``core.symlinks`` pin may hold Windows
-    link-text files instead of symlinks (#3457); cache hits rematerialize them.
+    Shards written before a pin existed may hold host-dependent bytes: CRLF
+    from ``core.autocrlf`` (apm#2971) or ``core.eol`` under ``text=auto``
+    (apm#3270), or OS symlinks / Windows link-text files instead of link
+    content (#3457). Cache hits rematerialize them so existing caches heal
+    without ``apm cache clean``.
     """
-    from ..utils.git_env import git_symlink_pin_entry
-
-    key, value = git_symlink_pin_entry()
-    values = _checkout_core_values(checkout_dir) or {}
-    return _checkout_pins_autocrlf_false(checkout_dir) and (
-        values.get(key.split(".", 1)[1]) == value
+    values = _checkout_config_values(checkout_dir) or {}
+    return all(
+        values.get(key.lower()) == value.lower() for key, value in _checkout_materialization_pins()
     )
+
+
+def _unmaterialized_paths(
+    git_exe: str, checkout_dir: Path, *, env: dict[str, str], timeout: int = 60
+) -> list[str]:
+    """Return tracked paths the working tree is missing (skip-worktree excluded)."""
+    result = run_git_text(
+        [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "ls-files", "--deleted", "-z"],
+        capture_output=True,
+        timeout=timeout,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    return [path for path in result.stdout.split("\0") if path]
+
+
+def _pin_sparse_completeness(git_exe: str, checkout_dir: Path, *, env: dict[str, str]) -> None:
+    """Record that a sparse shard was verified complete (#3071).
+
+    The pin only lets later cache hits skip the probe, so a failed write is
+    logged and ignored rather than discarding a verified checkout.
+    """
+    key, value = _SPARSE_COMPLETENESS_PIN
+    try:
+        run_git_text(
+            [git_exe, *_safe_git_args(), "-C", str(checkout_dir), "config", key, value],
+            capture_output=True,
+            timeout=10,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            check=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        _log.debug("Could not pin sparse completeness for %s", checkout_dir)
+
+
+def _sparse_checkout_is_complete(
+    checkout_dir: Path,
+    sparse_paths: list[str] | None,
+    *,
+    env: dict[str, str] | None,
+) -> bool:
+    """Return whether a cached sparse shard materialized every tracked file.
+
+    Only promisor-backed sparse shards can lose blobs silently, so full
+    shards skip the probe, and so do shards already pinned as verified.
+    Unpinned shards (possibly poisoned by 0.29.1+) are probed once and
+    pinned when complete. Probe failures count as incomplete so the shard
+    is rebuilt rather than trusted. Callers hold the shard lock.
+    """
+    if not sparse_paths:
+        return True
+    key, value = _SPARSE_COMPLETENESS_PIN
+    if (_checkout_config_values(checkout_dir) or {}).get(key.lower()) == value:
+        return True
+    from ..utils.git_env import get_git_executable, git_subprocess_env
+
+    git_exe = get_git_executable()
+    subprocess_env = git_subprocess_env(env)
+    try:
+        # Local index scan only; a short bound limits shard-lock hold time.
+        missing = _unmaterialized_paths(git_exe, checkout_dir, env=subprocess_env, timeout=10)
+    # SubprocessError also covers GitOutputDecodeError (#3056).
+    except (subprocess.SubprocessError, OSError):
+        return False
+    if missing:
+        return False
+    _pin_sparse_completeness(git_exe, checkout_dir, env=subprocess_env)
+    return True
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -269,11 +369,12 @@ class GitCache:
         if not self._refresh and checkout_dir.is_dir():
             sha_ok = verify_checkout_sha(checkout_dir, sha)
             if sha_ok and _checkout_has_materialization_pins(checkout_dir):
-                _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
-                    return self._record_checkout_access(
-                        self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
-                    )
+                    # An incomplete shard falls through to _create_checkout,
+                    # which rebuilds it under the same lock (#3071).
+                    if _sparse_checkout_is_complete(checkout_dir, sparse_paths, env=env):
+                        _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
+                        return self._record_checkout_access(checkout_dir)
             elif not sha_ok:
                 # Integrity failure -- evict
                 _log.warning(
@@ -339,42 +440,6 @@ class GitCache:
                 "Check cache permissions or set APM_CACHE_DIR to a writable directory.",
                 checkout_dir.parent,
                 exc,
-            )
-        return checkout_dir
-
-    def _finalize_sparse_checkout(
-        self,
-        url: str,
-        checkout_dir: Path,
-        sparse_paths: list[str] | None,
-        *,
-        env: dict[str, str] | None,
-    ) -> Path:
-        """Repair and validate a sparse checkout before any cache return."""
-        if not sparse_paths:
-            return checkout_dir
-        from ..utils.git_env import get_git_executable, git_network_env, git_subprocess_env
-
-        git_exe = get_git_executable()
-        subprocess_env = git_subprocess_env(env)
-        dangling = repair_dangling_cone_symlinks(
-            git_exe,
-            checkout_dir,
-            list(sparse_paths),
-            env=subprocess_env,
-            extra_git_args=_safe_git_args(),
-            repair_env_factory=lambda: git_network_env(
-                url,
-                env,
-                worktree=checkout_dir,
-            ),
-        )
-        if dangling is not None:
-            _log.info(
-                "Sparse-cone checkout of %s left a dangling symlink at %s; "
-                "widened to a full checkout so it resolves (#2707).",
-                checkout_dir,
-                dangling,
             )
         return checkout_dir
 
@@ -552,16 +617,17 @@ class GitCache:
                 # all blobs must be present locally. The partial path
                 # relies on the consumer being configured as a promisor
                 # so missing blobs trigger an on-demand fetch.
-                subprocess.run(
+                run_git_text(
                     clone_args,
                     capture_output=True,
-                    text=True,
                     timeout=300,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056), so a
+            # rejected clone output still removes the staged tree.
+            except (subprocess.SubprocessError, OSError) as exc:
                 # Partial clone fallback: some servers reject --filter
                 # (old Gerrit / pre-2.20 GHE). Retry once without it so
                 # we never block on this optimization. The resulting
@@ -580,7 +646,7 @@ class GitCache:
                     staged.mkdir(parents=True, exist_ok=True)
                     os.chmod(str(staged), 0o700)
                     try:
-                        subprocess.run(
+                        run_git_text(
                             [
                                 git_exe,
                                 *_safe_git_args(),
@@ -593,7 +659,6 @@ class GitCache:
                                 str(staged),
                             ],
                             capture_output=True,
-                            text=True,
                             timeout=300,
                             env=subprocess_env,
                             stdin=subprocess.DEVNULL,
@@ -603,11 +668,7 @@ class GitCache:
                         from ..utils.console import _rich_warning
 
                         _rich_warning(_partial_clone_fallback_warning(url))
-                    except (
-                        subprocess.CalledProcessError,
-                        subprocess.TimeoutExpired,
-                        OSError,
-                    ) as exc2:
+                    except (subprocess.SubprocessError, OSError) as exc2:
                         from ..utils.file_ops import robust_rmtree
 
                         robust_rmtree(staged, ignore_errors=True)
@@ -682,8 +743,6 @@ class GitCache:
             git_network_env,
             git_no_templates_args,
             git_subprocess_env,
-            git_symlink_pin_entry,
-            raise_for_symlink_capability,
         )
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if promisor_url else "")
@@ -712,19 +771,23 @@ class GitCache:
             # rule out a poisoned half-write (atomic_land guards
             # against that, but we re-check defensively).
             existing_ok = final_dir.is_dir() and verify_checkout_sha(final_dir, sha)
-            if existing_ok and _checkout_has_materialization_pins(final_dir):
+            if (
+                existing_ok
+                and _checkout_has_materialization_pins(final_dir)
+                and _sparse_checkout_is_complete(final_dir, sparse_paths, env=env)
+            ):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
                     variant,
                 )
-                return self._record_checkout_access(
-                    self._finalize_sparse_checkout(url, final_dir, sparse_paths, env=env)
-                )
+                return self._record_checkout_access(final_dir)
+            remat_started: float | None = None
             if existing_ok:
+                remat_started = time.monotonic()
                 _log.info(
-                    "[*] Rematerializing git checkout missing materialization pins: %s @ %s [%s]",
+                    "[*] Rematerializing incomplete or unpinned git checkout: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
                     variant,
@@ -747,11 +810,14 @@ class GitCache:
             try:
                 # Clone from local bare repo (fast, no network).
                 # ``promisor`` and ``partialclonefilter`` ride on the clone
-                # via ``-c key=val`` (one spawn). ``remote.origin.url``
-                # needs a separate post-clone ``git config`` because git
-                # clone always rewrites it to the clone source after
-                # applying ``-c`` overrides.
-                subprocess.run(
+                # via ``-c key=val`` (one spawn), as do the materialization
+                # pins that cache hits require to recognize post-fix shards.
+                # Checkout itself still needs the ``-c`` pins from
+                # ``_safe_git_args`` because env-frozen host config outranks
+                # these local values. ``remote.origin.url`` needs a separate
+                # post-clone ``git config`` because git clone always rewrites
+                # it to the clone source after applying ``-c`` overrides.
+                run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -761,6 +827,11 @@ class GitCache:
                         "--shared",
                         "--no-checkout",
                         "--no-recurse-submodules",
+                        *(
+                            arg
+                            for key, value in _checkout_materialization_pins()
+                            for arg in ("-c", f"{key}={value}")
+                        ),
                         *(
                             [
                                 "-c",
@@ -775,31 +846,16 @@ class GitCache:
                         str(staged),
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-                # Persist the pins so cache hits can recognize post-fix shards.
-                # Checkout itself still needs the ``-c`` pins from
-                # ``_safe_git_args`` because env-frozen host config outranks
-                # these local values.
-                for key, value in (("core.autocrlf", "false"), git_symlink_pin_entry()):
-                    subprocess.run(
-                        [git_exe, *_safe_git_args(), "-C", str(staged), "config", key, value],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                        env=subprocess_env,
-                        stdin=subprocess.DEVNULL,
-                        check=True,
-                    )
                 if promisor_url:
                     # Point origin at the real upstream (clone set it to the
                     # local bare). Single config call; the other two promisor
                     # keys were already applied via ``-c`` above.
-                    subprocess.run(
+                    run_git_text(
                         [
                             git_exe,
                             *_safe_git_args(),
@@ -810,7 +866,6 @@ class GitCache:
                             promisor_url,
                         ],
                         capture_output=True,
-                        text=True,
                         timeout=10,
                         env=subprocess_env,
                         stdin=subprocess.DEVNULL,
@@ -833,9 +888,8 @@ class GitCache:
                         env=subprocess_env,
                         extra_git_args=_safe_git_args(),
                     )
-                # Checkout the specific SHA. Git reports a link it could not
-                # create on stderr but still exits 0.
-                checkout = subprocess.run(
+                # Checkout the specific SHA.
+                checkout = run_git_text(
                     [
                         git_exe,
                         *_safe_git_args(),
@@ -845,35 +899,50 @@ class GitCache:
                         sha,
                     ],
                     capture_output=True,
-                    text=True,
                     timeout=60,
                     env=subprocess_env,
                     stdin=subprocess.DEVNULL,
                     check=True,
                 )
-                raise_for_symlink_capability(checkout, _sanitize_url(url))
-                if sparse_paths:
-                    # Correctness repair, not a failure fallback (#2707):
-                    # if the cone left a dangling symlink (target outside
-                    # the requested paths), widen to a full checkout so
-                    # it resolves. Only fires when the narrow cone would
-                    # otherwise ship a broken checkout.
-                    self._finalize_sparse_checkout(
-                        url,
-                        staged,
-                        sparse_paths,
-                        env=env,
+                # Old Git exits 0 when a promisor blob fetch fails, leaving
+                # an empty tree that would be cached as valid (#3071).
+                missing = (
+                    _unmaterialized_paths(git_exe, staged, env=subprocess_env)
+                    if promisor_url
+                    else []
+                )
+                if missing:
+                    raise IncompleteCheckoutError(
+                        f"Incomplete checkout for {_sanitize_url(url)} @ {sha[:12]}: "
+                        f"{len(missing)} tracked file(s) not materialized "
+                        f"(first: {missing[0]}). Git could not fetch file contents; "
+                        "the repository may require credentials.",
+                        stderr=checkout.stderr or "",
                     )
+                if promisor_url:
+                    _pin_sparse_completeness(git_exe, staged, env=subprocess_env)
+                # Replace link text with Git-object content before landing
+                # (#3457). Lenient: this shard may serve any package path or
+                # a marketplace read, so an unresolvable link stays link
+                # text for the package consumer to reject.
+                materialize_tracked_symlinks(
+                    git_exe,
+                    staged,
+                    list(sparse_paths) if sparse_paths else None,
+                    env=subprocess_env,
+                    extra_git_args=_safe_git_args(),
+                    strict=False,
+                )
             except (RuntimeError, ValueError):
                 from ..utils.file_ops import robust_rmtree
 
                 robust_rmtree(staged, ignore_errors=True)
                 raise
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            # SubprocessError also covers GitOutputDecodeError (#3056).
+            except (subprocess.SubprocessError, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
 
                 robust_rmtree(staged, ignore_errors=True)
-                raise_for_symlink_capability(exc, _sanitize_url(url))
                 raise RuntimeError(
                     f"Failed to create checkout for {_sanitize_url(url)} @ {sha[:12]}: {exc}"
                 ) from exc
@@ -893,6 +962,14 @@ class GitCache:
                         f"Race condition: concurrent checkout failed integrity "
                         f"for {_sanitize_url(url)} @ {sha[:12]}"
                     )
+            if remat_started is not None:
+                _log.info(
+                    "[+] Rematerialized git checkout %s @ %s [%s] in %d ms",
+                    _sanitize_url(url),
+                    sha[:12],
+                    variant,
+                    int((time.monotonic() - remat_started) * 1000),
+                )
             return final_dir
 
     def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:
@@ -902,10 +979,9 @@ class GitCache:
         git_exe = get_git_executable()
         subprocess_env = git_subprocess_env(env)
         try:
-            result = subprocess.run(
+            result = run_git_text(
                 [git_exe, *_safe_git_args(), "--git-dir", str(bare_dir), "cat-file", "-t", sha],
                 capture_output=True,
-                text=True,
                 timeout=10,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -951,10 +1027,9 @@ class GitCache:
             fetch_args += ["--filter=blob:none"]
         fetch_args += [url, sha]
         try:
-            subprocess.run(
+            run_git_text(
                 fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,
@@ -973,10 +1048,9 @@ class GitCache:
             if is_partial:
                 fallback_fetch_args += ["--filter=blob:none"]
             fallback_fetch_args += [url, *_FALLBACK_REFSPECS]
-            subprocess.run(
+            run_git_text(
                 fallback_fetch_args,
                 capture_output=True,
-                text=True,
                 timeout=120,
                 env=subprocess_env,
                 stdin=subprocess.DEVNULL,

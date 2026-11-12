@@ -49,12 +49,12 @@ _LEAF_CNF = """\
 distinguished_name = dn
 prompt = no
 [dn]
-CN = api.github.com
+CN = {common_name}
 [v3_leaf]
 basicConstraints = CA:FALSE
 keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
-subjectAltName = DNS:raw.githubusercontent.com, DNS:api.github.com
+subjectAltName = {alt_names}
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
 """
@@ -87,15 +87,23 @@ class GitHubHttpObservation:
         return self.host == RAW_HOST
 
 
-def _mint_certificates(directory: Path) -> tuple[Path, Path, Path]:
-    """Create a private CA and a GitHub-host leaf; return (ca, leaf, key)."""
+def _mint_certificates(
+    directory: Path, hosts: tuple[str, ...] = (API_HOST, RAW_HOST)
+) -> tuple[Path, Path, Path]:
+    """Create a private CA and a leaf for *hosts*; return (ca, leaf, key)."""
     openssl = openssl_executable()
     if openssl is None:
         raise RuntimeError("openssl CLI is required to mint fixture certificates")
     directory.mkdir(parents=True, exist_ok=True)
     ca_cnf, leaf_cnf = directory / "ca.cnf", directory / "leaf.cnf"
     ca_cnf.write_text(_CA_CNF, encoding="ascii")
-    leaf_cnf.write_text(_LEAF_CNF, encoding="ascii")
+    leaf_cnf.write_text(
+        _LEAF_CNF.format(
+            common_name=hosts[0],
+            alt_names=", ".join(f"DNS:{host}" for host in sorted(hosts)),
+        ),
+        encoding="ascii",
+    )
     ca_key, ca_pem = directory / "ca.key", directory / "ca.pem"
     leaf_key, leaf_csr, leaf_pem = (
         directory / "leaf.key",
@@ -191,17 +199,19 @@ class _GitHubHandler(BaseHTTPRequestHandler):
         return 404, b'{"message": "Not Found"}', "application/json"
 
     def _raw(self, path: str) -> tuple[int, bytes, str]:
-        parts = path.lstrip("/").split("/", 3)
+        parts = path.lstrip("/").split("/")
         if len(parts) < 4:
             return self._not_found()
         slug = f"{parts[0]}/{parts[1]}"
         if slug not in self.server.repositories or slug in self.server.private_repositories:
             # Real raw.githubusercontent.com answers 404 for private content.
             return self._not_found()
-        content = self._blob(slug, parts[2], parts[3])
-        if content is None:
-            return self._not_found()
-        return 200, content, "text/plain; charset=utf-8"
+        # Like the real host, accept slash-containing refs such as release/pilot.
+        for split in range(3, len(parts)):
+            content = self._blob(slug, "/".join(parts[2:split]), "/".join(parts[split:]))
+            if content is not None:
+                return 200, content, "text/plain; charset=utf-8"
+        return self._not_found()
 
     def _api(self, path: str, query: dict[str, list[str]]) -> tuple[int, bytes, str]:
         parts = path.lstrip("/").split("/", 4)

@@ -18,7 +18,7 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -56,12 +56,80 @@ on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 USER_ROOT_ENV_VARS: dict[str, str] = {
     "claude": "CLAUDE_CONFIG_DIR",
     "hermes": "HERMES_HOME",
+    "codex": "CODEX_HOME",
 }
 """Targets whose user-scope root an environment variable selects.
 
 Each value of the variable is a separate profile of the same runtime, and
 all of them share one user lockfile.
 """
+
+_TOOL_RESOLVED_USER_ROOTS: dict[str, str] = {
+    "codex": "Codex CLI",
+}
+"""Targets whose user-root variable follows the tool's own resolver, by tool label.
+
+A nonblank value is used verbatim (not trimmed) and must be absolute; a
+relative value raises :class:`PathTraversalError` instead of resolving
+against the working directory. The Codex MCP adapter reads ``CODEX_HOME``
+the same way, so compiled files and MCP config share one root.
+"""
+
+
+def _posix_shell_host() -> bool:
+    """Return whether documented macOS/Linux hook shell execution applies here."""
+    import os
+
+    return os.name != "nt"
+
+
+@dataclass(frozen=True)
+class UserHookHomeReference:
+    """How a harness runs user-scope hook commands, and the home reference it expands.
+
+    Set on a profile only when the harness's current official documentation
+    states that its user-scope hook commands run through a POSIX shell on
+    macOS and Linux. The shell then expands :attr:`reference` at invocation,
+    so a user config tracked in a dotfiles repo stays valid on every machine.
+    Exec-form handlers (``args``), fields the harness hands to another shell,
+    single-quoted references and Windows hosts keep absolute paths.
+    """
+
+    shell_selectors: tuple[str, ...]
+    """Command fields (or Claude ``shell`` values) run through a POSIX shell."""
+
+    evidence: str
+    """Official documentation URL that states the shell execution."""
+
+    reference: str = "$HOME"
+    """Home reference the harness expands; ``$HOME`` unless a native placeholder exists."""
+
+    def for_handler(self, handler: Mapping[str, object]) -> UserHookHomeReference | None:
+        """Return this capability for a shell-form handler; exec form (``args``) has no shell."""
+        return None if "args" in handler else self
+
+    def reference_for(self, selector: str, *, quote: str) -> str | None:
+        """Return the home reference for one command field, or ``None`` to stay absolute."""
+        if quote == "'" or selector not in self.shell_selectors:
+            return None
+        return self.reference if _posix_shell_host() else None
+
+    def anchor(self, path: Path, selector: str | None, *, quote: str) -> str:
+        """Return the hook command spelling of absolute *path* for one command field.
+
+        ``selector`` is the command field, or Claude's ``shell`` value (``None``
+        means the default shell form). Paths stay absolute unless the field is
+        shell-executed and *path* lives under the current home directory.
+        """
+        reference = self.reference_for(selector or "command", quote=quote)
+        if reference is None:
+            return str(path)
+        try:
+            relative = path.relative_to(Path.home().resolve())
+        except ValueError:
+            # A custom root such as CLAUDE_CONFIG_DIR outside home stays absolute.
+            return str(path)
+        return f"{reference}/{relative.as_posix()}"
 
 
 @dataclass(frozen=True)
@@ -266,6 +334,13 @@ class TargetProfile:
     from :attr:`root_dir`.  Override only when the target deploys to multiple
     top-level directories (e.g. Codex deploys both ``.codex/`` and
     ``.agents/``).
+    """
+
+    user_hook_home_reference: UserHookHomeReference | None = None
+    """Verified shell execution that lets user-scope hook commands anchor to home.
+
+    ``None`` keeps today's absolute user-scope hook paths. Enable only with a
+    citation to the harness's current official hook documentation.
     """
 
     hooks_config_display: str | None = None
@@ -482,24 +557,32 @@ class TargetProfile:
         if self.name == "copilot":
             generated_files = ()
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
-        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
-        # `apm install -g` lands where the tool reads.
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
+        # honors HERMES_HOME (default ~/.hermes) and Codex honors CODEX_HOME
+        # (default ~/.codex); mirror that at user scope so `apm install -g`
+        # and `apm compile --global` land where the tool reads.
         if self.name in USER_ROOT_ENV_VARS:
             import os
-            from pathlib import Path
 
-            env = os.environ.get(USER_ROOT_ENV_VARS[self.name], "").strip()
-            if env:
+            env_var = USER_ROOT_ENV_VARS[self.name]
+            raw = os.environ.get(env_var, "")
+            tool_label = _TOOL_RESOLVED_USER_ROOTS.get(self.name)
+            if raw.strip():
+                expanded = Path(raw if tool_label else raw.strip()).expanduser()
+                if tool_label and not expanded.is_absolute():
+                    raise PathTraversalError(
+                        f"{env_var} is set to a non-absolute path; cannot locate the "
+                        f"{tool_label} configuration directory."
+                    )
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = Path(env).expanduser().resolve(strict=False)
+                abs_path = expanded.resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
-                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
+                    # Fallback: when the user-root variable points outside $HOME we
                     # store an absolute path. ``pathlib.Path / <absolute>`` is
                     # ``<absolute>`` so deploy + cleanup write to the right
                     # place. The lockfile path translator treats an absolute
@@ -662,11 +745,18 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
+        # Shell form runs through ``sh -c`` on macOS/Linux; exec form (``args``)
+        # and ``shell: "powershell"`` do not expand ``$HOME``.
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("command", "bash"),
+            evidence="https://code.claude.com/docs/en/hooks",
+        ),
         hooks_config_display=".claude/settings.json",
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
-    # Instructions are compile-only (AGENTS.md) -- not installed.
+    # Instructions are compile-only (AGENTS.md) -- not installed.  At user
+    # scope the root honors CODEX_HOME (default ~/.codex) via for_scope().
     "codex": TargetProfile(
         capability=TARGET_CAPABILITIES["codex"],
         root_dir=".codex",
@@ -715,10 +805,17 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         # "partial": instructions deploy modularly under
         # ~/.copilot/instructions/ (restored above), but prompts/agents/
-        # skills/hooks/canvas have no documented Copilot CLI user-scope
+        # skills/canvas have no documented Copilot CLI user-scope
         # surface yet, so the target is not "True" (fully) supported.
         user_supported="partial",
         user_root_dir=".copilot",
+        # Copilot CLI loads ~/.copilot/hooks/*.json; ``bash`` is the Unix shell
+        # command. ``command`` is also copied to ``powershell``, and
+        # ``exec``/``args`` bypass the shell, so both stay absolute.
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("bash",),
+            evidence="https://docs.github.com/en/copilot/reference/hooks-reference",
+        ),
         generated_files=("copilot-instructions.md",),
     ),
     # GitHub Copilot desktop App -- experimental, user-scope only.
@@ -847,6 +944,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".gemini",
+        # Hook ``command`` is "the shell command to execute".
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("command",),
+            evidence="https://geminicli.com/docs/hooks/reference/",
+        ),
         hooks_config_display=".gemini/settings.json",
     ),
     # Grok Bot -- stable, explicit-only, skills-only target for the Grok Bot
@@ -957,6 +1059,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".kiro",
+        # Kiro CLI loads ~/.kiro/hooks/; command actions "run a shell command".
+        # Only command/bash sources become that action without PowerShell.
+        user_hook_home_reference=UserHookHomeReference(
+            shell_selectors=("command", "bash"),
+            evidence="https://kiro.dev/docs/hooks/actions/",
+        ),
     ),
     # OpenClaw -- experimental, skills-only target for the OpenClaw agent
     # runtime (github.com/openclaw/openclaw).  OpenClaw reads SKILL.md
@@ -1118,7 +1226,7 @@ def skills_root_prefixes() -> frozenset[str]:
         if not profile.supports("skills") or profile.user_root_resolver is not None:
             continue
         roots.add(profile.skills_rel_root)
-        user_profile = profile.for_scope(user_scope=True)
+        user_profile = scoped_profile_or_none(profile, user_scope=True)
         if user_profile is not None and user_profile.supports("skills"):
             roots.add(user_profile.skills_rel_root)
     return frozenset(roots)
@@ -1293,16 +1401,36 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
 def selected_user_profiles() -> dict[str, TargetProfile]:
     """Return the user-scope profile each :data:`USER_ROOT_ENV_VARS` target selects.
 
-    Without the variable the default root (``~/.claude``, ``~/.hermes``) is
-    the selected profile.
+    Without the variable the default root (``~/.claude``, ``~/.hermes``,
+    ``~/.codex``) is the selected profile. A target whose variable cannot
+    select a root (a relative ``CODEX_HOME``) is omitted so other targets'
+    cleanup keeps working; commands that deploy to it still fail clearly.
     """
     profiles: dict[str, TargetProfile] = {}
     for name in USER_ROOT_ENV_VARS:
         base = KNOWN_TARGETS.get(name)
-        scoped = base.for_scope(user_scope=True) if base is not None else None
+        scoped = scoped_profile_or_none(base, user_scope=True) if base is not None else None
         if scoped is not None:
             profiles[name] = scoped
     return profiles
+
+
+def scoped_profile_or_none(profile: TargetProfile, *, user_scope: bool) -> TargetProfile | None:
+    """Return ``profile.for_scope()`` for a scan that may include inactive targets.
+
+    A tool-resolved user-root variable that cannot select a root (a relative
+    ``CODEX_HOME``) makes only that target unresolvable: scans over
+    :data:`KNOWN_TARGETS` or lockfile rows skip it, so Claude-only installs,
+    uninstalls and skill cleanup keep working. Paths that deploy to the target
+    (``resolve_targets``, ``apm compile --global``) call ``for_scope``
+    directly and still fail clearly.
+    """
+    try:
+        return profile.for_scope(user_scope=user_scope)
+    except PathTraversalError:
+        if profile.name not in _TOOL_RESOLVED_USER_ROOTS:
+            raise
+        return None
 
 
 def is_other_profile_path(profile: TargetProfile, value: str) -> bool:

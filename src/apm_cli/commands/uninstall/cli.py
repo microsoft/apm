@@ -11,6 +11,7 @@ import click
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...hook_contract import HookContractError
 from ...install.locking import serialized_lifecycle
 from ...models.apm_package import APMPackage
 from ...utils.path_security import PathTraversalError
@@ -146,7 +147,13 @@ def _sync_integrations_for_manifest(
         )
     except Exception as sync_err:
         logger.warning("Integration cleanup did not finish.")
-        logger.warning("Run 'apm install' to resync remaining integrations.")
+        if isinstance(sync_err, HookContractError):
+            # The survivor preflight refused before any hook settings changed;
+            # 'apm install' would refuse the same package until it is migrated.
+            logger.warning(str(sync_err))
+            logger.warning("Migrate the package above, then run 'apm install' to resync.")
+        else:
+            logger.warning("Run 'apm install' to resync remaining integrations.")
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
         logger.verbose_detail(traceback.format_exc().rstrip())
         return default_outcome, sync_err
@@ -256,8 +263,8 @@ def _split_selected_profile_packages(
 ) -> tuple[list, list]:
     """Split requested packages into full removals and selected-profile removals.
 
-    A package still deployed to another Claude/Hermes profile is removed only
-    from the selected profile and stays declared (#3425).
+    A package still deployed to another Claude/Hermes/Codex profile is removed
+    only from the selected profile and stays declared (#3425).
     """
     if not user_scope or not lockfile:
         return packages_to_remove, []
@@ -393,7 +400,8 @@ def _finish_selected_profile_uninstall(
 
 
 @click.command(
-    help="Remove packages using manifest entries or direct locked keys from 'apm deps list'"
+    help="Remove packages using manifest entries or direct locked keys from 'apm deps list'",
+    short_help="Remove packages by manifest entry or locked key",
 )
 @click.argument("packages", nargs=-1, required=True)
 @click.option(
@@ -408,7 +416,7 @@ def _finish_selected_profile_uninstall(
     "global_",
     is_flag=True,
     default=False,
-    help="Remove from user scope (~/.apm/) instead of the current project",
+    help="Remove from the APM user home instead of the current project",
 )
 @click.pass_context
 @serialized_lifecycle
@@ -462,7 +470,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             sys.exit(1)
 
         if scope is InstallScope.USER:
-            logger.progress("Uninstalling from user scope (~/.apm/)")
+            logger.progress(f"Uninstalling from user scope ({manifest_path.parent}/)")
 
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 

@@ -164,8 +164,8 @@ excluded or collision-displaced resources fail before replacing a bundle.
 Use `apm pack --dry-run --verbose` to inspect the complete file list.
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
-files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
-(`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
+files under `hooks/` or `.apm/hooks/`. Hook filenames never select targets:
+every hook file reaches every effective target.
 
 Hook-only Git dependencies need neither `apm.yml` nor `SKILL.md`. Set
 `path` to the directory containing `hooks/` or `.apm/hooks/`, not the
@@ -201,11 +201,23 @@ This package cannot write to `.cursor/hooks.json`, even when Cursor is active.
 A consumer can narrow it further with per-dependency `targets:`; see
 `dependencies.md`.
 
-### Migrating filename-routed hooks
+To ship different hooks per harness, publish one package per target set,
+each declaring its own `target:`, and keep shared content in a common
+package. Declaring several targets on one package does not assign different
+files to each target.
 
-When renaming a target-specific hook file to generic `hooks.json`, preserve
-producer intent with an explicit package `target:` declaration -- consumers
-may narrow it further but cannot expand it:
+### Migrating from filename routing
+
+APM used to route `*-<harness>-hooks.json` and `hooks-<harness>.json` only to
+the named target and skipped generic files for a target that had its own
+file. That routing is removed. If removing it would give a target a hook file
+the old names kept from it, `apm install` fails for that package, names the
+target and files, and writes nothing from it. Until it is migrated,
+`apm uninstall` of another package stops with the same message before it
+changes hook settings.
+
+Package authors migrate by splitting each target's hooks into a package that
+declares it:
 
 ```yaml
 name: codex-hooks
@@ -213,21 +225,14 @@ version: "1.0.0"
 target: codex
 ```
 
-Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
-After: rename to `hooks.json` and add `target: codex` to the package's own
-`apm.yml`. The consumer can still narrow further with per-dependency `targets:`.
-Combined deprecated stems such as `claude-codex-hooks.json` route to every
-named target token during the migration window.
-Stems with target tokens outside the trailing target suffix (for example
-`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
-warning naming the ignored token.
-
-During the deprecation window, suffix routing remains an additional
-restriction inside the effective target set and emits an install-time warning.
-Consumer per-dependency `targets:` can narrow that set further.
+A consumer can instead narrow the dependency with object-form
+`targets: [codex]` only when the package ships hook files for that one
+target; a generic `hooks.json` beside them still needs the split. A file
+whose old name already matched every effective target keeps installing
+unchanged.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
-becomes `PostToolUse` in Claude) and rewrites path variables
+becomes `PostToolUse` in Claude; see the alias table below) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
@@ -263,12 +268,24 @@ configuration compatibility does not guarantee equivalent behavior.
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
-| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
+| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` |
+| `PreToolUse`, `preToolUse` | `preToolUse` | `PreToolUse` |
+| `PostToolUse`, `postToolUse` | `postToolUse` | `PostToolUse` |
+| `subagentStop` | unchanged | `SubagentStop` |
+| `sessionEnd` | unchanged | `SessionEnd` |
+| `postToolUseFailure` | unchanged | `PostToolUseFailure` |
+| `preCompact` | unchanged | `PreCompact` |
 
-For Copilot and Claude, event names absent from this table are preserved unchanged. Only an unmapped
-camelCase or PascalCase name that conflicts with the target convention emits
-an install warning. All-lowercase names such as `stop` pass through silently;
-`stop` is not a native Copilot or Claude event and will not fire.
+Claude Code rejects unknown events, so a lower-case event without a
+documented Claude alias (for example `errorOccurred`, `subagentStart`, or
+`stop`) fails
+the install for that package before `.claude/settings.json` changes; limit
+the package to targets that support it. PascalCase names absent from the
+table pass to Claude unchanged. For Copilot, names absent from the table are
+preserved; an unmapped name whose casing conflicts with the target convention
+emits an install warning. Equivalent spellings of one binding are written
+once; bindings with different matchers (for example `Bash` and `*`) stay
+separate.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at
@@ -303,8 +320,14 @@ merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
 sidecar, so clones, contributors, and CI runners do not see the installer's
 machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
-references to absolute paths because the user-scope config is read
-without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+references so the user-scope config resolves without a fixed cwd. Where the
+harness documents POSIX shell execution, the path is anchored to `$HOME` on
+macOS/Linux (for example `$HOME/.claude/hooks/<pkg>/run.sh`) so the file stays
+identical across machines: Claude Code shell-form `command` (not `args` exec
+form or `shell: "powershell"`), Copilot CLI `bash`, Gemini CLI `command`, and
+Kiro command actions. Cursor, Codex, and Windsurf keep absolute paths, as do
+Windows hosts, single-quoted references, and config roots outside the home
+directory such as `CLAUDE_CONFIG_DIR`. If a manifest in `hooks/` or `.apm/hooks/` uses
 `./hooks/<script>`, APM first resolves it from the hook file directory,
 then falls back to the package root to avoid deploying a doubled
 `hooks/hooks/` path. If a referenced hook script is missing at install
@@ -445,7 +468,11 @@ target-specific YAML arrays/lists (under `paths:` / `globs:` /
 `fileMatchPattern:`) across Claude, Windsurf, and Kiro.
 For Cursor, APM emits one comma-joined scalar rather than a YAML list
 (`globs: **/src/**, **/api/**`). Ordinary patterns stay unquoted; unsafe
-characters are escaped. Descriptions keep printable non-ASCII text readable
+characters are escaped.
+When `applyTo` resolves to exactly one universal `**` (scalar, padded, or
+single-item list), Cursor instead gets `alwaysApply: true` and no `globs:`;
+mixed `**` plus scoped patterns keep `globs:`, and an absent, empty, or null
+`applyTo` emits neither key. Descriptions keep printable non-ASCII text readable
 and are quoted when needed to preserve their value. For Antigravity, APM
 emits `trigger: glob` plus one double-quoted comma-joined string
 (`globs: "**/src/**, **/api/**"`); an instruction without `applyTo` gets
@@ -608,7 +635,9 @@ authority for the preserved metadata.
 #### Codex target: native model settings
 
 Codex agents deploy to `.codex/agents/<name>.toml`. APM writes `name`,
-`description`, and the Markdown body as `developer_instructions`.
+`description`, and the Markdown body as `developer_instructions`
+(package-relative Markdown links are rewritten for the generated file's
+location, as for verbatim agent targets).
 String `model` and `model_reasoning_effort` frontmatter values are
 preserved as top-level TOML keys:
 
@@ -624,7 +653,11 @@ Review the requested change.
 
 Absent settings stay absent. APM does not translate model names, choose
 defaults, or validate model availability or supported effort values.
-Non-string values are dropped with a warning. Other frontmatter,
+Non-string values are dropped with a warning. The one model check is by
+name only: a Claude model alias (`opus`, `sonnet`, `haiku`, `inherit`)
+or `claude-*` id is still kept as written, with a warning naming the
+agent, because Codex does not recognize it; use a Codex-specific agent
+source or remove `model`. Other frontmatter,
 including other native Codex settings and a `codex:` block, is dropped
 with a warning; APM provides no arbitrary or namespaced passthrough.
 Remove unnecessary fields or do not rely on their settings in the
@@ -632,6 +665,25 @@ generated agent. `tools` restrictions still cannot be preserved: the
 agent may inherit all project/session MCP servers. Remove `tools` only
 if unrestricted access is intentional; otherwise do not use the generated
 agent with Codex.
+
+#### Per-harness model values
+
+Agent files and model ids belong to each harness vendor. APM writes a
+string `model` verbatim to every agent target (a Claude `sonnet` also
+lands in the Codex TOML, with a warning naming the agent). APM does
+not add a per-target model map or `codex:`
+override block (#3324). Workarounds:
+
+1. Omit `model` from the shared agent so each harness uses its default.
+2. Split by target: a package per harness with its own `target:` and
+   `model:`, plus a common package for shared content.
+3. A `post-install` / `post-update` lifecycle script in the consuming
+   project's `apm.yml` (trusted with `apm lifecycle trust`; a dependency
+   cannot ship one) that sets `model` in `.codex/agents/*.toml`. It edits APM-managed output, so
+   `apm audit --ci` reports drift and the script must run on every
+   install; not recommended for CI-gated teams.
+
+For a portable fix, raise it upstream with Claude Code or Codex.
 
 #### OpenCode target: frontmatter constraints
 
@@ -713,6 +765,10 @@ my-skill/
   resource1.md                         # supporting documentation
   resource2.md
 ```
+
+APM never prefixes or renames skills; same-named skills are told apart by
+native plugin namespacing (`<plugin>:<skill>`). Use
+`apm view --file <deployed-path>` to see which package deployed a skill file.
 
 ### 7. Marketplace Plugin (`plugin.json`)
 

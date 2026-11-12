@@ -33,7 +33,7 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 |---|---|
 | `--dry-run` | Show the removal plan without writes from the uninstall engine. `pre-uninstall` lifecycle scripts still run and may have side effects. Registry fallback and shared-slot survivor staging are skipped. |
 | `-v, --verbose` | Show detailed removal information. |
-| `-g, --global` | Remove from the user scope (`~/.apm/`) instead of the current project. |
+| `-g, --global` | Remove from the user scope under `$APM_HOME` (default `~/.apm`) instead of the current project. Target deployment cleanup still uses target-specific home variables or the operating-system home. |
 
 ## Examples
 
@@ -127,7 +127,7 @@ Later installs can update the survivor without treating its unchanged files as
 user edits. Removed-output receipts are retired before survivor copies; failed
 removals do not retire evidence. Receipt failures are reported, not ignored.
 
-### Claude Code profiles
+### Claude Code and Codex profiles
 
 Claude Code profiles share one user manifest and lockfile. `apm uninstall -g`
 removes a package's files and lockfile rows only under the selected
@@ -135,6 +135,8 @@ removes a package's files and lockfile rows only under the selected
 If another profile still uses the package, it stays in `~/.apm/apm.yml` and
 `apm_modules/`; uninstall it with that profile selected to remove it everywhere.
 The selected profile is matched by path; symlinks are not resolved.
+Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
+Codex agents and hooks.
 
 `Cleaned N stale deployed files for DEPENDENCY` identifies the affected
 dependency, not the deletion location. An absolute local path in that message
@@ -179,7 +181,8 @@ ownership conflict. Run `apm install` to reconcile project state, or
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an
 absolute path. If two declared local dependencies have the same portable key,
 selection is ambiguous and exits nonzero without changes. Use one exact path
-already declared in the relevant manifest (`apm.yml` or `~/.apm/apm.yml`); APM
+already declared in the relevant manifest (`apm.yml` or `$APM_HOME/apm.yml`,
+default `~/.apm/apm.yml`); APM
 never removes both or guesses, and diagnostics do not print declared paths.
 When an exact path removes one declaration from a shared local install slot, APM
 validates and stages the survivor before changing the manifest, then activates

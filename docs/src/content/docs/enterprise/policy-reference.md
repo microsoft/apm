@@ -100,8 +100,9 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 
 | Value | Source |
 |-------|--------|
-| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`) |
+| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`); on GitLab, the top-level group's `apm-policy` |
 | `owner/repo` | Cross-org policy from a specific repository |
+| `namespace/.../repo` | On GitLab, an ancestor subgroup's policy, e.g. `acme/dept-a/apm-policy` (host-qualify a namespace whose first segment contains a dot) |
 | `https://...` | Direct URL to a policy file |
 
 ### `fetch_failure`
@@ -139,7 +140,10 @@ dependencies:
     - "contoso/**"           # Any repo under contoso org
     - "contoso-eng/*"        # Any repo directly under contoso-eng
     - "third-party/approved" # Exact match
+    - "github.com/example-org/**" # Only example-org, only on github.com
 ```
+
+Hostless patterns match any host; host-qualified patterns match one host exactly. See [Host-qualified patterns](#host-qualified-patterns).
 
 ### `deny`
 
@@ -186,14 +190,16 @@ dependencies:
 
 ### `require_pinned_constraint`
 
-Default: `false`. When `true`, every APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (e.g. `v1.5.3`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+Default: `false`. When `true`, every direct APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (`v1.5.3`, or `pkg-a-v1.5.3` / `pkg-a--v1.5.3` for a package named `pkg-a`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+
+The check judges the constraint as declared in `apm.yml`, not the tag a range resolves to; fresh installs, locked reinstalls, updates, and `apm audit` agree. A dependency redirected by a [`replace:` rule](../../consumer/manage-dependencies/#replace-a-source-candidate) is judged by the ref the rule selects.
 
 ```yaml
 dependencies:
   require_pinned_constraint: true
 ```
 
-Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
+Only direct dependencies are evaluated; a transitive package's own manifest is not something the consumer can rewrite. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -396,6 +402,30 @@ Allow and deny lists use glob-style patterns:
 
 `*` matches any characters within a single path segment (no `/`). `**` matches across any number of segments.
 
+### Host-qualified patterns
+
+Dependency `allow` and `deny` patterns can name a host. Every dependency, direct or transitive, is checked against its effective host: the host written in the reference, or the default host (`GITHUB_HOST`, else `github.com`) when none is written.
+
+```yaml
+dependencies:
+  allow:
+    - "ghes.corp.example/**"        # any org on your GitHub Enterprise Server
+    - "contoso.ghe.com/**"          # any org on your GHE.com data-residency host
+    - "github.com/example-org/**"   # only example-org on github.com
+```
+
+With this policy, `example-org/repo` is allowed only while the default host is `github.com`; with `GITHUB_HOST=ghes.other.example` it is rejected.
+
+| Rule | Behavior |
+|------|----------|
+| Host recognition | The first segment is a host if and only if it contains a dot and does not start with one. Write dotted GitLab groups with their host: `gitlab.com/my.group/**`; an existing `my.group/**` now matches nothing, so as a `deny` it no longer blocks. Relative local-path patterns such as `./packages/**` stay hostless. |
+| Exact host | Hosts compare exactly, ignoring case, port and a trailing dot (also in `GITHUB_HOST`). `ghes.corp.example` does not match `ghes.corp.example.evil.test` or `x.ghes.corp.example`. Wildcards are not expanded in the host segment: `*.corp.example/**` matches no dependency, so list each host. |
+| Reference forms | `owner/repo`, `github.com/owner/repo`, `https://...` and `git@...:` forms of the same package give the same result. |
+| Hostless patterns | Unchanged: `contoso/**` still matches `contoso/*` repositories on **any** host. Use a host-qualified pattern to restrict the host. |
+| Local paths | Never match host-qualified patterns. |
+
+Install checks every resolved dependency; `apm audit` checks direct dependencies (including `devDependencies` and the source selected by `replace`) plus the transitive entries in `apm.lock.yaml`. Violation details show the host, e.g. `ghes.other.example/example-org/repo: not in allowed sources`.
+
 Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. A `null` allow list permits everything not denied; an empty allow list permits nothing.
 
 ---
@@ -430,7 +460,7 @@ There are 21 policy checks.
 | `required-executable-untrusted` | Required executable packages are present and trusted |
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
-| `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
+| `dependency-pinned-constraint` | Every direct dep declares a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
 | `registry-source` | Dependencies come from required registries when `registry_source` is configured |
 
 **Integrity:**
@@ -475,7 +505,7 @@ There are 21 policy checks.
 ## Inheritance
 
 :::note[Discovery vs. `extends:` -- two different concepts]
-APM auto-discovers exactly **one** policy file: `<org>/.github/apm-policy.yml`, derived from the project's git remote. There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
+On GitHub and Azure DevOps, APM auto-discovers exactly **one** policy file per project, derived from the git remote (for example `<org>/.github/apm-policy.yml`). On GitLab it discovers the `apm-policy` project at every namespace of the project's group ancestry and combines them, top-level group first, with the same tighten-only merge (see [Policy Files](../apm-policy/#where-it-lives)). There is no automatic per-repo or per-enterprise discovery. `extends:` adds parents to a discovered policy (and that parent's parent), up to `MAX_CHAIN_DEPTH=5` distinct policies in total, counting GitLab-discovered ancestors. On GitHub and Azure DevOps, model an enterprise -> org -> team chain with `extends:`; on GitLab, publishing `apm-policy` in each group does it without `extends:`.
 :::
 
 Policies can inherit from a parent using `extends`. This enables a three-level chain:
@@ -619,8 +649,9 @@ found in the organization cascade: `.github-private`, `.github`, `.apm`, then
 `_apm`. Azure DevOps remotes use the org `apm` project and `apm-policy`
 repository. Legacy `_apm/_apm` is a temporary fallback after a 404 from the
 primary coordinate.
-GitLab remotes use `<top-level-group>/apm-policy/apm-policy.yml`, using the
-first path segment of the remote; nested subgroup scopes are not searched. Set
+GitLab combines the `apm-policy` projects found from the top-level group down
+to the project's own subgroup (the nearest one is the `policy.hash` leaf); a
+flat `<group>/<project>` remote probes only `<group>/apm-policy`. Set
 `GITLAB_HOST` or `APM_GITLAB_HOSTS` to recognize a self-managed host, and use
 `APM_GITLAB_POLICY_REPO` to select another project name. Plain git remotes
 fall through with no policy applied. Repositories with no detectable git remote
@@ -850,7 +881,7 @@ Compute the digest from the canonical org-policy file:
 shasum -a 256 .github/apm-policy.yml | awk '{print "sha256:" $1}'
 ```
 
-When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility.
+When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility. On GitLab the leaf is the nearest discovered `apm-policy`, and discovered ancestor policies are also outside the pin -- use `apm policy status` to check the composed chain (see [Policy Files](../apm-policy/#where-it-lives)).
 
 A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. Only SHA-256, SHA-384, and SHA-512 are supported.
 

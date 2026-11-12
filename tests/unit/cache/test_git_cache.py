@@ -15,6 +15,13 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 
+@pytest.fixture(autouse=True)
+def _mock_git_object_links():
+    """Mocked Git subprocesses carry no objects; real-git tests cover links."""
+    with patch("apm_cli.cache.git_cache.materialize_tracked_symlinks"):
+        yield
+
+
 @pytest.mark.parametrize("ref", ["main", "release/v1", "v1.0"])
 def test_remote_ref_receipt_is_shared_without_rewriting_git_refs(tmp_path: Path, ref: str) -> None:
     """Fresh named observations survive cache instances without changing pins."""
@@ -180,7 +187,9 @@ class TestGitCacheGetCheckout:
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
         (checkout_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
+            encoding="ascii",
         )
 
         # Mock git rev-parse HEAD to return the expected SHA
@@ -413,7 +422,9 @@ class TestCheckoutWriteDedup:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
+            encoding="ascii",
         )
 
         with (
@@ -480,7 +491,9 @@ class TestCheckoutWriteDedup:
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
         (final_dir / ".git" / "config").write_text(
-            "[core]\n\tautocrlf = false\n\tsymlinks = true\n", encoding="ascii"
+            "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
+            "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
+            encoding="ascii",
         )
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 

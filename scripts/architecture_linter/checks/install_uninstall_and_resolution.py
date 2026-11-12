@@ -41,8 +41,10 @@ def check_orphan_selection(provider: FactsProvider) -> tuple[Violation, ...]:
     findings: list[Violation] = []
     for path, scope in (
         ("src/apm_cli/commands/_helpers.py", "_check_orphaned_packages"),
+        ("src/apm_cli/commands/deps/cli.py", "_resolve_scope_deps"),
         ("src/apm_cli/commands/prune.py", "prune"),
         ("src/apm_cli/install/phases/cleanup.py", "_remove_dropped_package_dirs"),
+        ("src/apm_cli/install/phases/cleanup.py", "_trim_superseded_package_roots"),
     ):
         facts, failures = _facts_for(provider, path, _GUARD_ORPHAN_SELECTION)
         findings.extend(failures)

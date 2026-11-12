@@ -33,18 +33,17 @@ from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
 from ..utils.git_env import (
-    GitSymlinkCapabilityError,
     checkout_git_worktree,
     get_git_executable,
     git_no_hooks_args,
     git_subprocess_error_text,
     git_worktree_head,
-    raise_for_symlink_capability,
     redact_git_diagnostic,
+    run_git_text,
 )
 from ..utils.git_sparse import (
     apply_sparse_cone,
-    repair_dangling_cone_symlinks,
+    materialize_tracked_symlinks,
     sparse_checkout_active,
     validate_materialized_symlinks,
 )
@@ -58,6 +57,7 @@ from .bare_cache import (
     fetch_sha_into_bare,
     materialize_from_bare,
 )
+from .carried_license import carry_licenses, read_repository_license
 from .download_strategies import DownloadDelegate
 from .git_remote_ops import (
     parse_ls_remote_output,
@@ -68,6 +68,7 @@ from .github_rate_limit import GitHubThrottleError
 from .transport_selection import (
     ProtocolPreference,
     TransportSelector,
+    initial_transport_scheme,
 )
 from .virtual_file import materialize_virtual_file_package
 
@@ -300,12 +301,31 @@ class GitHubPackageDownloader:
 
         return GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
 
-    def _cache_git_env(self, dep_ref: DependencyReference) -> dict[str, str]:
+    def _persistent_cache_remote(self, dep_ref: DependencyReference, repository_url: str) -> str:
+        """Return the remote the persistent Git cache contacts for ``dep_ref``.
+
+        An SSH-declared dependency on a non-GitHub, non-ADO host keeps its
+        declared SSH transport so a cold cache never tries HTTPS first (#3513).
+        Every other dependency keeps the canonical ``repository_url``.
+        """
+        from .host_backends import backend_for
+
+        if dep_ref.artifactory_prefix or initial_transport_scheme(dep_ref) != "ssh":
+            return repository_url
+        backend = backend_for(dep_ref, self.auth_resolver)
+        if backend.is_github_family or backend.kind == "ado":
+            return repository_url
+        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref, token="")
+
+    def _cache_git_env(
+        self, dep_ref: DependencyReference, remote_url: str | None = None
+    ) -> dict[str, str]:
         """Return the subprocess environment for persistent Git cache operations.
 
         Plaintext HTTP repositories must not inherit ambient credential helpers:
         GitCache performs network fetches as well as local checkout operations, so
         it needs the same credential-suppression fence as direct HTTP transport.
+        ``remote_url`` selects the transport policy; it defaults to HTTPS.
         """
         from .git_auth_env import GitAuthEnvBuilder
 
@@ -323,13 +343,14 @@ class GitHubPackageDownloader:
             )
 
         auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-        remote_url = self._build_repo_url(
-            dep_ref.repo_url,
-            use_ssh=False,
-            dep_ref=dep_ref,
-            token="",
-            auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
-        )
+        if remote_url is None:
+            remote_url = self._build_repo_url(
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token="",
+                auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
+            )
         if auth_ctx is None:
             auth_ctx = self.auth_resolver.resolve_for_remote(
                 dep_ref.host or default_host(),
@@ -393,11 +414,15 @@ class GitHubPackageDownloader:
             )
 
         else:
+            cache_remote = self._persistent_cache_remote(dep_ref, repository_url)
             checkout = cache.get_checkout(
-                repository_url,
+                cache_remote,
                 ref,
                 locked_sha=locked_sha,
-                env=self._cache_git_env(dep_ref),
+                env=self._cache_git_env(
+                    dep_ref,
+                    remote_url=None if cache_remote == repository_url else cache_remote,
+                ),
                 sparse_paths=sparse_paths,
             )
         resolver = getattr(self, "_tiered_resolver", None)
@@ -748,7 +773,6 @@ class GitHubPackageDownloader:
         env: dict[str, str],
         known_sha: str | None = None,
         sparse_paths: list[str] | None = None,
-        package: str | None = None,
     ) -> str:
         """Thin delegate to :func:`bare_cache.materialize_from_bare` (kept on the class so test patches still work)."""
         return materialize_from_bare(
@@ -758,7 +782,6 @@ class GitHubPackageDownloader:
             env=env,
             known_sha=known_sha,
             sparse_paths=sparse_paths,
-            package=package,
         )
 
     def _fetch_sha_into_bare(
@@ -1123,17 +1146,10 @@ class GitHubPackageDownloader:
             temp_clone_path.mkdir(parents=True, exist_ok=True)
 
             def _repair(repo_env: dict[str, str]) -> bool:
-                dangling = repair_dangling_cone_symlinks(
-                    "git",
-                    temp_clone_path,
-                    [subdir_path],
-                    env=repo_env,
+                # Lenient: download_subdirectory_package rejects what remains.
+                materialize_tracked_symlinks(
+                    "git", temp_clone_path, [subdir_path], env=repo_env, strict=False
                 )
-                if dangling is not None:
-                    _log.info(
-                        "Sparse checkout widened to repair dangling symlink '%s' (#2707).",
-                        dangling.relative_to(temp_clone_path),
-                    )
                 return True
 
             public_github_anonymous_first = (
@@ -1189,7 +1205,7 @@ class GitHubPackageDownloader:
                         worktree=temp_clone_path,
                     )
                     if token is not None:
-                        remote_result = subprocess.run(
+                        remote_result = run_git_text(
                             [
                                 get_git_executable(),
                                 "remote",
@@ -1200,8 +1216,6 @@ class GitHubPackageDownloader:
                             cwd=str(temp_clone_path),
                             env=git_env,
                             capture_output=True,
-                            text=True,
-                            encoding="utf-8",
                             timeout=120,
                         )
                         if remote_result.returncode != 0:
@@ -1211,13 +1225,11 @@ class GitHubPackageDownloader:
                                 output=remote_result.stdout,
                                 stderr=remote_result.stderr,
                             )
-                    fetch_result = subprocess.run(
+                    fetch_result = run_git_text(
                         [get_git_executable(), "fetch", "origin", ref or "HEAD", "--depth=1"],
                         cwd=str(temp_clone_path),
                         env=git_env,
                         capture_output=True,
-                        text=True,
-                        encoding="utf-8",
                         timeout=120,
                     )
                     if fetch_result.returncode != 0:
@@ -1239,17 +1251,13 @@ class GitHubPackageDownloader:
                     unauth_first=True,
                     base_env=self.git_env,
                 )
-                checkout_result = subprocess.run(
+                checkout_result = run_git_text(
                     [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
                     cwd=str(temp_clone_path),
                     env=setup_env,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
                     timeout=120,
                 )
-                # Git may report a link it could not create with exit 0 or 1.
-                raise_for_symlink_capability(checkout_result, str(dep_ref))
                 if checkout_result.returncode != 0:
                     return False
                 return _repair(setup_env)
@@ -1307,16 +1315,13 @@ class GitHubPackageDownloader:
             ]
 
             for step_name, cmd in checkout_steps:
-                result = subprocess.run(
+                result = run_git_text(
                     cmd,
                     cwd=str(temp_clone_path),
                     env=env,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
                     timeout=120,
                 )
-                raise_for_symlink_capability(result, str(dep_ref))
                 if result.returncode != 0:
                     _debug(
                         f"Sparse-checkout {step_name} failed: "
@@ -1325,8 +1330,6 @@ class GitHubPackageDownloader:
                     return False
 
             return _repair(env)
-        except GitSymlinkCapabilityError:
-            raise
         except Exception as e:
             _debug(f"Sparse-checkout failed: {git_subprocess_error_text(e)}")
             return False
@@ -1410,8 +1413,6 @@ class GitHubPackageDownloader:
                     locked_sha=_resolved_sha_for_cache,
                     sparse_paths=[subdir_path],
                 )
-            except GitSymlinkCapabilityError:
-                raise
             except Exception:
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
@@ -1533,10 +1534,7 @@ class GitHubPackageDownloader:
                         # requesting different subdirs of the same
                         # repo+SHA still share the object DB.
                         sparse_paths=[subdir_path],
-                        package=_dep_display,
                     )
-                except GitSymlinkCapabilityError:
-                    raise
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed to prepare dependency from cached clone: {e}"
@@ -1600,21 +1598,22 @@ class GitHubPackageDownloader:
                             progress_reporter=progress_reporter,
                             **clone_kwargs,
                         )
-                    except GitSymlinkCapabilityError:
-                        raise
                     except Exception as e:
                         raise RuntimeError(f"Failed to clone repository: {e}") from e
 
                     if is_commit_sha:
                         try:
-                            checkout_git_worktree(
-                                temp_clone_path, ref, env=self.git_env, package=_dep_display
-                            )
-                        except GitSymlinkCapabilityError:
-                            raise
+                            checkout_git_worktree(temp_clone_path, ref, env=self.git_env)
                         except Exception as e:
                             detail = self._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(f"Failed to checkout commit {ref}: {detail}") from e
+                    materialize_tracked_symlinks(
+                        "git",
+                        temp_clone_path,
+                        [subdir_path],
+                        env=self._git_env_dict(),
+                        strict=False,
+                    )
 
                     # Disable progress reporter after clone
                     if progress_reporter:
@@ -1661,6 +1660,9 @@ class GitHubPackageDownloader:
                     robust_copytree(src, dst)
                 else:
                     robust_copy2(src, dst)
+            # Sparse cones keep ancestor-directory files, so read the repository
+            # licence before cleanup; it is written after validation (#3556).
+            repository_license = read_repository_license(temp_clone_path, subdir_path)
 
             # Capture commit SHA; close the Repo object immediately so its file
             # handles are released before _rmtree() runs in the finally block.
@@ -1742,6 +1744,9 @@ class GitHubPackageDownloader:
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,
             package_type=validation_result.package_type,
+            carried_licenses=carry_licenses(
+                target_path, repository_license=repository_license, package_subpath=subdir_path
+            ),
         )
 
     def _download_subdirectory_from_artifactory(
@@ -1890,6 +1895,9 @@ class GitHubPackageDownloader:
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                 )
+                # A shard keeps unresolvable links as text; the clone path
+                # below then raises the strict diagnostic (#3457).
+                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
                 from ..utils.file_ops import robust_copy2, robust_copytree
 
                 for item in _cached.iterdir():
@@ -1909,6 +1917,9 @@ class GitHubPackageDownloader:
                     package = validation_result.package
                     package.source = dep_ref.to_github_url()
                     package.resolved_commit = resolved_ref.resolved_commit
+                    # Single stamping implementation (shared with the clone
+                    # paths): also invalidates the from_apm_yml cache entry
+                    # after rewriting apm.yml (apm#2619 migration fallout).
                     from .package_validator import stamp_plugin_version
 
                     stamp_plugin_version(
@@ -1924,13 +1935,14 @@ class GitHubPackageDownloader:
                         installed_at=datetime.now().isoformat(),
                         dependency_ref=dep_ref,
                         package_type=validation_result.package_type,
+                        carried_licenses=carry_licenses(target_path),
                     )
                 # Validation failed against cached copy: fall through to a
                 # fresh clone (cache may be stale or repo structure changed).
                 if target_path.exists() and any(target_path.iterdir()):
                     _rmtree(target_path)
                     target_path.mkdir(parents=True, exist_ok=True)
-            except (AgentPluginError, GitSymlinkCapabilityError):
+            except AgentPluginError:
                 if target_path.exists():
                     _rmtree(target_path)
                 raise
@@ -1955,25 +1967,14 @@ class GitHubPackageDownloader:
                     if progress_task_id and progress_obj
                     else None
                 )
-                clone_options = {
-                    "progress_reporter": progress_reporter,
-                    "dep_ref": dep_ref,
-                    "verbose_callback": verbose_callback,
-                }
-                try:
-                    self._clone_with_fallback(dep_ref.repo_url, target_path, **clone_options)
-                except GitSymlinkCapabilityError:
-                    # A link at the default-branch HEAD must not fail a pinned
-                    # commit without links; the checkout below classifies it.
-                    self._clone_with_fallback(
-                        dep_ref.repo_url, target_path, no_checkout=True, **clone_options
-                    )
-                checkout_git_worktree(
+                self._clone_with_fallback(
+                    dep_ref.repo_url,
                     target_path,
-                    resolved_ref.resolved_commit,
-                    env=self.git_env,
-                    package=str(dep_ref),
+                    progress_reporter=progress_reporter,
+                    dep_ref=dep_ref,
+                    verbose_callback=verbose_callback,
                 )
+                checkout_git_worktree(target_path, resolved_ref.resolved_commit, env=self.git_env)
             else:
                 # For branches and tags, we can use shallow clone
                 progress_reporter = (
@@ -1994,6 +1995,9 @@ class GitHubPackageDownloader:
             # Disable progress reporter to prevent late git updates
             if progress_reporter:
                 progress_reporter.disabled = True
+
+            # Links become their Git-object content while .git exists (#3457).
+            materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"
@@ -2049,6 +2053,7 @@ class GitHubPackageDownloader:
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,  # Store for canonical dependency string
             package_type=validation_result.package_type,  # Track if APM, Claude Skill, or Hybrid
+            carried_licenses=carry_licenses(target_path),
         )
 
     def _get_clone_progress_callback(self):
