@@ -1861,6 +1861,47 @@ def test_orphan_selection_guard_rejects_targeted_install_bypass() -> None:
 
 
 @pytest.mark.parametrize(
+    ("path", "old", "new", "message"),
+    [
+        (
+            "src/apm_cli/deps/bare_cache.py",
+            "pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args()]",
+            'pin_args = [*git_symlink_pin_args(), *git_line_ending_pin_args(), "-c", "core.eol=crlf"]',
+            "The core.eol pin must route through utils/git_env.git_line_ending_pin_*",
+        ),
+        (
+            "src/apm_cli/cache/git_cache.py",
+            "        *git_line_ending_pin_args(),\n",
+            '        "-c",\n        "core.autocrlf=false",\n',
+            "Dependency checkouts must pin real symlinks and deterministic line endings",
+        ),
+        (
+            "src/apm_cli/utils/git_env.py",
+            "    retained.extend(pinned)",
+            "    retained.append(git_symlink_pin_entry())",
+            "utils/git_env.py must own repository-state and URL rewrite safety",
+        ),
+    ],
+    ids=["eol-literal-outside-owner", "cache-bypasses-line-ending-owner", "snapshot-drops-pins"],
+)
+def test_line_ending_pin_guard_rejects_owner_bypass(
+    path: str, old: str, new: str, message: str
+) -> None:
+    """Dependency checkouts cannot drop or re-implement the line-ending pins (#3270)."""
+    rule_id = "transport-platform-git-child-environment"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.message.startswith(message)
+        for violation in report.violations
+    ), [violation.message for violation in report.violations]
+
+
+@pytest.mark.parametrize(
     ("path", "rule_id", "old", "new"),
     [
         (
