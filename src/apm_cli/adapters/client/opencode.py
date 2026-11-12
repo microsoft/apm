@@ -39,11 +39,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ...models.dependency.mcp import (
-    _EXTRA_DENYLIST,
-    opencode_enabled_matches,
-    opencode_enabled_value,
-)
+from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
+from ...models.dependency.mcp import opencode_enabled_matches as _enabled_matches
 from ...utils.console import _rich_warning
 from .copilot import CopilotClientAdapter
 
@@ -172,19 +169,26 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                 for name, entry in config_updates.items()
             }
         except ValueError as exc:
-            _rich_warning(f"{exc} -- skipping {config_path}", symbol="warning")
+            names = ", ".join(f"'{name}'" for name in config_updates)
+            _rich_warning(
+                f"Skipping OpenCode server {names} in {config_path}: {exc}; "
+                "set 'enabled: true' or 'enabled: false' in apm.yml, or remove "
+                "'mcp.servers' to keep the OpenCode 1 layout",
+                symbol="warning",
+            )
             return False
 
         for name, entry in rendered.items():
             legacy = mcp.get(name) if name not in V2_MCP_SETTINGS else None
             if legacy is not None:
                 written = self._to_opencode_format(config_updates[name], enabled=enabled)
-                if legacy == written and opencode_enabled_matches(legacy, written):
+                if legacy == written and _enabled_matches(legacy, written):
                     del mcp[name]
                 else:
                     _rich_warning(
                         f"Kept the edited v1 entry 'mcp.{name}' in {config_path}; "
-                        f"OpenCode v2 uses 'mcp.servers.{name}' instead",
+                        f"OpenCode v2 uses 'mcp.servers.{name}' instead; "
+                        "remove the v1 entry when you no longer need it",
                         symbol="warning",
                     )
             servers[name] = entry
@@ -239,7 +243,11 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             return {}
 
     def render_server_config(self, server_info: dict) -> dict:
-        """Render the entry APM writes, for exact baseline comparisons."""
+        """Render the entry APM writes, for exact baseline comparisons.
+
+        The layout is re-read from the file on each call so the comparison
+        always matches what ``update_config`` would write now.
+        """
         copilot_entry = super().render_server_config(server_info)
         enabled = opencode_enabled_value(server_info)
         if self.uses_native_v2(self._read_config_file()):
@@ -340,7 +348,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                 f"OpenCode v2 needs a boolean 'enabled' value, got {json.dumps(enabled)}"
             )
         entry = cls._to_opencode_format(copilot_entry, enabled=enabled)
-        del entry["enabled"]
+        entry.pop("enabled", None)
         entry.pop("disabled", None)
         if not enabled:
             entry["disabled"] = True

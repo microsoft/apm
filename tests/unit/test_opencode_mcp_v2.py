@@ -131,9 +131,13 @@ class TestUpdateConfigV2(_ProjectFixture):
         original = {"mcp": {"servers": {}}}
         self.write_config(original)
 
-        self.assertFalse(self.adapter.update_config({"pkg": LOCAL_ENTRY}, enabled="yes"))
+        with patch("apm_cli.adapters.client.opencode._rich_warning") as warn:
+            self.assertFalse(self.adapter.update_config({"pkg": LOCAL_ENTRY}, enabled="yes"))
 
         self.assertEqual(self.read_config(), original)
+        message = warn.call_args.args[0]
+        self.assertIn("'pkg'", message)
+        self.assertIn("'enabled: true' or 'enabled: false'", message)
 
     def test_moves_matching_legacy_entry(self):
         legacy = OpenCodeClientAdapter._to_opencode_format(LOCAL_ENTRY)
