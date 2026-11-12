@@ -168,9 +168,9 @@ class PrimitiveMapping:
     * The deployed file is never byte-identical to its source, so a
       source-based adopt always misses (apm#1662).  The integrator instead
       compares against the rendered output and (re)writes when stale.
-    * The target is APM-owned per-file (``target_name`` derives 1:1 from a
-      source instruction), so ``managed_files`` is NOT consulted -- any
-      existing file at the target path is APM's, not user-authored.
+    * Ownership uses the shared collision decision: a ``managed_files`` path
+      is rewritten, while an unmanaged differing file is user-authored and
+      is skipped unless ``--force``.
     * The deployed filename is renamed from ``<x>.instructions.md`` to
       ``<x>{extension}``.
 

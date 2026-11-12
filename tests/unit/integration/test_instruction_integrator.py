@@ -845,14 +845,8 @@ class TestCursorRulesIntegration:
         assert result.files_integrated == 0
         assert result.target_paths == []
 
-    def test_collision_overwrites_existing_rule_file(self):
-        """Rule dirs are APM-owned: an existing .mdc is overwritten, not skipped.
-
-        Pre-#1662 this asserted a collision skip. The new invariant
-        (output_compare=True) is that target_name derives 1:1 from the source,
-        so any existing file here is APM's and must be (re)written -- never
-        treated as a user-authored collision -- regardless of managed_files.
-        """
+    def test_unmanaged_existing_rule_file_is_skipped(self):
+        """A same-named rule APM never deployed is user-authored: skip, keep bytes."""
         (self.project_root / ".cursor").mkdir()
         rules_dir = self.project_root / ".cursor" / "rules"
         rules_dir.mkdir()
@@ -868,19 +862,13 @@ class TestCursorRulesIntegration:
             pkg_info, self.project_root, managed_files=set()
         )
 
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        deployed = (rules_dir / "python.mdc").read_text()
-        assert "# APM rules" in deployed
-        assert "Stale rules" not in deployed
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert result.target_paths == []
+        assert (rules_dir / "python.mdc").read_text() == "# Stale rules"
 
-    def test_managed_files_has_no_effect_on_rule_dir(self):
-        """managed_files is not consulted for output_compare (rule-dir) targets.
-
-        Whether or not the path is recorded as managed, the existing rule is
-        (re)written from the source. Guards the #1662 regression where the file
-        fell out of managed_files and stopped propagating edits.
-        """
+    def test_rule_file_without_manifest_is_skipped(self):
+        """managed_files=None manages nothing: an existing differing rule is kept."""
         (self.project_root / ".cursor").mkdir()
         rules_dir = self.project_root / ".cursor" / "rules"
         rules_dir.mkdir()
@@ -892,15 +880,13 @@ class TestCursorRulesIntegration:
         (inst_dir / "python.instructions.md").write_text("# APM rules")
 
         pkg_info = _make_package_info(pkg)
-        # managed_files=None (no manifest) must behave identically to
-        # managed_files=set(): the rule is still adopted/overwritten.
         result = self.integrator.integrate_package_instructions_cursor(
             pkg_info, self.project_root, managed_files=None
         )
 
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        assert "# APM rules" in (rules_dir / "python.mdc").read_text()
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert (rules_dir / "python.mdc").read_text() == "# Stale rules"
 
     def test_overwrites_managed_file(self):
         """Overwrites file when it's in managed_files."""
@@ -1208,14 +1194,8 @@ class TestClaudeRulesIntegration:
         assert result.files_integrated == 0
         assert result.target_paths == []
 
-    def test_collision_overwrites_existing_rule_file(self):
-        """Rule dirs are APM-owned: an existing .md is overwritten, not skipped.
-
-        Pre-#1662 this asserted a collision skip. The new invariant
-        (output_compare=True) is that target_name derives 1:1 from the source,
-        so any existing file here is APM's and must be (re)written -- never
-        treated as a user-authored collision -- regardless of managed_files.
-        """
+    def test_unmanaged_existing_rule_file_is_skipped(self):
+        """A same-named rule APM never deployed is user-authored: skip, keep bytes."""
         (self.project_root / ".claude").mkdir()
         rules_dir = self.project_root / ".claude" / "rules"
         rules_dir.mkdir()
@@ -1231,19 +1211,13 @@ class TestClaudeRulesIntegration:
             pkg_info, self.project_root, managed_files=set()
         )
 
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        deployed = (rules_dir / "python.md").read_text()
-        assert "# APM rules" in deployed
-        assert "Stale rules" not in deployed
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert result.target_paths == []
+        assert (rules_dir / "python.md").read_text() == "# Stale rules"
 
-    def test_managed_files_has_no_effect_on_rule_dir(self):
-        """managed_files is not consulted for output_compare (rule-dir) targets.
-
-        Whether or not the path is recorded as managed, the existing rule is
-        (re)written from the source. Guards the #1662 regression where the file
-        fell out of managed_files and stopped propagating edits.
-        """
+    def test_rule_file_without_manifest_is_skipped(self):
+        """managed_files=None manages nothing: an existing differing rule is kept."""
         (self.project_root / ".claude").mkdir()
         rules_dir = self.project_root / ".claude" / "rules"
         rules_dir.mkdir()
@@ -1259,9 +1233,9 @@ class TestClaudeRulesIntegration:
             pkg_info, self.project_root, managed_files=None
         )
 
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        assert "# APM rules" in (rules_dir / "python.md").read_text()
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert (rules_dir / "python.md").read_text() == "# Stale rules"
 
     def test_overwrites_managed_file(self):
         """Overwrites file when it's in managed_files."""
@@ -1368,8 +1342,11 @@ class TestClaudeRulesIntegration:
         target.write_bytes(lf_bytes.replace(b"\n", b"\r\n"))
         assert b"\r\n" in target.read_bytes()
 
-        # Re-install must rewrite (not adopt) so bytes converge back to LF.
-        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+        # Re-install of the managed rule must rewrite (not adopt) so bytes
+        # converge back to LF.
+        result = self.integrator.integrate_package_instructions_claude(
+            pkg_info, self.project_root, managed_files={".claude/rules/python.md"}
+        )
         assert result.files_integrated == 1
         assert result.files_adopted == 0
         assert target.read_bytes() == lf_bytes
@@ -1920,11 +1897,8 @@ class TestWindsurfRulesIntegration:
         assert (rules_dir / "python.md").exists()
         assert (rules_dir / "testing.md").exists()
 
-    def test_collision_overwrites_existing_rule_file(self):
-        """Rule dirs are APM-owned: an existing .md is overwritten, not skipped.
-
-        Matches the cursor/claude invariant for the third output_compare format.
-        """
+    def test_unmanaged_existing_rule_file_is_skipped(self):
+        """A same-named rule APM never deployed is user-authored: skip, keep bytes."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         (self.project_root / ".windsurf").mkdir()
@@ -1943,14 +1917,13 @@ class TestWindsurfRulesIntegration:
             windsurf, pkg_info, self.project_root, managed_files=set()
         )
 
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        deployed = (rules_dir / "python.md").read_text()
-        assert "# APM rules" in deployed
-        assert "Stale rules" not in deployed
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert result.target_paths == []
+        assert (rules_dir / "python.md").read_text() == "# Stale rules"
 
-    def test_managed_files_has_no_effect_on_rule_dir(self):
-        """managed_files is not consulted for output_compare (rule-dir) targets."""
+    def test_rule_file_without_manifest_is_skipped(self):
+        """managed_files=None manages nothing: an existing differing rule is kept."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         (self.project_root / ".windsurf").mkdir()
@@ -1969,16 +1942,12 @@ class TestWindsurfRulesIntegration:
             windsurf, pkg_info, self.project_root, managed_files=None
         )
 
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        assert "# APM rules" in (rules_dir / "python.md").read_text()
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert (rules_dir / "python.md").read_text() == "# Stale rules"
 
-    def test_force_rewrites_byte_identical_rule(self):
-        """force=True rewrites even a byte-identical rule (no silent adopt).
-
-        The no-churn adopt path is gated on ``not force`` so ``--force`` always
-        rewrites and counts the file as integrated, not adopted.
-        """
+    def test_force_overwrites_unmanaged_rule_and_adopts_identical(self):
+        """force=True overwrites an unmanaged rule; byte-identical rules stay adopted."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         (self.project_root / ".windsurf").mkdir()
@@ -2008,12 +1977,26 @@ class TestWindsurfRulesIntegration:
         # paths were NOT recorded, causing rules to fall out of managed_files.
         assert len(adopt.target_paths) == 1
 
-        # Re-deploy WITH force rewrites instead of adopting.
+        # Re-deploy WITH force still adopts byte-identical content (no churn).
         forced = self.integrator.integrate_instructions_for_target(
             windsurf, pkg_info, self.project_root, force=True
         )
-        assert forced.files_integrated == 1
-        assert forced.files_adopted == 0
+        assert forced.files_integrated == 0
+        assert forced.files_adopted == 1
+
+        # An unmanaged differing rule is only overwritten under force.
+        rule = self.project_root / ".windsurf" / "rules" / "python.md"
+        rule.write_text("# User rules")
+        kept = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root, managed_files=set()
+        )
+        assert kept.files_skipped == 1
+        assert rule.read_text() == "# User rules"
+        overwritten = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root, managed_files=set(), force=True
+        )
+        assert overwritten.files_integrated == 1
+        assert "# Python" in rule.read_text()
 
     def test_verbose_breadcrumb_rewrite_vs_adopt(self):
         """adopt-vs-rewrite breadcrumbs are emitted only under verbose diagnostics.

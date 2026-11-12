@@ -1894,6 +1894,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new="rendered_rules = self._local_rule_plan(",
         intent="Direct native installation forks the projection used by coverage.",
     ),
+    MutationCase(
+        guard_id="hooks-integrations-native-instruction-projection",
+        rule_id="hooks-integrations-native-instruction-projection",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="skip, adopted = self._check_adopt_or_skip(",
+        new="skip, adopted = self._local_collision_check(",
+        intent="Rendered rules bypass the shared adopt-or-skip collision owner.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS

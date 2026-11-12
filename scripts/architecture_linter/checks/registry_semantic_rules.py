@@ -249,6 +249,8 @@ _NATIVE_PROJECTION_CONTRACTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (
             "rendered_rules = self._prepare_rule_plan(instruction_files, deploy_dir, "
             "mapping.extension, fmt, prepared_instructions)",
+            "skip, adopted = self._check_adopt_or_skip(target_path, source_file, rel_path, "
+            "managed_files, force, diagnostics, target_paths, expected_content=new_content)",
         ),
     ),
     (
