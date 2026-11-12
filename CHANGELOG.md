@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm view --file PATH` (with `-g` for user scope) reports which package deployed one installed file, such as a skill's `SKILL.md` or a bundled resource: recorded owners (active writer and surviving owners), project-self or local-bundle ownership, and dependency source, ref and commit, matched by exact path from the lockfile's deployment records. Whether the file still matches its recorded hash is shown separately. Unrecorded files exit `1`. It is read-only: no network, no writes, no lockfile migration. The skills guide now states that APM keeps skill names and folders unchanged and never prefixes them. (#PRNUM)
+- `apm view --file PATH` (with `-g` for user scope) reports which package deployed one installed file, such as a skill's `SKILL.md` or a bundled resource: recorded owners (active writer and surviving owners), project-self or local-bundle ownership, and dependency source, ref and commit, matched by exact path from the lockfile's deployment records. Whether the file still matches its recorded hash is shown separately. Unrecorded files exit `1`. It is read-only: no network, no writes, no lockfile migration. The skills guide now states that APM keeps skill names and folders unchanged and never prefixes them. (#3608)
 
 ### Changed
 
