@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Licence files now travel with subdirectory installs: APM copies the repository's nearest `LICENSE`, `LICENSE.*`, `COPYING` or `NOTICE` byte-for-byte into the package in `apm_modules/` and next to each deployed skill without one (also for skills below a whole-repo package root), and records each copy under `carried_licenses` in `apm.lock.yaml`. `apm uninstall` removes the copies and `apm audit` reports a missing or edited one; existing lockfiles keep verifying. (#3646)
 - `apm compile` fires a `pre-compile` lifecycle event before it reads sources, so a trusted project script can generate instructions under `.apm/` first. -- by @Ryangr0 (#3596)
 - A lifecycle `command` script that exits non-zero now prints a warning naming the event, the exit code and `scripts.log`; the command still continues. (#3596)
 - New `apm export-patch` command exports your local edits to dependency-managed files as upstream patches before the next install overwrites them: one `git apply`-ready `patches/<pkg>@<ref>.patch` per package against the locked source, without changing `apm.yml` or the lockfile. `apm audit` and `apm install` point to it when they find such edits. -- by @edenfunf (#2162)
