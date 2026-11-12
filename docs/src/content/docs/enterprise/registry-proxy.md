@@ -329,6 +329,8 @@ and `apm cache clean`.
 | HTTP 404 on every ref of an existing GitLab project | Default branch is `master`, APM defaults to `main` | Pin the ref: `<repo>#master` in `apm.yml` |
 | Upstream URL in `X-Artifactory-Origin-Remote-Path` has a duplicated group name | The remote's "Repository Path Prefix" is prepending a segment that's also in the request | Clear the prefix field on the remote |
 
+When the proxy serves an archive that APM rejects, for example because a member is a symlink or the body is not a zip, the error reports that archive's URL (and the reason, where available) after `Archive error:`, even if later fallback URLs return HTTP 404.
+
 For fully disconnected CI (no proxy reach at all), build a bundle on a
 connected host with `apm pack` and restore offline. See
 [Pack and distribute](../../producer/pack-a-bundle/).

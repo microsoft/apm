@@ -1360,7 +1360,7 @@ apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/li
 if [ "$PLATFORM" = "linux" ]; then
     # Get glibc version
     GLIBC_VERSION=$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    REQUIRED_GLIBC="2.38"
+    REQUIRED_GLIBC="2.28"
     
     if [ -n "$GLIBC_VERSION" ]; then
         # Compare versions

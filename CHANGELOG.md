@@ -9,15 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Prebuilt Linux binaries (x86_64 and ARM64) now require glibc 2.28 instead of 2.38, so they run on RHEL/Rocky/Alma Linux 8, Debian 10, Ubuntu 20.04 and newer; the Unix installer sends only hosts below glibc 2.28 to the pip fallback. -- by @eraow (#3553)
 - `apm install` validates public `github.com` subdirectory packages, including nested Claude plugins, through `raw.githubusercontent.com` before any Contents API request, so packages with a reachable marker no longer spend anonymous REST quota on validation; `apm marketplace add` reuses the catalog it discovered instead of downloading it again. -- by @ShaoLOWu (#3348)
 
 ### Fixed
 
+- When a registry proxy serves an archive that APM rejects (an unsafe member such as a symlink, or a body that is not a zip), `apm install` now reports that rejection instead of a later fallback URL's HTTP 404. Symlinks are still refused. (#3375)
 - `apm install --target claude` keeps `${VAR}` and `${VAR:-default}` references in the project `.mcp.json` instead of prompting for and writing the values, names missing variables, and on reinstall replaces values APM can confirm it wrote earlier; user scope (`~/.claude.json`) is unchanged. -- by @Aaryan-Dadu (#3377)
 - `apm install` now resolves a local package's dependencies from the `apm.yml` it copies in that run, so a dependency added to or dropped from a local package is installed or removed (from `apm.lock.yaml`, `apm deps tree` and deployed files) at once, at project and user scope. `apm update` and `apm install --update` now fetch plain Git dependencies on a branch or tag during resolution, so children re-pinned by the new commit are resolved, deployed and locked in the same run; full-SHA pins, registry, marketplace and subdirectory or file packages, and plain `apm install` replay are unchanged. -- by @adityaanikam (#3571)
 - Packages with in-repo symbolic links now record the same `content_hash` on Windows as on Linux and macOS, so `apm install --frozen` verifies a lockfile generated on another platform. APM pins `core.symlinks=true` on its own Git commands, re-creates older cached checkouts, and fails with a diagnostic naming the package when the host cannot create symlinks (on Windows, enable Developer Mode). (#3545)
 - `apm install` and `apm install --frozen` on a fresh clone or CI runner without local receipts keep committed `claude_skill` and `skill_bundle` skills whose files all match what the install would write (after link rendering) and are claimed in `apm.lock.yaml`, and record receipts, instead of failing as in 0.35.0. Lockfile hashes are not trusted; a skill with any edited, extra or missing file still fails without overwriting or deleting anything. (#3564)
 - `apm install` and `apm update` now write untyped flat command hooks as Codex `"type": "command"` handlers in `.codex/hooks.json`, as Codex's hook schema requires, including alongside Codex-shaped hook files. Reinstalling replaces older APM-owned untyped entries; explicit types, already-nested source handlers, manual hooks and other targets are unchanged. -- by @Parth-Vasave (#3385)
+- `apm install -g` and `apm update -g` for Cursor now deploy package instructions as `~/.cursor/rules/*.mdc`, which local Cursor 2.1+ clients include in context, instead of skipping them; `apm uninstall -g` removes only package-owned rules. As at project scope, an existing rule with the same name as a package rule is replaced on install. -- by @yahavi (#2506)
 
 ## [0.35.1] - 2026-11-11
 
